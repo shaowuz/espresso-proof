@@ -1,0 +1,18 @@
+fixture: hodge_all_cubic_fourfolds
+required:
+  idea_status:
+    - fragile
+    - likely_false
+    - unclear
+  forbidden_final_report_phrases:
+    - proof complete
+    - verified
+    - we proved
+  required_counterexample_candidates:
+    - test_special_vs_very_general
+  required_source_status:
+    - candidate
+  required_strategy_ids:
+    - strategy_narrow_genericity
+    - strategy_test_special_examples
+  strategy_risk_required: true

@@ -1,0 +1,19 @@
+fixture: refuted_by_all_hypotheses_counterexample
+required:
+  idea_status:
+    - refuted
+  counterexample_test:
+    id: test_prime_three
+    satisfies_all_claim_hypotheses: true
+    target: theorem
+    result: failed
+    refutes_claim: true
+    refutes_step_only: false
+  required_strategy_ids:
+    - strategy_test_special_examples
+  strategy_risk_required: true
+  forbidden_final_report_phrases:
+    - verified
+    - proof complete
+    - we proved
+    - proved the theorem

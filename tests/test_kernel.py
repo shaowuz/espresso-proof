@@ -1,0 +1,924 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+import yaml
+from typer.testing import CliRunner
+
+from espresso_proof.cli import _assert_fixture_expectations, app
+from espresso_proof.io import read_yaml
+from espresso_proof.mock_pipeline import run_mock_critique
+from espresso_proof.memory import load_memory_index, summarize_memory
+from espresso_proof.models import (
+    AdmissionCheck,
+    AgentContracts,
+    ComputationChecks,
+    ExampleBank,
+    HumanChoice,
+    MemoryIndex,
+    Review,
+    SourceGroundingReport,
+    WorkflowSpec,
+)
+from espresso_proof.validators import KernelValidationError, validate_run
+from espresso_proof.workflow_generator import classify_domain, generate_workflow_spec
+
+
+FIXTURES = Path("tests/fixtures")
+
+
+@pytest.mark.parametrize("fixture_dir", sorted(p for p in FIXTURES.iterdir() if p.is_dir()))
+def test_fixture_shape_is_complete(fixture_dir: Path) -> None:
+    assert (fixture_dir / "input.md").exists()
+    assert (fixture_dir / "expected.yaml").exists()
+    assert (fixture_dir / "rubric.md").exists()
+
+
+@pytest.mark.parametrize("fixture_dir", sorted(p for p in FIXTURES.iterdir() if p.is_dir()))
+def test_mock_fixtures_validate(fixture_dir: Path, tmp_path: Path) -> None:
+    run_dir = run_mock_critique("hodge_atoms", fixture_dir / "input.md", tmp_path)
+    validate_run(run_dir)
+
+    expected = read_yaml(fixture_dir / "expected.yaml")
+    _assert_fixture_expectations(run_dir, expected)
+
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert "tests" in manifest["artifacts"]
+    assert "agent_contracts" in manifest["artifacts"]
+    assert "human_choice" in manifest["artifacts"]
+    assert "strategy_synthesis" in manifest["artifacts"]
+    assert "strategy_brief" in manifest["artifacts"]
+    assert (run_dir / manifest["artifacts"]["tests"]).exists()
+    assert (run_dir / manifest["artifacts"]["agent_contracts"]).exists()
+    assert (run_dir / manifest["artifacts"]["human_choice"]).exists()
+    assert (run_dir / manifest["artifacts"]["strategy_synthesis"]).exists()
+    assert (run_dir / manifest["artifacts"]["strategy_brief"]).exists()
+    AgentContracts.model_validate(read_yaml(run_dir / manifest["artifacts"]["agent_contracts"]))
+    HumanChoice.model_validate(read_yaml(run_dir / manifest["artifacts"]["human_choice"]))
+
+    memory_dir = run_dir.parents[1] / "memory"
+    assert any(memory_dir.glob("*.yaml"))
+    MemoryIndex.model_validate(read_yaml(memory_dir / "index.yaml"))
+
+
+def test_seed_files_validate() -> None:
+    WorkflowSpec.model_validate(read_yaml(Path("projects/hodge_atoms/workflow_spec.yaml")))
+    ExampleBank.model_validate(read_yaml(Path("projects/hodge_atoms/example_bank.yaml")))
+    AgentContracts.model_validate(read_yaml(Path("projects/hodge_atoms/agent_contracts.yaml")))
+    WorkflowSpec.model_validate(read_yaml(Path("projects/coherent_base_change/workflow_spec.yaml")))
+    ExampleBank.model_validate(read_yaml(Path("projects/coherent_base_change/example_bank.yaml")))
+    AgentContracts.model_validate(read_yaml(Path("projects/coherent_base_change/agent_contracts.yaml")))
+
+
+def test_cross_artifact_rejects_unchecked_evidence(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "unchecked_example_not_evidence" / "input.md",
+        tmp_path,
+    )
+    grade_path = run_dir / "idea_grade.yaml"
+    data = read_yaml(grade_path)
+    data["survived_tests"] = ["test_special_vs_very_general"]
+
+    grade_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    counterexample_path = run_dir / "counterexamples.yaml"
+    counterexample_data = read_yaml(counterexample_path)
+    counterexample_data["tests"][0]["result"] = "survived"
+    counterexample_path.write_text(yaml.safe_dump(counterexample_data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="unchecked example"):
+        validate_run(run_dir)
+
+
+def test_cross_artifact_rejects_dropped_hypothesis_refutation(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "dropped_hypothesis_not_refutation" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "counterexamples.yaml"
+    data = read_yaml(path)
+    data["tests"][0]["refutes_claim"] = True
+
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="dropped-hypothesis"):
+        validate_run(run_dir)
+
+
+def test_cross_artifact_rejects_bad_final_report_language(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    (run_dir / "final_report.md").write_text("proof complete and verified", encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="forbidden proof language"):
+        validate_run(run_dir)
+
+
+def test_failed_parallel_reviewer_blocks_promising_grade(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    grade_path = run_dir / "idea_grade.yaml"
+    data = read_yaml(grade_path)
+    data["status"] = "promising"
+    data["score"] = 80
+
+    grade_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="failed reviewers cannot produce promising grade"):
+        validate_run(run_dir)
+
+
+def test_literature_review_cannot_be_source_backed(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "literature_review.yaml"
+    data = read_yaml(path)
+    data["candidate_references"][0]["status"] = "source_backed"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="Literature Review"):
+        validate_run(run_dir)
+
+
+def test_loop_control_stops_after_two_no_progress_cycles(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "loop_control.yaml"
+    data = read_yaml(path)
+    data["no_new_counterexamples_cycles"] = 2
+    data["no_new_references_cycles"] = 2
+    data["grade_delta_last_two"] = 0
+    data["should_stop"] = False
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="no-progress"):
+        validate_run(run_dir)
+
+
+def test_manual_review_cannot_be_checked_evidence(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "unchecked_example_not_evidence" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "computation_checks.yaml"
+    data = read_yaml(path)
+    data["checks"][1]["status"] = "checked"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="manual_review_needed"):
+        validate_run(run_dir)
+
+
+def test_line_proof_sketch_only_does_not_force_failed_attempt() -> None:
+    review = Review.model_validate(
+        {
+            "claim_id": "claim_001",
+            "attempt_status": "unclear",
+            "verdict": "unclear",
+            "reviewers": [
+                {
+                    "reviewer_id": "strategy_reviewer",
+                    "scope": "proof_strategy",
+                    "verdict": "pass",
+                    "applicability": "applicable",
+                    "summary": "Strategy is plausible.",
+                    "objections": [],
+                    "checked_artifacts": ["tests.yaml"],
+                    "required_reruns": [],
+                    "severity": "medium",
+                },
+                {
+                    "reviewer_id": "evidence_reviewer",
+                    "scope": "examples_counterexamples",
+                    "verdict": "pass",
+                    "applicability": "applicable",
+                    "summary": "Evidence is not misused.",
+                    "objections": [],
+                    "checked_artifacts": ["computation_checks.yaml"],
+                    "required_reruns": [],
+                    "severity": "medium",
+                },
+                {
+                    "reviewer_id": "line_proof_reviewer",
+                    "scope": "line_by_line_proof",
+                    "verdict": "unclear",
+                    "applicability": "sketch_only",
+                    "summary": "No full line-by-line proof was supplied.",
+                    "objections": ["Only a proof sketch is available."],
+                    "checked_artifacts": ["source_grounding.yaml"],
+                    "required_reruns": [],
+                    "severity": "medium",
+                },
+            ],
+            "strongest_objection": "No full proof is available, but this is not a failed attempt.",
+            "theorem_drift": [],
+            "missing_hypotheses": [],
+            "source_risks": [],
+            "example_risks": [],
+            "downgrade_reasons": ["Line proof review is sketch_only."],
+        }
+    )
+    assert review.attempt_status.value == "unclear"
+
+
+def test_sketch_only_applicability_cannot_be_used_by_strategy_reviewer() -> None:
+    with pytest.raises(ValueError, match="only line_proof_reviewer"):
+        Review.model_validate(
+            {
+                "claim_id": "claim_001",
+                "attempt_status": "unclear",
+                "verdict": "unclear",
+                "reviewers": [
+                    {
+                        "reviewer_id": "strategy_reviewer",
+                        "scope": "proof_strategy",
+                        "verdict": "unclear",
+                        "applicability": "sketch_only",
+                        "summary": "Invalid applicability.",
+                        "objections": [],
+                        "checked_artifacts": [],
+                        "required_reruns": [],
+                        "severity": "medium",
+                    },
+                    {
+                        "reviewer_id": "evidence_reviewer",
+                        "scope": "examples_counterexamples",
+                        "verdict": "pass",
+                        "applicability": "applicable",
+                        "summary": "Evidence is okay.",
+                        "objections": [],
+                        "checked_artifacts": [],
+                        "required_reruns": [],
+                        "severity": "medium",
+                    },
+                    {
+                        "reviewer_id": "line_proof_reviewer",
+                        "scope": "line_by_line_proof",
+                        "verdict": "unclear",
+                        "applicability": "sketch_only",
+                        "summary": "Sketch only.",
+                        "objections": [],
+                        "checked_artifacts": [],
+                        "required_reruns": [],
+                        "severity": "medium",
+                    },
+                ],
+                "strongest_objection": "Invalid reviewer applicability.",
+                "theorem_drift": [],
+                "missing_hypotheses": [],
+                "source_risks": [],
+                "example_risks": [],
+                "downgrade_reasons": [],
+            }
+        )
+
+
+def test_human_choice_rejects_unknown_selected_strategy(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "human_choice.yaml"
+    data = read_yaml(path)
+    data.update(
+        {
+            "status": "selected",
+            "selected_strategy": "not_a_strategy",
+            "effort": "quick_test",
+            "taste_judgment": "Try this anyway.",
+            "continue_decision": "continue",
+            "human_confirmed": True,
+        }
+    )
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="unknown strategy"):
+        validate_run(run_dir)
+
+
+def test_agent_contracts_must_cover_required_outputs(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "agent_contracts.yaml"
+    data = read_yaml(path)
+    data["contracts"] = [
+        contract
+        for contract in data["contracts"]
+        if contract["output_artifact"] != "strategy_brief.yaml"
+    ]
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="agent_contracts missing outputs"):
+        validate_run(run_dir)
+
+
+def test_memory_loading_missing_index_returns_empty(tmp_path: Path) -> None:
+    index = load_memory_index(tmp_path / "projects" / "empty_project")
+    assert index.project_id == "empty_project"
+    assert index.entries == []
+    assert summarize_memory(tmp_path / "projects" / "empty_project") == ""
+
+
+def test_memory_summary_loads_written_memory(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    summary = summarize_memory(run_dir.parents[1], claim_text="cubic fourfold hodge atom")
+
+    assert "Source gaps" in summary
+    assert "top strategy" in summary
+    assert "provenance:" in summary
+
+
+def test_workflow_generator_classifies_domains() -> None:
+    hodge_spec = generate_workflow_spec(
+        "KKPY Hodge atoms and mirror symmetry for cubic fourfolds",
+        project_name="generated_hodge",
+    )
+    coherent_spec = generate_workflow_spec(
+        "coherent sheaf cohomology and base change for a flat proper morphism",
+        project_name="generated_base_change",
+    )
+    stacks_spec = generate_workflow_spec(
+        "fpqc descent and representability for an algebraic stack",
+        project_name="generated_stacks",
+    )
+    generic_spec = generate_workflow_spec(
+        "study a smooth projective morphism and divisor intersection problem",
+        project_name="generated_generic",
+    )
+
+    assert classify_domain("Hodge atom mirror symmetry") == "hodge_atoms"
+    assert hodge_spec["domain_key"] == "hodge_atoms"
+    assert coherent_spec["domain_key"] == "coherent_base_change"
+    assert stacks_spec["domain_key"] == "stacks_descent"
+    assert generic_spec["domain_key"] == "generic_ag"
+    assert hodge_spec["canonical_example_templates"] != coherent_spec["canonical_example_templates"]
+    WorkflowSpec.model_validate(hodge_spec)
+    WorkflowSpec.model_validate(coherent_spec)
+    WorkflowSpec.model_validate(stacks_spec)
+    WorkflowSpec.model_validate(generic_spec)
+
+
+def test_strategy_rules_reject_standard_score_overreach(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "strategy_synthesis.yaml"
+    data = read_yaml(path)
+    data["routes"][0]["id"] = "strategy_speculate_big_jump"
+    data["routes"][0]["score"] = 70
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="max lift"):
+        validate_run(run_dir)
+
+
+def test_strategy_rules_reject_repair_score_overreach(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "strategy_synthesis.yaml"
+    data = read_yaml(path)
+    data["routes"][0]["id"] = "strategy_repair_overclaim"
+    data["routes"][0]["score"] = 80
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="repair-like strategy score"):
+        validate_run(run_dir)
+
+
+def test_strategy_rules_reject_high_score_with_unverified_source(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "strategy_synthesis.yaml"
+    data = read_yaml(path)
+    data["routes"][0]["score"] = 75
+    data["routes"][0]["source_status"] = "unverified"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="source_status cannot have score"):
+        validate_run(run_dir)
+
+
+def test_strategy_rules_reject_unchecked_deep_exploration(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "strategy_synthesis.yaml"
+    data = read_yaml(path)
+    data["routes"][2]["failed_tests"] = ["test_special_vs_very_general"]
+    data["routes"][2]["estimated_effort"] = "deep_exploration"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="unchecked example evidence"):
+        validate_run(run_dir)
+
+
+def test_strategy_rules_reject_unclear_claim_non_lock_route(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "vague_claim_unclear" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "strategy_synthesis.yaml"
+    data = read_yaml(path)
+    data["routes"][0]["id"] = "strategy_test_anyway"
+    data["routes"][0]["estimated_effort"] = "deep_exploration"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="unclear claim"):
+        validate_run(run_dir)
+
+
+def test_strategy_rules_reject_failed_reviewer_promising_strategy(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "strategy_synthesis.yaml"
+    data = read_yaml(path)
+    data["routes"][0]["status"] = "promising"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="failed reviewers cannot lead to promising strategy"):
+        validate_run(run_dir)
+
+
+def test_strategy_rules_reject_failed_reviewer_proof_like_strategy(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "strategy_synthesis.yaml"
+    data = read_yaml(path)
+    data["routes"][0]["next_loop_plan"] = "Write the proof and present it as complete."
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="proof-like strategy"):
+        validate_run(run_dir)
+
+
+def test_referencing_misapplied_requires_hypothesis_mismatch(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "source_misapplication_very_general_to_all" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "source_grounding.yaml"
+    data = read_yaml(path)
+    data["steps"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="misapplied step"):
+        validate_run(run_dir)
+
+
+def test_promising_fixture_has_non_toy_checked_support(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    grade = read_yaml(run_dir / "idea_grade.yaml")
+    computations = read_yaml(run_dir / "computation_checks.yaml")
+    assert "test_very_general_package_support" in grade["survived_tests"]
+    support = {
+        check["id"]: check
+        for check in computations["checks"]
+        if check["status"] in {"checked", "source_checked"}
+    }
+    assert "check_very_general_hodge_package_source" in support
+    assert support["check_very_general_hodge_package_source"]["status"] == "source_checked"
+
+
+def test_eval_rejects_incomplete_fixture_shape(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "bad_fixture"
+    fixture_dir.mkdir()
+    (fixture_dir / "input.md").write_text("bad fixture", encoding="utf-8")
+
+    result = CliRunner().invoke(app, ["eval", "--mode", "mock", "--fixture", str(fixture_dir)])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, KernelValidationError)
+    assert "missing required files" in str(result.exception)
+
+
+def test_manifest_rejects_run_id_mismatch(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "run_manifest.yaml"
+    data = read_yaml(path)
+    data["run_id"] = "wrong-run-id"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="does not match run dir"):
+        validate_run(run_dir)
+
+
+def test_manifest_rejects_absolute_artifact_path(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "run_manifest.yaml"
+    data = read_yaml(path)
+    data["artifacts"]["locked_claim"] = str((run_dir / "locked_claim.yaml").resolve())
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="must be relative"):
+        validate_run(run_dir)
+
+
+def test_manifest_rejects_parent_traversal_and_missing_artifact(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "run_manifest.yaml"
+    data = read_yaml(path)
+    data["artifacts"]["locked_claim"] = "../locked_claim.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="cannot contain"):
+        validate_run(run_dir)
+
+    data["artifacts"]["locked_claim"] = "missing_locked_claim.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    with pytest.raises(KernelValidationError, match="is missing"):
+        validate_run(run_dir)
+
+
+def test_computation_checks_reject_nested_claim_mismatch(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "computation_checks.yaml"
+    data = read_yaml(path)
+    data["checks"][0]["claim_id"] = "other_claim"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="claim_id mismatch"):
+        validate_run(run_dir)
+
+
+def test_test_report_requires_checked_evidence_for_survived_or_failed(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "tests.yaml"
+    data = read_yaml(path)
+    data["tests"][0]["result"] = "failed"
+    data["tests"][0]["evidence_status"] = "human_needed"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="checked/source_checked evidence"):
+        validate_run(run_dir)
+
+
+def test_test_report_counterexample_evidence_must_be_audited(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "tests.yaml"
+    data = read_yaml(path)
+    data["tests"][0]["uses_examples"] = []
+    data["tests"][0]["uses_counterexamples"] = ["test_special_vs_very_general"]
+    data["tests"][0]["result"] = "failed"
+    data["tests"][0]["evidence_status"] = "checked"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="unchecked counterexample example"):
+        validate_run(run_dir)
+
+
+def test_literature_review_cannot_mark_misapplied(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "literature_review.yaml"
+    data = read_yaml(path)
+    data["candidate_references"][0]["status"] = "misapplied"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="Literature Review"):
+        validate_run(run_dir)
+
+
+def test_source_backed_requires_exact_locator_and_hypothesis_match() -> None:
+    base = {
+        "claim_id": "claim_001",
+        "source_refs": [
+            {
+                "id": "src_bad",
+                "type": "paper",
+                "title": "Bad source",
+                "authors": [],
+                "locator": {"kind": "unknown", "value": "to_be_filled"},
+                "statement_or_summary": "Too vague.",
+                "hypothesis_match": {"matches": True, "mismatches": []},
+                "confidence": "high",
+                "status": "source_backed",
+            }
+        ],
+        "steps": [],
+    }
+    with pytest.raises(ValueError, match="exact locator"):
+        SourceGroundingReport.model_validate(base)
+
+    base["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.1"}
+    base["source_refs"][0]["hypothesis_match"] = {"matches": "unclear", "mismatches": []}
+    with pytest.raises(ValueError, match="matching hypotheses"):
+        SourceGroundingReport.model_validate(base)
+
+
+def test_final_report_allows_unverified_but_rejects_proof_language(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    (run_dir / "final_report.md").write_text(
+        "This is an unverified candidate and not a completed argument.",
+        encoding="utf-8",
+    )
+    validate_run(run_dir)
+
+    (run_dir / "final_report.md").write_text(
+        "This proof establishes the theorem.",
+        encoding="utf-8",
+    )
+    with pytest.raises(KernelValidationError, match="forbidden proof language"):
+        validate_run(run_dir)
+
+
+def test_loop_control_stop_requires_should_stop(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "loop_control.yaml"
+    data = read_yaml(path)
+    data["next_action"] = "stop"
+    data["should_stop"] = False
+    data["stop_reasons"] = []
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="next_action=stop"):
+        validate_run(run_dir)
+
+
+def test_strategy_rules_reject_high_score_for_likely_false_or_refuted_idea(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "likely_false_multiple_pressures" / "input.md",
+        tmp_path,
+    )
+    grade_path = run_dir / "idea_grade.yaml"
+    grade = read_yaml(grade_path)
+    grade["score"] = 70
+    grade_path.write_text(yaml.safe_dump(grade, sort_keys=False), encoding="utf-8")
+
+    synthesis_path = run_dir / "strategy_synthesis.yaml"
+    synthesis = read_yaml(synthesis_path)
+    synthesis["routes"][0]["score"] = 75
+    synthesis["routes"][0]["source_status"] = "candidate"
+    synthesis_path.write_text(yaml.safe_dump(synthesis, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="promising or fragile"):
+        validate_run(run_dir)
+
+
+def test_strategy_rules_reject_high_score_with_unchecked_evidence(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    grade_path = run_dir / "idea_grade.yaml"
+    grade = read_yaml(grade_path)
+    grade["score"] = 70
+    grade_path.write_text(yaml.safe_dump(grade, sort_keys=False), encoding="utf-8")
+
+    synthesis_path = run_dir / "strategy_synthesis.yaml"
+    synthesis = read_yaml(synthesis_path)
+    synthesis["routes"][2]["score"] = 75
+    synthesis["routes"][2]["failed_tests"] = ["test_special_vs_very_general"]
+    synthesis["routes"][2]["estimated_effort"] = "normal_pass"
+    synthesis_path.write_text(yaml.safe_dump(synthesis, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="unchecked example evidence"):
+        validate_run(run_dir)
+
+
+def test_strategy_rules_reject_marker_based_unchecked_deep_exploration(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "strategy_synthesis.yaml"
+    data = read_yaml(path)
+    data["routes"][1]["estimated_effort"] = "deep_exploration"
+    data["routes"][1]["next_loop_plan"] = "Use human_needed support as the reason to go deep."
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="explicit unchecked or human_needed support"):
+        validate_run(run_dir)
+
+
+def test_strategy_brief_route_must_match_strategy_synthesis(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "strategy_brief.yaml"
+    data = read_yaml(path)
+    data["top_strategies"][0]["score"] = data["top_strategies"][0]["score"] - 1
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="differs from Strategy Synthesis"):
+        validate_run(run_dir)
+
+
+def test_strategy_brief_requires_human_choice_options_and_top_three_limit(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "strategy_brief.yaml"
+    data = read_yaml(path)
+    data["allowed_human_choices"] = [
+        choice
+        for choice in data["allowed_human_choices"]
+        if choice["strategy_id"] != data["top_strategies"][0]["id"]
+    ]
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="missing human choice options"):
+        validate_run(run_dir)
+
+    data = read_yaml(path)
+    data["allowed_human_choices"].append(
+        {
+            "strategy_id": data["top_strategies"][0]["id"],
+            "effort_options": ["quick_test"],
+        }
+    )
+    data["top_strategies"].append(data["top_strategies"][0])
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    with pytest.raises(KernelValidationError, match="at most three"):
+        validate_run(run_dir)
+
+
+def test_human_choice_effort_must_be_allowed_and_none_cannot_continue(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    brief_path = run_dir / "strategy_brief.yaml"
+    brief = read_yaml(brief_path)
+    selected = brief["top_strategies"][1]["id"]
+    for choice in brief["allowed_human_choices"]:
+        if choice["strategy_id"] == selected:
+            choice["effort_options"] = ["quick_test"]
+    brief_path.write_text(yaml.safe_dump(brief, sort_keys=False), encoding="utf-8")
+
+    choice_path = run_dir / "human_choice.yaml"
+    choice = read_yaml(choice_path)
+    choice.update(
+        {
+            "status": "selected",
+            "selected_strategy": selected,
+            "effort": "long_watch",
+            "taste_judgment": "Try a longer run anyway.",
+            "continue_decision": "continue",
+            "human_confirmed": True,
+        }
+    )
+    choice_path.write_text(yaml.safe_dump(choice, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="is not allowed"):
+        validate_run(run_dir)
+
+    for choice_option in brief["allowed_human_choices"]:
+        if choice_option["strategy_id"] == selected:
+            choice_option["effort_options"] = ["quick_test", "normal_pass"]
+    brief_path.write_text(yaml.safe_dump(brief, sort_keys=False), encoding="utf-8")
+    choice.update(
+        {
+            "selected_strategy": "none",
+            "effort": "quick_test",
+            "continue_decision": "continue",
+        }
+    )
+    choice_path.write_text(yaml.safe_dump(choice, sort_keys=False), encoding="utf-8")
+    with pytest.raises(KernelValidationError, match="cannot continue"):
+        validate_run(run_dir)
+
+
+def test_generate_agent_cli_writes_admission_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("Study KKPY Hodge atoms for cubic fourfold mirror symmetry.", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        ["generate-agent", "--mode", "v0", "--prompt", str(prompt), "--project", "generated_hodge"],
+    )
+
+    assert result.exit_code == 0, result.output
+    project_dir = tmp_path / "projects" / "generated_hodge"
+    for relative in [
+        "workflow_spec.yaml",
+        "playbook.md",
+        "agent_contracts.yaml",
+        "admission_check.yaml",
+        "trial_fixture/input.md",
+        "trial_fixture/expected.yaml",
+    ]:
+        assert (project_dir / relative).exists()
+    WorkflowSpec.model_validate(read_yaml(project_dir / "workflow_spec.yaml"))
+    AgentContracts.model_validate(read_yaml(project_dir / "agent_contracts.yaml"))
+    admission = AdmissionCheck.model_validate(read_yaml(project_dir / "admission_check.yaml"))
+    assert admission.admitted is False
+    assert admission.human_confirmed is False
+    assert admission.blockers
+
+
+def test_admission_check_rejects_admitted_with_blockers_or_missing_checks() -> None:
+    with pytest.raises(ValueError, match="requires all admission checks"):
+        AdmissionCheck.model_validate(
+            {
+                "project_id": "bad",
+                "workflow_spec_valid": True,
+                "agent_contracts_exist": True,
+                "required_artifacts_declared": True,
+                "trial_fixture_exists": True,
+                "human_confirmed": False,
+                "admitted": True,
+                "blockers": [],
+            }
+        )
+    with pytest.raises(ValueError, match="cannot have blockers"):
+        AdmissionCheck.model_validate(
+            {
+                "project_id": "bad",
+                "workflow_spec_valid": True,
+                "agent_contracts_exist": True,
+                "required_artifacts_declared": True,
+                "trial_fixture_exists": True,
+                "human_confirmed": True,
+                "admitted": True,
+                "blockers": ["still needs review"],
+            }
+        )

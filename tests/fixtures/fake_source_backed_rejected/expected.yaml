@@ -1,0 +1,11 @@
+fixture: fake_source_backed_rejected
+required:
+  source_backed_allowed: false
+  required_source_status:
+    - candidate
+  required_strategy_ids:
+    - strategy_pin_reference
+  strategy_risk_required: true
+  forbidden_final_report_phrases:
+    - verified
+    - source backed theorem proves

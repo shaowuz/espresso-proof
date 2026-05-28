@@ -1,0 +1,13 @@
+fixture: dropped_hypothesis_not_refutation
+required:
+  counterexample_test:
+    id: test_drop_smoothness
+    refutes_claim: false
+    refutes_step_only: true
+  required_strategy_ids:
+    - strategy_test_special_examples
+  strategy_risk_required: true
+  forbidden_final_report_phrases:
+    - refutes the original theorem
+    - proof complete
+    - verified

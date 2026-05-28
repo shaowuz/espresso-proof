@@ -1,0 +1,12 @@
+fixture: unchecked_example_not_evidence
+required:
+  no_survived_or_failed_from_unchecked_examples: true
+  computation_status:
+    - human_needed
+    - inconclusive
+  required_strategy_ids:
+    - strategy_test_special_examples
+  strategy_risk_required: true
+  forbidden_final_report_phrases:
+    - verified
+    - proof complete

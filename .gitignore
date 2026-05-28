@@ -1,0 +1,9 @@
+.venv/
+.eval_runs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+espresso_proof.egg-info/
+projects/*/runs/
+projects/*/memory/

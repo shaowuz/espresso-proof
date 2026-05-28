@@ -1,0 +1,29 @@
+fixture: likely_false_multiple_pressures
+required:
+  idea_status:
+    - likely_false
+  required_counterexample_candidates:
+    - test_special_vs_very_general
+    - test_specialization_invariance_pressure
+  counterexample_test:
+    id: test_special_vs_very_general
+    refutes_claim: false
+    refutes_step_only: true
+  required_source_status:
+    - candidate
+  required_strategy_status:
+    - likely_false
+  required_strategy_ids:
+    - strategy_narrow_genericity
+    - strategy_pin_reference
+    - strategy_test_special_examples
+  strategy_risk_required: true
+  forbidden_strategy_phrases:
+    - verified
+    - proof complete
+    - complete the proof
+    - we proved
+  forbidden_final_report_phrases:
+    - verified
+    - proof complete
+    - we proved

@@ -1,0 +1,31 @@
+fixture: promising_but_unproved
+required:
+  idea_status:
+    - promising
+  required_survived_tests:
+    - test_very_general_package_support
+  meaningful_checked_support:
+    min_count: 1
+    statuses:
+      - checked
+      - source_checked
+    required_check_ids:
+      - check_very_general_hodge_package_source
+    exclude_check_ids:
+      - check_special_cubic_dimension
+  required_strategy_status:
+    - promising
+  required_strategy_ids:
+    - strategy_pin_reference
+    - strategy_test_special_examples
+  strategy_risk_required: true
+  forbidden_strategy_phrases:
+    - verified
+    - proof complete
+    - we proved
+    - proved the theorem
+  forbidden_final_report_phrases:
+    - verified
+    - proof complete
+    - we proved
+    - proved the theorem

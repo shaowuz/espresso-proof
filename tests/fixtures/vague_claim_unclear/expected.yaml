@@ -1,0 +1,11 @@
+fixture: vague_claim_unclear
+required:
+  idea_status:
+    - unclear
+  required_strategy_ids:
+    - strategy_lock_claim
+  strategy_risk_required: true
+  forbidden_final_report_phrases:
+    - promising
+    - proof complete
+    - verified

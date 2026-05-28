@@ -1,0 +1,13 @@
+fixture: source_misapplication_very_general_to_all
+required:
+  source_backed_allowed: false
+  required_source_status:
+    - misapplied
+  required_strategy_ids:
+    - strategy_narrow_genericity
+    - strategy_pin_reference
+  strategy_risk_required: true
+  forbidden_final_report_phrases:
+    - proof complete
+    - verified
+    - source backed theorem proves
