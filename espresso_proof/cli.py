@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -8,7 +9,14 @@ from .contracts import DEFAULT_AGENT_FLOW, default_agent_contracts
 from .io import read_text, read_yaml, write_text, write_yaml
 from .memory import summarize_memory
 from .mock_pipeline import run_mock_critique
-from .models import AdmissionCheck, AgentContracts, ExampleBank, WorkflowSpec
+from .models import (
+    AdmissionCheck,
+    AgentContracts,
+    ExampleBank,
+    ExampleFeedbackSummary,
+    HumanExampleFeedback,
+    WorkflowSpec,
+)
 from .validators import KernelValidationError, validate_run
 from .workflow_generator import generate_workflow_spec
 
@@ -113,6 +121,121 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
             typer.echo(line)
     typer.echo("")
     typer.echo(f"Final report: {run / 'final_report.md'}")
+
+
+@app.command("feedback-example")
+def feedback_example(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    target: str = typer.Option(..., "--target", help="Example id from examples.yaml."),
+    label: list[str] | None = typer.Option(None, "--label", "-l", help="Repeatable taste label."),
+    reason: str = typer.Option(..., "--reason"),
+    scope: str = typer.Option("project", "--scope"),
+    action: list[str] | None = typer.Option(None, "--action", "-a", help="Optional repeatable action."),
+) -> None:
+    """Record confirmed human taste feedback about an example."""
+    validate_run(run)
+    labels = label or []
+    if not labels:
+        raise typer.BadParameter("provide at least one --label")
+    examples = read_yaml(run / "examples.yaml")
+    example_ids = {example["id"] for example in examples.get("examples", [])}
+    if target not in example_ids:
+        raise typer.BadParameter(f"unknown example target {target!r}")
+
+    manifest_path = run / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    optional = manifest.setdefault("optional_artifacts", {})
+    feedback_path = run / optional.get("human_example_feedback", "human_example_feedback.yaml")
+    existing = read_yaml(feedback_path) if feedback_path.exists() else None
+    if existing is None:
+        feedback_data = {
+            "schema_version": 1,
+            "project_id": manifest["project_id"],
+            "claim_id": examples["claim_id"],
+            "run_id": manifest["run_id"],
+            "created_at": datetime.now(UTC).isoformat(),
+            "feedback": [],
+        }
+    else:
+        feedback_data = existing
+    next_id = _next_feedback_id(feedback_data.get("feedback", []))
+    feedback_data["feedback"].append(
+        {
+            "feedback_id": next_id,
+            "target_type": "example",
+            "target_artifact": "examples.yaml",
+            "target_id": target,
+            "labels": labels,
+            "reason": reason,
+            "scope": scope,
+            "requested_actions": action or _default_feedback_actions(labels),
+            "human_confirmed": True,
+            "supersedes_feedback_id": None,
+        }
+    )
+    HumanExampleFeedback.model_validate(feedback_data)
+    optional["human_example_feedback"] = feedback_path.name
+    write_yaml(feedback_path, feedback_data)
+    write_yaml(manifest_path, manifest)
+    validate_run(run)
+    typer.echo(f"Wrote feedback {next_id} to {feedback_path}")
+
+
+@app.command("summarize-feedback")
+def summarize_feedback(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+) -> None:
+    """Summarize confirmed human feedback into ranking-only preferences."""
+    validate_run(run)
+    manifest_path = run / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    feedback_name = manifest.get("optional_artifacts", {}).get("human_example_feedback")
+    if not feedback_name:
+        raise typer.BadParameter("run has no human_example_feedback optional artifact")
+    feedback_path = run / feedback_name
+    feedback_data = read_yaml(feedback_path)
+    feedback = HumanExampleFeedback.model_validate(feedback_data)
+    adjustments = []
+    project_preferences = []
+    for item in feedback.feedback:
+        label_values = {label.value for label in item.labels}
+        direction = "down" if label_values & {"misleading", "too_easy", "irrelevant"} else "up"
+        weight = "high" if label_values & {"dangerous", "canonical", "favorite"} else "medium"
+        adjustments.append(
+            {
+                "target_id": item.target_id,
+                "target_type": item.target_type.value,
+                "target_artifact": item.target_artifact,
+                "feedback_ids": [item.feedback_id],
+                "direction": direction,
+                "weight": weight,
+                "reason": item.reason,
+            }
+        )
+        project_preferences.append(
+            f"{item.target_type.value}:{item.target_id} labeled "
+            f"{', '.join(label.value for label in item.labels)}"
+        )
+    summary_data = {
+        "schema_version": 1,
+        "claim_id": feedback.claim_id,
+        "run_id": feedback.run_id,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_by": "summarize-feedback",
+        "feedback_artifact_path": feedback_name,
+        "summarized_from": [item.feedback_id for item in feedback.feedback],
+        "input_artifact_digests": {},
+        "ranking_adjustments": adjustments,
+        "project_preferences": project_preferences,
+        "playbook_tuning_candidates": [],
+        "memory_entries": [],
+    }
+    ExampleFeedbackSummary.model_validate(summary_data)
+    manifest.setdefault("optional_artifacts", {})["example_feedback_summary"] = "example_feedback_summary.yaml"
+    write_yaml(run / "example_feedback_summary.yaml", summary_data)
+    write_yaml(manifest_path, manifest)
+    validate_run(run)
+    typer.echo(f"Wrote feedback summary to {run / 'example_feedback_summary.yaml'}")
 
 
 @app.command()
@@ -255,8 +378,31 @@ def _validate_seed_files() -> None:
         AgentContracts.model_validate(read_yaml(coherent_dir / "agent_contracts.yaml"))
 
 
+def _next_feedback_id(existing: list[dict]) -> str:
+    return f"feedback_{len(existing) + 1:03d}"
+
+
+def _default_feedback_actions(labels: list[str]) -> list[str]:
+    actions: set[str] = set()
+    for label in labels:
+        if label == "dangerous":
+            actions.add("prioritize_counterexample_testing")
+        elif label == "needs_source":
+            actions.add("run_referencing")
+        elif label == "needs_computation":
+            actions.add("run_evidence_auditor")
+        elif label in {"misleading", "too_easy", "irrelevant"}:
+            actions.add("demote_ranking")
+        elif label in {"interesting", "canonical", "favorite"}:
+            actions.add("promote_ranking")
+        if label == "favorite":
+            actions.add("save_to_memory")
+    return sorted(actions)
+
+
 def _assert_fixture_expectations(run_dir: Path, expected: dict) -> None:
     required = expected.get("required", {})
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
     idea_grade = read_yaml(run_dir / "idea_grade.yaml")
     counterexamples = read_yaml(run_dir / "counterexamples.yaml")
     computations = read_yaml(run_dir / "computation_checks.yaml")
@@ -325,6 +471,15 @@ def _assert_fixture_expectations(run_dir: Path, expected: dict) -> None:
     if required.get("source_backed_allowed") is False and "source_backed" in statuses:
         raise KernelValidationError("source_backed was not allowed for this fixture")
 
+    if "human_feedback" in required:
+        _assert_human_feedback_expectations(
+            run_dir,
+            manifest,
+            required["human_feedback"],
+            idea_grade,
+            source_grounding,
+        )
+
     computation_statuses = {check.get("status") for check in computations.get("checks", [])}
     expected_computation_statuses = set(required.get("computation_status", []))
     if expected_computation_statuses and not computation_statuses.intersection(expected_computation_statuses):
@@ -375,3 +530,53 @@ def _find_by_id(items: list[dict], item_id: str) -> dict:
         if item.get("id") == item_id:
             return item
     raise KernelValidationError(f"missing item id {item_id!r}")
+
+
+def _assert_human_feedback_expectations(
+    run_dir: Path,
+    manifest: dict,
+    required: dict,
+    idea_grade: dict,
+    source_grounding: dict,
+) -> None:
+    optional = manifest.get("optional_artifacts", {})
+    feedback_name = optional.get("human_example_feedback")
+    if not feedback_name:
+        raise KernelValidationError("expected human_example_feedback optional artifact")
+    feedback = read_yaml(run_dir / feedback_name)
+    items = feedback.get("feedback", [])
+    if not items:
+        raise KernelValidationError("expected at least one human feedback item")
+    target_id = required.get("target_id")
+    target_type = required.get("target_type")
+    labels = set(required.get("labels", []))
+    matching = [
+        item
+        for item in items
+        if (target_id is None or item.get("target_id") == target_id)
+        and (target_type is None or item.get("target_type") == target_type)
+    ]
+    if not matching:
+        raise KernelValidationError("missing expected human feedback target")
+    if labels and not any(labels.issubset(set(item.get("labels", []))) for item in matching):
+        raise KernelValidationError(f"missing expected human feedback labels {sorted(labels)}")
+    if required.get("summary_required"):
+        summary_name = optional.get("example_feedback_summary")
+        if not summary_name:
+            raise KernelValidationError("expected example_feedback_summary optional artifact")
+        summary = read_yaml(run_dir / summary_name)
+        summarized = set(summary.get("summarized_from", []))
+        feedback_ids = {item.get("feedback_id") for item in matching}
+        if not feedback_ids.intersection(summarized):
+            raise KernelValidationError("feedback summary does not cite expected feedback")
+    if required.get("no_status_upgrade"):
+        if idea_grade.get("status") == "promising":
+            raise KernelValidationError("human feedback upgraded idea status to promising")
+        if idea_grade.get("survived_tests") or idea_grade.get("failed_tests"):
+            raise KernelValidationError("human feedback changed survived/failed evidence")
+        source_statuses = {
+            ref.get("status")
+            for ref in source_grounding.get("source_refs", [])
+        } | {step.get("status") for step in source_grounding.get("steps", [])}
+        if "source_backed" in source_statuses:
+            raise KernelValidationError("human feedback upgraded source status")

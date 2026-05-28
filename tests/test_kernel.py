@@ -15,7 +15,9 @@ from espresso_proof.models import (
     AgentContracts,
     ComputationChecks,
     ExampleBank,
+    ExampleFeedbackSummary,
     HumanChoice,
+    HumanExampleFeedback,
     MemoryIndex,
     Review,
     SourceGroundingReport,
@@ -864,6 +866,168 @@ def test_human_choice_effort_must_be_allowed_and_none_cannot_continue(tmp_path: 
     choice_path.write_text(yaml.safe_dump(choice, sort_keys=False), encoding="utf-8")
     with pytest.raises(KernelValidationError, match="cannot continue"):
         validate_run(run_dir)
+
+
+def test_human_feedback_unknown_target_is_rejected(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "human_marks_example_interesting" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "human_example_feedback.yaml"
+    data = read_yaml(path)
+    data["feedback"][0]["target_id"] = "ex_not_real"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="unknown example target"):
+        validate_run(run_dir)
+
+
+def test_human_feedback_unconfirmed_item_is_rejected(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "human_marks_example_interesting" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "human_example_feedback.yaml"
+    data = read_yaml(path)
+    data["feedback"][0]["human_confirmed"] = False
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="unconfirmed feedback"):
+        validate_run(run_dir)
+
+
+def test_human_feedback_summary_rejects_unknown_feedback_id(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "human_marks_example_interesting" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "example_feedback_summary.yaml"
+    data = read_yaml(path)
+    data["summarized_from"] = ["feedback_not_real"]
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="unknown feedback ids"):
+        validate_run(run_dir)
+
+
+def test_human_feedback_schema_rejects_evidence_status_fields() -> None:
+    data = {
+        "schema_version": 1,
+        "project_id": "hodge_atoms",
+        "claim_id": "claim_001",
+        "run_id": "run_001",
+        "created_at": "2026-05-28T12:00:00Z",
+        "feedback": [
+            {
+                "feedback_id": "feedback_001",
+                "target_type": "source_ref",
+                "target_artifact": "source_grounding.yaml",
+                "target_id": "src_candidate_001",
+                "labels": ["needs_source"],
+                "reason": "Needs an exact theorem locator.",
+                "scope": "project",
+                "requested_actions": ["run_referencing"],
+                "human_confirmed": True,
+                "source_backed": True,
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError, match="Extra inputs"):
+        HumanExampleFeedback.model_validate(data)
+
+
+def test_feedback_example_cli_writes_valid_optional_artifact(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "feedback-example",
+            "--run",
+            str(run_dir),
+            "--target",
+            "ex_special_cubic",
+            "--label",
+            "dangerous",
+            "--reason",
+            "This is the first example I would test.",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert manifest["optional_artifacts"]["human_example_feedback"] == "human_example_feedback.yaml"
+    feedback = HumanExampleFeedback.model_validate(read_yaml(run_dir / "human_example_feedback.yaml"))
+    assert feedback.feedback[0].feedback_id == "feedback_001"
+    assert feedback.feedback[0].target_id == "ex_special_cubic"
+    validate_run(run_dir)
+
+
+def test_feedback_example_cli_rejects_unknown_target_without_writing(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "feedback-example",
+            "--run",
+            str(run_dir),
+            "--target",
+            "ex_not_real",
+            "--label",
+            "interesting",
+            "--reason",
+            "Invalid target.",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert not (run_dir / "human_example_feedback.yaml").exists()
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert "human_example_feedback" not in manifest.get("optional_artifacts", {})
+
+
+def test_summarize_feedback_cli_writes_ranking_only_summary(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    feedback_result = CliRunner().invoke(
+        app,
+        [
+            "feedback-example",
+            "--run",
+            str(run_dir),
+            "--target",
+            "ex_special_cubic",
+            "--label",
+            "too_easy",
+            "--reason",
+            "This only checks a toy dimension fact.",
+        ],
+    )
+    assert feedback_result.exit_code == 0, feedback_result.output
+
+    result = CliRunner().invoke(app, ["summarize-feedback", "--run", str(run_dir)])
+
+    assert result.exit_code == 0, result.output
+    summary = ExampleFeedbackSummary.model_validate(read_yaml(run_dir / "example_feedback_summary.yaml"))
+    assert summary.ranking_adjustments[0].direction.value == "down"
+    assert summary.ranking_adjustments[0].feedback_ids == ["feedback_001"]
+    validate_run(run_dir)
 
 
 def test_generate_agent_cli_writes_admission_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

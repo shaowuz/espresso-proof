@@ -15,9 +15,11 @@ from .models import (
     CounterexampleReport,
     ContinueDecision,
     ExampleSelection,
+    ExampleFeedbackSummary,
     ExampleStatus,
     HypothesisLedger,
     HumanChoice,
+    HumanExampleFeedback,
     HumanChoiceStatus,
     IdeaGrade,
     IdeaStatus,
@@ -71,6 +73,7 @@ def validate_run(run_dir: Path) -> None:
     )
     strategy_brief = validate_yaml_model(run_dir / artifacts["strategy_brief"], StrategyBrief)
     human_choice = validate_yaml_model(run_dir / artifacts["human_choice"], HumanChoice)
+    human_feedback, feedback_summary = _load_optional_human_feedback(run_dir, manifest)
 
     _validate_claim_id_consistency(
         claim,
@@ -114,7 +117,38 @@ def validate_run(run_dir: Path) -> None:
         tests,
     )
     _validate_human_choice(human_choice, strategy_brief)
+    _validate_human_feedback(
+        manifest,
+        claim,
+        examples,
+        counterexamples,
+        tests,
+        source_grounding,
+        strategy_brief,
+        human_feedback,
+        feedback_summary,
+    )
     _validate_final_report_language(run_dir / artifacts["final_report"], idea_grade)
+
+
+def _load_optional_human_feedback(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> tuple[HumanExampleFeedback | None, ExampleFeedbackSummary | None]:
+    optional = manifest.optional_artifacts
+    feedback = None
+    summary = None
+    if "human_example_feedback" in optional:
+        feedback = validate_yaml_model(
+            run_dir / optional["human_example_feedback"],
+            HumanExampleFeedback,
+        )
+    if "example_feedback_summary" in optional:
+        summary = validate_yaml_model(
+            run_dir / optional["example_feedback_summary"],
+            ExampleFeedbackSummary,
+        )
+    return feedback, summary
 
 
 def _validate_manifest_paths(run_dir: Path, manifest: RunManifest) -> None:
@@ -520,6 +554,112 @@ def _validate_human_choice(human_choice: HumanChoice, strategy_brief: StrategyBr
             and human_choice.continue_decision == ContinueDecision.continue_run
         ):
             raise KernelValidationError("human_choice cannot continue with selected_strategy='none'")
+
+
+def _validate_human_feedback(
+    manifest: RunManifest,
+    claim: Claim,
+    examples: ExampleSelection,
+    counterexamples: CounterexampleReport,
+    tests: TestReport,
+    source_grounding: SourceGroundingReport,
+    strategy_brief: StrategyBrief,
+    feedback: HumanExampleFeedback | None,
+    summary: ExampleFeedbackSummary | None,
+) -> None:
+    if feedback is None:
+        if summary is not None:
+            raise KernelValidationError("example_feedback_summary requires human_example_feedback")
+        return
+
+    if feedback.project_id != manifest.project_id:
+        raise KernelValidationError("human_example_feedback project_id does not match manifest")
+    if feedback.run_id != manifest.run_id:
+        raise KernelValidationError("human_example_feedback run_id does not match manifest")
+    if feedback.claim_id != claim.id:
+        raise KernelValidationError("human_example_feedback claim_id does not match locked claim")
+
+    target_sets = _feedback_target_sets(
+        examples,
+        counterexamples,
+        tests,
+        source_grounding,
+        strategy_brief,
+    )
+    feedback_by_id = {}
+    for item in feedback.feedback:
+        feedback_by_id[item.feedback_id] = item
+        if not item.human_confirmed:
+            raise KernelValidationError(f"{item.feedback_id}: unconfirmed feedback cannot enter a run")
+        expected_artifact, allowed_ids = target_sets[item.target_type.value]
+        if item.target_artifact != expected_artifact:
+            raise KernelValidationError(
+                f"{item.feedback_id}: {item.target_type.value} feedback must target {expected_artifact}"
+            )
+        if item.target_id not in allowed_ids:
+            raise KernelValidationError(
+                f"{item.feedback_id}: unknown {item.target_type.value} target {item.target_id!r}"
+            )
+
+    if summary is None:
+        return
+
+    if summary.claim_id != claim.id:
+        raise KernelValidationError("example_feedback_summary claim_id does not match locked claim")
+    if summary.run_id != manifest.run_id:
+        raise KernelValidationError("example_feedback_summary run_id does not match manifest")
+    if summary.feedback_artifact_path != manifest.optional_artifacts.get("human_example_feedback"):
+        raise KernelValidationError("example_feedback_summary must cite the human feedback artifact path")
+
+    feedback_ids = set(feedback_by_id)
+    unknown_summary_ids = set(summary.summarized_from).difference(feedback_ids)
+    if unknown_summary_ids:
+        raise KernelValidationError(
+            f"example_feedback_summary references unknown feedback ids {sorted(unknown_summary_ids)}"
+        )
+
+    for adjustment in summary.ranking_adjustments:
+        unknown_feedback_ids = set(adjustment.feedback_ids).difference(feedback_ids)
+        if unknown_feedback_ids:
+            raise KernelValidationError(
+                f"ranking adjustment references unknown feedback ids {sorted(unknown_feedback_ids)}"
+            )
+        expected_artifact, allowed_ids = target_sets[adjustment.target_type.value]
+        if adjustment.target_artifact != expected_artifact:
+            raise KernelValidationError(
+                f"ranking adjustment for {adjustment.target_type.value} must target {expected_artifact}"
+            )
+        if adjustment.target_id not in allowed_ids:
+            raise KernelValidationError(
+                f"ranking adjustment references unknown {adjustment.target_type.value} target "
+                f"{adjustment.target_id!r}"
+            )
+
+
+def _feedback_target_sets(
+    examples: ExampleSelection,
+    counterexamples: CounterexampleReport,
+    tests: TestReport,
+    source_grounding: SourceGroundingReport,
+    strategy_brief: StrategyBrief,
+) -> dict[str, tuple[str, set[str]]]:
+    return {
+        "example": ("examples.yaml", {example.id for example in examples.examples}),
+        "counterexample_test": (
+            "counterexamples.yaml",
+            {test.id for test in counterexamples.tests},
+        ),
+        "test": ("tests.yaml", {test.id for test in tests.tests}),
+        "source_ref": ("source_grounding.yaml", {ref.id for ref in source_grounding.source_refs}),
+        "source_step": (
+            "source_grounding.yaml",
+            {step.proof_step_id for step in source_grounding.steps},
+        ),
+        "strategy": (
+            "strategy_brief.yaml",
+            {strategy.id for strategy in strategy_brief.top_strategies},
+        ),
+    }
 
 
 def _validate_final_report_language(final_report: Path, idea_grade: IdeaGrade) -> None:

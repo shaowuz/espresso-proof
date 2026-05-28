@@ -74,6 +74,56 @@ class ContinueDecision(str, Enum):
     revise = "revise"
 
 
+class HumanFeedbackLabel(str, Enum):
+    interesting = "interesting"
+    canonical = "canonical"
+    dangerous = "dangerous"
+    misleading = "misleading"
+    too_easy = "too_easy"
+    irrelevant = "irrelevant"
+    needs_source = "needs_source"
+    needs_computation = "needs_computation"
+    favorite = "favorite"
+
+
+class HumanFeedbackScope(str, Enum):
+    current_run = "current_run"
+    project = "project"
+    domain = "domain"
+    personal_global = "personal_global"
+
+
+class HumanFeedbackTargetType(str, Enum):
+    example = "example"
+    counterexample_test = "counterexample_test"
+    test = "test"
+    source_ref = "source_ref"
+    source_step = "source_step"
+    strategy = "strategy"
+
+
+class HumanFeedbackAction(str, Enum):
+    prioritize_counterexample_testing = "prioritize_counterexample_testing"
+    run_referencing = "run_referencing"
+    run_evidence_auditor = "run_evidence_auditor"
+    promote_ranking = "promote_ranking"
+    demote_ranking = "demote_ranking"
+    save_to_memory = "save_to_memory"
+    request_claim_review = "request_claim_review"
+    request_rubric_update = "request_rubric_update"
+
+
+class RankingDirection(str, Enum):
+    up = "up"
+    down = "down"
+
+
+class RankingWeight(str, Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+
+
 class HypothesisStatus(str, Enum):
     explicit = "explicit"
     inferred = "inferred"
@@ -528,6 +578,93 @@ class HumanChoice(StrictBaseModel):
         return self
 
 
+class HumanFeedbackItem(StrictBaseModel):
+    feedback_id: str
+    target_type: HumanFeedbackTargetType
+    target_artifact: str
+    target_id: str
+    labels: list[HumanFeedbackLabel]
+    reason: str
+    scope: HumanFeedbackScope
+    requested_actions: list[HumanFeedbackAction] = Field(default_factory=list)
+    human_confirmed: bool
+    supersedes_feedback_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_feedback_item(self) -> HumanFeedbackItem:
+        if len(self.labels) != len(set(self.labels)):
+            raise ValueError("feedback labels must be unique")
+        if not self.labels:
+            raise ValueError("feedback requires at least one label")
+        if not self.reason.strip():
+            raise ValueError("feedback reason cannot be empty")
+        return self
+
+
+class HumanExampleFeedback(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    project_id: str
+    claim_id: str
+    run_id: str
+    created_at: str
+    feedback: list[HumanFeedbackItem]
+
+    @model_validator(mode="after")
+    def validate_feedback_ids(self) -> HumanExampleFeedback:
+        ids = [item.feedback_id for item in self.feedback]
+        if len(ids) != len(set(ids)):
+            raise ValueError("feedback ids must be unique")
+        return self
+
+
+class FeedbackRankingAdjustment(StrictBaseModel):
+    target_id: str
+    target_type: HumanFeedbackTargetType
+    target_artifact: str
+    feedback_ids: list[str]
+    direction: RankingDirection
+    weight: RankingWeight
+    reason: str
+
+    @model_validator(mode="after")
+    def validate_ranking_adjustment(self) -> FeedbackRankingAdjustment:
+        if not self.feedback_ids:
+            raise ValueError("ranking adjustment requires feedback_ids")
+        if len(self.feedback_ids) != len(set(self.feedback_ids)):
+            raise ValueError("ranking adjustment feedback_ids must be unique")
+        if not self.reason.strip():
+            raise ValueError("ranking adjustment reason cannot be empty")
+        return self
+
+
+class FeedbackMemoryEntryPointer(StrictBaseModel):
+    memory_entry_id: str
+    entry_path: str
+
+
+class ExampleFeedbackSummary(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    generated_by: Literal["summarize-feedback", "mock_pipeline"]
+    feedback_artifact_path: str
+    summarized_from: list[str]
+    input_artifact_digests: dict[str, str] = Field(default_factory=dict)
+    ranking_adjustments: list[FeedbackRankingAdjustment] = Field(default_factory=list)
+    project_preferences: list[str] = Field(default_factory=list)
+    playbook_tuning_candidates: list[str] = Field(default_factory=list)
+    memory_entries: list[FeedbackMemoryEntryPointer] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_summary_references(self) -> ExampleFeedbackSummary:
+        if not self.summarized_from:
+            raise ValueError("feedback summary requires summarized_from")
+        if len(self.summarized_from) != len(set(self.summarized_from)):
+            raise ValueError("summarized_from ids must be unique")
+        return self
+
+
 class AgentContract(StrictBaseModel):
     agent_name: str
     input_artifacts: list[str]
@@ -728,6 +865,8 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "strategy_synthesis": StrategySynthesis,
     "strategy_brief": StrategyBrief,
     "human_choice": HumanChoice,
+    "human_example_feedback": HumanExampleFeedback,
+    "example_feedback_summary": ExampleFeedbackSummary,
     "memory_entry": MemoryEntry,
     "memory_index": MemoryIndex,
     "run_manifest": RunManifest,

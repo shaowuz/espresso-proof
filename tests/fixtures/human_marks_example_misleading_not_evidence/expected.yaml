@@ -1,0 +1,15 @@
+required:
+  idea_status:
+    - fragile
+  forbidden_final_report_phrases:
+    - verified
+    - proof complete
+    - we proved
+    - proved the theorem
+  human_feedback:
+    target_type: example
+    target_id: ex_special_cubic
+    labels:
+      - misleading
+    summary_required: true
+    no_status_upgrade: true
