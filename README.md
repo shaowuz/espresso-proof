@@ -46,6 +46,99 @@ The guiding rule is:
 - [projects/coherent_base_change/playbook.md](projects/coherent_base_change/playbook.md): second seeded workflow for coherent sheaf cohomology, base change, flatness/properness hypotheses, and local-to-global pathologies.
 - [projects/coherent_base_change/workflow_spec.yaml](projects/coherent_base_change/workflow_spec.yaml): draft `WorkflowSpec` for the second domain.
 
+## Collaboration Workflow
+
+This project should be developed through small branches and reviewed pull requests. The main branch should stay runnable and should pass the local release gate before important merges.
+
+Recommended local setup:
+
+```text
+git clone git@github.com:shaowuz/espresso-proof.git
+cd espresso-proof
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+```
+
+Before opening or merging a pull request, run:
+
+```text
+.venv/bin/python -m pytest -q
+.venv/bin/espresso eval --mode mock
+.venv/bin/espresso eval --schemas-only
+```
+
+Use this branch pattern:
+
+```text
+feature/<short-topic>
+fix/<short-topic>
+docs/<short-topic>
+```
+
+Do not commit directly to `main` once two people are coding. Make a branch, push it, open a pull request, and let the other person review it. Keep pull requests focused: one behavior change, one validator rule, one fixture family, or one documentation update.
+
+### Suggested Division of Work
+
+the maintainer leads the mathematical product layer:
+
+- decide whether examples are meaningful, dangerous, too easy, misleading, or worth saving;
+- write and review fixture `rubric.md` files;
+- curate domain playbooks and example banks under `projects/`;
+- review Strategy Brief outputs and decide whether the suggested routes have real mathematical taste;
+- define the human feedback labels that should influence future example ranking without pretending to be proof evidence.
+
+The engineering collaborator leads the runtime layer:
+
+- keep the CLI, schemas, validators, and tests reliable;
+- add focused negative tests for unsafe proof claims, source misuse, unchecked examples, and invalid strategy scoring;
+- maintain the fixture runner and release-gate commands;
+- implement small, inspectable modules before changing hot files;
+- keep generated artifacts deterministic and schema-valid.
+
+Shared work should happen at the boundary:
+
+- every new product rule needs a fixture;
+- every fixture needs a mathematical rubric;
+- every validator rule needs at least one negative test;
+- every agent or workflow change must leave auditable artifacts, not only chat output.
+
+### Working Agreement
+
+Start each coding session by pulling the latest `main`. If both people need to touch the same hot file, agree on the owner for that file before editing. Hot files include:
+
+```text
+espresso_proof/mock_pipeline.py
+espresso_proof/validators.py
+espresso_proof/cli.py
+espresso_proof/models.py
+tests/test_kernel.py
+```
+
+Use issues or a short shared TODO list for task ownership. A good issue should name:
+
+- the product behavior being protected;
+- the artifact or schema affected;
+- the fixture that proves the behavior;
+- the release-gate commands that must pass.
+
+Pull request checklist:
+
+- What changed?
+- Which product rule does this protect?
+- Which files are affected?
+- Which tests or evals were run?
+- Are any proof-like claims, source-backed claims, or strategy scores newly allowed?
+- Does this preserve the positioning: not a Lean-heavy prover, not a chatbox, not an agent zoo?
+
+### Immediate Coding Priorities
+
+The highest-value next features are:
+
+- Human Example Feedback: let a mathematician mark examples as interesting, dangerous, misleading, too easy, or important, while keeping evidence status separate from taste.
+- Rubric discipline: make every fixture explain the mathematical reason it exists.
+- Strategy Brief Review: let human route choices feed memory and future strategy ranking.
+- GitHub hygiene: add CI, issue templates, pull request template, and branch protection after the first collaborator has access.
+
 ## Recommended V0
 
 Build the **Espresso Proof local workflow kernel first**, then the first proof-sketch critique workflow, then the AI workflow generator.
