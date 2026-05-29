@@ -363,6 +363,39 @@ class LiteratureReviewReport(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class ExtractedTheorem(StrictBaseModel):
+    id: str
+    source_ref_id: str
+    kind: Literal["theorem", "proposition", "lemma", "corollary", "definition", "remark"]
+    label: str
+    locator: Locator
+    statement: str
+    context: str = ""
+    hypothesis_terms: list[str] = Field(default_factory=list)
+    confidence: Literal["high", "medium", "low"]
+
+
+class TheoremExtractionReport(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    generated_at: str
+    sources: list[SourceRef]
+    theorems: list[ExtractedTheorem]
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_theorem_source_refs(self) -> TheoremExtractionReport:
+        source_ids = {source.id for source in self.sources}
+        unknown = {
+            theorem.source_ref_id
+            for theorem in self.theorems
+            if theorem.source_ref_id not in source_ids
+        }
+        if unknown:
+            raise ValueError(f"theorems reference unknown sources: {sorted(unknown)}")
+        return self
+
+
 class CounterexampleTest(StrictBaseModel):
     id: str
     operator_id: str
@@ -859,6 +892,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "counterexamples": CounterexampleReport,
     "tests": TestReport,
     "source_grounding": SourceGroundingReport,
+    "theorem_extraction": TheoremExtractionReport,
     "review": Review,
     "idea_grade": IdeaGrade,
     "loop_control": LoopControl,
@@ -872,5 +906,6 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "run_manifest": RunManifest,
     "workflow_spec": WorkflowSpec,
     "source_ref": SourceRef,
+    "extracted_theorem": ExtractedTheorem,
     "example_computation_check": ExampleComputationCheck,
 }

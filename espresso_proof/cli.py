@@ -7,14 +7,19 @@ import typer
 
 from .contracts import DEFAULT_AGENT_FLOW, default_agent_contracts
 from .io import read_text, read_yaml, write_text, write_yaml
+from .literature_discovery import discover_literature as run_literature_discovery
 from .memory import summarize_memory
 from .mock_pipeline import run_mock_critique
+from .pdf_ingestion import ingest_source_for_theorems
+from .source_verification import verify_source_grounding_from_theorems
 from .models import (
     AdmissionCheck,
     AgentContracts,
     ExampleBank,
     ExampleFeedbackSummary,
     HumanExampleFeedback,
+    LiteratureReviewReport,
+    TheoremExtractionReport,
     WorkflowSpec,
 )
 from .validators import KernelValidationError, validate_run
@@ -121,6 +126,92 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
             typer.echo(line)
     typer.echo("")
     typer.echo(f"Final report: {run / 'final_report.md'}")
+
+
+@app.command("discover-literature")
+def discover_literature(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    mode: str = typer.Option("local", "--mode"),
+    query: str | None = typer.Option(None, "--query"),
+    max_references: int = typer.Option(8, "--max-references", min=1, max=25),
+    provider: list[str] | None = typer.Option(None, "--provider"),
+    ads_token_env: str = typer.Option("ADS_API_TOKEN", "--ads-token-env"),
+) -> None:
+    """Run conservative Literature Discovery for an existing run."""
+    if mode not in {"local", "live"}:
+        raise typer.BadParameter("Literature Discovery supports --mode local or --mode live")
+    validate_run(run)
+    manifest_path = run / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    artifacts = manifest["artifacts"]
+    project_dir = run.parents[1]
+    report = run_literature_discovery(
+        project_dir=project_dir,
+        locked_claim_path=run / artifacts["locked_claim"],
+        hypothesis_ledger_path=run / artifacts["hypothesis_ledger"],
+        max_references=max_references,
+        query=query,
+        mode=mode,
+        providers=provider,
+        ads_token_env=ads_token_env,
+    )
+    LiteratureReviewReport.model_validate(report)
+    write_yaml(run / artifacts["literature_review"], report)
+    validate_run(run)
+    typer.echo(f"Wrote {mode} literature discovery to {run / artifacts['literature_review']}")
+    typer.echo("Reference status remains candidate/unverified/not_found; Referencing owns source_backed.")
+
+
+@app.command("ingest-pdf")
+def ingest_pdf(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    pdf: str = typer.Option(..., "--pdf", help="Local PDF/text path or HTTPS URL."),
+    source_id: str = typer.Option("source_001", "--source-id"),
+    title: str = typer.Option("Ingested source", "--title"),
+    author: list[str] | None = typer.Option(None, "--author"),
+    source_type: str = typer.Option("paper", "--source-type"),
+) -> None:
+    """Ingest a PDF/text source and write theorem_extraction.yaml."""
+    validate_run(run)
+    manifest_path = run / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    claim = read_yaml(run / manifest["artifacts"]["locked_claim"])
+    report = ingest_source_for_theorems(
+        claim_id=claim["id"],
+        source=pdf,
+        source_id=source_id,
+        title=title,
+        authors=author or [],
+        source_type=source_type,
+    )
+    TheoremExtractionReport.model_validate(report)
+    manifest.setdefault("optional_artifacts", {})["theorem_extraction"] = "theorem_extraction.yaml"
+    write_yaml(run / "theorem_extraction.yaml", report)
+    write_yaml(manifest_path, manifest)
+    validate_run(run)
+    typer.echo(f"Wrote theorem extraction to {run / 'theorem_extraction.yaml'}")
+
+
+@app.command("verify-sources")
+def verify_sources(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    theorem_extraction: Path | None = typer.Option(None, "--theorem-extraction", exists=True, dir_okay=False),
+) -> None:
+    """Run conservative Referencing verification from extracted theorem statements."""
+    validate_run(run)
+    manifest = read_yaml(run / "run_manifest.yaml")
+    extraction_path = theorem_extraction
+    if extraction_path is None:
+        extraction_name = manifest.get("optional_artifacts", {}).get("theorem_extraction")
+        if not extraction_name:
+            raise typer.BadParameter("run has no theorem_extraction optional artifact")
+        extraction_path = run / extraction_name
+    verify_source_grounding_from_theorems(
+        run_dir=run,
+        theorem_extraction_path=extraction_path,
+    )
+    validate_run(run)
+    typer.echo(f"Wrote source verification to {run / 'source_grounding.yaml'}")
 
 
 @app.command("feedback-example")

@@ -34,6 +34,7 @@ from .models import (
     StrategyBrief,
     StrategySynthesis,
     TestReport,
+    TheoremExtractionReport,
 )
 from .strategy_rules import validate_strategy_rules
 
@@ -73,6 +74,7 @@ def validate_run(run_dir: Path) -> None:
     )
     strategy_brief = validate_yaml_model(run_dir / artifacts["strategy_brief"], StrategyBrief)
     human_choice = validate_yaml_model(run_dir / artifacts["human_choice"], HumanChoice)
+    _load_optional_theorem_extraction(run_dir, manifest)
     human_feedback, feedback_summary = _load_optional_human_feedback(run_dir, manifest)
 
     _validate_claim_id_consistency(
@@ -149,6 +151,19 @@ def _load_optional_human_feedback(
             ExampleFeedbackSummary,
         )
     return feedback, summary
+
+
+def _load_optional_theorem_extraction(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> TheoremExtractionReport | None:
+    optional = manifest.optional_artifacts
+    if "theorem_extraction" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["theorem_extraction"],
+        TheoremExtractionReport,
+    )
 
 
 def _validate_manifest_paths(run_dir: Path, manifest: RunManifest) -> None:
