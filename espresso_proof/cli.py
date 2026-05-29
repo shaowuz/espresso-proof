@@ -8,6 +8,9 @@ import typer
 from .contracts import DEFAULT_AGENT_FLOW, default_agent_contracts
 from .io import read_text, read_yaml, write_text, write_yaml
 from .literature_discovery import discover_literature as run_literature_discovery
+from .literature_review_agent import ReviewSourceSpec, run_literature_review_agent
+from .llm_agents import resolve_agent_gate as resolve_llm_agent_gate
+from .llm_agents import run_llm_agent_pass
 from .memory import summarize_memory
 from .mock_pipeline import run_mock_critique
 from .pdf_ingestion import ingest_source_for_theorems
@@ -18,6 +21,8 @@ from .models import (
     ExampleBank,
     ExampleFeedbackSummary,
     HumanExampleFeedback,
+    LLMAgentRunReport,
+    LiteratureReviewAgentReport,
     LiteratureReviewReport,
     TheoremExtractionReport,
     WorkflowSpec,
@@ -212,6 +217,88 @@ def verify_sources(
     )
     validate_run(run)
     typer.echo(f"Wrote source verification to {run / 'source_grounding.yaml'}")
+
+
+@app.command("review-literature-agent")
+def review_literature_agent(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    source: list[str] | None = typer.Option(None, "--source", help="Repeatable local PDF/text path or HTTPS URL."),
+    source_id: list[str] | None = typer.Option(None, "--source-id", help="Optional repeatable id aligned with --source."),
+    title: list[str] | None = typer.Option(None, "--title", help="Optional repeatable title aligned with --source."),
+    author: list[str] | None = typer.Option(None, "--author", help="Optional author list applied to all supplied sources."),
+    source_type: str = typer.Option("paper", "--source-type"),
+) -> None:
+    """Run the literature-review-first agent over candidate source text/PDFs."""
+    validate_run(run)
+    sources = source or []
+    ids = source_id or []
+    titles = title or []
+    specs = [
+        ReviewSourceSpec(
+            source=value,
+            source_id=ids[index] if index < len(ids) else None,
+            title=titles[index] if index < len(titles) else None,
+            authors=author or [],
+            source_type=source_type,
+        )
+        for index, value in enumerate(sources)
+    ]
+    report = run_literature_review_agent(run_dir=run, source_specs=specs)
+    LiteratureReviewAgentReport.model_validate(report)
+    manifest_path = run / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    manifest.setdefault("optional_artifacts", {})["literature_review_agent"] = "literature_review_agent.yaml"
+    write_yaml(run / "literature_review_agent.yaml", report)
+    write_yaml(manifest_path, manifest)
+    validate_run(run)
+    typer.echo(f"Wrote literature review agent report to {run / 'literature_review_agent.yaml'}")
+    typer.echo("Review judgments remain candidate-level; Referencing owns source_backed.")
+
+
+@app.command("run-llm-agents")
+def run_llm_agents(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    provider: str = typer.Option("stub", "--provider"),
+    model: str = typer.Option("gpt-4.1", "--model"),
+    verifier_count: int = typer.Option(1, "--verifier-count", min=1, max=3),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+) -> None:
+    """Run initial prover/verifier LLM agents and write llm_agent_run.yaml."""
+    if provider not in {"stub", "openai"}:
+        raise typer.BadParameter("provider must be stub or openai")
+    validate_run(run)
+    manifest_path = run / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    report = run_llm_agent_pass(
+        run_dir=run,
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        verifier_count=verifier_count,
+    )
+    LLMAgentRunReport.model_validate(report)
+    manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
+    write_yaml(run / "llm_agent_run.yaml", report)
+    write_yaml(manifest_path, manifest)
+    validate_run(run)
+    typer.echo(f"Wrote LLM agent run to {run / 'llm_agent_run.yaml'}")
+    typer.echo("Agent output is candidate-only and requires human gate resolution.")
+
+
+@app.command("resolve-agent-gate")
+def resolve_agent_gate(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    decision: str = typer.Option(..., "--decision"),
+    reason: str = typer.Option(..., "--reason"),
+) -> None:
+    """Record a human decision for llm_agent_run.yaml without upgrading status."""
+    if decision not in {"continue", "revise", "stop"}:
+        raise typer.BadParameter("decision must be continue, revise, or stop")
+    validate_run(run)
+    report = resolve_llm_agent_gate(run_dir=run, decision=decision, reason=reason)
+    LLMAgentRunReport.model_validate(report)
+    validate_run(run)
+    typer.echo(f"Resolved LLM agent human gate as {decision}")
 
 
 @app.command("feedback-example")

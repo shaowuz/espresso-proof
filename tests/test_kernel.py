@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -775,7 +778,7 @@ def test_strategy_rules_reject_marker_based_unchecked_deep_exploration(tmp_path:
         validate_run(run_dir)
 
 
-def test_strategy_brief_route_must_match_strategy_synthesis(tmp_path: Path) -> None:
+def test_strategy_brief_score_is_canonical_for_human_grading(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
         "hodge_atoms",
         FIXTURES / "promising_but_unproved" / "input.md",
@@ -785,9 +788,64 @@ def test_strategy_brief_route_must_match_strategy_synthesis(tmp_path: Path) -> N
     data = read_yaml(path)
     data["top_strategies"][0]["score"] = data["top_strategies"][0]["score"] - 1
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    validate_run(run_dir)
+
+
+def test_strategy_brief_non_score_fields_must_match_strategy_synthesis(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    path = run_dir / "strategy_brief.yaml"
+    data = read_yaml(path)
+    data["top_strategies"][0]["main_risk"] = "Changed outside the synthesizer."
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
     with pytest.raises(KernelValidationError, match="differs from Strategy Synthesis"):
         validate_run(run_dir)
+
+
+def test_vscode_bridge_grade_strategy_updates_strategy_brief_only(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    brief_before = read_yaml(run_dir / "strategy_brief.yaml")
+    synthesis_before = read_yaml(run_dir / "strategy_synthesis.yaml")
+    strategy = brief_before["top_strategies"][0]
+    new_score = max(0, strategy["score"] - 1)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/espresso_vscode_bridge.py",
+            "grade-strategy",
+            "--workspace",
+            str(tmp_path),
+            "--run",
+            str(run_dir),
+            "--target-id",
+            strategy["id"],
+            "--score",
+            str(new_score),
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["payload"]["score"] == new_score
+    brief_after = read_yaml(run_dir / "strategy_brief.yaml")
+    synthesis_after = read_yaml(run_dir / "strategy_synthesis.yaml")
+    assert brief_after["top_strategies"][0]["score"] == new_score
+    assert synthesis_after == synthesis_before
+    validate_run(run_dir)
 
 
 def test_strategy_brief_requires_human_choice_options_and_top_three_limit(tmp_path: Path) -> None:

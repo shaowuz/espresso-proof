@@ -396,6 +396,213 @@ class TheoremExtractionReport(StrictBaseModel):
         return self
 
 
+class LiteratureSourceAccess(StrictBaseModel):
+    status: Literal["full_text_read", "abstract_only", "metadata_only", "unreadable", "unavailable"]
+    access_path: str | None = None
+    pages_or_sections_read: list[str] = Field(default_factory=list)
+    extraction_method: Literal["pdf_text", "tex_source", "html", "plain_text", "metadata", "human_supplied", "unknown"]
+
+
+class ReviewedSource(StrictBaseModel):
+    source_ref: SourceRef
+    access: LiteratureSourceAccess
+    bibliographic_confidence: Literal["high", "medium", "low"]
+
+    @model_validator(mode="after")
+    def validate_review_source_status(self) -> ReviewedSource:
+        if self.source_ref.status in {SourceStatus.source_backed, SourceStatus.misapplied}:
+            raise ValueError("literature review agent may not emit source_backed or misapplied sources")
+        return self
+
+
+class TheoremStatementSpan(StrictBaseModel):
+    page: str | None = None
+    section: str | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+
+
+class DefinitionRef(StrictBaseModel):
+    source_ref_id: str
+    locator: Locator
+    definition_text: str
+
+
+class ReviewedTheoremHypothesis(StrictBaseModel):
+    id: str
+    text: str
+    normalized: str
+    definition_refs: list[DefinitionRef] = Field(default_factory=list)
+    status: Literal["explicit", "inferred", "implicit", "unclear"]
+
+
+class ReviewedTheorem(StrictBaseModel):
+    id: str
+    source_ref_id: str
+    kind: Literal["theorem", "proposition", "lemma", "corollary", "definition", "remark"]
+    label: str
+    locator: Locator
+    statement_exact: str
+    statement_is_verbatim: bool
+    statement_span: TheoremStatementSpan = Field(default_factory=TheoremStatementSpan)
+    theorem_hypotheses: list[ReviewedTheoremHypothesis] = Field(default_factory=list)
+    theorem_conclusion: str
+    extraction_confidence: Literal["high", "medium", "low"]
+
+
+class TheoremHypothesisComparison(StrictBaseModel):
+    claim_hypothesis: str
+    theorem_hypothesis_id: str | None = None
+    relation: Literal[
+        "same",
+        "stronger",
+        "weaker",
+        "missing_in_theorem",
+        "extra_in_theorem",
+        "incompatible",
+        "unclear",
+    ]
+    reason: str
+    support_locator: Locator | None = None
+
+
+class ConclusionMatch(StrictBaseModel):
+    relation: Literal["same", "stronger", "weaker", "orthogonal", "incompatible", "unclear"]
+    reason: str
+
+
+class TheoremRelevance(StrictBaseModel):
+    role: Literal[
+        "key_theorem",
+        "supporting_lemma",
+        "definition_source",
+        "example_source",
+        "counterexample_source",
+        "background",
+    ]
+    summary: str
+
+
+class ComparisonUncertainty(StrictBaseModel):
+    confidence: Literal["high", "medium", "low"]
+    failure_modes: list[
+        Literal[
+            "missing_exact_locator",
+            "unread_source",
+            "ambiguous_statement",
+            "missing_definition",
+            "hypothesis_mismatch",
+            "translation_unclear",
+            "weak_term_match",
+            "no_theorem_found",
+        ]
+    ] = Field(default_factory=list)
+    explanation: str
+
+    @model_validator(mode="after")
+    def validate_uncertainty_detail(self) -> ComparisonUncertainty:
+        if self.confidence != "high" and not self.failure_modes:
+            raise ValueError("medium/low comparison uncertainty must name at least one failure mode")
+        return self
+
+
+class TheoremClaimComparison(StrictBaseModel):
+    theorem_id: str
+    claim_id: str
+    comparison_status: Literal[
+        "applicable",
+        "partially_applicable",
+        "stronger_than_needed",
+        "weaker_than_needed",
+        "contradicts",
+        "unclear",
+    ]
+    hypothesis_matches: list[TheoremHypothesisComparison] = Field(default_factory=list)
+    conclusion_match: ConclusionMatch
+    relevance: TheoremRelevance
+    uncertainty: ComparisonUncertainty
+
+    @model_validator(mode="after")
+    def validate_applicable_comparison(self) -> TheoremClaimComparison:
+        if self.comparison_status == "applicable":
+            bad_relations = {"missing_in_theorem", "incompatible", "unclear"}
+            if any(match.relation in bad_relations for match in self.hypothesis_matches):
+                raise ValueError("applicable comparison requires non-unclear matching hypotheses")
+            if self.conclusion_match.relation in {"orthogonal", "incompatible", "unclear"}:
+                raise ValueError("applicable comparison requires a compatible conclusion")
+        return self
+
+
+class StrongestLiteratureSource(StrictBaseModel):
+    source_ref_id: str
+    theorem_id: str | None = None
+    reason: str
+
+
+class LiteratureRelevanceSummary(StrictBaseModel):
+    overall_status: Literal[
+        "supports_route",
+        "contradicts_route",
+        "background_only",
+        "no_relevant_source",
+        "unclear",
+    ]
+    strongest_sources: list[StrongestLiteratureSource] = Field(default_factory=list)
+    main_blockers: list[str] = Field(default_factory=list)
+
+
+class LiteratureUncertaintySummary(StrictBaseModel):
+    overall_confidence: Literal["high", "medium", "low"]
+    blocking_uncertainties: list[str] = Field(default_factory=list)
+    needs_human_review: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_uncertainty_summary(self) -> LiteratureUncertaintySummary:
+        if self.overall_confidence != "high" and not (
+            self.blocking_uncertainties or self.needs_human_review
+        ):
+            raise ValueError("medium/low literature uncertainty must include concrete blockers")
+        return self
+
+
+class LiteratureReviewAgentReport(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    generated_at: str
+    input_sources: list[ReviewedSource]
+    extracted_theorems: list[ReviewedTheorem] = Field(default_factory=list)
+    theorem_comparisons: list[TheoremClaimComparison] = Field(default_factory=list)
+    relevance_summary: LiteratureRelevanceSummary
+    uncertainty: LiteratureUncertaintySummary
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_literature_review_agent_refs(self) -> LiteratureReviewAgentReport:
+        source_by_id = {source.source_ref.id: source for source in self.input_sources}
+        unknown_theorem_sources = {
+            theorem.source_ref_id
+            for theorem in self.extracted_theorems
+            if theorem.source_ref_id not in source_by_id
+        }
+        if unknown_theorem_sources:
+            raise ValueError(f"reviewed theorems reference unknown sources: {sorted(unknown_theorem_sources)}")
+        theorem_by_id = {theorem.id: theorem for theorem in self.extracted_theorems}
+        unknown_comparisons = {
+            comparison.theorem_id
+            for comparison in self.theorem_comparisons
+            if comparison.theorem_id not in theorem_by_id
+        }
+        if unknown_comparisons:
+            raise ValueError(f"comparisons reference unknown theorems: {sorted(unknown_comparisons)}")
+        for theorem in self.extracted_theorems:
+            source = source_by_id[theorem.source_ref_id]
+            if theorem.statement_is_verbatim and (
+                source.access.status != "full_text_read" or not theorem.locator.is_exact
+            ):
+                raise ValueError("verbatim theorem statements require full text access and an exact locator")
+        return self
+
+
 class CounterexampleTest(StrictBaseModel):
     id: str
     operator_id: str
@@ -775,6 +982,83 @@ class LoopControl(StrictBaseModel):
         return self
 
 
+class LLMAgentAttempt(StrictBaseModel):
+    agent_id: str
+    role: Literal["prover", "verifier"]
+    provider: Literal["openai", "stub"]
+    model: str
+    created_at: str
+    input_artifacts: list[str]
+    output_summary: str
+    proposed_steps: list[str] = Field(default_factory=list)
+    source_requests: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    status: Literal["candidate", "needs_human", "blocked", "error"]
+
+
+class LLMAgentVerifierReview(StrictBaseModel):
+    verifier_id: str
+    provider: Literal["openai", "stub"]
+    model: str
+    created_at: str
+    verdict: Literal["plausible_direction", "needs_revision", "needs_sources", "blocked"]
+    objections: list[str] = Field(default_factory=list)
+    missing_hypotheses: list[str] = Field(default_factory=list)
+    source_requests: list[str] = Field(default_factory=list)
+    unsafe_language: list[str] = Field(default_factory=list)
+    recommended_human_action: Literal["continue", "revise", "stop"]
+    status: Literal["candidate", "needs_human", "blocked"]
+
+
+class LLMAgentHumanGate(StrictBaseModel):
+    gate_id: str
+    status: Literal["pending", "resolved"]
+    question: str
+    allowed_decisions: list[Literal["continue", "revise", "stop"]]
+    recommended_decision: Literal["continue", "revise", "stop"]
+    decision: Literal["continue", "revise", "stop"] | None = None
+    reason: str | None = None
+    human_confirmed: bool = False
+    created_at: str
+    resolved_at: str | None = None
+
+    @model_validator(mode="after")
+    def validate_resolution(self) -> LLMAgentHumanGate:
+        if self.status == "resolved":
+            if self.decision is None:
+                raise ValueError("resolved human gate requires a decision")
+            if not self.human_confirmed:
+                raise ValueError("resolved human gate requires human_confirmed=true")
+            if not self.resolved_at:
+                raise ValueError("resolved human gate requires resolved_at")
+        if self.status == "pending":
+            if self.decision is not None or self.human_confirmed:
+                raise ValueError("pending human gate cannot include a confirmed decision")
+        return self
+
+
+class LLMAgentRunReport(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    provider: Literal["openai", "stub"]
+    model: str
+    input_artifacts: list[str]
+    prover_attempt: LLMAgentAttempt
+    verifier_reviews: list[LLMAgentVerifierReview]
+    human_gate: LLMAgentHumanGate
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_agent_report(self) -> LLMAgentRunReport:
+        if self.prover_attempt.role != "prover":
+            raise ValueError("prover_attempt must have role=prover")
+        if not self.verifier_reviews:
+            raise ValueError("LLM agent run requires at least one verifier review")
+        return self
+
+
 class MemoryEntry(StrictBaseModel):
     id: str
     timestamp: str
@@ -886,6 +1170,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "admission_check": AdmissionCheck,
     "hypothesis_ledger": HypothesisLedger,
     "literature_review": LiteratureReviewReport,
+    "literature_review_agent": LiteratureReviewAgentReport,
     "example_bank": ExampleBank,
     "examples": ExampleSelection,
     "computation_checks": ComputationChecks,
@@ -901,6 +1186,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "human_choice": HumanChoice,
     "human_example_feedback": HumanExampleFeedback,
     "example_feedback_summary": ExampleFeedbackSummary,
+    "llm_agent_run": LLMAgentRunReport,
     "memory_entry": MemoryEntry,
     "memory_index": MemoryIndex,
     "run_manifest": RunManifest,

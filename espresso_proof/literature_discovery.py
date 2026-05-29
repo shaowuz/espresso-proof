@@ -153,7 +153,7 @@ def live_responses_to_literature_items(responses: list[LiveSearchResponse]) -> l
                     "relevance": result.relevance,
                     "status": result.status,
                     "why_relevant": result.why_relevant,
-                    "found_by": "web_search",
+                    "found_by": f"live_{response.provider}",
                 }
             )
             index += 1

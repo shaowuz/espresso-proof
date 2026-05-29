@@ -8,8 +8,9 @@ from espresso_proof.cli import app
 from espresso_proof.io import read_yaml
 from espresso_proof.literature_discovery import discover_local_literature
 from espresso_proof.live_search import parse_ads_json, parse_arxiv_atom, parse_crossref_json
+from espresso_proof.literature_review_agent import ReviewSourceSpec, run_literature_review_agent
 from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import LiteratureReviewReport
+from espresso_proof.models import LiteratureReviewAgentReport, LiteratureReviewReport
 from espresso_proof.pdf_ingestion import extract_text_from_pdf_bytes, extract_theorems
 from espresso_proof.validators import validate_run
 
@@ -216,3 +217,106 @@ def test_pdf_fallback_decodes_hex_strings_for_theorem_extraction() -> None:
     assert theorems
     assert theorems[0]["label"] == "2.1"
     assert "base field C" in theorems[0]["statement"]
+
+
+def test_literature_review_agent_reads_source_and_compares_theorem(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    source_path = tmp_path / "hodge_source.txt"
+    source_path.write_text(
+        "Theorem 1.2. For all cubic fourfolds over base field C, "
+        "the Hodge atom obstruction proves irrationality.\n",
+        encoding="utf-8",
+    )
+
+    report = run_literature_review_agent(
+        run_dir=run_dir,
+        source_specs=[
+            ReviewSourceSpec(
+                source=str(source_path),
+                source_id="src_hodge_text",
+                title="Exact Hodge obstruction statement",
+            )
+        ],
+    )
+
+    parsed = LiteratureReviewAgentReport.model_validate(report)
+    assert parsed.input_sources[0].access.status == "full_text_read"
+    assert parsed.extracted_theorems[0].statement_is_verbatim is True
+    assert "For all cubic fourfolds" in parsed.extracted_theorems[0].statement_exact
+    assert parsed.theorem_comparisons[0].comparison_status == "applicable"
+    assert parsed.theorem_comparisons[0].relevance.role == "key_theorem"
+    assert parsed.relevance_summary.overall_status == "supports_route"
+    assert parsed.uncertainty.overall_confidence in {"high", "medium"}
+
+
+def test_literature_review_agent_flags_very_general_theorem_for_universal_claim(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    source_path = tmp_path / "very_general_source.txt"
+    source_path.write_text(
+        "Theorem 3.4. For a very general smooth cubic fourfold over base field C, "
+        "the Hodge atom obstruction proves irrationality.\n",
+        encoding="utf-8",
+    )
+
+    report = run_literature_review_agent(
+        run_dir=run_dir,
+        source_specs=[
+            ReviewSourceSpec(
+                source=str(source_path),
+                source_id="src_very_general",
+                title="Very general cubic fourfold theorem",
+            )
+        ],
+    )
+
+    parsed = LiteratureReviewAgentReport.model_validate(report)
+    comparison = parsed.theorem_comparisons[0]
+    assert comparison.comparison_status == "weaker_than_needed"
+    assert any(match.relation == "incompatible" for match in comparison.hypothesis_matches)
+    assert "hypothesis_mismatch" in set(comparison.uncertainty.failure_modes)
+    assert parsed.relevance_summary.overall_status in {"unclear", "background_only"}
+
+
+def test_literature_review_agent_cli_writes_optional_artifact(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    source_path = tmp_path / "cli_source.txt"
+    source_path.write_text(
+        "Theorem 2.1. For all cubic fourfolds over base field C, "
+        "the Hodge atom obstruction proves irrationality.\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "review-literature-agent",
+            "--run",
+            str(run_dir),
+            "--source",
+            str(source_path),
+            "--source-id",
+            "src_cli",
+            "--title",
+            "CLI source",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    validate_run(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert manifest["optional_artifacts"]["literature_review_agent"] == "literature_review_agent.yaml"
+    report = LiteratureReviewAgentReport.model_validate(read_yaml(run_dir / "literature_review_agent.yaml"))
+    assert report.extracted_theorems

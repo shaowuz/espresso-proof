@@ -23,6 +23,8 @@ from .models import (
     HumanChoiceStatus,
     IdeaGrade,
     IdeaStatus,
+    LLMAgentRunReport,
+    LiteratureReviewAgentReport,
     LiteratureReviewReport,
     LoopControl,
     ProofLanguageStatus,
@@ -75,6 +77,8 @@ def validate_run(run_dir: Path) -> None:
     strategy_brief = validate_yaml_model(run_dir / artifacts["strategy_brief"], StrategyBrief)
     human_choice = validate_yaml_model(run_dir / artifacts["human_choice"], HumanChoice)
     _load_optional_theorem_extraction(run_dir, manifest)
+    _load_optional_literature_review_agent(run_dir, manifest)
+    _load_optional_llm_agent_run(run_dir, manifest)
     human_feedback, feedback_summary = _load_optional_human_feedback(run_dir, manifest)
 
     _validate_claim_id_consistency(
@@ -163,6 +167,32 @@ def _load_optional_theorem_extraction(
     return validate_yaml_model(
         run_dir / optional["theorem_extraction"],
         TheoremExtractionReport,
+    )
+
+
+def _load_optional_literature_review_agent(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> LiteratureReviewAgentReport | None:
+    optional = manifest.optional_artifacts
+    if "literature_review_agent" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["literature_review_agent"],
+        LiteratureReviewAgentReport,
+    )
+
+
+def _load_optional_llm_agent_run(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> LLMAgentRunReport | None:
+    optional = manifest.optional_artifacts
+    if "llm_agent_run" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["llm_agent_run"],
+        LLMAgentRunReport,
     )
 
 
@@ -529,7 +559,7 @@ def _validate_strategy_brief(
         )
     for strategy in strategy_brief.top_strategies:
         synthesis_route = synthesis_by_id[strategy.id]
-        if strategy.model_dump(mode="json") != synthesis_route.model_dump(mode="json"):
+        if _strategy_brief_identity(strategy) != _strategy_brief_identity(synthesis_route):
             raise KernelValidationError(
                 f"{strategy.id}: strategy_brief route differs from Strategy Synthesis"
             )
@@ -541,6 +571,12 @@ def _validate_strategy_brief(
         computations,
         tests,
     )
+
+
+def _strategy_brief_identity(strategy) -> dict:
+    data = strategy.model_dump(mode="json")
+    data.pop("score", None)
+    return data
 
 
 def _validate_human_choice(human_choice: HumanChoice, strategy_brief: StrategyBrief) -> None:
