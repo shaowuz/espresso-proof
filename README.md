@@ -6,7 +6,7 @@ It is not a Lean-heavy prover, not a chatbox, and not an agent zoo. The platform
 
 Lean-light is intended adapter behavior after a Lean/Mathlib connector exists: use existing Mathlib results when they help; if they do not exist, continue with critique and counterexample checks. The current kernel does not include Mathlib integration.
 
-This repository now contains the first local engineering kernel: Pydantic schemas, a Typer CLI, mock critique pipeline, `agent_contracts.yaml`, `literature_review.yaml`, `tests.yaml`, `loop_control.yaml`, `strategy_synthesis.yaml`, `strategy_brief.yaml`, `human_choice.yaml`, optional `human_example_feedback.yaml`, and optional `example_feedback_summary.yaml` artifacts, indexed memory writing/loading, cross-artifact validators, JSON Schema exports, fixture contracts under `tests/fixtures/`, a deterministic `generate-agent --mode v0` admission flow, and two seeded domains: `hodge_atoms` and `coherent_base_change`. It still does not contain real LLM agents, real Literature Discovery, real Evidence Auditor adapters, VS Code integration, PDF ingestion, Mathlib integration, or long-running workers.
+This repository now contains the first local engineering kernel: Pydantic schemas, a Typer CLI, mock critique pipeline, `agent_contracts.yaml`, `literature_review.yaml`, `tests.yaml`, `loop_control.yaml`, `strategy_synthesis.yaml`, `strategy_brief.yaml`, `human_choice.yaml`, optional `human_example_feedback.yaml`, and optional `example_feedback_summary.yaml` artifacts, indexed memory writing/loading, cross-artifact validators, JSON Schema exports, fixture contracts under `tests/fixtures/`, a deterministic `generate-agent --mode v0` admission flow, conservative Literature Discovery commands, PDF/text theorem ingestion, conservative source verification, a local VS Code side-panel prototype, and two seeded domains: `hodge_atoms` and `coherent_base_change`. It still does not contain real LLM agents, real Evidence Auditor adapters, Mathlib integration, long-running workers, or proof automation.
 
 ## Core Position
 
@@ -23,6 +23,7 @@ The guiding rule is:
 
 ## Documents
 
+- [ESPRESSO_AGENT_PROTOCOL.md](ESPRESSO_AGENT_PROTOCOL.md): single source of truth for the maintainer/a collaborator/Codex collaboration, UI V1, artifact rules, and agent execution boundaries.
 - [RESEARCH.md](RESEARCH.md): current landscape of AI theorem proving, Lean agents, benchmarks, theorem search, and research assistants.
 - [PRODUCT_STRATEGY.md](PRODUCT_STRATEGY.md): algebraic geometry opportunity, positioning, product-form comparison, and MVP recommendation.
 - [ARCHITECTURE.md](ARCHITECTURE.md): proposed system architecture, module responsibilities, critique loop, retrieval layer, and multi-agent workflow.
@@ -160,7 +161,7 @@ Current command scope is deliberately narrow. `critique-sketch` and `eval` run d
 The product loop remains:
 
 1. Ask the user about the research direction, important papers, goal, style, and cost preference.
-2. Run a first literature review summary. In the current kernel this is a mock `literature_review.yaml`, not live Literature Discovery.
+2. Run a first literature review summary. The current kernel supports local notes and conservative live metadata search through `espresso discover-literature`; results remain candidates until Referencing/source verification succeeds.
 3. Draft a specialized, runnable workflow.
 4. Let the user tune it with natural language: `more examples`, `more proof`, `stricter review`, `cheaper`, `slower but more careful`.
 5. Run one trial round, then have the AI suggest adjustments.
