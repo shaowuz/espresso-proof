@@ -18,10 +18,19 @@ def run_mock_critique(project_id: str, input_path: Path, output_root: Path) -> P
     run_dir.mkdir(parents=True, exist_ok=True)
 
     write_text(run_dir / "input.md", text)
-    artifacts = _artifacts_for_scenario(scenario, text, run_id)
+    artifacts = _artifacts_for_scenario(scenario, text, run_id, project_id)
     claim_id = artifacts["locked_claim.yaml"]["id"]
     artifacts["agent_contracts.yaml"] = default_agent_contracts(project_id)
     artifacts.setdefault("human_choice.yaml", _pending_human_choice(claim_id))
+    optional_artifacts = {
+        "human_example_feedback": "human_example_feedback.yaml",
+        "example_feedback_summary": "example_feedback_summary.yaml",
+    }
+    optional_manifest = {
+        key: filename
+        for key, filename in optional_artifacts.items()
+        if filename in artifacts
+    }
     for filename, data in artifacts.items():
         if filename.endswith(".yaml"):
             write_yaml(run_dir / filename, data)
@@ -52,7 +61,7 @@ def run_mock_critique(project_id: str, input_path: Path, output_root: Path) -> P
             "human_choice": "human_choice.yaml",
             "final_report": "final_report.md",
         },
-        "optional_artifacts": {},
+        "optional_artifacts": optional_manifest,
         "dependencies": {
             "idea_grade": {
                 "depends_on": [
@@ -106,6 +115,10 @@ def _detect_scenario(input_path: Path, text: str) -> str:
         "likely_false_multiple_pressures",
         "source_misapplication_very_general_to_all",
         "vague_claim_unclear",
+        "human_marks_example_interesting",
+        "human_marks_example_misleading_not_evidence",
+        "human_promotes_dangerous_counterexample",
+        "human_feedback_does_not_upgrade_source_status",
     }:
         return name
     lowered = text.lower()
@@ -147,7 +160,7 @@ def _base_claim(text: str, ambiguous_terms: list[str] | None = None) -> dict:
     }
 
 
-def _artifacts_for_scenario(scenario: str, text: str, run_id: str) -> dict[str, object]:
+def _artifacts_for_scenario(scenario: str, text: str, run_id: str, project_id: str) -> dict[str, object]:
     if scenario == "hodge_all_cubic_fourfolds":
         return _hodge_all_cubic_fourfolds(text, run_id)
     if scenario == "dropped_hypothesis_not_refutation":
@@ -164,6 +177,13 @@ def _artifacts_for_scenario(scenario: str, text: str, run_id: str) -> dict[str, 
         return _likely_false_multiple_pressures(text, run_id)
     if scenario == "source_misapplication_very_general_to_all":
         return _source_misapplication(text, run_id)
+    if scenario in {
+        "human_marks_example_interesting",
+        "human_marks_example_misleading_not_evidence",
+        "human_promotes_dangerous_counterexample",
+        "human_feedback_does_not_upgrade_source_status",
+    }:
+        return _human_feedback_scenario(scenario, text, run_id, project_id)
     return _vague_claim(text, run_id)
 
 
@@ -328,6 +348,72 @@ def _pending_human_choice(claim_id: str) -> dict:
         "taste_judgment": "",
         "continue_decision": "pending",
         "human_confirmed": False,
+    }
+
+
+def _human_feedback_artifacts(
+    claim_id: str,
+    run_id: str,
+    *,
+    project_id: str,
+    target_type: str,
+    target_artifact: str,
+    target_id: str,
+    labels: list[str],
+    requested_actions: list[str],
+    reason: str,
+    direction: str,
+    weight: str,
+) -> dict[str, object]:
+    feedback_id = "feedback_001"
+    return {
+        "human_example_feedback.yaml": {
+            "schema_version": 1,
+            "project_id": project_id,
+            "claim_id": claim_id,
+            "run_id": run_id,
+            "created_at": datetime.now(UTC).isoformat(),
+            "feedback": [
+                {
+                    "feedback_id": feedback_id,
+                    "target_type": target_type,
+                    "target_artifact": target_artifact,
+                    "target_id": target_id,
+                    "labels": labels,
+                    "reason": reason,
+                    "scope": "project",
+                    "requested_actions": requested_actions,
+                    "human_confirmed": True,
+                    "supersedes_feedback_id": None,
+                }
+            ],
+        },
+        "example_feedback_summary.yaml": {
+            "schema_version": 1,
+            "claim_id": claim_id,
+            "run_id": run_id,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "generated_by": "mock_pipeline",
+            "feedback_artifact_path": "human_example_feedback.yaml",
+            "summarized_from": [feedback_id],
+            "input_artifact_digests": {},
+            "ranking_adjustments": [
+                {
+                    "target_id": target_id,
+                    "target_type": target_type,
+                    "target_artifact": target_artifact,
+                    "feedback_ids": [feedback_id],
+                    "direction": direction,
+                    "weight": weight,
+                    "reason": reason,
+                }
+            ],
+            "project_preferences": [
+                f"{target_type}:{target_id} labeled {', '.join(labels)}"
+            ],
+            "playbook_tuning_candidates": [],
+            "memory_entries": [],
+        },
     }
 
 
@@ -1254,6 +1340,87 @@ def _source_misapplication(text: str, run_id: str) -> dict[str, object]:
     )
     artifacts["final_report.md"] = (
         "Mock critique: Referencing marks the very-general-to-all citation as misapplied.\n"
+    )
+    return artifacts
+
+
+def _human_feedback_scenario(
+    scenario: str,
+    text: str,
+    run_id: str,
+    project_id: str,
+) -> dict[str, object]:
+    artifacts = _hodge_all_cubic_fourfolds(text, run_id)
+    claim_id = artifacts["locked_claim.yaml"]["id"]
+    if scenario == "human_marks_example_interesting":
+        artifacts.update(
+            _human_feedback_artifacts(
+                claim_id,
+                run_id,
+                project_id=project_id,
+                target_type="example",
+                target_artifact="examples.yaml",
+                target_id="ex_special_cubic",
+                labels=["interesting"],
+                requested_actions=["promote_ranking"],
+                reason="This example may reveal the all-versus-very-general issue.",
+                direction="up",
+                weight="medium",
+            )
+        )
+    elif scenario == "human_marks_example_misleading_not_evidence":
+        artifacts.update(
+            _human_feedback_artifacts(
+                claim_id,
+                run_id,
+                project_id=project_id,
+                target_type="example",
+                target_artifact="examples.yaml",
+                target_id="ex_special_cubic",
+                labels=["misleading"],
+                requested_actions=["demote_ranking"],
+                reason="This example is superficially related but does not test the key source gap.",
+                direction="down",
+                weight="medium",
+            )
+        )
+    elif scenario == "human_promotes_dangerous_counterexample":
+        artifacts.update(
+            _human_feedback_artifacts(
+                claim_id,
+                run_id,
+                project_id=project_id,
+                target_type="counterexample_test",
+                target_artifact="counterexamples.yaml",
+                target_id="test_special_vs_very_general",
+                labels=["dangerous"],
+                requested_actions=["prioritize_counterexample_testing"],
+                reason="Special cubic pressure is the most dangerous place for theorem drift.",
+                direction="up",
+                weight="high",
+            )
+        )
+    elif scenario == "human_feedback_does_not_upgrade_source_status":
+        artifacts.update(
+            _human_feedback_artifacts(
+                claim_id,
+                run_id,
+                project_id=project_id,
+                target_type="source_ref",
+                target_artifact="source_grounding.yaml",
+                target_id="src_candidate_001",
+                labels=["needs_source"],
+                requested_actions=["run_referencing"],
+                reason="The remembered theorem needs an exact locator and hypothesis match.",
+                direction="up",
+                weight="medium",
+            )
+        )
+    else:
+        raise ValueError(f"unknown human feedback scenario {scenario}")
+    artifacts["final_report.md"] = (
+        "Mock critique: human feedback was recorded as ranking guidance only; "
+        "evidence and source status remain unchanged.\n"
     )
     return artifacts
 

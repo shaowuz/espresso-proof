@@ -1,0 +1,18 @@
+required:
+  idea_status:
+    - fragile
+  required_source_status:
+    - candidate
+  source_backed_allowed: false
+  forbidden_final_report_phrases:
+    - verified
+    - proof complete
+    - we proved
+    - proved the theorem
+  human_feedback:
+    target_type: source_ref
+    target_id: src_candidate_001
+    labels:
+      - needs_source
+    summary_required: true
+    no_status_upgrade: true
