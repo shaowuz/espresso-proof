@@ -31,6 +31,8 @@ The guiding rule is:
 - [IDEA_GRADING.md](IDEA_GRADING.md): grading pipeline for deciding whether a proof idea is promising, fragile, likely false, refuted, or unclear.
 - [IMPLEMENTATION_GOALS.md](IMPLEMENTATION_GOALS.md): concrete build goals, acceptance tests, failure modes, and release gates.
 - [ENGINEERING_KERNEL.md](ENGINEERING_KERNEL.md): smallest buildable local kernel: CLI, artifacts, schemas, rejection gates, mock evals, and non-goals.
+- [HUMAN_IN_THE_LOOP.md](HUMAN_IN_THE_LOOP.md): product and engineering design for human mathematical judgment, feedback labels, memory, and non-upgrade rules.
+- [HUMAN_IN_THE_LOOP_AUDIT.md](HUMAN_IN_THE_LOOP_AUDIT.md): implementation audit of Human Choice, Strategy Brief, memory, and missing Human Example Feedback artifacts.
 - [SCHEMAS.md](SCHEMAS.md): structured YAML/JSON schemas for claims, attempts, examples, counterexample tests, source grounding, idea grades, and memory.
 - [ORCHESTRATOR.md](ORCHESTRATOR.md): state machine, parallel/serial agent rules, major human gates, long-run policy, and checkpoint rules.
 - [EVALS.md](EVALS.md): fixture format, rubrics, automated checks, and release gates.
