@@ -6,7 +6,7 @@ It is not a Lean-heavy prover, not a chatbox, and not an agent zoo. The platform
 
 Lean-light is intended adapter behavior after a Lean/Mathlib connector exists: use existing Mathlib results when they help; if they do not exist, continue with critique and counterexample checks. The current kernel does not include Mathlib integration.
 
-This repository now contains the first local engineering kernel: Pydantic schemas, a Typer CLI, mock critique pipeline, `agent_contracts.yaml`, `literature_review.yaml`, `tests.yaml`, `loop_control.yaml`, `strategy_synthesis.yaml`, `strategy_brief.yaml`, `human_choice.yaml`, optional `human_example_feedback.yaml`, optional `example_feedback_summary.yaml`, and optional `llm_agent_run.yaml` artifacts, indexed memory writing/loading, cross-artifact validators, JSON Schema exports, fixture contracts under `tests/fixtures/`, a deterministic `generate-agent --mode v0` admission flow, conservative Literature Discovery commands, PDF/text theorem ingestion, conservative source verification, a local VS Code side-panel prototype, an initial LLM prover/verifier CLI runtime with a human gate, and two seeded domains: `hodge_atoms` and `coherent_base_change`. It still does not contain LLM tool execution, durable long-running workers, real Evidence Auditor adapters, Mathlib integration, or proof automation.
+This repository now contains the first local engineering kernel: Pydantic schemas, a Typer CLI, mock critique pipeline, `agent_contracts.yaml`, `literature_review.yaml`, `tests.yaml`, `loop_control.yaml`, `strategy_synthesis.yaml`, `strategy_brief.yaml`, `human_choice.yaml`, optional `human_example_feedback.yaml`, optional `example_feedback_summary.yaml`, and optional `llm_agent_run.yaml` artifacts, indexed memory writing/loading, cross-artifact validators, JSON Schema exports, fixture contracts under `tests/fixtures/`, a deterministic `generate-agent --mode v0` admission flow, conservative Literature Discovery commands, PDF/text theorem ingestion, conservative source verification, a local VS Code side-panel prototype, a runnable `espresso run-flow` multiagent command, an initial human-gated LLM prover plus Espresso reviewer-set runtime, and two seeded domains: `hodge_atoms` and `coherent_base_change`. It still does not contain LLM tool execution, durable long-running workers, real Evidence Auditor adapters, Mathlib integration, or proof automation.
 
 ## Core Position
 
@@ -23,20 +23,28 @@ The guiding rule is:
 
 ## Documents
 
-- [ESPRESSO_AGENT_PROTOCOL.md](ESPRESSO_AGENT_PROTOCOL.md): single source of truth for the maintainer/a collaborator/Codex collaboration, UI V1, artifact rules, and agent execution boundaries.
+Core design documents:
+
+- [PRODUCT_PHILOSOPHY.md](PRODUCT_PHILOSOPHY.md): product philosophy, core mathematical judgment principles, and what Espresso should/should not become.
+- [AGENT_FLOW.md](AGENT_FLOW.md): current multi-agent workflow, parallel/serial rules, review stages, human gates, and memory loop.
+- [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md): system architecture, module responsibilities, local runtime, retrieval, UI, memory, and evaluation boundaries.
+- [FILE_OVERVIEW.md](FILE_OVERVIEW.md): explanation of what each repository file and folder is for.
+
+Supporting documents:
+
+- [ESPRESSO_AGENT_PROTOCOL.md](ESPRESSO_AGENT_PROTOCOL.md): source of truth for collaborator/Codex sessions, UI V1, artifact rules, and agent execution boundaries.
 - [RESEARCH.md](RESEARCH.md): current landscape of AI theorem proving, Lean agents, benchmarks, theorem search, and research assistants.
 - [PRODUCT_STRATEGY.md](PRODUCT_STRATEGY.md): algebraic geometry opportunity, positioning, product-form comparison, and MVP recommendation.
-- [ARCHITECTURE.md](ARCHITECTURE.md): proposed system architecture, module responsibilities, critique loop, retrieval layer, and multi-agent workflow.
 - [FLOW_DESIGN.md](FLOW_DESIGN.md): detailed user-facing flow for Generate AI Agent, Critique Sketch, and Improve Workflow.
-- [ESPRESSO_FLOW.md](ESPRESSO_FLOW.md): final no-Lean-formalization agentic flow centered on examples, counterexamples, taste, and idea grading.
 - [IDEA_GRADING.md](IDEA_GRADING.md): grading pipeline for deciding whether a proof idea is promising, fragile, likely false, refuted, or unclear.
 - [IMPLEMENTATION_GOALS.md](IMPLEMENTATION_GOALS.md): concrete build goals, acceptance tests, failure modes, and release gates.
 - [ENGINEERING_KERNEL.md](ENGINEERING_KERNEL.md): smallest buildable local kernel: CLI, artifacts, schemas, rejection gates, mock evals, and non-goals.
 - [HUMAN_IN_THE_LOOP.md](HUMAN_IN_THE_LOOP.md): product and engineering design for human mathematical judgment, feedback labels, memory, and non-upgrade rules.
 - [HUMAN_IN_THE_LOOP_AUDIT.md](HUMAN_IN_THE_LOOP_AUDIT.md): implementation audit of Human Choice, Strategy Brief, memory, and Human Example Feedback artifacts.
 - [docs/AGENT_INFRA_REFERENCES.md](docs/AGENT_INFRA_REFERENCES.md): infrastructure references for LLM provider calls, human-gated agent execution, durable orchestration, and VS Code webviews.
+- [docs/REAL_AGENT_RUNBOOK.md](docs/REAL_AGENT_RUNBOOK.md): supported path for saving an OpenAI API key, checking the real provider, running OpenAI or external-command multiagent flow, and resolving the human gate.
+- [skill/espresso-proof/SKILL.md](skill/espresso-proof/SKILL.md): Claude-style skill prototype for running the current Espresso agent flow in chat.
 - [SCHEMAS.md](SCHEMAS.md): structured YAML/JSON schemas for claims, attempts, examples, counterexample tests, source grounding, idea grades, and memory.
-- [ORCHESTRATOR.md](ORCHESTRATOR.md): state machine, parallel/serial agent rules, major human gates, long-run policy, and checkpoint rules.
 - [EVALS.md](EVALS.md): fixture format, rubrics, automated checks, and release gates.
 - [PROJECT_SKELETON_REVIEW.md](PROJECT_SKELETON_REVIEW.md): engineering/math review of feasibility, gaps, and priority improvements before coding.
 - [ROADMAP.md](ROADMAP.md): four-week MVP plan with acceptance criteria and explicit cuts.
@@ -138,7 +146,6 @@ Pull request checklist:
 
 The highest-value next features are:
 
-- Human Choice memory: persist selected Strategy Brief decisions as `user_decision` memory with provenance.
 - Rubric discipline: make every fixture explain the mathematical reason it exists.
 - Strategy Brief Review: let human route choices feed memory and future strategy ranking.
 - GitHub hygiene: add CI, issue templates, pull request template, and branch protection after the first collaborator has access.
@@ -159,16 +166,18 @@ espresso improve-workflow
 
 Current command scope is deliberately narrow. `critique-sketch` and `eval` run deterministic mock artifacts. `generate-agent --mode v0` classifies the prompt into a small deterministic domain set, writes a schema-valid draft `workflow_spec.yaml`, `agent_contracts.yaml`, `admission_check.yaml`, `playbook.md`, and `trial_fixture/`, then leaves `admitted: false` until human confirmation. It does not create a live LLM agent.
 
-The product loop remains:
+The current product loop is:
 
-1. Ask the user about the research direction, important papers, goal, style, and cost preference.
-2. Run a first literature review summary. The current kernel supports local notes and conservative live metadata search through `espresso discover-literature`; results remain candidates until Referencing/source verification succeeds.
-3. Draft a specialized, runnable workflow.
-4. Let the user tune it with natural language: `more examples`, `more proof`, `stricter review`, `cheaper`, `slower but more careful`.
-5. Run one trial round, then have the AI suggest adjustments.
-6. Save the confirmed workflow as `projects/<name>/playbook.md` and `workflow_spec.yaml`.
-7. Use the workflow to critique proof sketches with hypothesis ledger, locality/descent checks, examples, counterexample tests, reference needs, a Review verdict, and a Grade.
-8. After the Grade, run Strategy Synthesizer to organize the best next routes, then present a Strategy Brief and ask the human whether to stop, run a quick extra test, invest deeper effort, or save the direction for later exploration. Real 6h/24h long runs are post-V0.
+1. Understand and lock the user's mathematical problem.
+2. Run Literature Review, Examples, and Counterexamples in parallel.
+3. Generate several proof strategies.
+4. Attack strategies with the examples/counterexamples bank and grade them with LLM mathematical judgment.
+5. Check whether references actually match each strategy.
+6. Present a Strategy Brief and collect Human Strategy Preference.
+7. Let the Prover try the selected or high-score routes.
+8. Let reviewers check proof outline, literature use, and line-level proof detail.
+9. Send reviewer objections to the Time Allocation Agent, which decides whether to repair, retry, switch, stop, or spend more time.
+10. Grade the current proof attempt and save useful routes, failures, examples, source gaps, and human preferences to Memory.
 
 After a Lean adapter exists, V0 should default to background **Lean-light**: use existing Mathlib/Lean results if they are available, but skip Lean if they are not. Do not ask the user to choose a Lean mode, and do not formalize the user's research theorem by default.
 
@@ -189,9 +198,10 @@ Hard product decision:
 - Custom agents are editable Markdown/YAML-like playbooks.
 - Platform value comes from workflows being composable, auditable, reusable, and evaluable; not from having many agents.
 - All advanced capabilities must leave artifacts, not only chat history.
-- Literature Review only finds candidate papers/examples/counterexamples; Referencing alone decides whether a proof step is actually source-backed.
+- Literature Review only finds candidate papers/examples/counterexamples; `Check If References Match Strategies` decides whether a proof step is actually source-backed.
 - Stop after repeated no-progress loops and return a Strategy Brief instead of letting agents self-loop.
-- Evidence Auditor evidence must come from exact arithmetic, CAS, tiny Lean snippets, or source lookup; manual review needed cannot count as checked evidence.
+- Examples/Counterexamples Attacker can lower or block a strategy score; LLM Strategy Grader cannot overrule concrete example failure, unchecked computation, or theorem-condition gaps.
+- Human Strategy Preference affects future time allocation, not proof status, source-backed status, or checked evidence.
 - Do not become a broad research workbench.
 - Do not let LaTeX, slides, Lean, computation, or tool count replace mathematical judgment.
 
