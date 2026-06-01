@@ -43,7 +43,8 @@ Supporting documents:
 - [HUMAN_IN_THE_LOOP_AUDIT.md](HUMAN_IN_THE_LOOP_AUDIT.md): implementation audit of Human Choice, Strategy Brief, memory, and Human Example Feedback artifacts.
 - [docs/AGENT_INFRA_REFERENCES.md](docs/AGENT_INFRA_REFERENCES.md): infrastructure references for LLM provider calls, human-gated agent execution, durable orchestration, and VS Code webviews.
 - [docs/REAL_AGENT_RUNBOOK.md](docs/REAL_AGENT_RUNBOOK.md): supported path for saving an OpenAI API key, checking the real provider, running OpenAI or external-command multiagent flow, and resolving the human gate.
-- [skill/espresso-proof/SKILL.md](skill/espresso-proof/SKILL.md): Claude-style skill prototype for running the current Espresso agent flow in chat.
+- [.claude/skills/espresso-proof/SKILL.md](.claude/skills/espresso-proof/SKILL.md): project-discoverable Claude Code skill for running the current Espresso agent flow in chat.
+- [skill/espresso-proof/SKILL.md](skill/espresso-proof/SKILL.md): shareable copy of the same Espresso Proof skill package.
 - [SCHEMAS.md](SCHEMAS.md): structured YAML/JSON schemas for claims, attempts, examples, counterexample tests, source grounding, idea grades, and memory.
 - [EVALS.md](EVALS.md): fixture format, rubrics, automated checks, and release gates.
 - [PROJECT_SKELETON_REVIEW.md](PROJECT_SKELETON_REVIEW.md): engineering/math review of feasibility, gaps, and priority improvements before coding.
