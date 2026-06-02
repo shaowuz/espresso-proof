@@ -29,27 +29,19 @@ Core design documents:
 - [AGENT_FLOW.md](AGENT_FLOW.md): current multi-agent workflow, parallel/serial rules, review stages, human gates, and memory loop.
 - [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md): system architecture, module responsibilities, local runtime, retrieval, UI, memory, and evaluation boundaries.
 - [FILE_OVERVIEW.md](FILE_OVERVIEW.md): explanation of what each repository file and folder is for.
+- [ESPRESSO_AGENT_PROTOCOL.md](ESPRESSO_AGENT_PROTOCOL.md): source of truth for Codex/collaborator sessions, current capability boundaries, safe language, and validation discipline.
 
 Supporting documents:
 
-- [ESPRESSO_AGENT_PROTOCOL.md](ESPRESSO_AGENT_PROTOCOL.md): source of truth for collaborator/Codex sessions, UI V1, artifact rules, and agent execution boundaries.
-- [RESEARCH.md](RESEARCH.md): current landscape of AI theorem proving, Lean agents, benchmarks, theorem search, and research assistants.
-- [PRODUCT_STRATEGY.md](PRODUCT_STRATEGY.md): algebraic geometry opportunity, positioning, product-form comparison, and MVP recommendation.
-- [FLOW_DESIGN.md](FLOW_DESIGN.md): detailed user-facing flow for Generate AI Agent, Critique Sketch, and Improve Workflow.
-- [IDEA_GRADING.md](IDEA_GRADING.md): grading pipeline for deciding whether a proof idea is promising, fragile, likely false, refuted, or unclear.
-- [IMPLEMENTATION_GOALS.md](IMPLEMENTATION_GOALS.md): concrete build goals, acceptance tests, failure modes, and release gates.
-- [ENGINEERING_KERNEL.md](ENGINEERING_KERNEL.md): smallest buildable local kernel: CLI, artifacts, schemas, rejection gates, mock evals, and non-goals.
-- [HUMAN_IN_THE_LOOP.md](HUMAN_IN_THE_LOOP.md): product and engineering design for human mathematical judgment, feedback labels, memory, and non-upgrade rules.
-- [HUMAN_IN_THE_LOOP_AUDIT.md](HUMAN_IN_THE_LOOP_AUDIT.md): implementation audit of Human Choice, Strategy Brief, memory, and Human Example Feedback artifacts.
+- [docs/product/](docs/product/): product strategy, human-in-the-loop design, idea grading, workflow synthesis, and prompt-building rules.
+- [docs/engineering/](docs/engineering/): local kernel, schemas, evals, implementation goals, and release gates.
+- [docs/research/](docs/research/): research survey and source material about AI theorem proving and math agents.
+- [docs/archive/](docs/archive/): older planning notes and collaborator handoffs preserved for history, not current product direction.
 - [docs/AGENT_INFRA_REFERENCES.md](docs/AGENT_INFRA_REFERENCES.md): infrastructure references for LLM provider calls, human-gated agent execution, durable orchestration, and VS Code webviews.
 - [docs/REAL_AGENT_RUNBOOK.md](docs/REAL_AGENT_RUNBOOK.md): supported path for saving an OpenAI API key, checking the real provider, running OpenAI or external-command multiagent flow, and resolving the human gate.
+- [docs/LITERATURE_DISCOVERY.md](docs/LITERATURE_DISCOVERY.md): conservative literature discovery, source ingestion, and source verification behavior.
+- [docs/UI_PLAN.md](docs/UI_PLAN.md): V1 VS Code side-panel scope and artifact-backed UI plan.
 - [.claude/skills/espresso-proof/SKILL.md](.claude/skills/espresso-proof/SKILL.md): project-discoverable Claude Code skill for running the current Espresso agent flow in chat.
-- [SCHEMAS.md](SCHEMAS.md): structured YAML/JSON schemas for claims, attempts, examples, counterexample tests, source grounding, idea grades, and memory.
-- [EVALS.md](EVALS.md): fixture format, rubrics, automated checks, and release gates.
-- [PROJECT_SKELETON_REVIEW.md](PROJECT_SKELETON_REVIEW.md): engineering/math review of feasibility, gaps, and priority improvements before coding.
-- [ROADMAP.md](ROADMAP.md): four-week MVP plan with acceptance criteria and explicit cuts.
-- [WORKFLOW_SYNTHESIZER.md](WORKFLOW_SYNTHESIZER.md): meta-workflow for turning a research prompt into a specialized project playbook.
-- [UPDATED_PLAN.md](UPDATED_PLAN.md): platform-oriented V0 plan: kernel, first workflow, workflow generator, and later platform surface.
 
 ## Project Playbooks
 
@@ -89,25 +81,16 @@ docs/<short-topic>
 
 Do not commit directly to `main` once two people are coding. Make a branch, push it, open a pull request, and let the other person review it. Keep pull requests focused: one behavior change, one validator rule, one fixture family, or one documentation update.
 
-### Suggested Division of Work
+### Suggested Work Tracks
 
-the maintainer leads the mathematical product layer:
+Use work tracks instead of fixed personal ownership:
 
-- decide whether examples are meaningful, dangerous, too easy, misleading, or worth saving;
-- write and review fixture `rubric.md` files;
-- curate domain playbooks and example banks under `projects/`;
-- review Strategy Brief outputs and decide whether the suggested routes have real mathematical taste;
-- define the human feedback labels that should influence future example ranking without pretending to be proof evidence.
+- Math product track: define meaningful examples, dangerous examples, rubrics, domain playbooks, Strategy Brief taste, and misleading-language rules.
+- Runtime track: maintain CLI, schemas, validators, tests, memory, fixtures, and release gates.
+- UI track: expose artifact-backed runs, Strategy Brief cards, human choices, example feedback, and source gaps without inventing mathematical status.
+- Research/source track: improve literature discovery, theorem ingestion, source matching, and reference discipline.
 
-The engineering collaborator leads the runtime layer:
-
-- keep the CLI, schemas, validators, and tests reliable;
-- add focused negative tests for unsafe proof claims, source misuse, unchecked examples, and invalid strategy scoring;
-- maintain the fixture runner and release-gate commands;
-- implement small, inspectable modules before changing hot files;
-- keep generated artifacts deterministic and schema-valid.
-
-Shared work should happen at the boundary:
+Shared work happens at the boundary:
 
 - every new product rule needs a fixture;
 - every fixture needs a mathematical rubric;
