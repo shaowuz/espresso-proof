@@ -717,6 +717,8 @@ def resolve_agent_gate(
         raise RuntimeError("run has no llm_agent_run optional artifact")
     report = read_yaml(run_dir / agent_path)
     gate = report["human_gate"]
+    if gate.get("status") == "resolved":
+        raise RuntimeError("human gate is already resolved")
     if decision not in gate["allowed_decisions"]:
         raise RuntimeError(f"decision {decision!r} is not allowed for this gate")
     gate.update(

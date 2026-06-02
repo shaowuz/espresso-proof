@@ -625,6 +625,58 @@ def test_resolve_agent_gate_does_not_upgrade_grade_or_source(tmp_path: Path) -> 
     assert read_yaml(run_dir / "source_grounding.yaml") == before_grounding
 
 
+def test_resolve_agent_gate_cannot_overwrite_resolved_gate(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    first = runner.invoke(
+        app,
+        [
+            "resolve-agent-gate",
+            "--run",
+            str(run_dir),
+            "--decision",
+            "revise",
+            "--reason",
+            "Record one deliberate human gate decision.",
+        ],
+    )
+    assert first.exit_code == 0, first.output
+    before_report = read_yaml(run_dir / "llm_agent_run.yaml")
+
+    second = runner.invoke(
+        app,
+        [
+            "resolve-agent-gate",
+            "--run",
+            str(run_dir),
+            "--decision",
+            "continue",
+            "--reason",
+            "This should not overwrite the first resolved gate.",
+        ],
+    )
+
+    assert second.exit_code != 0
+    assert second.exception is not None
+    assert "already resolved" in str(second.exception)
+    assert read_yaml(run_dir / "llm_agent_run.yaml") == before_report
+
+
 def test_human_choice_routes_prover_loop_strategy_and_effort(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
         "hodge_atoms",
@@ -789,6 +841,40 @@ def test_prover_loop_reviewer_pointers_must_match_llm_report(tmp_path: Path) -> 
         assert "reviewer objection verdict" in str(exc)
     else:
         raise AssertionError("validate_run should reject tampered reviewer pointers")
+
+
+def test_prover_loop_reviewer_pointers_must_be_unique(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    loop = read_yaml(run_dir / "prover_loop.yaml")
+    loop["attempts"][0]["reviewer_objections"][1]["verifier_id"] = loop["attempts"][0][
+        "reviewer_objections"
+    ][0]["verifier_id"]
+    write_yaml(run_dir / "prover_loop.yaml", loop)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "reviewer_objections" in str(exc)
+    else:
+        raise AssertionError("validate_run should reject duplicate reviewer pointers")
 
 
 def test_run_prover_loop_round_appends_child_attempt(tmp_path: Path) -> None:

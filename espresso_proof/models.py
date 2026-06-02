@@ -1105,6 +1105,8 @@ class ProverLoopAttempt(StrictBaseModel):
         if len(self.reviewer_ids) != len(set(self.reviewer_ids)):
             raise ValueError("prover loop attempt reviewer_ids must be unique")
         pointer_ids = [review.verifier_id for review in self.reviewer_objections]
+        if len(pointer_ids) != len(set(pointer_ids)):
+            raise ValueError("reviewer_objections verifier_id values must be unique")
         if set(pointer_ids) != set(self.reviewer_ids):
             raise ValueError("reviewer_objections must match reviewer_ids")
         if self.status in {"needs_repair", "blocked"} and not self.blockers:
