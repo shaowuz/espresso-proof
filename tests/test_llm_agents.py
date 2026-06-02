@@ -93,6 +93,110 @@ def test_stub_llm_agents_write_schema_valid_candidate_artifact(tmp_path: Path) -
     assert loop.attempts[0].time_allocation == "ask_human"
 
 
+def test_inspect_reports_prover_loop_and_theorem_applicability(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    applicability = runner.invoke(app, ["audit-theorem-applicability", "--run", str(run_dir)])
+    assert applicability.exit_code == 0, applicability.output
+    llm = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert llm.exit_code == 0, llm.output
+    validate_run(run_dir)
+
+    inspected = runner.invoke(app, ["inspect", "--run", str(run_dir)])
+
+    assert inspected.exit_code == 0, inspected.output
+    assert "Theorem Applicability" in inspected.output
+    assert "blocking usage" in inspected.output
+    assert "condition unclear" in inspected.output
+    assert "applicability audit is not proof status" in inspected.output
+    assert "Prover Loop" in inspected.output
+    assert "decision ask_human" in inspected.output
+    assert "reviewer strategy_reviewer_001" in inspected.output
+    assert "A sketch-only argument cannot become proof-complete evidence." in inspected.output
+    assert "latest attempt:" in inspected.output
+    assert "proved the theorem" not in inspected.output.lower()
+    assert "proof complete" not in inspected.output.lower()
+
+
+def test_inspect_focuses_selected_strategy_attempt(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    chosen = runner.invoke(
+        app,
+        [
+            "choose-strategy",
+            "--run",
+            str(run_dir),
+            "--strategy",
+            "strategy_pin_reference",
+            "--effort",
+            "quick_test",
+            "--decision",
+            "continue",
+            "--reason",
+            "Spend the next cheap check on pinning the exact theorem.",
+        ],
+    )
+    assert chosen.exit_code == 0, chosen.output
+    llm = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert llm.exit_code == 0, llm.output
+
+    inspected = runner.invoke(app, ["inspect", "--run", str(run_dir)])
+
+    assert inspected.exit_code == 0, inspected.output
+    assert "strategy strategy_pin_reference" in inspected.output
+    assert "attempt strategy strategy_pin_reference" in inspected.output
+    assert "attempt strategy strategy_stress_test_specials" not in inspected.output
+    assert "Exact locator for every external theorem step." in inspected.output
+
+
+def test_inspect_ignores_undeclared_optional_artifact_files(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    write_yaml(run_dir / "theorem_applicability.yaml", {"overall_status": "misapplied"})
+    write_yaml(run_dir / "prover_loop.yaml", {"loop_decision": "continue"})
+    validate_run(run_dir)
+
+    inspected = CliRunner().invoke(app, ["inspect", "--run", str(run_dir)])
+
+    assert inspected.exit_code == 0, inspected.output
+    assert "Theorem Applicability" not in inspected.output
+    assert "Prover Loop" not in inspected.output
+
+
 def test_stub_espresso_reviewer_set_runs_three_role_reviewers(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
         "hodge_atoms",
@@ -385,6 +489,59 @@ def test_bridge_run_flow_creates_selectable_run(tmp_path: Path) -> None:
     run_dir = Path(payload["payload"]["run"])
     validate_run(run_dir)
     assert read_yaml(run_dir / "run_manifest.yaml")["optional_artifacts"]["llm_agent_run"] == "llm_agent_run.yaml"
+
+
+def test_bridge_snapshot_exposes_prover_loop_and_theorem_applicability(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    applicability = runner.invoke(app, ["audit-theorem-applicability", "--run", str(run_dir)])
+    assert applicability.exit_code == 0, applicability.output
+    llm = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert llm.exit_code == 0, llm.output
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/espresso_vscode_bridge.py",
+            "snapshot",
+            "--workspace",
+            str(tmp_path),
+            "--run",
+            str(run_dir),
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    current = payload["payload"]["current"]
+    assert current["artifacts"]["prover_loop"]["loop_decision"] == "ask_human"
+    assert current["artifacts"]["theorem_applicability"]["overall_status"] == "unclear"
+    assert current["artifact_paths"]["prover_loop"].endswith("prover_loop.yaml")
+    assert current["artifact_paths"]["theorem_applicability"].endswith("theorem_applicability.yaml")
+    assert {
+        item["key"]
+        for item in current["progress"]
+    } >= {"prover_loop", "theorem_applicability"}
 
 
 def test_bridge_run_flow_openai_missing_key_does_not_write_run(tmp_path: Path) -> None:

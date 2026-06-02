@@ -222,6 +222,8 @@ def agent_doctor(
 def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)) -> None:
     """Validate and print a human-readable run summary."""
     validate_run(run)
+    manifest = read_yaml(run / "run_manifest.yaml")
+    optional_artifacts = manifest.get("optional_artifacts", {})
     typer.echo(f"Run is valid: {run}")
     claim = read_yaml(run / "locked_claim.yaml")
     grade = read_yaml(run / "idea_grade.yaml")
@@ -268,6 +270,59 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     typer.echo("Source Gaps")
     typer.echo(f"- {', '.join(source_gaps) if source_gaps else 'none'}")
     typer.echo(f"- source status: {', '.join(source_statuses) if source_statuses else 'none'}")
+    theorem_applicability_path = _optional_artifact_path(
+        run, optional_artifacts, "theorem_applicability"
+    )
+    if theorem_applicability_path is not None:
+        theorem_applicability = read_yaml(theorem_applicability_path)
+        usages = theorem_applicability.get("usages", [])
+        blocking_usages = [
+            usage
+            for usage in usages
+            if usage.get("applicability_status") != "applicable"
+            or usage.get("blocks_source_backed") is True
+        ]
+        unclear_conditions = [
+            condition
+            for usage in usages
+            for condition in usage.get("conditions", [])
+            if condition.get("status") != "satisfied"
+        ]
+        typer.echo("")
+        typer.echo("Theorem Applicability")
+        typer.echo(
+            f"- {theorem_applicability.get('overall_status')} / "
+            f"{len(blocking_usages)} blocking usage(s), "
+            f"{len(unclear_conditions)} unresolved condition(s)"
+        )
+        for usage in blocking_usages[:3]:
+            typer.echo(
+                f"- {usage.get('proof_step_id')}: "
+                f"{usage.get('applicability_status')} "
+                f"({usage.get('theorem_label') or usage.get('source_ref_id')})"
+            )
+            for condition in [
+                condition
+                for condition in usage.get("conditions", [])
+                if condition.get("status") != "satisfied"
+            ][:3]:
+                locator = condition.get("definition_locator") or {}
+                locator_text = (
+                    f", locator {locator.get('kind')}:{locator.get('value')}"
+                    if locator.get("value")
+                    else ""
+                )
+                typer.echo(
+                    f"  condition {condition.get('status')} "
+                    f"[{condition.get('condition_type')}]: "
+                    f"{condition.get('text')}"
+                    f"{locator_text}"
+                )
+                if condition.get("evidence"):
+                    typer.echo(f"  evidence: {condition.get('evidence')}")
+        if not blocking_usages:
+            typer.echo("- no theorem-condition blockers found")
+        typer.echo("- applicability audit is not proof status")
     typer.echo("")
     typer.echo("Top Strategies")
     for index, strategy in enumerate(strategy_brief.get("top_strategies", [])[:3], start=1):
@@ -281,6 +336,39 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     typer.echo(
         f"- {human_choice.get('status')} / {human_choice.get('selected_strategy') or 'none'}"
     )
+    prover_loop_path = _optional_artifact_path(run, optional_artifacts, "prover_loop")
+    if prover_loop_path is not None:
+        prover_loop = read_yaml(prover_loop_path)
+        budget = prover_loop.get("budget", {})
+        latest_attempt = _focused_prover_loop_attempt(prover_loop)
+        blockers = latest_attempt.get("blockers", [])
+        typer.echo("")
+        typer.echo("Prover Loop")
+        typer.echo(
+            f"- decision {prover_loop.get('loop_decision')} / "
+            f"strategy {prover_loop.get('selected_strategy_id') or 'none'} / "
+            f"rounds {budget.get('rounds_used')}/{budget.get('max_rounds')}"
+        )
+        typer.echo(
+            f"- human gate {prover_loop.get('human_gate_status')} / "
+            f"effort {budget.get('approved_effort')} / "
+            f"agent calls {budget.get('agent_calls_used')}/{budget.get('max_agent_calls')}"
+        )
+        typer.echo(
+            f"- latest attempt: {latest_attempt.get('status', 'none')} / "
+            f"attempt strategy {latest_attempt.get('strategy_id', 'none')} / "
+            f"time allocation {latest_attempt.get('time_allocation', 'none')}"
+        )
+        if prover_loop.get("decision_reason"):
+            typer.echo(f"- decision reason: {prover_loop.get('decision_reason')}")
+        for review in latest_attempt.get("reviewer_objections", [])[:3]:
+            typer.echo(
+                f"- reviewer {review.get('verifier_id')}: "
+                f"{review.get('verdict')} / "
+                f"{review.get('objection_count')} objection(s), "
+                f"action {review.get('recommended_human_action')}"
+            )
+        typer.echo(f"- blockers: {', '.join(blockers[:3]) if blockers else 'none'}")
     memory_summary = summarize_memory(run.parents[1], claim_text=claim.get("normalized_statement", ""))
     if memory_summary:
         typer.echo("")
@@ -289,6 +377,32 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
             typer.echo(line)
     typer.echo("")
     typer.echo(f"Final report: {run / 'final_report.md'}")
+
+
+def _optional_artifact_path(run_dir: Path, optional_artifacts: dict, key: str) -> Path | None:
+    rel_path = optional_artifacts.get(key)
+    if not rel_path:
+        return None
+    path = run_dir / rel_path
+    return path if path.exists() else None
+
+
+def _focused_prover_loop_attempt(prover_loop: dict) -> dict:
+    attempts = prover_loop.get("attempts", [])
+    if not attempts:
+        return {}
+    selected_strategy_id = prover_loop.get("selected_strategy_id")
+    candidates = [
+        attempt
+        for attempt in attempts
+        if selected_strategy_id is None or attempt.get("strategy_id") == selected_strategy_id
+    ]
+    if not candidates:
+        candidates = attempts
+    return sorted(
+        candidates,
+        key=lambda attempt: (attempt.get("round_index", 0), attempt.get("attempt_id", "")),
+    )[-1]
 
 
 @app.command("choose-strategy")

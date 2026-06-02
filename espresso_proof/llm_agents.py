@@ -571,7 +571,7 @@ def build_prover_loop_report(
                 "reviewer_objections": reviewer_pointers,
                 "time_allocation": allocation,
                 "status": status,
-                "blockers": blockers if status in {"needs_repair", "blocked"} else [],
+                "blockers": blockers,
                 "next_action": _next_action_for_strategy(
                     index=index,
                     strategy=strategy,
