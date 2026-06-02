@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -10,16 +11,21 @@ from .io import read_text, read_yaml, write_text, write_yaml
 from .literature_discovery import discover_literature as run_literature_discovery
 from .literature_review_agent import ReviewSourceSpec, run_literature_review_agent
 from .llm_agents import resolve_agent_gate as resolve_llm_agent_gate
+from .llm_agents import external_agent_diagnostic
+from .llm_agents import openai_agent_diagnostic
 from .llm_agents import run_llm_agent_pass
-from .memory import summarize_memory
+from .memory import summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
 from .pdf_ingestion import ingest_source_for_theorems
 from .source_verification import verify_source_grounding_from_theorems
 from .models import (
     AdmissionCheck,
     AgentContracts,
+    ContinueDecision,
     ExampleBank,
     ExampleFeedbackSummary,
+    ExplorationMode,
+    HumanChoice,
     HumanExampleFeedback,
     LLMAgentRunReport,
     LiteratureReviewAgentReport,
@@ -58,6 +64,145 @@ def critique_sketch(
         raise typer.BadParameter("P0 only supports --mode mock")
     run_dir = run_mock_critique(project, input, Path("."))
     typer.echo(f"Wrote run artifacts to {run_dir}")
+
+
+@app.command("run-flow")
+def run_flow(
+    input: Path = typer.Option(..., "--input", "-i", exists=True, dir_okay=False),
+    project: str = typer.Option("hodge_atoms", "--project", "-p"),
+    literature_mode: str = typer.Option("local", "--literature-mode"),
+    literature_provider: list[str] | None = typer.Option(None, "--literature-provider"),
+    max_references: int = typer.Option(8, "--max-references", min=1, max=25),
+    provider: str = typer.Option("stub", "--provider"),
+    model: str = typer.Option("gpt-4.1", "--model"),
+    reviewer_set: str = typer.Option("espresso", "--reviewer-set"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+        "--external-agent-command-env",
+    ),
+    agent_network_preflight: bool = typer.Option(
+        False,
+        "--agent-network-preflight/--no-agent-network-preflight",
+    ),
+    output_root: Path = typer.Option(Path("."), "--output-root", file_okay=False),
+) -> None:
+    """Run the current end-to-end multiagent critique flow."""
+    if literature_mode not in {"local", "live"}:
+        raise typer.BadParameter("literature-mode must be local or live")
+    if provider not in {"stub", "openai", "external"}:
+        raise typer.BadParameter("provider must be stub, openai, or external")
+    if reviewer_set not in {"generic", "espresso"}:
+        raise typer.BadParameter("reviewer-set must be generic or espresso")
+    provider_diagnostic = _preflight_agent_provider(
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        network_check=agent_network_preflight,
+    )
+
+    run_dir = run_mock_critique(project, input, output_root)
+    manifest_path = run_dir / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    artifacts = manifest["artifacts"]
+    project_dir = run_dir.parents[1]
+
+    literature = run_literature_discovery(
+        project_dir=project_dir,
+        locked_claim_path=run_dir / artifacts["locked_claim"],
+        hypothesis_ledger_path=run_dir / artifacts["hypothesis_ledger"],
+        max_references=max_references,
+        query=read_text(input),
+        mode=literature_mode,
+        providers=literature_provider,
+    )
+    LiteratureReviewReport.model_validate(literature)
+    write_yaml(run_dir / artifacts["literature_review"], literature)
+    validate_run(run_dir)
+
+    agent_report = run_llm_agent_pass(
+        run_dir=run_dir,
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        reviewer_set=reviewer_set,
+        provider_diagnostic=provider_diagnostic,
+    )
+    LLMAgentRunReport.model_validate(agent_report)
+    manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
+    manifest["current_state"] = "WAITING_LLM_AGENT_HUMAN_GATE"
+    write_yaml(run_dir / "llm_agent_run.yaml", agent_report)
+    write_yaml(manifest_path, manifest)
+    validate_run(run_dir)
+
+    typer.echo(f"Wrote run artifacts to {run_dir}")
+    typer.echo(f"Literature Discovery: {literature_mode}")
+    typer.echo(f"LLM agents: provider={provider}, reviewer_set={reviewer_set}")
+    typer.echo(f"Human gate: {agent_report['human_gate']['status']}")
+
+
+def _preflight_agent_provider(
+    *,
+    provider: str,
+    model: str,
+    api_key_env: str,
+    external_agent_command_env: str,
+    network_check: bool,
+) -> dict | None:
+    if provider == "stub":
+        return None
+    if provider == "openai":
+        report = openai_agent_diagnostic(
+            model=model,
+            api_key_env=api_key_env,
+            network_check=network_check,
+        )
+    elif provider == "external":
+        report = external_agent_diagnostic(
+            model=model,
+            command_env=external_agent_command_env,
+            network_check=network_check,
+        )
+    else:
+        raise RuntimeError(f"unsupported provider for preflight: {provider}")
+    if report["status"] not in {"configured", "ready"}:
+        message = report.get("error") or report.get("message") or f"{provider} provider is not ready."
+        raise RuntimeError(str(message))
+    return report
+
+
+@app.command("agent-doctor")
+def agent_doctor(
+    provider: str = typer.Option("openai", "--provider"),
+    model: str = typer.Option("gpt-4.1", "--model"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+        "--external-agent-command-env",
+    ),
+    network_check: bool = typer.Option(False, "--network-check/--no-network-check"),
+    timeout: int = typer.Option(30, "--timeout", min=1, max=300),
+) -> None:
+    """Check whether the real LLM provider path is configured and callable."""
+    if provider == "openai":
+        report = openai_agent_diagnostic(
+            model=model,
+            api_key_env=api_key_env,
+            network_check=network_check,
+            timeout=timeout,
+        )
+    elif provider == "external":
+        report = external_agent_diagnostic(
+            model=model,
+            command_env=external_agent_command_env,
+            network_check=network_check,
+            timeout=timeout,
+        )
+    else:
+        raise typer.BadParameter("agent-doctor supports provider=openai or provider=external")
+    typer.echo(json.dumps(report, indent=2, sort_keys=True))
 
 
 @app.command()
@@ -131,6 +276,76 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
             typer.echo(line)
     typer.echo("")
     typer.echo(f"Final report: {run / 'final_report.md'}")
+
+
+@app.command("choose-strategy")
+def choose_strategy(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    strategy: str = typer.Option(..., "--strategy", help="Strategy id from strategy_brief.yaml, or 'none'."),
+    effort: ExplorationMode = typer.Option(ExplorationMode.normal_pass, "--effort"),
+    decision: ContinueDecision = typer.Option(ContinueDecision.continue_run, "--decision"),
+    reason: str = typer.Option(..., "--reason"),
+) -> None:
+    """Record a validated Human Choice and persist it as user-decision memory."""
+    if not reason.strip():
+        raise typer.BadParameter("reason cannot be empty")
+    validate_run(run)
+    manifest_path = run / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    artifacts = manifest["artifacts"]
+    strategy_brief = read_yaml(run / artifacts["strategy_brief"])
+    original_choice_text = (run / artifacts["human_choice"]).read_text(encoding="utf-8")
+    original_manifest_text = manifest_path.read_text(encoding="utf-8")
+
+    choice = {
+        "claim_id": strategy_brief["claim_id"],
+        "status": "selected",
+        "selected_strategy": strategy,
+        "effort": effort.value,
+        "taste_judgment": reason.strip(),
+        "continue_decision": decision.value,
+        "human_confirmed": True,
+    }
+    HumanChoice.model_validate(choice)
+    write_yaml(run / artifacts["human_choice"], choice)
+    manifest["current_state"] = _state_for_human_decision(decision)
+    write_yaml(manifest_path, manifest)
+    try:
+        validate_run(run)
+    except Exception:
+        (run / artifacts["human_choice"]).write_text(original_choice_text, encoding="utf-8")
+        manifest_path.write_text(original_manifest_text, encoding="utf-8")
+        raise
+
+    project_dir = run.parents[1]
+    run_id = manifest["run_id"]
+    title = _strategy_title(strategy_brief, strategy)
+    entry = {
+        "id": f"user_decision_{run_id}",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "project": manifest["project_id"],
+        "type": "user_decision",
+        "claim_id": strategy_brief["claim_id"],
+        "summary": (
+            f"Human chose {strategy} ({title}) with {effort.value}; "
+            f"decision={decision.value}."
+        ),
+        "provenance": [
+            f"projects/{manifest['project_id']}/runs/{run_id}/{artifacts['human_choice']}",
+            f"projects/{manifest['project_id']}/runs/{run_id}/{artifacts['strategy_brief']}",
+        ],
+        "reusable_lesson": reason.strip(),
+    }
+    memory_path = write_memory_entry(
+        project_dir,
+        entry,
+        filename=f"{run_id}_human_choice.yaml",
+        tags=[strategy, effort.value, decision.value],
+    )
+    typer.echo(
+        f"Recorded human choice {strategy} with {effort.value} effort; "
+        f"memory: {memory_path}"
+    )
 
 
 @app.command("discover-literature")
@@ -261,11 +476,25 @@ def run_llm_agents(
     provider: str = typer.Option("stub", "--provider"),
     model: str = typer.Option("gpt-4.1", "--model"),
     verifier_count: int = typer.Option(1, "--verifier-count", min=1, max=3),
+    reviewer_set: str = typer.Option("generic", "--reviewer-set"),
     api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+        "--external-agent-command-env",
+    ),
 ) -> None:
-    """Run initial prover/verifier LLM agents and write llm_agent_run.yaml."""
-    if provider not in {"stub", "openai"}:
-        raise typer.BadParameter("provider must be stub or openai")
+    """Run human-gated prover/reviewer LLM agents and write llm_agent_run.yaml."""
+    if provider not in {"stub", "openai", "external"}:
+        raise typer.BadParameter("provider must be stub, openai, or external")
+    if reviewer_set not in {"generic", "espresso"}:
+        raise typer.BadParameter("reviewer-set must be generic or espresso")
+    provider_diagnostic = _preflight_agent_provider(
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        network_check=False,
+    )
     validate_run(run)
     manifest_path = run / "run_manifest.yaml"
     manifest = read_yaml(manifest_path)
@@ -274,7 +503,10 @@ def run_llm_agents(
         provider=provider,
         model=model,
         api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
         verifier_count=verifier_count,
+        reviewer_set=reviewer_set,
+        provider_diagnostic=provider_diagnostic,
     )
     LLMAgentRunReport.model_validate(report)
     manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
@@ -576,6 +808,23 @@ def _default_feedback_actions(labels: list[str]) -> list[str]:
         if label == "favorite":
             actions.add("save_to_memory")
     return sorted(actions)
+
+
+def _state_for_human_decision(decision: ContinueDecision) -> str:
+    if decision == ContinueDecision.continue_run:
+        return "HUMAN_CHOICE_CONTINUE_SELECTED"
+    if decision == ContinueDecision.revise:
+        return "HUMAN_CHOICE_REVISE_SELECTED"
+    return "HUMAN_CHOICE_STOP_SELECTED"
+
+
+def _strategy_title(strategy_brief: dict, strategy_id: str) -> str:
+    if strategy_id == "none":
+        return "none"
+    for strategy in strategy_brief.get("top_strategies", []):
+        if strategy.get("id") == strategy_id:
+            return strategy.get("title") or strategy_id
+    return strategy_id
 
 
 def _assert_fixture_expectations(run_dir: Path, expected: dict) -> None:

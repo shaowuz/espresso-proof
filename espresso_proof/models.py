@@ -985,7 +985,7 @@ class LoopControl(StrictBaseModel):
 class LLMAgentAttempt(StrictBaseModel):
     agent_id: str
     role: Literal["prover", "verifier"]
-    provider: Literal["openai", "stub"]
+    provider: Literal["openai", "stub", "external"]
     model: str
     created_at: str
     input_artifacts: list[str]
@@ -998,7 +998,7 @@ class LLMAgentAttempt(StrictBaseModel):
 
 class LLMAgentVerifierReview(StrictBaseModel):
     verifier_id: str
-    provider: Literal["openai", "stub"]
+    provider: Literal["openai", "stub", "external"]
     model: str
     created_at: str
     verdict: Literal["plausible_direction", "needs_revision", "needs_sources", "blocked"]
@@ -1037,17 +1037,34 @@ class LLMAgentHumanGate(StrictBaseModel):
         return self
 
 
+class LLMAgentProviderDiagnostic(StrictBaseModel):
+    provider: Literal["openai", "external"]
+    model: str
+    api_key_env: str | None = None
+    api_key_present: bool | None = None
+    command_env: str | None = None
+    command_present: bool | None = None
+    endpoint: str | None = None
+    network_check: Literal["skipped", "not_run", "passed", "failed"]
+    status: Literal["missing_key", "missing_command", "configured", "ready", "error"]
+    message: str
+    structured_output: dict[str, Any]
+    sample_verdict: str | None = None
+    error: str | None = None
+
+
 class LLMAgentRunReport(StrictBaseModel):
     schema_version: Literal[1] = 1
     claim_id: str
     run_id: str
     generated_at: str
-    provider: Literal["openai", "stub"]
+    provider: Literal["openai", "stub", "external"]
     model: str
     input_artifacts: list[str]
     prover_attempt: LLMAgentAttempt
     verifier_reviews: list[LLMAgentVerifierReview]
     human_gate: LLMAgentHumanGate
+    provider_diagnostic: LLMAgentProviderDiagnostic | None = None
     notes: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
