@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
+import subprocess
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -53,9 +55,20 @@ INPUT_ARTIFACTS = [
     "locked_claim.yaml",
     "hypothesis_ledger.yaml",
     "literature_review.yaml",
+    "examples.yaml",
+    "computation_checks.yaml",
+    "counterexamples.yaml",
+    "tests.yaml",
     "source_grounding.yaml",
     "review.yaml",
+    "idea_grade.yaml",
     "strategy_brief.yaml",
+]
+
+ESPRESSO_REVIEWER_ROLES = [
+    "strategy_reviewer",
+    "evidence_reviewer",
+    "line_proof_reviewer",
 ]
 
 
@@ -75,6 +88,61 @@ class StubLLMClient:
 
     def complete_json(self, *, system: str, prompt: str) -> dict:
         lowered = system.lower()
+        if "strategy reviewer" in lowered:
+            return {
+                "summary": "Strategy reviewer sees a plausible route but flags theorem drift and missing genericity control.",
+                "steps": [
+                    "Compare the locked claim against the proposed route.",
+                    "Check whether very general and all objects are kept separate.",
+                ],
+                "source_requests": [
+                    "Exact theorem supporting the main reduction.",
+                ],
+                "missing_hypotheses": [
+                    "Precise genericity condition for the route.",
+                ],
+                "risks": [
+                    "The strategy may prove only a narrower statement than the locked claim.",
+                ],
+                "verdict": "needs_revision",
+                "recommended_human_action": "revise",
+            }
+        if "evidence reviewer" in lowered:
+            return {
+                "summary": "Evidence reviewer found candidate examples useful but not enough to upgrade evidence status.",
+                "steps": [
+                    "Separate checked examples from human_needed examples.",
+                    "Do not count unchecked examples as survived or failed evidence.",
+                ],
+                "source_requests": [
+                    "Source or exact computation for the most dangerous example.",
+                ],
+                "missing_hypotheses": [],
+                "risks": [
+                    "Example pressure remains incomplete until computation/source checks are pinned.",
+                ],
+                "verdict": "needs_sources",
+                "recommended_human_action": "revise",
+            }
+        if "line proof reviewer" in lowered:
+            return {
+                "summary": "Line proof reviewer treats the current argument as sketch-only and requests exact theorem locators.",
+                "steps": [
+                    "Split the sketch into proof steps.",
+                    "Mark external theorem steps as candidate until exact locators match hypotheses.",
+                ],
+                "source_requests": [
+                    "Exact locator for every external theorem step.",
+                ],
+                "missing_hypotheses": [
+                    "Any theorem-specific assumptions not present in the locked claim.",
+                ],
+                "risks": [
+                    "A sketch-only argument cannot become proof-complete evidence.",
+                ],
+                "verdict": "needs_sources",
+                "recommended_human_action": "revise",
+            }
         if "verifier" in lowered:
             return {
                 "summary": "Verifier found the route exploratory and blocked by source applicability checks.",
@@ -142,6 +210,7 @@ class OpenAIResponsesClient:
             "model": self.model,
             "instructions": system,
             "input": prompt,
+            "store": False,
             "max_output_tokens": 1200,
             "text": {
                 "format": {
@@ -174,15 +243,221 @@ class OpenAIResponsesClient:
             raise RuntimeError(f"OpenAI response was not valid agent JSON: {text[:500]}") from exc
 
 
+class ExternalCommandClient:
+    provider = "external"
+
+    def __init__(
+        self,
+        *,
+        model: str,
+        command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+        timeout: int = 120,
+    ) -> None:
+        self.model = model or "external-json-agent"
+        self.command_env = command_env
+        self.timeout = timeout
+        raw_command = os.environ.get(command_env, "")
+        if not raw_command:
+            raise RuntimeError(f"{command_env} is not set")
+        self.command = shlex.split(raw_command)
+        if not self.command:
+            raise RuntimeError(f"{command_env} is empty")
+
+    def complete_json(self, *, system: str, prompt: str) -> dict:
+        request = {
+            "system": system,
+            "prompt": prompt,
+            "provider": self.provider,
+            "model": self.model,
+            "required_json_schema": AGENT_OUTPUT_SCHEMA,
+        }
+        try:
+            completed = subprocess.run(
+                self.command,
+                input=json.dumps(request),
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=self.timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"external agent command timed out after {self.timeout}s") from exc
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or completed.stdout.strip()
+            raise RuntimeError(f"external agent command failed: {detail}")
+        try:
+            data = json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"external agent command did not return JSON: {completed.stdout[:500]}"
+            ) from exc
+        if isinstance(data.get("output"), dict):
+            return data["output"]
+        return data
+
+
+def openai_agent_diagnostic(
+    *,
+    model: str,
+    api_key_env: str = "OPENAI_API_KEY",
+    network_check: bool = False,
+    timeout: int = 30,
+) -> dict:
+    """Report whether the real OpenAI agent path is configured and callable."""
+    key_present = bool(os.environ.get(api_key_env, ""))
+    report = {
+        "provider": "openai",
+        "model": model,
+        "api_key_env": api_key_env,
+        "api_key_present": key_present,
+        "endpoint": "https://api.openai.com/v1/responses",
+        "structured_output": {
+            "format": "json_schema",
+            "schema_name": "espresso_agent_output",
+            "strict": True,
+            "store": False,
+        },
+        "network_check": "skipped",
+        "status": "configured" if key_present else "missing_key",
+        "message": (
+            f"{api_key_env} is set; run with --network-check to verify a live Responses API call."
+            if key_present
+            else f"{api_key_env} is not set."
+        ),
+    }
+    if not network_check:
+        return report
+    if not key_present:
+        report["network_check"] = "not_run"
+        return report
+
+    try:
+        client = OpenAIResponsesClient(model=model, api_key_env=api_key_env, timeout=timeout)
+        sample = client.complete_json(
+            system=(
+                "You are Espresso's agent diagnostic. Return JSON only. "
+                "Do not claim any mathematical result is proved."
+            ),
+            prompt=(
+                "Return a minimal candidate-only Espresso agent response for this diagnostic. "
+                "Use verdict needs_sources and recommended_human_action revise."
+            ),
+        )
+        missing = [
+            key for key in AGENT_OUTPUT_SCHEMA["required"] if key not in sample
+        ]
+        if missing:
+            raise RuntimeError(f"diagnostic response missing keys: {', '.join(missing)}")
+        report.update(
+            {
+                "status": "ready",
+                "network_check": "passed",
+                "sample_verdict": normalize_verdict(sample.get("verdict")),
+                "message": "OpenAI Responses API returned schema-valid Espresso agent JSON.",
+            }
+        )
+    except Exception as exc:
+        report.update(
+            {
+                "status": "error",
+                "network_check": "failed",
+                "error": str(exc),
+                "message": "OpenAI Responses API diagnostic failed.",
+            }
+        )
+    return report
+
+
+def external_agent_diagnostic(
+    *,
+    model: str,
+    command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+    network_check: bool = False,
+    timeout: int = 120,
+) -> dict:
+    """Report whether a local JSON agent command is configured and callable."""
+    command_present = bool(os.environ.get(command_env, ""))
+    report = {
+        "provider": "external",
+        "model": model or "external-json-agent",
+        "command_env": command_env,
+        "command_present": command_present,
+        "structured_output": {
+            "format": "json",
+            "schema_name": "espresso_agent_output",
+            "strict": True,
+            "store": False,
+        },
+        "network_check": "skipped",
+        "status": "configured" if command_present else "missing_command",
+        "message": (
+            f"{command_env} is set; run with --network-check to verify the JSON agent command."
+            if command_present
+            else f"{command_env} is not set."
+        ),
+    }
+    if not network_check:
+        return report
+    if not command_present:
+        report["network_check"] = "not_run"
+        return report
+    try:
+        client = ExternalCommandClient(
+            model=model,
+            command_env=command_env,
+            timeout=timeout,
+        )
+        sample = client.complete_json(
+            system=(
+                "You are Espresso's external agent diagnostic. Return JSON only. "
+                "Do not claim any mathematical result is proved."
+            ),
+            prompt=(
+                "Return a minimal candidate-only Espresso agent response for this diagnostic. "
+                "Use verdict needs_sources and recommended_human_action revise."
+            ),
+        )
+        missing = [key for key in AGENT_OUTPUT_SCHEMA["required"] if key not in sample]
+        if missing:
+            raise RuntimeError(f"diagnostic response missing keys: {', '.join(missing)}")
+        report.update(
+            {
+                "status": "ready",
+                "network_check": "passed",
+                "sample_verdict": normalize_verdict(sample.get("verdict")),
+                "message": "External JSON agent command returned schema-valid Espresso agent JSON.",
+            }
+        )
+    except Exception as exc:
+        report.update(
+            {
+                "status": "error",
+                "network_check": "failed",
+                "error": str(exc),
+                "message": "External JSON agent command diagnostic failed.",
+            }
+        )
+    return report
+
+
 def run_llm_agent_pass(
     *,
     run_dir: Path,
     provider: str,
     model: str,
     api_key_env: str = "OPENAI_API_KEY",
+    external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
     verifier_count: int = 1,
+    reviewer_set: str = "generic",
+    provider_diagnostic: dict | None = None,
 ) -> dict:
-    client = build_client(provider=provider, model=model, api_key_env=api_key_env)
+    client = build_client(
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+    )
     context = load_agent_context(run_dir)
     now = datetime.now(UTC).isoformat()
     prover_raw = client.complete_json(
@@ -191,10 +466,14 @@ def run_llm_agent_pass(
     )
     prover = make_prover_attempt(prover_raw, client=client, created_at=now)
     verifier_reviews = []
-    for index in range(1, max(1, verifier_count) + 1):
+    reviewer_roles = _reviewer_roles(reviewer_set, verifier_count)
+    for index, reviewer_role in enumerate(reviewer_roles, start=1):
         verifier_raw = client.complete_json(
-            system=verifier_system_prompt(index),
-            prompt=agent_prompt({**context, "prover_attempt": prover}, role="verifier"),
+            system=verifier_system_prompt(index, reviewer_role=reviewer_role),
+            prompt=agent_prompt(
+                {**context, "prover_attempt": prover},
+                role=reviewer_role,
+            ),
         )
         verifier_reviews.append(
             make_verifier_review(
@@ -202,6 +481,7 @@ def run_llm_agent_pass(
                 client=client,
                 created_at=datetime.now(UTC).isoformat(),
                 index=index,
+                reviewer_role=reviewer_role,
             )
         )
     gate = make_human_gate(verifier_reviews)
@@ -216,8 +496,10 @@ def run_llm_agent_pass(
         "prover_attempt": prover,
         "verifier_reviews": verifier_reviews,
         "human_gate": gate,
+        "provider_diagnostic": provider_diagnostic,
         "notes": [
             "Initial LLM agent runtime; outputs are candidate planning artifacts only.",
+            f"Reviewer set: {reviewer_set}; roles: {', '.join(reviewer_roles)}.",
             "This artifact must not upgrade Idea grade, source_backed, checked evidence, or proof status.",
             "Human gate must be resolved through a validated CLI/API path before deeper automated work.",
         ],
@@ -254,11 +536,19 @@ def resolve_agent_gate(
     return report
 
 
-def build_client(*, provider: str, model: str, api_key_env: str) -> LLMClient:
+def build_client(
+    *,
+    provider: str,
+    model: str,
+    api_key_env: str,
+    external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+) -> LLMClient:
     if provider == "stub":
         return StubLLMClient(model=model or "stub-espresso-agent")
     if provider == "openai":
         return OpenAIResponsesClient(model=model, api_key_env=api_key_env)
+    if provider == "external":
+        return ExternalCommandClient(model=model, command_env=external_agent_command_env)
     raise RuntimeError(f"unsupported LLM provider: {provider}")
 
 
@@ -270,8 +560,13 @@ def load_agent_context(run_dir: Path) -> dict:
         "claim": read_yaml(run_dir / artifacts["locked_claim"]),
         "hypothesis_ledger": read_yaml(run_dir / artifacts["hypothesis_ledger"]),
         "literature_review": read_yaml(run_dir / artifacts["literature_review"]),
+        "examples": read_yaml(run_dir / artifacts["examples"]),
+        "computation_checks": read_yaml(run_dir / artifacts["computation_checks"]),
+        "counterexamples": read_yaml(run_dir / artifacts["counterexamples"]),
+        "tests": read_yaml(run_dir / artifacts["tests"]),
         "source_grounding": read_yaml(run_dir / artifacts["source_grounding"]),
         "review": read_yaml(run_dir / artifacts["review"]),
+        "idea_grade": read_yaml(run_dir / artifacts["idea_grade"]),
         "strategy_brief": read_yaml(run_dir / artifacts["strategy_brief"]),
     }
 
@@ -292,12 +587,19 @@ def make_prover_attempt(raw: dict, *, client: LLMClient, created_at: str) -> dic
     }
 
 
-def make_verifier_review(raw: dict, *, client: LLMClient, created_at: str, index: int) -> dict:
+def make_verifier_review(
+    raw: dict,
+    *,
+    client: LLMClient,
+    created_at: str,
+    index: int,
+    reviewer_role: str,
+) -> dict:
     unsafe_language = collect_unsafe_language(raw)
     verdict = normalize_verdict(raw.get("verdict", "needs_revision"))
     action = normalize_action(raw.get("recommended_human_action", "revise"))
     return {
-        "verifier_id": f"llm_verifier_{index:03d}",
+        "verifier_id": f"{reviewer_role}_{index:03d}",
         "provider": client.provider,
         "model": client.model,
         "created_at": created_at,
@@ -342,9 +644,24 @@ def prover_system_prompt() -> str:
     )
 
 
-def verifier_system_prompt(index: int) -> str:
+def verifier_system_prompt(index: int, *, reviewer_role: str = "verifier") -> str:
+    role_guidance = {
+        "strategy_reviewer": (
+            "You are Espresso strategy reviewer agent. Assess theorem drift, strategic soundness, "
+            "missing reductions, and analogy risks."
+        ),
+        "evidence_reviewer": (
+            "You are Espresso evidence reviewer agent. Assess example coverage, counterexample pressure, "
+            "and whether checked/source_checked evidence is being used honestly."
+        ),
+        "line_proof_reviewer": (
+            "You are Espresso line proof reviewer agent. Parse proof-sketch steps, locate source gaps, "
+            "and flag external theorem applicability risks."
+        ),
+        "verifier": f"You are Espresso verifier agent {index}. Critique the prover route.",
+    }.get(reviewer_role, f"You are Espresso verifier agent {index}. Critique the prover route.")
     return (
-        f"You are Espresso verifier agent {index}. Critique the prover route. "
+        f"{role_guidance} "
         "Flag missing hypotheses, source gaps, unsafe proof-like language, and counterexample pressure. "
         "Do not upgrade proof, evidence, source, or grade status. Return JSON only."
     )
@@ -365,6 +682,12 @@ def agent_prompt(context: dict, *, role: str) -> str:
         },
         indent=2,
     )
+
+
+def _reviewer_roles(reviewer_set: str, verifier_count: int) -> list[str]:
+    if reviewer_set == "espresso":
+        return ESPRESSO_REVIEWER_ROLES
+    return ["verifier" for _ in range(max(1, verifier_count))]
 
 
 def safe_list(value: object) -> list[str]:

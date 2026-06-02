@@ -7,3 +7,4 @@ __pycache__/
 espresso_proof.egg-info/
 projects/*/runs/
 projects/*/memory/
+runs/

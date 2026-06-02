@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
-from .io import read_yaml
+from .io import read_yaml, write_yaml
 from .models import MemoryEntry, MemoryIndex, MemoryIndexEntry
 
 
@@ -79,6 +80,28 @@ def summarize_memory(project_dir: Path | str, claim_text: str | None = None) -> 
             sections.append(f"{title}:\n" + "\n".join(lines))
 
     return "\n\n".join(sections)
+
+
+def write_memory_entry(
+    project_dir: Path | str,
+    entry: dict,
+    *,
+    filename: str | None = None,
+    tags: list[str] | None = None,
+) -> Path:
+    """Write a validated memory entry and update the project memory index."""
+
+    project_path = Path(project_dir)
+    project_id = _project_id(project_path)
+    MemoryEntry.model_validate(entry)
+    memory_dir = _memory_dir(project_path)
+    entry_filename = filename or f"{entry['id']}.yaml"
+    if Path(entry_filename).name != entry_filename:
+        raise ValueError("memory entry filename must not contain directories")
+    entry_path = memory_dir / entry_filename
+    write_yaml(entry_path, entry)
+    _update_memory_index(memory_dir, project_id, entry, entry_filename, tags=tags or [])
+    return entry_path
 
 
 def _memory_dir(project_path: Path) -> Path:
@@ -171,4 +194,59 @@ def _format_memory_line(index_entry: MemoryIndexEntry, memory_entry: MemoryEntry
     return "\n".join(lines)
 
 
-__all__ = ["load_memory_index", "summarize_memory"]
+def _update_memory_index(
+    memory_dir: Path,
+    project_id: str,
+    entry: dict,
+    entry_filename: str,
+    *,
+    tags: list[str],
+) -> None:
+    index_path = memory_dir / "index.yaml"
+    if index_path.exists():
+        index = read_yaml(index_path)
+    else:
+        index = {
+            "project_id": project_id,
+            "last_updated": datetime.now(UTC).isoformat(),
+            "lookup_keys": [],
+            "entries": [],
+        }
+
+    entry_tags = _memory_tags(entry, extra=tags)
+    index["entries"] = [item for item in index.get("entries", []) if item.get("id") != entry["id"]]
+    index["entries"].append(
+        {
+            "id": entry["id"],
+            "entry_path": f"projects/{project_id}/memory/{entry_filename}",
+            "claim_id": entry["claim_id"],
+            "type": entry["type"],
+            "tags": entry_tags,
+            "summary": entry["summary"],
+            "provenance": entry["provenance"],
+        }
+    )
+    lookup_keys = set(index.get("lookup_keys", []))
+    lookup_keys.update(entry_tags)
+    lookup_keys.update(item["claim_id"] for item in index["entries"])
+    index["lookup_keys"] = sorted(lookup_keys)
+    index["last_updated"] = datetime.now(UTC).isoformat()
+    MemoryIndex.model_validate(index)
+    write_yaml(index_path, index)
+
+
+def _memory_tags(entry: dict, *, extra: list[str]) -> list[str]:
+    summary = str(entry.get("summary", "")).lower()
+    tags = {entry["type"], *extra}
+    if "source" in summary or entry["type"] == "source_gap":
+        tags.add("source_gap")
+    if "fragile" in summary:
+        tags.add("fragile")
+    if "unclear" in summary:
+        tags.add("unclear")
+    if entry["type"] == "user_decision":
+        tags.add("human_choice")
+    return sorted(tag for tag in tags if tag)
+
+
+__all__ = ["load_memory_index", "summarize_memory", "write_memory_entry"]

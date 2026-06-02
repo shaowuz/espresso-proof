@@ -317,6 +317,79 @@ def test_human_choice_rejects_unknown_selected_strategy(tmp_path: Path) -> None:
         validate_run(run_dir)
 
 
+def test_choose_strategy_cli_writes_human_choice_and_memory(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "choose-strategy",
+            "--run",
+            str(run_dir),
+            "--strategy",
+            "strategy_pin_reference",
+            "--effort",
+            "quick_test",
+            "--decision",
+            "continue",
+            "--reason",
+            "Pinning the exact theorem is the cheapest useful next step.",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    validate_run(run_dir)
+    human_choice = read_yaml(run_dir / "human_choice.yaml")
+    assert human_choice["status"] == "selected"
+    assert human_choice["selected_strategy"] == "strategy_pin_reference"
+    assert human_choice["effort"] == "quick_test"
+    assert human_choice["continue_decision"] == "continue"
+    assert human_choice["human_confirmed"] is True
+
+    project_dir = run_dir.parents[1]
+    memory = summarize_memory(project_dir, claim_text="pin exact Hodge theorem")
+    assert "User decisions" in memory
+    assert "strategy_pin_reference" in memory
+    index = read_yaml(project_dir / "memory" / "index.yaml")
+    assert any(item["type"] == "user_decision" for item in index["entries"])
+
+
+def test_choose_strategy_cli_rejects_invalid_effort_without_writing(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    before = read_yaml(run_dir / "human_choice.yaml")
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "choose-strategy",
+            "--run",
+            str(run_dir),
+            "--strategy",
+            "none",
+            "--effort",
+            "normal_pass",
+            "--decision",
+            "stop",
+            "--reason",
+            "No route is worth continuing.",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert read_yaml(run_dir / "human_choice.yaml") == before
+    validate_run(run_dir)
+
+
 def test_agent_contracts_must_cover_required_outputs(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
         "hodge_atoms",
@@ -845,6 +918,47 @@ def test_vscode_bridge_grade_strategy_updates_strategy_brief_only(tmp_path: Path
     synthesis_after = read_yaml(run_dir / "strategy_synthesis.yaml")
     assert brief_after["top_strategies"][0]["score"] == new_score
     assert synthesis_after == synthesis_before
+    validate_run(run_dir)
+
+
+def test_vscode_bridge_choose_strategy_uses_validated_cli(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    strategy_id = read_yaml(run_dir / "strategy_brief.yaml")["top_strategies"][1]["id"]
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/espresso_vscode_bridge.py",
+            "choose-strategy",
+            "--workspace",
+            str(tmp_path),
+            "--run",
+            str(run_dir),
+            "--strategy-id",
+            strategy_id,
+            "--effort",
+            "quick_test",
+            "--decision",
+            "continue",
+            "--reason",
+            "Use the validated bridge path for the human choice.",
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["payload"]["strategy_id"] == strategy_id
+    assert read_yaml(run_dir / "human_choice.yaml")["selected_strategy"] == strategy_id
+    assert (run_dir.parents[1] / "memory" / f"{run_dir.name}_human_choice.yaml").exists()
     validate_run(run_dir)
 
 
