@@ -27,14 +27,14 @@ Core design documents:
 
 - [PRODUCT_PHILOSOPHY.md](PRODUCT_PHILOSOPHY.md): product philosophy, core mathematical judgment principles, and what Espresso should/should not become.
 - [AGENT_FLOW.md](AGENT_FLOW.md): current multi-agent workflow, parallel/serial rules, review stages, human gates, and memory loop.
-- [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md): system architecture, module responsibilities, local runtime, retrieval, UI, memory, and evaluation boundaries.
-- [FILE_OVERVIEW.md](FILE_OVERVIEW.md): explanation of what each repository file and folder is for.
-- [ESPRESSO_AGENT_PROTOCOL.md](ESPRESSO_AGENT_PROTOCOL.md): source of truth for Codex/collaborator sessions, current capability boundaries, safe language, and validation discipline.
 
 Supporting documents:
 
+- [docs/FILE_OVERVIEW.md](docs/FILE_OVERVIEW.md): explanation of what each repository file and folder is for.
 - [docs/product/](docs/product/): product strategy, human-in-the-loop design, idea grading, workflow synthesis, and prompt-building rules.
 - [docs/engineering/](docs/engineering/): local kernel, schemas, evals, implementation goals, and release gates.
+- [docs/engineering/SYSTEM_ARCHITECTURE.md](docs/engineering/SYSTEM_ARCHITECTURE.md): system architecture, module responsibilities, local runtime, retrieval, UI, memory, and evaluation boundaries.
+- [docs/engineering/ESPRESSO_AGENT_PROTOCOL.md](docs/engineering/ESPRESSO_AGENT_PROTOCOL.md): source of truth for Codex/collaborator sessions, current capability boundaries, safe language, and validation discipline.
 - [docs/engineering/CLEANUP_GUIDE.md](docs/engineering/CLEANUP_GUIDE.md): cleanup-only collaboration contract, layer boundaries, hot files, and future refactor plan.
 - [docs/research/](docs/research/): research survey and source material about AI theorem proving and math agents.
 - [docs/archive/](docs/archive/): older planning notes and collaborator handoffs preserved for history, not current product direction.
