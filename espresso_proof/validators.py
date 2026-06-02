@@ -28,6 +28,7 @@ from .models import (
     LiteratureReviewReport,
     LoopControl,
     ProofLanguageStatus,
+    ProverLoopReport,
     Review,
     ReviewerVerdict,
     RunManifest,
@@ -78,7 +79,8 @@ def validate_run(run_dir: Path) -> None:
     human_choice = validate_yaml_model(run_dir / artifacts["human_choice"], HumanChoice)
     _load_optional_theorem_extraction(run_dir, manifest)
     _load_optional_literature_review_agent(run_dir, manifest)
-    _load_optional_llm_agent_run(run_dir, manifest)
+    llm_agent_run = _load_optional_llm_agent_run(run_dir, manifest)
+    prover_loop = _load_optional_prover_loop(run_dir, manifest)
     human_feedback, feedback_summary = _load_optional_human_feedback(run_dir, manifest)
 
     _validate_claim_id_consistency(
@@ -134,6 +136,7 @@ def validate_run(run_dir: Path) -> None:
         human_feedback,
         feedback_summary,
     )
+    _validate_llm_loop_artifacts(manifest, claim, llm_agent_run, prover_loop, strategy_brief)
     _validate_final_report_language(run_dir / artifacts["final_report"], idea_grade)
 
 
@@ -193,6 +196,19 @@ def _load_optional_llm_agent_run(
     return validate_yaml_model(
         run_dir / optional["llm_agent_run"],
         LLMAgentRunReport,
+    )
+
+
+def _load_optional_prover_loop(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> ProverLoopReport | None:
+    optional = manifest.optional_artifacts
+    if "prover_loop" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["prover_loop"],
+        ProverLoopReport,
     )
 
 
@@ -685,6 +701,126 @@ def _validate_human_feedback(
                 f"ranking adjustment references unknown {adjustment.target_type.value} target "
                 f"{adjustment.target_id!r}"
             )
+
+
+def _validate_llm_loop_artifacts(
+    manifest: RunManifest,
+    claim: Claim,
+    llm_agent_run: LLMAgentRunReport | None,
+    prover_loop: ProverLoopReport | None,
+    strategy_brief: StrategyBrief,
+) -> None:
+    if llm_agent_run is None:
+        if prover_loop is not None:
+            raise KernelValidationError("prover_loop requires llm_agent_run")
+        return
+
+    if llm_agent_run.claim_id != claim.id:
+        raise KernelValidationError("llm_agent_run claim_id does not match locked claim")
+    if llm_agent_run.run_id != manifest.run_id:
+        raise KernelValidationError("llm_agent_run run_id does not match manifest")
+    known_artifacts = set(manifest.artifacts.values()) | set(manifest.optional_artifacts.values())
+    unknown_inputs = set(llm_agent_run.input_artifacts).difference(known_artifacts)
+    if unknown_inputs:
+        raise KernelValidationError(
+            f"llm_agent_run references unknown input artifacts {sorted(unknown_inputs)}"
+        )
+
+    if prover_loop is None:
+        return
+
+    if prover_loop.claim_id != claim.id:
+        raise KernelValidationError("prover_loop claim_id does not match locked claim")
+    if prover_loop.run_id != manifest.run_id:
+        raise KernelValidationError("prover_loop run_id does not match manifest")
+    if prover_loop.source_llm_agent_run != manifest.optional_artifacts.get("llm_agent_run"):
+        raise KernelValidationError("prover_loop must cite the llm_agent_run optional artifact")
+    if prover_loop.human_gate_status != llm_agent_run.human_gate.status:
+        raise KernelValidationError("prover_loop human_gate_status does not match llm_agent_run")
+    if (
+        llm_agent_run.human_gate.status == "pending"
+        and prover_loop.loop_decision not in {"ask_human", "stop"}
+    ):
+        raise KernelValidationError("pending LLM human gate cannot continue prover loop")
+    if llm_agent_run.human_gate.status == "pending":
+        for attempt in prover_loop.attempts:
+            if attempt.time_allocation not in {"ask_human", "stop"} or attempt.status not in {
+                "waiting_human",
+                "stopped",
+            }:
+                raise KernelValidationError(
+                    f"{attempt.attempt_id}: pending human gate cannot allocate prover work"
+                )
+
+    known_strategy_ids = {strategy.id for strategy in strategy_brief.top_strategies}
+    known_strategy_ids.add("none")
+    if prover_loop.selected_strategy_id is not None and prover_loop.selected_strategy_id not in known_strategy_ids:
+        raise KernelValidationError(
+            f"prover_loop selected unknown strategy {prover_loop.selected_strategy_id!r}"
+        )
+    reviews_by_id = {review.verifier_id: review for review in llm_agent_run.verifier_reviews}
+    known_reviewer_ids = set(reviews_by_id)
+    if len(known_reviewer_ids) < 3:
+        raise KernelValidationError("proof-close-style prover loop requires at least three reviewer roles")
+    known_attempt_ids = {attempt.attempt_id for attempt in prover_loop.attempts}
+    for attempt in prover_loop.attempts:
+        if attempt.parent_attempt_id is not None:
+            if attempt.parent_attempt_id == attempt.attempt_id:
+                raise KernelValidationError(f"{attempt.attempt_id}: parent attempt cannot be self")
+            if attempt.parent_attempt_id not in known_attempt_ids:
+                raise KernelValidationError(
+                    f"{attempt.attempt_id}: parent attempt id does not exist"
+                )
+        if attempt.strategy_id not in known_strategy_ids:
+            raise KernelValidationError(
+                f"{attempt.attempt_id}: unknown strategy id {attempt.strategy_id!r}"
+            )
+        if attempt.round_index == 1:
+            unknown_reviewers = set(attempt.reviewer_ids).difference(known_reviewer_ids)
+            if unknown_reviewers:
+                raise KernelValidationError(
+                    f"{attempt.attempt_id}: unknown reviewer ids {sorted(unknown_reviewers)}"
+                )
+        elif len(set(attempt.reviewer_ids)) < 3:
+            raise KernelValidationError(
+                f"{attempt.attempt_id}: appended loop round requires at least three reviewers"
+            )
+        if attempt.prover_attempt_id != llm_agent_run.prover_attempt.agent_id:
+            if attempt.round_index == 1:
+                raise KernelValidationError(
+                    f"{attempt.attempt_id}: prover attempt id does not match llm_agent_run"
+                )
+            if not attempt.prover_attempt_id.startswith("llm_prover_"):
+                raise KernelValidationError(
+                    f"{attempt.attempt_id}: appended prover attempt id is malformed"
+                )
+        for pointer in attempt.reviewer_objections:
+            if pointer.verifier_id not in attempt.reviewer_ids:
+                raise KernelValidationError(
+                    f"{attempt.attempt_id}: reviewer objection is not listed in reviewer_ids"
+                )
+            if attempt.round_index == 1:
+                source_review = reviews_by_id.get(pointer.verifier_id)
+                if source_review is None:
+                    raise KernelValidationError(
+                        f"{attempt.attempt_id}: reviewer objection references unknown reviewer "
+                        f"{pointer.verifier_id!r}"
+                    )
+                if pointer.verdict != source_review.verdict:
+                    raise KernelValidationError(
+                        f"{attempt.attempt_id}: reviewer objection verdict does not match "
+                        f"{pointer.verifier_id}"
+                    )
+                if pointer.recommended_human_action != source_review.recommended_human_action:
+                    raise KernelValidationError(
+                        f"{attempt.attempt_id}: reviewer objection action does not match "
+                        f"{pointer.verifier_id}"
+                    )
+                if pointer.objection_count != len(source_review.objections):
+                    raise KernelValidationError(
+                        f"{attempt.attempt_id}: reviewer objection count does not match "
+                        f"{pointer.verifier_id}"
+                    )
 
 
 def _feedback_target_sets(

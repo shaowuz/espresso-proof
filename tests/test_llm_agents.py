@@ -11,10 +11,12 @@ from typer.testing import CliRunner
 
 from espresso_proof.cli import app
 from espresso_proof.io import read_yaml
+from espresso_proof.io import write_yaml
 from espresso_proof.llm_agents import OpenAIResponsesClient, collect_unsafe_language, safe_text
 from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import LLMAgentRunReport
+from espresso_proof.models import LLMAgentRunReport, ProverLoopReport
 from espresso_proof.validators import validate_run
+from espresso_proof.validators import KernelValidationError
 
 
 FIXTURES = Path("tests/fixtures")
@@ -72,11 +74,23 @@ def test_stub_llm_agents_write_schema_valid_candidate_artifact(tmp_path: Path) -
     assert manifest["optional_artifacts"]["llm_agent_run"] == "llm_agent_run.yaml"
     report = LLMAgentRunReport.model_validate(read_yaml(run_dir / "llm_agent_run.yaml"))
     assert report.prover_attempt.status == "needs_human"
-    assert report.verifier_reviews[0].verdict == "needs_sources"
-    assert report.verifier_reviews[0].missing_hypotheses
+    assert len(report.verifier_reviews) == 3
+    assert {review.verifier_id for review in report.verifier_reviews} == {
+        "strategy_reviewer_001",
+        "evidence_reviewer_002",
+        "line_proof_reviewer_003",
+    }
+    assert any(review.verdict == "needs_sources" for review in report.verifier_reviews)
+    assert any(review.missing_hypotheses for review in report.verifier_reviews)
     assert report.provider_diagnostic is None
     assert report.human_gate.status == "pending"
     assert report.human_gate.human_confirmed is False
+    loop = ProverLoopReport.model_validate(read_yaml(run_dir / "prover_loop.yaml"))
+    assert loop.human_gate_status == "pending"
+    assert loop.loop_decision == "ask_human"
+    assert loop.budget.rounds_used == 1
+    assert len(loop.attempts) >= 1
+    assert loop.attempts[0].time_allocation == "ask_human"
 
 
 def test_stub_espresso_reviewer_set_runs_three_role_reviewers(tmp_path: Path) -> None:
@@ -155,6 +169,12 @@ def test_run_flow_creates_literature_and_espresso_agent_artifacts(tmp_path: Path
         "line_proof_reviewer_003",
     }
     assert report.human_gate.status == "pending"
+    loop = ProverLoopReport.model_validate(read_yaml(run_dir / "prover_loop.yaml"))
+    assert manifest["optional_artifacts"]["prover_loop"] == "prover_loop.yaml"
+    assert {attempt.strategy_id for attempt in loop.attempts}.issubset(
+        {strategy["id"] for strategy in read_yaml(run_dir / "strategy_brief.yaml")["top_strategies"]}
+    )
+    assert loop.loop_decision == "ask_human"
 
 
 def test_run_flow_openai_provider_requires_api_key(tmp_path: Path, monkeypatch) -> None:
@@ -597,8 +617,360 @@ def test_resolve_agent_gate_does_not_upgrade_grade_or_source(tmp_path: Path) -> 
     assert report.human_gate.status == "resolved"
     assert report.human_gate.decision == "revise"
     assert report.human_gate.human_confirmed is True
+    loop = ProverLoopReport.model_validate(read_yaml(run_dir / "prover_loop.yaml"))
+    assert loop.human_gate_status == "resolved"
+    assert loop.loop_decision == "repair"
+    assert loop.decision_reason
     assert read_yaml(run_dir / "idea_grade.yaml") == before_grade
     assert read_yaml(run_dir / "source_grounding.yaml") == before_grounding
+
+
+def test_human_choice_routes_prover_loop_strategy_and_effort(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    chosen = runner.invoke(
+        app,
+        [
+            "choose-strategy",
+            "--run",
+            str(run_dir),
+            "--strategy",
+            "strategy_pin_reference",
+            "--effort",
+            "quick_test",
+            "--decision",
+            "continue",
+            "--reason",
+            "Pinning the reference is the mathematically cleanest cheap test.",
+        ],
+    )
+    assert chosen.exit_code == 0, chosen.output
+    before_grade = read_yaml(run_dir / "idea_grade.yaml")
+    before_grounding = read_yaml(run_dir / "source_grounding.yaml")
+
+    result = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    loop = ProverLoopReport.model_validate(read_yaml(run_dir / "prover_loop.yaml"))
+    assert loop.selected_strategy_id == "strategy_pin_reference"
+    assert loop.budget.approved_effort == "quick_test"
+    assert {attempt.time_allocation for attempt in loop.attempts} == {"ask_human"}
+
+    resolved = runner.invoke(
+        app,
+        [
+            "resolve-agent-gate",
+            "--run",
+            str(run_dir),
+            "--decision",
+            "revise",
+            "--reason",
+            "Use the selected source-pinning route for the repair pass.",
+        ],
+    )
+    assert resolved.exit_code == 0, resolved.output
+    validate_run(run_dir)
+    loop = ProverLoopReport.model_validate(read_yaml(run_dir / "prover_loop.yaml"))
+    assert loop.selected_strategy_id == "strategy_pin_reference"
+    selected_attempt = next(
+        attempt for attempt in loop.attempts if attempt.strategy_id == "strategy_pin_reference"
+    )
+    assert selected_attempt.time_allocation == "repair"
+    assert read_yaml(run_dir / "idea_grade.yaml") == before_grade
+    assert read_yaml(run_dir / "source_grounding.yaml") == before_grounding
+
+
+def test_prover_loop_pending_gate_cannot_continue(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    loop = read_yaml(run_dir / "prover_loop.yaml")
+    loop["loop_decision"] = "continue"
+    write_yaml(run_dir / "prover_loop.yaml", loop)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "pending human gate" in str(exc)
+    else:
+        raise AssertionError("validate_run should reject continuing with a pending human gate")
+
+
+def test_prover_loop_pending_gate_cannot_allocate_attempt_work(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    loop = read_yaml(run_dir / "prover_loop.yaml")
+    loop["attempts"][0]["time_allocation"] = "expand"
+    loop["attempts"][0]["status"] = "candidate"
+    write_yaml(run_dir / "prover_loop.yaml", loop)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "pending human gate" in str(exc)
+    else:
+        raise AssertionError("validate_run should reject attempt work with a pending gate")
+
+
+def test_prover_loop_reviewer_pointers_must_match_llm_report(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    loop = read_yaml(run_dir / "prover_loop.yaml")
+    loop["attempts"][0]["reviewer_objections"][0]["verdict"] = "plausible_direction"
+    write_yaml(run_dir / "prover_loop.yaml", loop)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "reviewer objection verdict" in str(exc)
+    else:
+        raise AssertionError("validate_run should reject tampered reviewer pointers")
+
+
+def test_run_prover_loop_round_appends_child_attempt(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    chosen = runner.invoke(
+        app,
+        [
+            "choose-strategy",
+            "--run",
+            str(run_dir),
+            "--strategy",
+            "strategy_pin_reference",
+            "--effort",
+            "normal_pass",
+            "--decision",
+            "continue",
+            "--reason",
+            "Continue by repairing the source-pinning route.",
+        ],
+    )
+    assert chosen.exit_code == 0, chosen.output
+    result = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    resolved = runner.invoke(
+        app,
+        [
+            "resolve-agent-gate",
+            "--run",
+            str(run_dir),
+            "--decision",
+            "revise",
+            "--reason",
+            "Use reviewer blockers to repair the selected source route.",
+        ],
+    )
+    assert resolved.exit_code == 0, resolved.output
+    before_loop = ProverLoopReport.model_validate(read_yaml(run_dir / "prover_loop.yaml"))
+    assert before_loop.budget.rounds_used == 1
+
+    appended = runner.invoke(
+        app,
+        [
+            "run-prover-loop-round",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert appended.exit_code == 0, appended.output
+    validate_run(run_dir)
+    loop = ProverLoopReport.model_validate(read_yaml(run_dir / "prover_loop.yaml"))
+    assert loop.budget.rounds_used == 2
+    assert len(loop.attempts) == len(before_loop.attempts) + 1
+    child = loop.attempts[-1]
+    assert child.round_index == 2
+    assert child.parent_attempt_id in {attempt.attempt_id for attempt in before_loop.attempts}
+    assert child.strategy_id == "strategy_pin_reference"
+    assert child.prover_attempt_id == "llm_prover_002"
+    assert len(set(child.reviewer_ids)) == 3
+
+
+def test_prover_loop_round_prompt_contains_reviewer_blockers(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    log_path = tmp_path / "external_requests.jsonl"
+    script = tmp_path / "recording_external_agent.py"
+    script.write_text(
+        "\n".join(
+            [
+                "import json",
+                "import sys",
+                f"log_path = {str(log_path)!r}",
+                "request = json.loads(sys.stdin.read())",
+                "with open(log_path, 'a', encoding='utf-8') as handle:",
+                "    handle.write(json.dumps(request) + '\\n')",
+                "json.dump({",
+                "  'summary': 'External candidate route with recorded prompt.',",
+                "  'steps': ['Repair the selected route against reviewer blockers.'],",
+                "  'source_requests': ['Exact theorem locator.'],",
+                "  'missing_hypotheses': ['Exact theorem applicability condition.'],",
+                "  'risks': ['Reviewer blockers remain active.'],",
+                "  'verdict': 'needs_sources',",
+                "  'recommended_human_action': 'revise',",
+                "}, sys.stdout)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    chosen = runner.invoke(
+        app,
+        [
+            "choose-strategy",
+            "--run",
+            str(run_dir),
+            "--strategy",
+            "strategy_pin_reference",
+            "--effort",
+            "normal_pass",
+            "--decision",
+            "continue",
+            "--reason",
+            "Continue by repairing the source-pinning route.",
+        ],
+    )
+    assert chosen.exit_code == 0, chosen.output
+    initial = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert initial.exit_code == 0, initial.output
+    resolved = runner.invoke(
+        app,
+        [
+            "resolve-agent-gate",
+            "--run",
+            str(run_dir),
+            "--decision",
+            "revise",
+            "--reason",
+            "Use reviewer blockers in the next prover prompt.",
+        ],
+    )
+    assert resolved.exit_code == 0, resolved.output
+    appended = runner.invoke(
+        app,
+        [
+            "run-prover-loop-round",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "external",
+            "--model",
+            "recording-agent",
+            "--reviewer-set",
+            "espresso",
+        ],
+        env={"ESPRESSO_EXTERNAL_AGENT_COMMAND": f"{sys.executable} {script}"},
+    )
+    assert appended.exit_code == 0, appended.output
+    requests = [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    prover_requests = [
+        request for request in requests if '"role": "prover_loop_round"' in request["prompt"]
+    ]
+    assert prover_requests
+    assert "reviewer_blockers_to_repair" in prover_requests[0]["prompt"]
+    assert "strategy may prove only a narrower statement" in prover_requests[0]["prompt"]
 
 
 def test_openai_provider_requires_api_key(tmp_path: Path, monkeypatch) -> None:

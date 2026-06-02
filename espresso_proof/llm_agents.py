@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .io import read_yaml, write_yaml
-from .models import LLMAgentRunReport
+from .models import LLMAgentRunReport, ProverLoopReport
 
 
 AGENT_OUTPUT_SCHEMA = {
@@ -508,6 +508,203 @@ def run_llm_agent_pass(
     return report
 
 
+def build_prover_loop_report(
+    *,
+    agent_report: dict,
+    strategy_brief: dict,
+    human_choice: dict | None = None,
+    approved_effort: str = "normal_pass",
+) -> dict:
+    top_strategies = strategy_brief.get("top_strategies", [])[:3]
+    if not top_strategies:
+        top_strategies = [
+            {
+                "id": "strategy_missing_brief",
+                "title": "No strategy brief route available",
+            }
+        ]
+    verifier_reviews = agent_report.get("verifier_reviews", [])
+    reviewer_pointers = [
+        {
+            "verifier_id": review["verifier_id"],
+            "verdict": review["verdict"],
+            "objection_count": len(review.get("objections", [])),
+            "recommended_human_action": review["recommended_human_action"],
+        }
+        for review in verifier_reviews
+    ]
+    blockers = sorted(
+        {
+            item
+            for review in verifier_reviews
+            for item in (
+                review.get("objections", [])
+                + review.get("missing_hypotheses", [])
+                + review.get("source_requests", [])
+            )
+            if str(item).strip()
+        }
+    )[:12]
+    gate = agent_report["human_gate"]
+    selected_strategy = _selected_strategy_from_choice(human_choice, top_strategies)
+    approved_effort = _approved_effort_from_choice(human_choice, approved_effort)
+    attempts = []
+    for index, strategy in enumerate(top_strategies, start=1):
+        strategy_id = strategy.get("id", f"strategy_{index}")
+        allocation = _allocation_for_strategy(
+            strategy_id=strategy_id,
+            selected_strategy_id=selected_strategy,
+            gate=gate,
+            reviewer_reviews=verifier_reviews,
+        )
+        status = _attempt_status_for_allocation(allocation, blockers)
+        attempts.append(
+            {
+                "attempt_id": f"attempt_round_001_{strategy_id}",
+                "round_index": 1,
+                "strategy_id": strategy_id,
+                "parent_attempt_id": None,
+                "prover_attempt_id": agent_report["prover_attempt"]["agent_id"],
+                "source_request_count": len(agent_report["prover_attempt"].get("source_requests", [])),
+                "risk_count": len(agent_report["prover_attempt"].get("risks", [])),
+                "reviewer_ids": [review["verifier_id"] for review in verifier_reviews],
+                "reviewer_objections": reviewer_pointers,
+                "time_allocation": allocation,
+                "status": status,
+                "blockers": blockers if status in {"needs_repair", "blocked"} else [],
+                "next_action": _next_action_for_strategy(
+                    index=index,
+                    strategy=strategy,
+                    gate=gate,
+                    blockers=blockers,
+                ),
+            }
+        )
+    decision = "ask_human" if gate["status"] == "pending" else _decision_from_gate(gate)
+    report = {
+        "schema_version": 1,
+        "claim_id": agent_report["claim_id"],
+        "run_id": agent_report["run_id"],
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source_llm_agent_run": "llm_agent_run.yaml",
+        "selected_strategy_id": selected_strategy,
+        "budget": {
+            "approved_effort": approved_effort,
+            "max_rounds": _max_rounds_for_effort(approved_effort),
+            "rounds_used": 1,
+            "max_agent_calls": _max_agent_calls_for_effort(approved_effort),
+            "agent_calls_used": 1 + len(verifier_reviews),
+            "stop_if_human_gate_pending": True,
+        },
+        "attempts": attempts,
+        "human_gate_status": gate["status"],
+        "loop_decision": decision,
+        "decision_reason": _loop_decision_reason(gate, blockers),
+        "audit_note": (
+            "proof-close-style loop scaffold: records attempt portfolio, reviewer objections, "
+            "time allocation, and human gate without upgrading proof/source/evidence status."
+        ),
+    }
+    ProverLoopReport.model_validate(report)
+    return report
+
+
+def _selected_strategy_from_choice(human_choice: dict | None, strategies: list[dict]) -> str | None:
+    strategy_ids = [strategy.get("id") for strategy in strategies]
+    if (
+        human_choice
+        and human_choice.get("status") == "selected"
+        and human_choice.get("selected_strategy") in strategy_ids
+    ):
+        return human_choice["selected_strategy"]
+    return strategy_ids[0] if strategy_ids else None
+
+
+def _approved_effort_from_choice(human_choice: dict | None, fallback: str) -> str:
+    if human_choice and human_choice.get("status") == "selected" and human_choice.get("effort"):
+        return str(human_choice["effort"])
+    return fallback
+
+
+def _allocation_for_strategy(
+    *,
+    strategy_id: str,
+    selected_strategy_id: str | None,
+    gate: dict,
+    reviewer_reviews: list[dict],
+) -> str:
+    if gate.get("status") == "pending":
+        return "ask_human"
+    if gate.get("decision") == "stop":
+        return "stop"
+    if any(review.get("verdict") == "blocked" for review in reviewer_reviews):
+        return "pause"
+    is_selected = strategy_id == selected_strategy_id
+    if any(review.get("verdict") in {"needs_revision", "needs_sources"} for review in reviewer_reviews):
+        return "repair" if is_selected else "cheap_check"
+    return "expand" if is_selected else "cheap_check"
+
+
+def _attempt_status_for_allocation(allocation: str, blockers: list[str]) -> str:
+    if allocation == "stop":
+        return "stopped"
+    if allocation in {"pause"}:
+        return "blocked"
+    if allocation == "ask_human":
+        return "waiting_human"
+    if allocation == "repair" or blockers:
+        return "needs_repair"
+    return "candidate"
+
+
+def _next_action_for_strategy(*, index: int, strategy: dict, gate: dict, blockers: list[str]) -> str:
+    title = strategy.get("title") or strategy.get("id") or f"strategy {index}"
+    if gate.get("status") == "pending":
+        if index == 1:
+            return f"Ask mathematician whether to spend the next round on {title}."
+        return f"Keep {title} as a low-budget alternative until human preference is resolved."
+    if blockers:
+        return f"Repair {title} against reviewer blockers before expanding proof text."
+    return f"Expand {title} with source matching and checked examples."
+
+
+def _decision_from_gate(gate: dict) -> str:
+    decision = gate.get("decision")
+    if decision == "continue":
+        return "continue"
+    if decision == "stop":
+        return "stop"
+    return "repair"
+
+
+def _loop_decision_reason(gate: dict, blockers: list[str]) -> str:
+    if gate.get("status") == "pending":
+        return "Human gate is pending; Espresso must not run deeper prover rounds yet."
+    if gate.get("decision") == "stop":
+        return "Human gate resolved to stop."
+    if blockers:
+        return "Reviewer objections or source requests require repair before another proof round."
+    return "Human gate resolved and no blocking reviewer objection was recorded."
+
+
+def _max_rounds_for_effort(effort: str) -> int:
+    return {
+        "quick_test": 1,
+        "normal_pass": 2,
+        "deep_exploration": 4,
+        "long_watch": 8,
+    }.get(effort, 2)
+
+
+def _max_agent_calls_for_effort(effort: str) -> int:
+    return {
+        "quick_test": 4,
+        "normal_pass": 8,
+        "deep_exploration": 20,
+        "long_watch": 50,
+    }.get(effort, 8)
+
+
 def resolve_agent_gate(
     *,
     run_dir: Path,
@@ -534,6 +731,146 @@ def resolve_agent_gate(
     LLMAgentRunReport.model_validate(report)
     write_yaml(run_dir / agent_path, report)
     return report
+
+
+def append_prover_loop_round(
+    *,
+    run_dir: Path,
+    provider: str,
+    model: str,
+    api_key_env: str = "OPENAI_API_KEY",
+    external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+    reviewer_set: str = "espresso",
+) -> dict:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    optional = manifest.get("optional_artifacts", {})
+    agent_path = optional.get("llm_agent_run")
+    loop_path = optional.get("prover_loop")
+    if not agent_path or not loop_path:
+        raise RuntimeError("run requires llm_agent_run.yaml and prover_loop.yaml")
+    agent_report = read_yaml(run_dir / agent_path)
+    loop_report = read_yaml(run_dir / loop_path)
+    if agent_report["human_gate"]["status"] != "resolved":
+        raise RuntimeError("cannot run another prover round before resolving the human gate")
+    if loop_report.get("loop_decision") in {"ask_human", "stop"}:
+        raise RuntimeError(f"cannot append round when loop_decision={loop_report.get('loop_decision')}")
+
+    attempts = loop_report["attempts"]
+    if loop_report["budget"]["rounds_used"] >= loop_report["budget"]["max_rounds"]:
+        raise RuntimeError("prover loop budget has no remaining rounds")
+    selected_strategy_id = loop_report.get("selected_strategy_id")
+    parent_attempt = _select_parent_attempt(attempts, selected_strategy_id)
+    next_round = max(attempt["round_index"] for attempt in attempts) + 1
+
+    client = build_client(
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+    )
+    context = load_agent_context(run_dir)
+    round_context = {
+        **context,
+        "previous_prover_loop_attempt": parent_attempt,
+        "reviewer_blockers_to_repair": parent_attempt.get("blockers", []),
+        "loop_decision": loop_report.get("loop_decision"),
+        "time_allocation": parent_attempt.get("time_allocation"),
+    }
+    created_at = datetime.now(UTC).isoformat()
+    prover_raw = client.complete_json(
+        system=prover_system_prompt(),
+        prompt=agent_prompt(round_context, role="prover_loop_round"),
+    )
+    prover = make_prover_attempt(prover_raw, client=client, created_at=created_at)
+    prover["agent_id"] = f"llm_prover_{next_round:03d}"
+
+    reviewer_roles = _reviewer_roles(reviewer_set, 3)
+    verifier_reviews = []
+    for index, reviewer_role in enumerate(reviewer_roles, start=1):
+        verifier_raw = client.complete_json(
+            system=verifier_system_prompt(index, reviewer_role=reviewer_role),
+            prompt=agent_prompt(
+                {**round_context, "prover_attempt": prover},
+                role=f"round_{next_round}_{reviewer_role}",
+            ),
+        )
+        review = make_verifier_review(
+            verifier_raw,
+            client=client,
+            created_at=datetime.now(UTC).isoformat(),
+            index=index,
+            reviewer_role=reviewer_role,
+        )
+        review["verifier_id"] = f"round_{next_round:03d}_{review['verifier_id']}"
+        verifier_reviews.append(review)
+
+    blockers = sorted(
+        {
+            item
+            for review in verifier_reviews
+            for item in (
+                review.get("objections", [])
+                + review.get("missing_hypotheses", [])
+                + review.get("source_requests", [])
+            )
+            if str(item).strip()
+        }
+    )[:12]
+    reviewer_pointers = [
+        {
+            "verifier_id": review["verifier_id"],
+            "verdict": review["verdict"],
+            "objection_count": len(review.get("objections", [])),
+            "recommended_human_action": review["recommended_human_action"],
+        }
+        for review in verifier_reviews
+    ]
+    selected_strategy_id = parent_attempt["strategy_id"]
+    allocation = "repair" if blockers else "expand"
+    loop_report["attempts"].append(
+        {
+            "attempt_id": f"attempt_round_{next_round:03d}_{selected_strategy_id}",
+            "round_index": next_round,
+            "strategy_id": selected_strategy_id,
+            "parent_attempt_id": parent_attempt["attempt_id"],
+            "prover_attempt_id": prover["agent_id"],
+            "source_request_count": len(prover.get("source_requests", [])),
+            "risk_count": len(prover.get("risks", [])),
+            "reviewer_ids": [review["verifier_id"] for review in verifier_reviews],
+            "reviewer_objections": reviewer_pointers,
+            "time_allocation": allocation,
+            "status": "needs_repair" if blockers else "candidate",
+            "blockers": blockers,
+            "next_action": (
+                "Repair reviewer blockers before another proof round."
+                if blockers
+                else "Expand this candidate with source matching and checked examples."
+            ),
+        }
+    )
+    loop_report["generated_at"] = datetime.now(UTC).isoformat()
+    loop_report["budget"]["rounds_used"] = len(
+        {attempt["round_index"] for attempt in loop_report["attempts"]}
+    )
+    loop_report["budget"]["agent_calls_used"] += 1 + len(verifier_reviews)
+    loop_report["loop_decision"] = "repair" if blockers else "continue"
+    loop_report["decision_reason"] = (
+        "Round appended from resolved human gate; reviewer blockers were routed into the prover prompt."
+    )
+    ProverLoopReport.model_validate(loop_report)
+    write_yaml(run_dir / loop_path, loop_report)
+    return loop_report
+
+
+def _select_parent_attempt(attempts: list[dict], selected_strategy_id: str | None) -> dict:
+    candidates = [
+        attempt
+        for attempt in attempts
+        if selected_strategy_id is None or attempt.get("strategy_id") == selected_strategy_id
+    ]
+    if not candidates:
+        raise RuntimeError("selected strategy has no prover-loop attempt")
+    return sorted(candidates, key=lambda item: item["round_index"])[-1]
 
 
 def build_client(
@@ -687,7 +1024,7 @@ def agent_prompt(context: dict, *, role: str) -> str:
 def _reviewer_roles(reviewer_set: str, verifier_count: int) -> list[str]:
     if reviewer_set == "espresso":
         return ESPRESSO_REVIEWER_ROLES
-    return ["verifier" for _ in range(max(1, verifier_count))]
+    return ["verifier" for _ in range(max(3, verifier_count))]
 
 
 def safe_list(value: object) -> list[str]:

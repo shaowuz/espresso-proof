@@ -10,7 +10,9 @@ from .contracts import DEFAULT_AGENT_FLOW, default_agent_contracts
 from .io import read_text, read_yaml, write_text, write_yaml
 from .literature_discovery import discover_literature as run_literature_discovery
 from .literature_review_agent import ReviewSourceSpec, run_literature_review_agent
+from .llm_agents import append_prover_loop_round
 from .llm_agents import resolve_agent_gate as resolve_llm_agent_gate
+from .llm_agents import build_prover_loop_report
 from .llm_agents import external_agent_diagnostic
 from .llm_agents import openai_agent_diagnostic
 from .llm_agents import run_llm_agent_pass
@@ -30,6 +32,7 @@ from .models import (
     LLMAgentRunReport,
     LiteratureReviewAgentReport,
     LiteratureReviewReport,
+    ProverLoopReport,
     TheoremExtractionReport,
     WorkflowSpec,
 )
@@ -131,9 +134,17 @@ def run_flow(
         provider_diagnostic=provider_diagnostic,
     )
     LLMAgentRunReport.model_validate(agent_report)
+    loop_report = build_prover_loop_report(
+        agent_report=agent_report,
+        strategy_brief=read_yaml(run_dir / artifacts["strategy_brief"]),
+        human_choice=read_yaml(run_dir / artifacts["human_choice"]),
+    )
+    ProverLoopReport.model_validate(loop_report)
     manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
+    manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"
     manifest["current_state"] = "WAITING_LLM_AGENT_HUMAN_GATE"
     write_yaml(run_dir / "llm_agent_run.yaml", agent_report)
+    write_yaml(run_dir / "prover_loop.yaml", loop_report)
     write_yaml(manifest_path, manifest)
     validate_run(run_dir)
 
@@ -476,7 +487,7 @@ def run_llm_agents(
     provider: str = typer.Option("stub", "--provider"),
     model: str = typer.Option("gpt-4.1", "--model"),
     verifier_count: int = typer.Option(1, "--verifier-count", min=1, max=3),
-    reviewer_set: str = typer.Option("generic", "--reviewer-set"),
+    reviewer_set: str = typer.Option("espresso", "--reviewer-set"),
     api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
     external_agent_command_env: str = typer.Option(
         "ESPRESSO_EXTERNAL_AGENT_COMMAND",
@@ -509,8 +520,17 @@ def run_llm_agents(
         provider_diagnostic=provider_diagnostic,
     )
     LLMAgentRunReport.model_validate(report)
+    artifacts = manifest["artifacts"]
+    loop_report = build_prover_loop_report(
+        agent_report=report,
+        strategy_brief=read_yaml(run / artifacts["strategy_brief"]),
+        human_choice=read_yaml(run / artifacts["human_choice"]),
+    )
+    ProverLoopReport.model_validate(loop_report)
     manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
+    manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"
     write_yaml(run / "llm_agent_run.yaml", report)
+    write_yaml(run / "prover_loop.yaml", loop_report)
     write_yaml(manifest_path, manifest)
     validate_run(run)
     typer.echo(f"Wrote LLM agent run to {run / 'llm_agent_run.yaml'}")
@@ -529,8 +549,52 @@ def resolve_agent_gate(
     validate_run(run)
     report = resolve_llm_agent_gate(run_dir=run, decision=decision, reason=reason)
     LLMAgentRunReport.model_validate(report)
+    manifest = read_yaml(run / "run_manifest.yaml")
+    artifacts = manifest["artifacts"]
+    loop_report = build_prover_loop_report(
+        agent_report=report,
+        strategy_brief=read_yaml(run / artifacts["strategy_brief"]),
+        human_choice=read_yaml(run / artifacts["human_choice"]),
+    )
+    ProverLoopReport.model_validate(loop_report)
+    manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"
+    write_yaml(run / "prover_loop.yaml", loop_report)
+    write_yaml(run / "run_manifest.yaml", manifest)
     validate_run(run)
     typer.echo(f"Resolved LLM agent human gate as {decision}")
+
+
+@app.command("run-prover-loop-round")
+def run_prover_loop_round(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    provider: str = typer.Option("stub", "--provider"),
+    model: str = typer.Option("gpt-4.1", "--model"),
+    reviewer_set: str = typer.Option("espresso", "--reviewer-set"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+        "--external-agent-command-env",
+    ),
+) -> None:
+    """Append one resolved-gate prover/reviewer loop round."""
+    if provider not in {"stub", "openai", "external"}:
+        raise typer.BadParameter("provider must be stub, openai, or external")
+    if reviewer_set not in {"generic", "espresso"}:
+        raise typer.BadParameter("reviewer-set must be generic or espresso")
+    validate_run(run)
+    report = append_prover_loop_round(
+        run_dir=run,
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        reviewer_set=reviewer_set,
+    )
+    ProverLoopReport.model_validate(report)
+    validate_run(run)
+    typer.echo(
+        f"Appended prover loop round {report['budget']['rounds_used']} to {run / 'prover_loop.yaml'}"
+    )
 
 
 @app.command("feedback-example")
