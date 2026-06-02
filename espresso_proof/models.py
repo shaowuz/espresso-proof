@@ -643,6 +643,84 @@ class SourceGroundingReport(StrictBaseModel):
     steps: list[SourceGroundingStep]
 
 
+class TheoremApplicabilityCondition(StrictBaseModel):
+    id: str
+    text: str
+    condition_type: Literal[
+        "object",
+        "morphism",
+        "base_field",
+        "genericity",
+        "smoothness",
+        "properness",
+        "flatness",
+        "coherence",
+        "definition",
+        "other",
+    ]
+    status: Literal["satisfied", "missing", "mismatched", "unclear", "not_checked"]
+    evidence: str
+    definition_locator: Locator | None = None
+
+
+class TheoremApplicabilityUsage(StrictBaseModel):
+    proof_step_id: str
+    source_ref_id: str
+    theorem_id: str | None = None
+    theorem_label: str | None = None
+    theorem_statement: str
+    locator: Locator
+    source_status: SourceStatus
+    conclusion_status: Literal["compatible", "weaker", "stronger", "orthogonal", "contradicts", "unclear"]
+    conditions: list[TheoremApplicabilityCondition]
+    applicability_status: Literal["applicable", "blocked", "misapplied", "unclear"]
+    blocks_source_backed: bool
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_condition_status(self) -> TheoremApplicabilityUsage:
+        bad_conditions = {"missing", "mismatched", "unclear", "not_checked"}
+        has_bad_condition = any(condition.status in bad_conditions for condition in self.conditions)
+        if self.applicability_status == "applicable":
+            if has_bad_condition:
+                raise ValueError("applicable theorem usage requires all conditions satisfied")
+            if self.conclusion_status in {"orthogonal", "contradicts", "unclear"}:
+                raise ValueError("applicable theorem usage requires compatible conclusion")
+            if self.blocks_source_backed:
+                raise ValueError("applicable theorem usage cannot block source_backed")
+        if has_bad_condition and not self.blocks_source_backed:
+            raise ValueError("unsatisfied theorem conditions must block source_backed")
+        return self
+
+
+class TheoremApplicabilityReport(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    source_grounding_artifact: str
+    literature_review_agent_artifact: str | None = None
+    usages: list[TheoremApplicabilityUsage]
+    overall_status: Literal["all_applicable", "blocked", "misapplied", "unclear"]
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_overall_status(self) -> TheoremApplicabilityReport:
+        proof_step_ids = [usage.proof_step_id for usage in self.usages]
+        if len(proof_step_ids) != len(set(proof_step_ids)):
+            raise ValueError("theorem applicability usages must have unique proof_step_id values")
+        if self.overall_status == "all_applicable":
+            if any(usage.applicability_status != "applicable" for usage in self.usages):
+                raise ValueError("all_applicable requires every theorem usage applicable")
+        if any(usage.applicability_status == "misapplied" for usage in self.usages):
+            if self.overall_status != "misapplied":
+                raise ValueError("misapplied theorem usage requires overall_status=misapplied")
+        if any(usage.applicability_status == "blocked" for usage in self.usages):
+            if self.overall_status not in {"blocked", "misapplied"}:
+                raise ValueError("blocked theorem usage requires blocked or misapplied overall status")
+        return self
+
+
 class TestReportItem(StrictBaseModel):
     id: str
     description: str
@@ -1278,6 +1356,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "tests": TestReport,
     "source_grounding": SourceGroundingReport,
     "theorem_extraction": TheoremExtractionReport,
+    "theorem_applicability": TheoremApplicabilityReport,
     "review": Review,
     "idea_grade": IdeaGrade,
     "loop_control": LoopControl,

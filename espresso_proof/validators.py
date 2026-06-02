@@ -37,6 +37,7 @@ from .models import (
     StrategyBrief,
     StrategySynthesis,
     TestReport,
+    TheoremApplicabilityReport,
     TheoremExtractionReport,
 )
 from .strategy_rules import validate_strategy_rules
@@ -79,6 +80,7 @@ def validate_run(run_dir: Path) -> None:
     human_choice = validate_yaml_model(run_dir / artifacts["human_choice"], HumanChoice)
     _load_optional_theorem_extraction(run_dir, manifest)
     _load_optional_literature_review_agent(run_dir, manifest)
+    theorem_applicability = _load_optional_theorem_applicability(run_dir, manifest)
     llm_agent_run = _load_optional_llm_agent_run(run_dir, manifest)
     prover_loop = _load_optional_prover_loop(run_dir, manifest)
     human_feedback, feedback_summary = _load_optional_human_feedback(run_dir, manifest)
@@ -105,6 +107,7 @@ def validate_run(run_dir: Path) -> None:
     _validate_test_report_evidence(computations, examples, counterexamples, tests)
     _validate_example_evidence(computations, counterexamples, idea_grade)
     _validate_source_backing(source_grounding)
+    _validate_theorem_applicability(manifest, claim, source_grounding, theorem_applicability)
     _validate_review_outcome(review, idea_grade)
     _validate_loop_control(loop_control)
     _validate_strategy_synthesis(
@@ -183,6 +186,19 @@ def _load_optional_literature_review_agent(
     return validate_yaml_model(
         run_dir / optional["literature_review_agent"],
         LiteratureReviewAgentReport,
+    )
+
+
+def _load_optional_theorem_applicability(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> TheoremApplicabilityReport | None:
+    optional = manifest.optional_artifacts
+    if "theorem_applicability" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["theorem_applicability"],
+        TheoremApplicabilityReport,
     )
 
 
@@ -447,6 +463,77 @@ def _validate_source_backing(source_grounding: SourceGroundingReport) -> None:
                     raise KernelValidationError(
                         f"{step.proof_step_id}: source ref {ref_id} is not source_backed"
                     )
+
+
+def _validate_theorem_applicability(
+    manifest: RunManifest,
+    claim: Claim,
+    source_grounding: SourceGroundingReport,
+    theorem_applicability: TheoremApplicabilityReport | None,
+) -> None:
+    has_source_backed_step = any(
+        step.status == SourceStatus.source_backed for step in source_grounding.steps
+    )
+    if theorem_applicability is None:
+        if has_source_backed_step:
+            raise KernelValidationError(
+                "source_backed theorem steps require theorem_applicability audit"
+            )
+        return
+    if theorem_applicability.claim_id != claim.id:
+        raise KernelValidationError("theorem_applicability claim_id does not match locked claim")
+    if theorem_applicability.run_id != manifest.run_id:
+        raise KernelValidationError("theorem_applicability run_id does not match manifest")
+    if theorem_applicability.source_grounding_artifact != manifest.artifacts["source_grounding"]:
+        raise KernelValidationError("theorem_applicability must cite the source_grounding artifact")
+    if theorem_applicability.literature_review_agent_artifact is not None:
+        expected = manifest.optional_artifacts.get("literature_review_agent")
+        if theorem_applicability.literature_review_agent_artifact != expected:
+            raise KernelValidationError(
+                "theorem_applicability literature_review_agent_artifact does not match manifest"
+            )
+    known_steps = {step.proof_step_id: step for step in source_grounding.steps}
+    refs_by_id = {ref.id: ref for ref in source_grounding.source_refs}
+    known_refs = set(refs_by_id)
+    usages_by_step = {usage.proof_step_id: usage for usage in theorem_applicability.usages}
+    for usage in theorem_applicability.usages:
+        if usage.proof_step_id not in known_steps:
+            raise KernelValidationError(
+                f"theorem_applicability references unknown proof step {usage.proof_step_id!r}"
+            )
+        if usage.source_ref_id not in known_refs and usage.source_ref_id != "missing_source_ref":
+            raise KernelValidationError(
+                f"theorem_applicability references unknown source ref {usage.source_ref_id!r}"
+            )
+        step = known_steps[usage.proof_step_id]
+        if usage.source_ref_id != "missing_source_ref" and usage.source_ref_id not in step.source_refs:
+            raise KernelValidationError(
+                f"{usage.proof_step_id}: theorem_applicability source_ref_id is not used by proof step"
+            )
+        if usage.source_status != step.status:
+            raise KernelValidationError(
+                f"{usage.proof_step_id}: theorem_applicability source_status does not match source_grounding step"
+            )
+        if usage.source_ref_id in refs_by_id and refs_by_id[usage.source_ref_id].status != usage.source_status:
+            raise KernelValidationError(
+                f"{usage.proof_step_id}: theorem_applicability source_status does not match source ref"
+            )
+    for step in source_grounding.steps:
+        if step.status != SourceStatus.source_backed:
+            continue
+        usage = usages_by_step.get(step.proof_step_id)
+        if usage is None:
+            raise KernelValidationError(
+                f"{step.proof_step_id}: source_backed theorem step lacks applicability audit"
+            )
+        if usage.applicability_status != "applicable" or usage.blocks_source_backed:
+            raise KernelValidationError(
+                f"{step.proof_step_id}: source_backed theorem step is blocked by theorem applicability"
+            )
+        if any(condition.status != "satisfied" for condition in usage.conditions):
+            raise KernelValidationError(
+                f"{step.proof_step_id}: source_backed theorem step has unsatisfied theorem conditions"
+            )
 
 
 def _validate_review_outcome(review: Review, idea_grade: IdeaGrade) -> None:

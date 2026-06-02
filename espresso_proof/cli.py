@@ -20,6 +20,7 @@ from .memory import summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
 from .pdf_ingestion import ingest_source_for_theorems
 from .source_verification import verify_source_grounding_from_theorems
+from .theorem_applicability import audit_theorem_applicability
 from .models import (
     AdmissionCheck,
     AgentContracts,
@@ -33,6 +34,7 @@ from .models import (
     LiteratureReviewAgentReport,
     LiteratureReviewReport,
     ProverLoopReport,
+    TheoremApplicabilityReport,
     TheoremExtractionReport,
     WorkflowSpec,
 )
@@ -441,8 +443,33 @@ def verify_sources(
         run_dir=run,
         theorem_extraction_path=extraction_path,
     )
+    applicability = audit_theorem_applicability(run)
+    TheoremApplicabilityReport.model_validate(applicability)
+    manifest.setdefault("optional_artifacts", {})["theorem_applicability"] = "theorem_applicability.yaml"
+    write_yaml(run / "run_manifest.yaml", manifest)
     validate_run(run)
     typer.echo(f"Wrote source verification to {run / 'source_grounding.yaml'}")
+    typer.echo(f"Wrote theorem applicability audit to {run / 'theorem_applicability.yaml'}")
+
+
+@app.command("audit-theorem-applicability")
+def audit_theorem_applicability_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+) -> None:
+    """Write theorem_applicability.yaml without upgrading source or proof status."""
+    try:
+        validate_run(run)
+    except KernelValidationError as exc:
+        if "require theorem_applicability audit" not in str(exc):
+            raise
+    report = audit_theorem_applicability(run)
+    TheoremApplicabilityReport.model_validate(report)
+    manifest_path = run / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    manifest.setdefault("optional_artifacts", {})["theorem_applicability"] = "theorem_applicability.yaml"
+    write_yaml(manifest_path, manifest)
+    validate_run(run)
+    typer.echo(f"Wrote theorem applicability audit to {run / 'theorem_applicability.yaml'}")
 
 
 @app.command("review-literature-agent")

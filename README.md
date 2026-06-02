@@ -6,7 +6,7 @@ It is not a Lean-heavy prover, not a chatbox, and not an agent zoo. The platform
 
 Lean-light is intended adapter behavior after a Lean/Mathlib connector exists: use existing Mathlib results when they help; if they do not exist, continue with critique and counterexample checks. The current kernel does not include Mathlib integration.
 
-This repository now contains the first local engineering kernel: Pydantic schemas, a Typer CLI, mock critique pipeline, `agent_contracts.yaml`, `literature_review.yaml`, `tests.yaml`, `loop_control.yaml`, `strategy_synthesis.yaml`, `strategy_brief.yaml`, `human_choice.yaml`, optional `human_example_feedback.yaml`, optional `example_feedback_summary.yaml`, optional `llm_agent_run.yaml`, and optional `prover_loop.yaml` artifacts, indexed memory writing/loading, cross-artifact validators, JSON Schema exports, fixture contracts under `tests/fixtures/`, a deterministic `generate-agent --mode v0` admission flow, conservative Literature Discovery commands, PDF/text theorem ingestion, conservative source verification, a local VS Code side-panel prototype, a runnable `espresso run-flow` multiagent command, an initial human-gated LLM prover plus Espresso reviewer-set runtime, and two seeded domains: `hodge_atoms` and `coherent_base_change`. It still does not contain LLM tool execution, durable long-running workers, real Evidence Auditor adapters, Mathlib integration, or proof automation.
+This repository now contains the first local engineering kernel: Pydantic schemas, a Typer CLI, mock critique pipeline, `agent_contracts.yaml`, `literature_review.yaml`, `tests.yaml`, `loop_control.yaml`, `strategy_synthesis.yaml`, `strategy_brief.yaml`, `human_choice.yaml`, optional `human_example_feedback.yaml`, optional `example_feedback_summary.yaml`, optional `llm_agent_run.yaml`, optional `prover_loop.yaml`, and optional `theorem_applicability.yaml` artifacts, indexed memory writing/loading, cross-artifact validators, JSON Schema exports, fixture contracts under `tests/fixtures/`, a deterministic `generate-agent --mode v0` admission flow, conservative Literature Discovery commands, PDF/text theorem ingestion, conservative source verification, theorem-applicability auditing, a local VS Code side-panel prototype, a runnable `espresso run-flow` multiagent command, an initial human-gated LLM prover plus Espresso reviewer-set runtime, and two seeded domains: `hodge_atoms` and `coherent_base_change`. It still does not contain LLM tool execution, durable long-running workers, real Evidence Auditor adapters, Mathlib integration, or proof automation.
 
 ## Core Position
 
@@ -148,6 +148,7 @@ espresso improve-workflow
 espresso run-llm-agents
 espresso resolve-agent-gate
 espresso run-prover-loop-round
+espresso audit-theorem-applicability
 ```
 
 Current command scope is deliberately narrow. `critique-sketch` and `eval` run deterministic mock artifacts. `generate-agent --mode v0` classifies the prompt into a small deterministic domain set, writes a schema-valid draft `workflow_spec.yaml`, `agent_contracts.yaml`, `admission_check.yaml`, `playbook.md`, and `trial_fixture/`, then leaves `admitted: false` until human confirmation. `run-prover-loop-round` appends one resolved-gate prover/reviewer round to `prover_loop.yaml`; it is not a durable long-running worker.
@@ -159,6 +160,7 @@ The current product loop is:
 3. Generate several proof strategies.
 4. Attack strategies with the examples/counterexamples bank and grade them with LLM mathematical judgment.
 5. Check whether references actually match each strategy.
+5.5. Audit theorem applicability by listing theorem conditions and whether the current claim satisfies them.
 6. Present a Strategy Brief and collect Human Strategy Preference.
 7. Let the Prover try the selected or high-score routes.
 8. Let reviewers check proof outline, literature use, and line-level proof detail.

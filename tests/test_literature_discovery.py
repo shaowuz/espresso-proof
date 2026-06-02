@@ -5,14 +5,14 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.io import read_yaml
+from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.literature_discovery import discover_local_literature
 from espresso_proof.live_search import parse_ads_json, parse_arxiv_atom, parse_crossref_json
 from espresso_proof.literature_review_agent import ReviewSourceSpec, run_literature_review_agent
 from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import LiteratureReviewAgentReport, LiteratureReviewReport
+from espresso_proof.models import LiteratureReviewAgentReport, LiteratureReviewReport, TheoremApplicabilityReport
 from espresso_proof.pdf_ingestion import extract_text_from_pdf_bytes, extract_theorems
-from espresso_proof.validators import validate_run
+from espresso_proof.validators import KernelValidationError, validate_run
 
 
 FIXTURES = Path("tests/fixtures")
@@ -199,9 +199,11 @@ def test_pdf_ingestion_and_source_verification_can_source_back_exact_match(tmp_p
     assert verify.exit_code == 0, verify.output
     validate_run(run_dir)
     grounding = read_yaml(run_dir / "source_grounding.yaml")
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
     assert any(ref["status"] == "source_backed" for ref in grounding["source_refs"])
     assert grounding["steps"][0]["status"] == "source_backed"
     assert grounding["steps"][0]["hypothesis_match"]["matches"] is True
+    assert manifest["optional_artifacts"]["theorem_applicability"] == "theorem_applicability.yaml"
 
 
 def test_pdf_fallback_decodes_hex_strings_for_theorem_extraction() -> None:
@@ -320,3 +322,246 @@ def test_literature_review_agent_cli_writes_optional_artifact(tmp_path: Path) ->
     assert manifest["optional_artifacts"]["literature_review_agent"] == "literature_review_agent.yaml"
     report = LiteratureReviewAgentReport.model_validate(read_yaml(run_dir / "literature_review_agent.yaml"))
     assert report.extracted_theorems
+
+
+def test_audit_theorem_applicability_cli_writes_condition_ledger(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    source_path = tmp_path / "very_general_source.txt"
+    source_path.write_text(
+        "Theorem 3.4. For a very general smooth cubic fourfold over base field C, "
+        "the Hodge atom obstruction proves irrationality.\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    review = runner.invoke(
+        app,
+        [
+            "review-literature-agent",
+            "--run",
+            str(run_dir),
+            "--source",
+            str(source_path),
+            "--source-id",
+            "src_very_general",
+            "--title",
+            "Very general theorem",
+        ],
+    )
+    assert review.exit_code == 0, review.output
+
+    result = runner.invoke(app, ["audit-theorem-applicability", "--run", str(run_dir)])
+
+    assert result.exit_code == 0, result.output
+    validate_run(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert manifest["optional_artifacts"]["theorem_applicability"] == "theorem_applicability.yaml"
+    report = TheoremApplicabilityReport.model_validate(
+        read_yaml(run_dir / "theorem_applicability.yaml")
+    )
+    assert report.literature_review_agent_artifact == "literature_review_agent.yaml"
+    assert report.usages
+    assert report.overall_status in {"misapplied", "blocked", "unclear"}
+    assert any(usage.blocks_source_backed for usage in report.usages)
+    assert any(
+        condition.status in {"missing", "mismatched", "unclear", "not_checked"}
+        for usage in report.usages
+        for condition in usage.conditions
+    )
+
+
+def test_audit_theorem_applicability_cli_falls_back_without_literature_agent(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["audit-theorem-applicability", "--run", str(run_dir)])
+
+    assert result.exit_code == 0, result.output
+    validate_run(run_dir)
+    report = TheoremApplicabilityReport.model_validate(
+        read_yaml(run_dir / "theorem_applicability.yaml")
+    )
+    assert report.literature_review_agent_artifact is None
+    assert report.usages
+    assert "fallback" in " ".join(report.usages[0].notes).lower()
+
+
+def test_source_backed_step_requires_theorem_applicability_artifact(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    source_grounding = read_yaml(run_dir / "source_grounding.yaml")
+    ref_id = source_grounding["source_refs"][0]["id"]
+    source_grounding["source_refs"][0]["status"] = "source_backed"
+    source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+    source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
+    source_grounding["steps"][0]["status"] = "source_backed"
+    source_grounding["steps"][0]["source_refs"] = [ref_id]
+    source_grounding["steps"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
+    write_yaml(run_dir / "source_grounding.yaml", source_grounding)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "require theorem_applicability audit" in str(exc)
+    else:
+        raise AssertionError("validate_run should require theorem_applicability for source_backed steps")
+
+
+def test_source_backed_step_requires_applicable_theorem_conditions(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    source_grounding = read_yaml(run_dir / "source_grounding.yaml")
+    ref_id = source_grounding["source_refs"][0]["id"]
+    source_grounding["source_refs"][0]["status"] = "source_backed"
+    source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+    source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
+    source_grounding["steps"][0]["status"] = "source_backed"
+    source_grounding["steps"][0]["source_refs"] = [ref_id]
+    source_grounding["steps"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
+    write_yaml(run_dir / "source_grounding.yaml", source_grounding)
+    applicability = {
+        "schema_version": 1,
+        "claim_id": source_grounding["claim_id"],
+        "run_id": manifest["run_id"],
+        "generated_at": "2026-06-02T00:00:00+00:00",
+        "source_grounding_artifact": "source_grounding.yaml",
+        "literature_review_agent_artifact": None,
+        "usages": [
+            {
+                "proof_step_id": source_grounding["steps"][0]["proof_step_id"],
+                "source_ref_id": ref_id,
+                "theorem_id": None,
+                "theorem_label": "Theorem 1.2",
+                "theorem_statement": "For a very general smooth cubic fourfold, the obstruction applies.",
+                "locator": {"kind": "theorem", "value": "Theorem 1.2"},
+                "source_status": "source_backed",
+                "conclusion_status": "compatible",
+                "conditions": [
+                    {
+                        "id": "cond_001",
+                        "text": "very general hypothesis not present in locked claim",
+                        "condition_type": "genericity",
+                        "status": "missing",
+                        "evidence": "The theorem has an extra very general condition.",
+                        "definition_locator": None,
+                    }
+                ],
+                "applicability_status": "blocked",
+                "blocks_source_backed": True,
+                "notes": ["This theorem usage is blocked by an unsatisfied condition."],
+            }
+        ],
+        "overall_status": "blocked",
+        "notes": ["Test fixture for source-backed condition blocking."],
+    }
+    write_yaml(run_dir / "theorem_applicability.yaml", applicability)
+    manifest.setdefault("optional_artifacts", {})["theorem_applicability"] = "theorem_applicability.yaml"
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "theorem applicability" in str(exc)
+    else:
+        raise AssertionError("validate_run should reject source_backed step with blocked theorem conditions")
+
+
+def test_theorem_applicability_rejects_duplicate_usage_for_same_step(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["audit-theorem-applicability", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    report = read_yaml(run_dir / "theorem_applicability.yaml")
+    report["usages"].append(report["usages"][0])
+    write_yaml(run_dir / "theorem_applicability.yaml", report)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "unique proof_step_id" in str(exc)
+    else:
+        raise AssertionError("validate_run should reject duplicate theorem applicability usages")
+
+
+def test_source_backed_step_applicability_usage_must_match_step_source_ref(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    source_grounding = read_yaml(run_dir / "source_grounding.yaml")
+    good_ref = source_grounding["source_refs"][0]
+    wrong_ref = {**good_ref, "id": "src_wrong_but_known"}
+    for ref in (good_ref, wrong_ref):
+        ref["status"] = "source_backed"
+        ref["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+        ref["hypothesis_match"] = {"matches": True, "mismatches": []}
+    source_grounding["source_refs"] = [good_ref, wrong_ref]
+    source_grounding["steps"][0]["status"] = "source_backed"
+    source_grounding["steps"][0]["source_refs"] = [good_ref["id"]]
+    source_grounding["steps"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
+    write_yaml(run_dir / "source_grounding.yaml", source_grounding)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    applicability = {
+        "schema_version": 1,
+        "claim_id": source_grounding["claim_id"],
+        "run_id": manifest["run_id"],
+        "generated_at": "2026-06-02T00:00:00+00:00",
+        "source_grounding_artifact": "source_grounding.yaml",
+        "literature_review_agent_artifact": None,
+        "usages": [
+            {
+                "proof_step_id": source_grounding["steps"][0]["proof_step_id"],
+                "source_ref_id": wrong_ref["id"],
+                "theorem_id": None,
+                "theorem_label": "Theorem 1.2",
+                "theorem_statement": "For all cubic fourfolds over C, the obstruction applies.",
+                "locator": {"kind": "theorem", "value": "Theorem 1.2"},
+                "source_status": "source_backed",
+                "conclusion_status": "compatible",
+                "conditions": [
+                    {
+                        "id": "cond_001",
+                        "text": "all hypotheses match",
+                        "condition_type": "other",
+                        "status": "satisfied",
+                        "evidence": "Tampered usage cites the wrong source ref.",
+                        "definition_locator": None,
+                    }
+                ],
+                "applicability_status": "applicable",
+                "blocks_source_backed": False,
+                "notes": ["This usage should be rejected because it cites the wrong source ref."],
+            }
+        ],
+        "overall_status": "all_applicable",
+        "notes": ["Tampered source ref binding."],
+    }
+    write_yaml(run_dir / "theorem_applicability.yaml", applicability)
+    manifest.setdefault("optional_artifacts", {})["theorem_applicability"] = "theorem_applicability.yaml"
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "not used by proof step" in str(exc)
+    else:
+        raise AssertionError("validate_run should reject applicability usage for a different source ref")
