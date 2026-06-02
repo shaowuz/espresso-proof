@@ -16,6 +16,7 @@ from .llm_agents import build_prover_loop_report
 from .llm_agents import external_agent_diagnostic
 from .llm_agents import openai_agent_diagnostic
 from .llm_agents import run_llm_agent_pass
+from .llm_agents import write_initial_prover_round_artifacts
 from .memory import summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
 from .pdf_ingestion import ingest_source_for_theorems
@@ -144,9 +145,15 @@ def run_flow(
     ProverLoopReport.model_validate(loop_report)
     manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
     manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"
+    manifest.setdefault("optional_artifacts", {})["prover_round_index"] = "prover_rounds/index.yaml"
     manifest["current_state"] = "WAITING_LLM_AGENT_HUMAN_GATE"
     write_yaml(run_dir / "llm_agent_run.yaml", agent_report)
     write_yaml(run_dir / "prover_loop.yaml", loop_report)
+    write_initial_prover_round_artifacts(
+        run_dir=run_dir,
+        agent_report=agent_report,
+        loop_report=loop_report,
+    )
     write_yaml(manifest_path, manifest)
     validate_run(run_dir)
 
@@ -339,6 +346,8 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     prover_loop_path = _optional_artifact_path(run, optional_artifacts, "prover_loop")
     if prover_loop_path is not None:
         prover_loop = read_yaml(prover_loop_path)
+        round_index_path = _optional_artifact_path(run, optional_artifacts, "prover_round_index")
+        round_index = read_yaml(round_index_path) if round_index_path is not None else None
         budget = prover_loop.get("budget", {})
         latest_attempt = _focused_prover_loop_attempt(prover_loop)
         blockers = latest_attempt.get("blockers", [])
@@ -369,6 +378,16 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
                 f"action {review.get('recommended_human_action')}"
             )
         typer.echo(f"- blockers: {', '.join(blockers[:3]) if blockers else 'none'}")
+        if round_index is not None:
+            rounds = round_index.get("rounds", [])
+            typer.echo(f"- durable round artifacts: {len(rounds)}")
+            if len(rounds) > 3:
+                typer.echo(f"  showing latest 3 of {len(rounds)}")
+            for item in rounds[-3:]:
+                typer.echo(
+                    f"  {item.get('loop_attempt_id')}: {item.get('artifact_path')} "
+                    f"({item.get('status')}, {item.get('time_allocation')})"
+                )
     memory_summary = summarize_memory(run.parents[1], claim_text=claim.get("normalized_statement", ""))
     if memory_summary:
         typer.echo("")
@@ -670,8 +689,14 @@ def run_llm_agents(
     ProverLoopReport.model_validate(loop_report)
     manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
     manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"
+    manifest.setdefault("optional_artifacts", {})["prover_round_index"] = "prover_rounds/index.yaml"
     write_yaml(run / "llm_agent_run.yaml", report)
     write_yaml(run / "prover_loop.yaml", loop_report)
+    write_initial_prover_round_artifacts(
+        run_dir=run,
+        agent_report=report,
+        loop_report=loop_report,
+    )
     write_yaml(manifest_path, manifest)
     validate_run(run)
     typer.echo(f"Wrote LLM agent run to {run / 'llm_agent_run.yaml'}")
@@ -699,7 +724,13 @@ def resolve_agent_gate(
     )
     ProverLoopReport.model_validate(loop_report)
     manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"
+    manifest.setdefault("optional_artifacts", {})["prover_round_index"] = "prover_rounds/index.yaml"
     write_yaml(run / "prover_loop.yaml", loop_report)
+    write_initial_prover_round_artifacts(
+        run_dir=run,
+        agent_report=report,
+        loop_report=loop_report,
+    )
     write_yaml(run / "run_manifest.yaml", manifest)
     validate_run(run)
     typer.echo(f"Resolved LLM agent human gate as {decision}")

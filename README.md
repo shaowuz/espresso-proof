@@ -6,7 +6,7 @@ It is not a Lean-heavy prover, not a chatbox, and not an agent zoo. The platform
 
 Lean-light is intended adapter behavior after a Lean/Mathlib connector exists: use existing Mathlib results when they help; if they do not exist, continue with critique and counterexample checks. The current kernel does not include Mathlib integration.
 
-This repository now contains the first local engineering kernel: Pydantic schemas, a Typer CLI, mock critique pipeline, `agent_contracts.yaml`, `literature_review.yaml`, `tests.yaml`, `loop_control.yaml`, `strategy_synthesis.yaml`, `strategy_brief.yaml`, `human_choice.yaml`, optional `human_example_feedback.yaml`, optional `example_feedback_summary.yaml`, optional `llm_agent_run.yaml`, optional `prover_loop.yaml`, and optional `theorem_applicability.yaml` artifacts, indexed memory writing/loading, cross-artifact validators, JSON Schema exports, fixture contracts under `tests/fixtures/`, a deterministic `generate-agent --mode v0` admission flow, conservative Literature Discovery commands, PDF/text theorem ingestion, conservative source verification, theorem-applicability auditing, a local VS Code side-panel prototype, a runnable `espresso run-flow` multiagent command, an initial human-gated LLM prover plus Espresso reviewer-set runtime, and two seeded domains: `hodge_atoms` and `coherent_base_change`. It still does not contain LLM tool execution, durable long-running workers, real Evidence Auditor adapters, Mathlib integration, or proof automation.
+This repository now contains the first local engineering kernel: Pydantic schemas, a Typer CLI, mock critique pipeline, `agent_contracts.yaml`, `literature_review.yaml`, `tests.yaml`, `loop_control.yaml`, `strategy_synthesis.yaml`, `strategy_brief.yaml`, `human_choice.yaml`, optional `human_example_feedback.yaml`, optional `example_feedback_summary.yaml`, optional `llm_agent_run.yaml`, optional `prover_loop.yaml`, optional `prover_rounds/index.yaml`, and optional `theorem_applicability.yaml` artifacts, indexed memory writing/loading, cross-artifact validators, JSON Schema exports, fixture contracts under `tests/fixtures/`, a deterministic `generate-agent --mode v0` admission flow, conservative Literature Discovery commands, PDF/text theorem ingestion, conservative source verification, theorem-applicability auditing, a local VS Code side-panel prototype, a runnable `espresso run-flow` multiagent command, an initial human-gated LLM prover plus Espresso reviewer-set runtime, and two seeded domains: `hodge_atoms` and `coherent_base_change`. It still does not contain LLM tool execution, durable long-running workers, real Evidence Auditor adapters, Mathlib integration, or proof automation.
 
 ## Core Position
 
@@ -35,6 +35,7 @@ Supporting documents:
 
 - [docs/product/](docs/product/): product strategy, human-in-the-loop design, idea grading, workflow synthesis, and prompt-building rules.
 - [docs/engineering/](docs/engineering/): local kernel, schemas, evals, implementation goals, and release gates.
+- [docs/engineering/CLEANUP_GUIDE.md](docs/engineering/CLEANUP_GUIDE.md): cleanup-only collaboration contract, layer boundaries, hot files, and future refactor plan.
 - [docs/research/](docs/research/): research survey and source material about AI theorem proving and math agents.
 - [docs/archive/](docs/archive/): older planning notes and collaborator handoffs preserved for history, not current product direction.
 - [docs/AGENT_INFRA_REFERENCES.md](docs/AGENT_INFRA_REFERENCES.md): infrastructure references for LLM provider calls, human-gated agent execution, durable orchestration, and VS Code webviews.
@@ -151,7 +152,7 @@ espresso run-prover-loop-round
 espresso audit-theorem-applicability
 ```
 
-Current command scope is deliberately narrow. `critique-sketch` and `eval` run deterministic mock artifacts. `generate-agent --mode v0` classifies the prompt into a small deterministic domain set, writes a schema-valid draft `workflow_spec.yaml`, `agent_contracts.yaml`, `admission_check.yaml`, `playbook.md`, and `trial_fixture/`, then leaves `admitted: false` until human confirmation. `run-prover-loop-round` appends one resolved-gate prover/reviewer round to `prover_loop.yaml`; it is not a durable long-running worker.
+Current command scope is deliberately narrow. `critique-sketch` and `eval` run deterministic mock artifacts. `generate-agent --mode v0` classifies the prompt into a small deterministic domain set, writes a schema-valid draft `workflow_spec.yaml`, `agent_contracts.yaml`, `admission_check.yaml`, `playbook.md`, and `trial_fixture/`, then leaves `admitted: false` until human confirmation. `run-prover-loop-round` appends one resolved-gate prover/reviewer round to `prover_loop.yaml` and writes durable per-round prover/reviewer artifacts under `prover_rounds/`; it is not a durable long-running worker.
 
 The current product loop is:
 

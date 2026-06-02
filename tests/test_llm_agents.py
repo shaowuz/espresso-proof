@@ -14,7 +14,7 @@ from espresso_proof.io import read_yaml
 from espresso_proof.io import write_yaml
 from espresso_proof.llm_agents import OpenAIResponsesClient, collect_unsafe_language, safe_text
 from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import LLMAgentRunReport, ProverLoopReport
+from espresso_proof.models import LLMAgentRunReport, ProverLoopReport, ProverRoundIndex, ProverRoundReport
 from espresso_proof.validators import validate_run
 from espresso_proof.validators import KernelValidationError
 
@@ -91,6 +91,15 @@ def test_stub_llm_agents_write_schema_valid_candidate_artifact(tmp_path: Path) -
     assert loop.budget.rounds_used == 1
     assert len(loop.attempts) >= 1
     assert loop.attempts[0].time_allocation == "ask_human"
+    index = ProverRoundIndex.model_validate(read_yaml(run_dir / "prover_rounds/index.yaml"))
+    assert manifest["optional_artifacts"]["prover_round_index"] == "prover_rounds/index.yaml"
+    assert len(index.rounds) == len(loop.attempts)
+    for entry in index.rounds:
+        round_report = ProverRoundReport.model_validate(read_yaml(run_dir / entry.artifact_path))
+        assert round_report.loop_attempt_id == entry.loop_attempt_id
+        assert round_report.source == "initial_llm_agent_run"
+        assert round_report.human_gate_status == "pending"
+        assert round_report.safety_note
 
 
 def test_inspect_reports_prover_loop_and_theorem_applicability(tmp_path: Path) -> None:
@@ -128,6 +137,7 @@ def test_inspect_reports_prover_loop_and_theorem_applicability(tmp_path: Path) -
     assert "decision ask_human" in inspected.output
     assert "reviewer strategy_reviewer_001" in inspected.output
     assert "A sketch-only argument cannot become proof-complete evidence." in inspected.output
+    assert "durable round artifacts:" in inspected.output
     assert "latest attempt:" in inspected.output
     assert "proved the theorem" not in inspected.output.lower()
     assert "proof complete" not in inspected.output.lower()
@@ -535,13 +545,15 @@ def test_bridge_snapshot_exposes_prover_loop_and_theorem_applicability(tmp_path:
     assert payload["ok"] is True
     current = payload["payload"]["current"]
     assert current["artifacts"]["prover_loop"]["loop_decision"] == "ask_human"
+    assert len(current["artifacts"]["prover_round_index"]["rounds"]) >= 1
     assert current["artifacts"]["theorem_applicability"]["overall_status"] == "unclear"
     assert current["artifact_paths"]["prover_loop"].endswith("prover_loop.yaml")
+    assert current["artifact_paths"]["prover_round_index"].endswith("prover_rounds/index.yaml")
     assert current["artifact_paths"]["theorem_applicability"].endswith("theorem_applicability.yaml")
     assert {
         item["key"]
         for item in current["progress"]
-    } >= {"prover_loop", "theorem_applicability"}
+    } >= {"prover_loop", "prover_round_index", "theorem_applicability"}
 
 
 def test_bridge_run_flow_openai_missing_key_does_not_write_run(tmp_path: Path) -> None:
@@ -1034,6 +1046,209 @@ def test_prover_loop_reviewer_pointers_must_be_unique(tmp_path: Path) -> None:
         raise AssertionError("validate_run should reject duplicate reviewer pointers")
 
 
+def test_prover_loop_requires_round_index(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    manifest["optional_artifacts"].pop("prover_round_index")
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "prover_loop requires prover_round_index" in str(exc)
+    else:
+        raise AssertionError("validate_run should require prover_round_index")
+
+
+def test_prover_round_artifact_must_match_loop_attempt(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    index = read_yaml(run_dir / "prover_rounds/index.yaml")
+    first_path = run_dir / index["rounds"][0]["artifact_path"]
+    round_report = read_yaml(first_path)
+    round_report["strategy_id"] = "strategy_drifted"
+    write_yaml(first_path, round_report)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "prover round strategy_id" in str(exc)
+    else:
+        raise AssertionError("validate_run should reject drifted prover round artifact")
+
+
+def test_initial_prover_round_body_must_match_llm_agent_run(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    index = read_yaml(run_dir / "prover_rounds/index.yaml")
+    first_path = run_dir / index["rounds"][0]["artifact_path"]
+    round_report = read_yaml(first_path)
+    round_report["verifier_reviews"][0]["objections"] = ["Drifted reviewer body."]
+    write_yaml(first_path, round_report)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "initial round verifier body" in str(exc)
+    else:
+        raise AssertionError("validate_run should reject drifted initial reviewer body")
+
+
+def test_prover_round_rejects_proof_like_language(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    index = read_yaml(run_dir / "prover_rounds/index.yaml")
+    first_path = run_dir / index["rounds"][0]["artifact_path"]
+    round_report = read_yaml(first_path)
+    round_report["prover_attempt"]["output_summary"] = "This proof is complete and verified."
+    write_yaml(first_path, round_report)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "forbidden proof language" in str(exc)
+    else:
+        raise AssertionError("validate_run should reject proof-like prover round language")
+
+
+def test_prover_round_rejects_proof_like_language_variants(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    index = read_yaml(run_dir / "prover_rounds/index.yaml")
+    first_path = run_dir / index["rounds"][0]["artifact_path"]
+    round_report = read_yaml(first_path)
+    round_report["prover_attempt"]["output_summary"] = "The claim has been proven."
+    round_report["prover_attempt"]["proposed_steps"] = ["The route proves the claim."]
+    write_yaml(first_path, round_report)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "forbidden proof language" in str(exc)
+    else:
+        raise AssertionError("validate_run should reject proven/proves proof language")
+
+
+def test_prover_round_input_artifacts_must_match_manifest(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "run-llm-agents",
+            "--run",
+            str(run_dir),
+            "--provider",
+            "stub",
+            "--reviewer-set",
+            "espresso",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    index = read_yaml(run_dir / "prover_rounds/index.yaml")
+    first_path = run_dir / index["rounds"][0]["artifact_path"]
+    round_report = read_yaml(first_path)
+    round_report["input_artifacts"] = ["locked_claim.yaml", "../outside.yaml", "missing.yaml"]
+    write_yaml(first_path, round_report)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "prover round input_artifacts" in str(exc)
+    else:
+        raise AssertionError("validate_run should reject unknown or escaping round input artifacts")
+
+
 def test_run_prover_loop_round_appends_child_attempt(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
         "hodge_atoms",
@@ -1110,6 +1325,64 @@ def test_run_prover_loop_round_appends_child_attempt(tmp_path: Path) -> None:
     assert child.strategy_id == "strategy_pin_reference"
     assert child.prover_attempt_id == "llm_prover_002"
     assert len(set(child.reviewer_ids)) == 3
+    index = ProverRoundIndex.model_validate(read_yaml(run_dir / "prover_rounds/index.yaml"))
+    assert len(index.rounds) == len(loop.attempts)
+    child_entry = next(entry for entry in index.rounds if entry.loop_attempt_id == child.attempt_id)
+    child_round = ProverRoundReport.model_validate(read_yaml(run_dir / child_entry.artifact_path))
+    assert child_round.source == "appended_prover_loop_round"
+    assert child_round.loop_attempt_id == child.attempt_id
+    assert child_round.parent_attempt_id == child.parent_attempt_id
+    assert child_round.prover_attempt.agent_id == child.prover_attempt_id
+    assert {review.verifier_id for review in child_round.verifier_reviews} == set(child.reviewer_ids)
+
+
+def test_appended_prover_round_reviewers_must_match_loop_pointers(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    runner = CliRunner()
+    chosen = runner.invoke(
+        app,
+        [
+            "choose-strategy",
+            "--run",
+            str(run_dir),
+            "--strategy",
+            "strategy_pin_reference",
+            "--effort",
+            "normal_pass",
+            "--decision",
+            "continue",
+            "--reason",
+            "Continue by repairing the source-pinning route.",
+        ],
+    )
+    assert chosen.exit_code == 0, chosen.output
+    assert runner.invoke(app, ["run-llm-agents", "--run", str(run_dir), "--provider", "stub"]).exit_code == 0
+    assert runner.invoke(
+        app,
+        ["resolve-agent-gate", "--run", str(run_dir), "--decision", "revise", "--reason", "repair"],
+    ).exit_code == 0
+    appended = runner.invoke(
+        app,
+        ["run-prover-loop-round", "--run", str(run_dir), "--provider", "stub"],
+    )
+    assert appended.exit_code == 0, appended.output
+    index = read_yaml(run_dir / "prover_rounds/index.yaml")
+    child_entry = next(entry for entry in index["rounds"] if entry["round_index"] == 2)
+    child_path = run_dir / child_entry["artifact_path"]
+    child_round = read_yaml(child_path)
+    child_round["verifier_reviews"][0]["recommended_human_action"] = "continue"
+    write_yaml(child_path, child_round)
+
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "prover round reviewer action" in str(exc)
+    else:
+        raise AssertionError("validate_run should reject appended reviewer pointer drift")
 
 
 def test_prover_loop_round_prompt_contains_reviewer_blockers(tmp_path: Path) -> None:

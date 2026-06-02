@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .io import read_yaml, write_yaml
-from .models import LLMAgentRunReport, ProverLoopReport
+from .models import LLMAgentRunReport, ProverLoopReport, ProverRoundIndex, ProverRoundReport
 
 
 AGENT_OUTPUT_SCHEMA = {
@@ -609,6 +609,111 @@ def build_prover_loop_report(
     return report
 
 
+def write_initial_prover_round_artifacts(
+    *,
+    run_dir: Path,
+    agent_report: dict,
+    loop_report: dict,
+) -> dict:
+    """Write durable round artifacts for the initial prover/reviewer pass."""
+    for attempt in loop_report.get("attempts", []):
+        if attempt.get("round_index") != 1:
+            continue
+        _write_prover_round_artifact(
+            run_dir=run_dir,
+            agent_report=agent_report,
+            loop_report=loop_report,
+            attempt=attempt,
+            prover_attempt=agent_report["prover_attempt"],
+            verifier_reviews=agent_report["verifier_reviews"],
+            source="initial_llm_agent_run",
+        )
+    return refresh_prover_round_index(run_dir=run_dir, loop_report=loop_report)
+
+
+def refresh_prover_round_index(*, run_dir: Path, loop_report: dict) -> dict:
+    rounds_dir = run_dir / "prover_rounds"
+    entries = []
+    for attempt in loop_report.get("attempts", []):
+        artifact_path = _round_artifact_rel_path(attempt)
+        path = run_dir / artifact_path
+        if not path.exists():
+            continue
+        round_report = ProverRoundReport.model_validate(read_yaml(path))
+        entries.append(
+            {
+                "round_index": round_report.round_index,
+                "strategy_id": round_report.strategy_id,
+                "loop_attempt_id": round_report.loop_attempt_id,
+                "artifact_path": artifact_path,
+                "status": round_report.status,
+                "time_allocation": round_report.time_allocation,
+            }
+        )
+    index = {
+        "schema_version": 1,
+        "claim_id": loop_report["claim_id"],
+        "run_id": loop_report["run_id"],
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source_prover_loop": "prover_loop.yaml",
+        "rounds": sorted(entries, key=lambda item: (item["round_index"], item["loop_attempt_id"])),
+    }
+    ProverRoundIndex.model_validate(index)
+    rounds_dir.mkdir(exist_ok=True)
+    write_yaml(run_dir / "prover_rounds" / "index.yaml", index)
+    return index
+
+
+def _write_prover_round_artifact(
+    *,
+    run_dir: Path,
+    agent_report: dict,
+    loop_report: dict,
+    attempt: dict,
+    prover_attempt: dict,
+    verifier_reviews: list[dict],
+    source: str,
+) -> dict:
+    report = {
+        "schema_version": 1,
+        "claim_id": loop_report["claim_id"],
+        "run_id": loop_report["run_id"],
+        "round_index": attempt["round_index"],
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source": source,
+        "strategy_id": attempt["strategy_id"],
+        "loop_attempt_id": attempt["attempt_id"],
+        "parent_attempt_id": attempt.get("parent_attempt_id"),
+        "input_artifacts": agent_report.get("input_artifacts", INPUT_ARTIFACTS),
+        "context_summary": (
+            "Durable prover/reviewer round artifact. It records the candidate prover output, "
+            "the independent reviewer outputs, and the loop allocation for this strategy."
+        ),
+        "prover_attempt": prover_attempt,
+        "verifier_reviews": verifier_reviews,
+        "reviewer_blockers": attempt.get("blockers", []),
+        "human_gate_status": loop_report["human_gate_status"],
+        "time_allocation": attempt["time_allocation"],
+        "status": attempt["status"],
+        "next_action": attempt["next_action"],
+        "safety_note": (
+            "This round artifact does not upgrade proof status, source_backed status, "
+            "checked evidence, or human preference into verification."
+        ),
+    }
+    ProverRoundReport.model_validate(report)
+    path = run_dir / _round_artifact_rel_path(attempt)
+    path.parent.mkdir(exist_ok=True)
+    write_yaml(path, report)
+    return report
+
+
+def _round_artifact_rel_path(attempt: dict) -> str:
+    strategy = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(attempt.get("strategy_id", "strategy")))
+    attempt_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(attempt.get("attempt_id", "attempt")))
+    return f"prover_rounds/round_{int(attempt['round_index']):03d}_{attempt_id}_{strategy}.yaml"
+
+
 def _selected_strategy_from_choice(human_choice: dict | None, strategies: list[dict]) -> str | None:
     strategy_ids = [strategy.get("id") for strategy in strategies]
     if (
@@ -829,27 +934,26 @@ def append_prover_loop_round(
     ]
     selected_strategy_id = parent_attempt["strategy_id"]
     allocation = "repair" if blockers else "expand"
-    loop_report["attempts"].append(
-        {
-            "attempt_id": f"attempt_round_{next_round:03d}_{selected_strategy_id}",
-            "round_index": next_round,
-            "strategy_id": selected_strategy_id,
-            "parent_attempt_id": parent_attempt["attempt_id"],
-            "prover_attempt_id": prover["agent_id"],
-            "source_request_count": len(prover.get("source_requests", [])),
-            "risk_count": len(prover.get("risks", [])),
-            "reviewer_ids": [review["verifier_id"] for review in verifier_reviews],
-            "reviewer_objections": reviewer_pointers,
-            "time_allocation": allocation,
-            "status": "needs_repair" if blockers else "candidate",
-            "blockers": blockers,
-            "next_action": (
-                "Repair reviewer blockers before another proof round."
-                if blockers
-                else "Expand this candidate with source matching and checked examples."
-            ),
-        }
-    )
+    new_attempt = {
+        "attempt_id": f"attempt_round_{next_round:03d}_{selected_strategy_id}",
+        "round_index": next_round,
+        "strategy_id": selected_strategy_id,
+        "parent_attempt_id": parent_attempt["attempt_id"],
+        "prover_attempt_id": prover["agent_id"],
+        "source_request_count": len(prover.get("source_requests", [])),
+        "risk_count": len(prover.get("risks", [])),
+        "reviewer_ids": [review["verifier_id"] for review in verifier_reviews],
+        "reviewer_objections": reviewer_pointers,
+        "time_allocation": allocation,
+        "status": "needs_repair" if blockers else "candidate",
+        "blockers": blockers,
+        "next_action": (
+            "Repair reviewer blockers before another proof round."
+            if blockers
+            else "Expand this candidate with source matching and checked examples."
+        ),
+    }
+    loop_report["attempts"].append(new_attempt)
     loop_report["generated_at"] = datetime.now(UTC).isoformat()
     loop_report["budget"]["rounds_used"] = len(
         {attempt["round_index"] for attempt in loop_report["attempts"]}
@@ -861,6 +965,24 @@ def append_prover_loop_round(
     )
     ProverLoopReport.model_validate(loop_report)
     write_yaml(run_dir / loop_path, loop_report)
+    if not (run_dir / "prover_rounds" / "index.yaml").exists():
+        write_initial_prover_round_artifacts(
+            run_dir=run_dir,
+            agent_report=agent_report,
+            loop_report=loop_report,
+        )
+    _write_prover_round_artifact(
+        run_dir=run_dir,
+        agent_report=agent_report,
+        loop_report=loop_report,
+        attempt=new_attempt,
+        prover_attempt=prover,
+        verifier_reviews=verifier_reviews,
+        source="appended_prover_loop_round",
+    )
+    refresh_prover_round_index(run_dir=run_dir, loop_report=loop_report)
+    manifest.setdefault("optional_artifacts", {})["prover_round_index"] = "prover_rounds/index.yaml"
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
     return loop_report
 
 

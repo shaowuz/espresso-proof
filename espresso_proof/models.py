@@ -1237,6 +1237,76 @@ class ProverLoopReport(StrictBaseModel):
         return self
 
 
+class ProverRoundReport(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    round_index: int = Field(ge=1)
+    generated_at: str
+    source: Literal["initial_llm_agent_run", "appended_prover_loop_round"]
+    strategy_id: str
+    loop_attempt_id: str
+    parent_attempt_id: str | None = None
+    input_artifacts: list[str]
+    context_summary: str
+    prover_attempt: LLMAgentAttempt
+    verifier_reviews: list[LLMAgentVerifierReview]
+    reviewer_blockers: list[str] = Field(default_factory=list)
+    human_gate_status: Literal["pending", "resolved"]
+    time_allocation: Literal["expand", "repair", "cheap_check", "pause", "ask_human", "stop"]
+    status: Literal["candidate", "needs_repair", "blocked", "waiting_human", "stopped"]
+    next_action: str
+    safety_note: str
+
+    @model_validator(mode="after")
+    def validate_round_report(self) -> ProverRoundReport:
+        if self.prover_attempt.role != "prover":
+            raise ValueError("prover_attempt must have role=prover")
+        if len(self.verifier_reviews) < 3:
+            raise ValueError("proof-close-style prover round requires at least three verifier reviews")
+        reviewer_ids = [review.verifier_id for review in self.verifier_reviews]
+        if len(reviewer_ids) != len(set(reviewer_ids)):
+            raise ValueError("prover round verifier ids must be unique")
+        if self.status in {"needs_repair", "blocked"} and not self.reviewer_blockers:
+            raise ValueError("repair/blocked prover round requires reviewer_blockers")
+        if self.human_gate_status == "pending":
+            if self.time_allocation not in {"ask_human", "stop"}:
+                raise ValueError("pending human gate cannot allocate prover work")
+            if self.status not in {"waiting_human", "stopped"}:
+                raise ValueError("pending human gate requires waiting_human or stopped status")
+        lowered_note = self.safety_note.lower()
+        if "does not upgrade" not in lowered_note and "not proof status" not in lowered_note:
+            raise ValueError("prover round safety_note must preserve proof-status boundary")
+        return self
+
+
+class ProverRoundIndexEntry(StrictBaseModel):
+    round_index: int = Field(ge=1)
+    strategy_id: str
+    loop_attempt_id: str
+    artifact_path: str
+    status: Literal["candidate", "needs_repair", "blocked", "waiting_human", "stopped"]
+    time_allocation: Literal["expand", "repair", "cheap_check", "pause", "ask_human", "stop"]
+
+
+class ProverRoundIndex(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    source_prover_loop: str
+    rounds: list[ProverRoundIndexEntry]
+
+    @model_validator(mode="after")
+    def validate_round_index(self) -> ProverRoundIndex:
+        keys = [(entry.round_index, entry.loop_attempt_id) for entry in self.rounds]
+        if len(keys) != len(set(keys)):
+            raise ValueError("prover round index entries must be unique by round_index and loop_attempt_id")
+        if not self.rounds:
+            raise ValueError("prover round index requires at least one round")
+        return self
+
+
 class MemoryEntry(StrictBaseModel):
     id: str
     timestamp: str
@@ -1367,6 +1437,8 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "example_feedback_summary": ExampleFeedbackSummary,
     "llm_agent_run": LLMAgentRunReport,
     "prover_loop": ProverLoopReport,
+    "prover_round": ProverRoundReport,
+    "prover_round_index": ProverRoundIndex,
     "memory_entry": MemoryEntry,
     "memory_index": MemoryIndex,
     "run_manifest": RunManifest,
