@@ -8,3 +8,9 @@ espresso_proof.egg-info/
 projects/*/runs/
 projects/*/memory/
 runs/
+
+# Local paper/source scratch files downloaded into the repository root.
+/*.pdf
+/*.txt
+/*_source/
+/*_source.tar.gz
