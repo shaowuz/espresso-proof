@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 
 from espresso_proof.cli import _assert_fixture_expectations, app
 from espresso_proof.io import read_yaml
-from espresso_proof.kernel import KernelError, safe_run_path, snapshot
+from espresso_proof.kernel import KernelError, require_inside, safe_run_path, snapshot
 from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.memory import load_memory_index, summarize_memory, write_memory_entry
 from espresso_proof.models import (
@@ -92,6 +92,32 @@ def test_kernel_safe_run_path_rejects_escape(tmp_path: Path) -> None:
         safe_run_path(run_dir, str(tmp_path / "outside.yaml"))
     with pytest.raises(KernelError, match="cannot contain"):
         safe_run_path(run_dir, "../outside.yaml")
+
+
+def test_kernel_safe_run_path_rejects_symlink(tmp_path: Path) -> None:
+    # The VS Code bridge resolves artifact paths through safe_run_path; a symlink
+    # pointing outside the run must be rejected (VS_CODE_ARTIFACT_DASHBOARD:
+    # artifact paths must not escape workspace).
+    run_dir = tmp_path / "projects" / "hodge_atoms" / "runs" / "run_001"
+    run_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("not: trusted\n", encoding="utf-8")
+    (run_dir / "linked.yaml").symlink_to(outside)
+
+    with pytest.raises(KernelError, match="symlink"):
+        safe_run_path(run_dir, "linked.yaml")
+
+
+def test_kernel_require_inside_confines_to_workspace(tmp_path: Path) -> None:
+    # require_inside is the bridge's workspace-confinement guard; verify it
+    # directly (it is otherwise only exercised through snapshot).
+    root = (tmp_path / "workspace").resolve()
+    inside = root / "projects" / "p" / "runs" / "r"
+    inside.mkdir(parents=True)
+
+    assert require_inside(root, inside.resolve()) == inside.resolve()
+    with pytest.raises(KernelError, match="outside workspace"):
+        require_inside(root, (root / ".." / "evil").resolve())
 
 
 def test_kernel_snapshot_rejects_requested_run_outside_workspace(tmp_path: Path) -> None:
