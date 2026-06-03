@@ -552,6 +552,18 @@ def test_workflow_generator_classifies_domains() -> None:
     WorkflowSpec.model_validate(generic_spec)
 
 
+def test_workflow_spec_rejects_missing_lean_non_goal() -> None:
+    # Espresso is not Lean-heavy by default (KERNEL_SAFETY_RULES Mathematical
+    # Status Rules): a workflow spec must keep Lean formalization an explicit
+    # non-goal. Dropping that non-goal must be rejected.
+    spec = read_yaml(Path("projects/hodge_atoms/workflow_spec.yaml"))
+    spec["non_goals"] = [
+        goal for goal in spec["non_goals"] if "lean formalization" not in goal.lower()
+    ]
+    with pytest.raises(ValueError, match="reject Lean formalization"):
+        WorkflowSpec.model_validate(spec)
+
+
 def test_strategy_rules_reject_standard_score_overreach(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
         "hodge_atoms",
@@ -1201,6 +1213,46 @@ def test_human_feedback_schema_rejects_evidence_status_fields() -> None:
         ],
     }
 
+    with pytest.raises(ValueError, match="Extra inputs"):
+        HumanExampleFeedback.model_validate(data)
+
+
+def _human_feedback_with_extra(extra: dict) -> dict:
+    """A valid human feedback payload plus one forbidden extra field."""
+    item = {
+        "feedback_id": "feedback_001",
+        "target_type": "source_ref",
+        "target_artifact": "source_grounding.yaml",
+        "target_id": "src_candidate_001",
+        "labels": ["needs_source"],
+        "reason": "Needs an exact theorem locator.",
+        "scope": "project",
+        "requested_actions": ["run_referencing"],
+        "human_confirmed": True,
+        **extra,
+    }
+    return {
+        "schema_version": 1,
+        "project_id": "hodge_atoms",
+        "claim_id": "claim_001",
+        "run_id": "run_001",
+        "created_at": "2026-05-28T12:00:00Z",
+        "feedback": [item],
+    }
+
+
+def test_human_feedback_schema_rejects_checked_status_fields() -> None:
+    # Human taste cannot mark examples/computations checked (KERNEL_SAFETY_RULES
+    # Human Feedback Rules): the feedback schema has no evidence-status slot.
+    data = _human_feedback_with_extra({"evidence_status": "checked"})
+    with pytest.raises(ValueError, match="Extra inputs"):
+        HumanExampleFeedback.model_validate(data)
+
+
+def test_human_feedback_schema_rejects_proof_status_field() -> None:
+    # Human taste cannot upgrade proof status (KERNEL_SAFETY_RULES Human Feedback
+    # Rules): the feedback schema has no proof-status slot.
+    data = _human_feedback_with_extra({"proof_status": "proof_complete"})
     with pytest.raises(ValueError, match="Extra inputs"):
         HumanExampleFeedback.model_validate(data)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
@@ -285,6 +286,37 @@ def test_literature_review_agent_flags_very_general_theorem_for_universal_claim(
     assert any(match.relation == "incompatible" for match in comparison.hypothesis_matches)
     assert "hypothesis_mismatch" in set(comparison.uncertainty.failure_modes)
     assert parsed.relevance_summary.overall_status in {"unclear", "background_only"}
+
+
+def test_literature_review_agent_cannot_emit_source_backed_source(tmp_path: Path) -> None:
+    # Literature Review finds candidate references only; it cannot decide
+    # source_backed or misapplied (KERNEL_SAFETY_RULES Literature And Source
+    # Rules). Those remain Referencing / Source Grounding decisions.
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    source_path = tmp_path / "agent_source.txt"
+    source_path.write_text(
+        "Theorem 1.2. For all cubic fourfolds over base field C, "
+        "the Hodge atom obstruction proves irrationality.\n",
+        encoding="utf-8",
+    )
+    report = run_literature_review_agent(
+        run_dir=run_dir,
+        source_specs=[
+            ReviewSourceSpec(
+                source=str(source_path),
+                source_id="src_agent",
+                title="Agent source",
+            )
+        ],
+    )
+
+    report["input_sources"][0]["source_ref"]["status"] = "misapplied"
+    with pytest.raises(ValueError, match="may not emit source_backed or misapplied"):
+        LiteratureReviewAgentReport.model_validate(report)
 
 
 def test_literature_review_agent_cli_writes_optional_artifact(tmp_path: Path) -> None:
