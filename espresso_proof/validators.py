@@ -45,7 +45,6 @@ from .strategy_rules import validate_strategy_rules
 from .validation.errors import KernelValidationError
 from .validation.evidence import (
     _validate_computation_verification,
-    _validate_counterexample_scope,
     _validate_example_evidence,
     _validate_test_report_evidence,
 )
@@ -111,7 +110,6 @@ def validate_run(run_dir: Path) -> None:
     )
     _validate_agent_contracts(agent_contracts, artifacts)
     _validate_literature_review_separation(literature_review)
-    _validate_counterexample_scope(counterexamples)
     _validate_test_report_evidence(computations, examples, counterexamples, tests)
     _validate_computation_verification(computations, computation_verification)
     _validate_example_evidence(computations, counterexamples, idea_grade)

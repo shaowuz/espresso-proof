@@ -232,15 +232,21 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     validate_run(run)
     manifest = read_yaml(run / "run_manifest.yaml")
     optional_artifacts = manifest.get("optional_artifacts", {})
+    artifacts = manifest.get("artifacts", {})
     typer.echo(f"Run is valid: {run}")
-    claim = read_yaml(run / "locked_claim.yaml")
-    grade = read_yaml(run / "idea_grade.yaml")
-    review = read_yaml(run / "review.yaml")
-    strategy_brief = read_yaml(run / "strategy_brief.yaml")
-    source_grounding = read_yaml(run / "source_grounding.yaml")
-    human_choice = read_yaml(run / "human_choice.yaml")
-    examples = read_yaml(run / "examples.yaml")
-    counterexamples = read_yaml(run / "counterexamples.yaml")
+
+    def _artifact(key: str) -> dict:
+        # Resolve through the run manifest (source of truth), not hardcoded names.
+        return read_yaml(run / artifacts[key])
+
+    claim = _artifact("locked_claim")
+    grade = _artifact("idea_grade")
+    review = _artifact("review")
+    strategy_brief = _artifact("strategy_brief")
+    source_grounding = _artifact("source_grounding")
+    human_choice = _artifact("human_choice")
+    examples = _artifact("examples")
+    counterexamples = _artifact("counterexamples")
 
     failed_reviewers = [
         reviewer["reviewer_id"]

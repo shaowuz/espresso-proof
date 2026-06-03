@@ -538,7 +538,9 @@ def _setup_source_backed_run(tmp_path: Path):
     return run_dir, manifest, source_grounding, ref_id, step_id
 
 
-def _write_applicability(run_dir: Path, manifest: dict, claim_id: str, usages: list[dict]) -> None:
+def _write_applicability(
+    run_dir: Path, manifest: dict, claim_id: str, usages: list[dict], **report_overrides
+) -> None:
     applicability = {
         "schema_version": 1,
         "claim_id": claim_id,
@@ -550,9 +552,55 @@ def _write_applicability(run_dir: Path, manifest: dict, claim_id: str, usages: l
         "overall_status": "unclear",
         "notes": ["test applicability fixture"],
     }
+    applicability.update(report_overrides)
     write_yaml(run_dir / "theorem_applicability.yaml", applicability)
     manifest.setdefault("optional_artifacts", {})["theorem_applicability"] = "theorem_applicability.yaml"
     write_yaml(run_dir / "run_manifest.yaml", manifest)
+
+
+def test_theorem_applicability_rejects_claim_id_mismatch(tmp_path: Path) -> None:
+    run_dir, manifest, source_grounding, _ref, _step = _setup_source_backed_run(tmp_path)
+    _write_applicability(run_dir, manifest, "claim_does_not_exist", usages=[])
+    with pytest.raises(KernelValidationError, match="claim_id does not match locked claim"):
+        validate_run(run_dir)
+
+
+def test_theorem_applicability_rejects_run_id_mismatch(tmp_path: Path) -> None:
+    run_dir, manifest, source_grounding, _ref, _step = _setup_source_backed_run(tmp_path)
+    _write_applicability(
+        run_dir, manifest, source_grounding["claim_id"], usages=[], run_id="run_does_not_exist"
+    )
+    with pytest.raises(KernelValidationError, match="run_id does not match manifest"):
+        validate_run(run_dir)
+
+
+def test_theorem_applicability_rejects_source_grounding_artifact_mismatch(tmp_path: Path) -> None:
+    run_dir, manifest, source_grounding, _ref, _step = _setup_source_backed_run(tmp_path)
+    _write_applicability(
+        run_dir,
+        manifest,
+        source_grounding["claim_id"],
+        usages=[],
+        source_grounding_artifact="not_source_grounding.yaml",
+    )
+    with pytest.raises(KernelValidationError, match="must cite the source_grounding artifact"):
+        validate_run(run_dir)
+
+
+def test_theorem_applicability_rejects_unknown_proof_step(tmp_path: Path) -> None:
+    run_dir, manifest, source_grounding, ref_id, _step = _setup_source_backed_run(tmp_path)
+    usage = _theorem_usage(proof_step_id="ghost_step", source_ref_id=ref_id)
+    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[usage])
+    with pytest.raises(KernelValidationError, match="references unknown proof step"):
+        validate_run(run_dir)
+
+
+def test_theorem_applicability_rejects_unknown_source_ref(tmp_path: Path) -> None:
+    run_dir, manifest, source_grounding, _ref, step_id = _setup_source_backed_run(tmp_path)
+    usage = _theorem_usage(proof_step_id=step_id, source_ref_id="ghost_ref")
+    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[usage])
+    with pytest.raises(KernelValidationError, match="references unknown source ref"):
+        validate_run(run_dir)
 
 
 def test_source_backed_step_lacks_applicability_audit_is_rejected(tmp_path: Path) -> None:

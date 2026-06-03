@@ -7,9 +7,13 @@ violation, preserving the exact messages other code and tests depend on.
 Evidence invariants enforced here:
 
 - unchecked examples cannot justify survived/failed tests,
-- dropped-hypothesis failures cannot refute the original claim,
 - counterexample tests must trace to known examples/counterexamples,
 - machine-refuted computation checks cannot claim checked/source_checked.
+
+The counterexample refutation-scope rules (a dropped-hypothesis failure and a
+proof-step attack cannot refute the original claim) are enforced authoritatively
+at parse time by CounterexampleTest.validate_refutation_scope in models.py, so
+they are intentionally not duplicated here.
 """
 
 from __future__ import annotations
@@ -26,14 +30,6 @@ from ..models import (
     VerificationVerdict,
 )
 from .errors import KernelValidationError
-
-
-def _validate_counterexample_scope(counterexamples: CounterexampleReport) -> None:
-    for test in counterexamples.tests:
-        if test.satisfies_all_claim_hypotheses is False and test.refutes_claim:
-            raise KernelValidationError(
-                f"{test.id}: dropped-hypothesis failure cannot refute the original claim"
-            )
 
 
 def _validate_example_evidence(
