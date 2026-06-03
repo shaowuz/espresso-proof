@@ -13,7 +13,7 @@ from espresso_proof.cli import _assert_fixture_expectations, app
 from espresso_proof.io import read_yaml
 from espresso_proof.kernel import KernelError, safe_run_path, snapshot
 from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.memory import load_memory_index, summarize_memory
+from espresso_proof.memory import load_memory_index, summarize_memory, write_memory_entry
 from espresso_proof.models import (
     AdmissionCheck,
     AgentContracts,
@@ -23,6 +23,7 @@ from espresso_proof.models import (
     ExampleFeedbackSummary,
     HumanChoice,
     HumanExampleFeedback,
+    MemoryEntry,
     MemoryIndex,
     Review,
     SourceGroundingReport,
@@ -521,6 +522,53 @@ def test_memory_summary_loads_written_memory(tmp_path: Path) -> None:
     assert "Source gaps" in summary
     assert "top strategy" in summary
     assert "provenance:" in summary
+
+
+def _memory_entry(**overrides) -> dict:
+    entry = {
+        "id": "mem_entry_1",
+        "timestamp": "2026-06-03T00:00:00+00:00",
+        "project": "mem_proj",
+        "type": "failed_attempt",
+        "claim_id": "claim_1",
+        "summary": "specialization route stalled at step 3",
+        "provenance": ["run:demo"],
+        "reusable_lesson": "specialization route needs a flatness check first",
+    }
+    entry.update(overrides)
+    return entry
+
+
+def test_memory_entry_schema_rejects_status_fields() -> None:
+    # Memory is advisory, not evidential: it cannot set source_backed, mark
+    # examples checked, or upgrade proof status (KERNEL_SAFETY_RULES; memory_reuse
+    # slice). The schema has no status slot, so any such field is rejected.
+    for forbidden in ("source_backed", "examples_checked", "proof_status"):
+        with pytest.raises(ValueError, match="Extra inputs"):
+            MemoryEntry.model_validate(_memory_entry(**{forbidden: True}))
+
+
+def test_memory_summary_includes_failed_route(tmp_path: Path) -> None:
+    project_dir = tmp_path / "projects" / "mem_proj"
+    write_memory_entry(project_dir, _memory_entry(id="mem_failed_1"))
+
+    summary = summarize_memory(project_dir, claim_text="specialization route flatness")
+    assert "Previous failed routes:" in summary
+    assert "mem_failed_1" in summary
+
+
+def test_memory_summary_is_deterministic(tmp_path: Path) -> None:
+    project_dir = tmp_path / "projects" / "mem_det"
+    write_memory_entry(project_dir, _memory_entry(id="mem_a", type="failed_attempt"))
+    write_memory_entry(
+        project_dir,
+        _memory_entry(id="mem_b", type="source_gap", summary="missing exact locator for Theorem 1.2"),
+    )
+
+    first = summarize_memory(project_dir, claim_text="cubic fourfold locator")
+    second = summarize_memory(project_dir, claim_text="cubic fourfold locator")
+    assert first == second
+    assert first  # non-empty
 
 
 def test_workflow_generator_classifies_domains() -> None:
