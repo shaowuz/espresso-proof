@@ -1257,6 +1257,20 @@ def test_human_feedback_schema_rejects_proof_status_field() -> None:
         HumanExampleFeedback.model_validate(data)
 
 
+def test_human_choice_schema_cannot_override_applicability() -> None:
+    # Human preference cannot override theorem applicability / source status
+    # (KERNEL_SAFETY_RULES Human Feedback Rules): HumanChoice has no slot to
+    # set applicability or source status, so any such field is rejected.
+    data = {
+        "claim_id": "claim_001",
+        "status": "pending",
+        "continue_decision": "pending",
+        "applicability_status": "applicable",
+    }
+    with pytest.raises(ValueError, match="Extra inputs"):
+        HumanChoice.model_validate(data)
+
+
 def test_feedback_example_cli_writes_valid_optional_artifact(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
         "hodge_atoms",

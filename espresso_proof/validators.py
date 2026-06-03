@@ -597,6 +597,10 @@ def _validate_theorem_applicability(
             raise KernelValidationError(
                 f"{step.proof_step_id}: source_backed theorem step has unsatisfied theorem conditions"
             )
+        if not usage.locator.is_exact:
+            raise KernelValidationError(
+                f"{step.proof_step_id}: source_backed theorem step requires an exact applicability locator"
+            )
 
 
 def _validate_review_outcome(review: Review, idea_grade: IdeaGrade) -> None:
