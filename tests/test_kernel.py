@@ -18,6 +18,7 @@ from espresso_proof.models import (
     AdmissionCheck,
     AgentContracts,
     ComputationChecks,
+    CounterexampleTest,
     ExampleBank,
     ExampleFeedbackSummary,
     HumanChoice,
@@ -1255,6 +1256,64 @@ def test_human_feedback_schema_rejects_proof_status_field() -> None:
     data = _human_feedback_with_extra({"proof_status": "proof_complete"})
     with pytest.raises(ValueError, match="Extra inputs"):
         HumanExampleFeedback.model_validate(data)
+
+
+def _counterexample_test(**overrides) -> dict:
+    """A valid CounterexampleTest payload; override fields to break it."""
+    data = {
+        "id": "cx_1",
+        "operator_id": "op_specialize",
+        "example_id": "ex_1",
+        "satisfies_all_claim_hypotheses": True,
+        "target": "theorem",
+        "result": "survived",
+        "refutes_claim": False,
+        "refutes_step_only": False,
+        "exposes_missing_hypothesis": False,
+        "explanation": "A canonical test of the claim.",
+    }
+    data.update(overrides)
+    return data
+
+
+def test_counterexample_proof_step_attack_cannot_refute_claim() -> None:
+    # A proof-step failure is not automatically a theorem refutation
+    # (KERNEL_SAFETY_RULES Example And Counterexample Rules).
+    data = _counterexample_test(
+        target="proof_step",
+        result="failed",
+        refutes_step_only=True,
+        refutes_claim=True,
+    )
+    with pytest.raises(ValueError, match="proof-step attack cannot refute"):
+        CounterexampleTest.model_validate(data)
+
+
+def test_counterexample_dropped_hypothesis_cannot_refute_claim() -> None:
+    # Dropping a claim hypothesis cannot refute the original claim
+    # (KERNEL_SAFETY_RULES Example And Counterexample Rules), enforced at the
+    # model level, not only cross-artifact.
+    data = _counterexample_test(
+        satisfies_all_claim_hypotheses=False,
+        result="failed",
+        refutes_claim=True,
+    )
+    with pytest.raises(ValueError, match="dropped-hypothesis tests cannot refute"):
+        CounterexampleTest.model_validate(data)
+
+
+def test_counterexample_accepts_optional_support_fields() -> None:
+    # The optional missing_hypothesis / support fields are additive and accepted.
+    test = CounterexampleTest.model_validate(
+        _counterexample_test(
+            target="hypothesis",
+            exposes_missing_hypothesis=True,
+            missing_hypothesis="projectivity",
+            support="cited computation in source S1",
+        )
+    )
+    assert test.missing_hypothesis == "projectivity"
+    assert test.support == "cited computation in source S1"
 
 
 def test_human_choice_schema_cannot_override_applicability() -> None:

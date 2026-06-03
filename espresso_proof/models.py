@@ -674,6 +674,8 @@ class CounterexampleTest(StrictBaseModel):
     refutes_claim: bool
     refutes_step_only: bool
     exposes_missing_hypothesis: bool
+    missing_hypothesis: str | None = None
+    support: str | None = None
     explanation: str
     repaired_claim_suggestion: str | None = None
 
@@ -681,6 +683,8 @@ class CounterexampleTest(StrictBaseModel):
     def validate_refutation_scope(self) -> CounterexampleTest:
         if self.satisfies_all_claim_hypotheses is False and self.refutes_claim:
             raise ValueError("dropped-hypothesis tests cannot refute the original claim")
+        if self.refutes_step_only and self.refutes_claim:
+            raise ValueError("a proof-step attack cannot refute the original claim")
         return self
 
 
