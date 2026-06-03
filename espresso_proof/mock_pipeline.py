@@ -5,7 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .contracts import default_agent_contracts
-from .io import read_text, read_yaml, write_text, write_yaml
+from .io import read_text, write_text, write_yaml
 from .memory import write_run_memory
 from .validators import validate_run
 
