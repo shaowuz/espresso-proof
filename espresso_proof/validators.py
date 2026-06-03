@@ -12,6 +12,8 @@ from .models import (
     Claim,
     ComputationStatus,
     ComputationChecks,
+    ComputationVerificationReport,
+    VerificationVerdict,
     CounterexampleReport,
     ContinueDecision,
     ExampleSelection,
@@ -69,6 +71,7 @@ def validate_run(run_dir: Path) -> None:
     )
     examples = validate_yaml_model(run_dir / artifacts["examples"], ExampleSelection)
     computations = validate_yaml_model(run_dir / artifacts["computation_checks"], ComputationChecks)
+    computation_verification = _load_optional_computation_verification(run_dir, manifest)
     counterexamples = validate_yaml_model(run_dir / artifacts["counterexamples"], CounterexampleReport)
     tests = validate_yaml_model(run_dir / artifacts["tests"], TestReport)
     source_grounding = validate_yaml_model(run_dir / artifacts["source_grounding"], SourceGroundingReport)
@@ -108,6 +111,7 @@ def validate_run(run_dir: Path) -> None:
     _validate_literature_review_separation(literature_review)
     _validate_counterexample_scope(counterexamples)
     _validate_test_report_evidence(computations, examples, counterexamples, tests)
+    _validate_computation_verification(computations, computation_verification)
     _validate_example_evidence(computations, counterexamples, idea_grade)
     _validate_source_backing(source_grounding)
     _validate_theorem_applicability(manifest, claim, source_grounding, theorem_applicability)
@@ -172,6 +176,64 @@ def _load_optional_human_feedback(
             ExampleFeedbackSummary,
         )
     return feedback, summary
+
+
+def _load_optional_computation_verification(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> ComputationVerificationReport | None:
+    optional = manifest.optional_artifacts
+    if "computation_verification" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["computation_verification"],
+        ComputationVerificationReport,
+    )
+
+
+def _validate_computation_verification(
+    computations: ComputationChecks,
+    verification: ComputationVerificationReport | None,
+) -> None:
+    """Enforce honesty between machine verification and claimed computation status.
+
+    Only runs when a computation_verification artifact is present, so existing
+    runs without machine verification are unaffected. Rules:
+
+    - every verification result must reference a real check;
+    - a check refuted by the machine cannot claim checked/source_checked;
+    - a check that carries a machine_check spec and claims ``checked`` must have
+      a confirming verification result (no asserting evidence the backend could
+      have checked but did not confirm).
+    """
+    if verification is None:
+        return
+    evidence_statuses = {ComputationStatus.checked, ComputationStatus.source_checked}
+    checks_by_id = {check.id: check for check in computations.checks}
+    confirmed = {
+        result.check_id
+        for result in verification.results
+        if result.verdict == VerificationVerdict.confirmed
+    }
+    for result in verification.results:
+        check = checks_by_id.get(result.check_id)
+        if check is None:
+            raise KernelValidationError(
+                f"computation_verification references unknown check id: {result.check_id}"
+            )
+        if result.verdict == VerificationVerdict.refuted and check.status in evidence_statuses:
+            raise KernelValidationError(
+                f"computation check {result.check_id} claims status "
+                f"'{check.status.value}' but machine verification refuted it "
+                f"(computed {result.computed!r} != expected {result.expected!r})"
+            )
+    for check in computations.checks:
+        if check.machine_check is not None and check.status == ComputationStatus.checked:
+            if check.id not in confirmed:
+                raise KernelValidationError(
+                    f"computation check {check.id} claims 'checked' with a machine_check "
+                    f"spec but has no confirming machine verification result"
+                )
 
 
 def _load_optional_theorem_extraction(

@@ -22,6 +22,7 @@ from .mock_pipeline import run_mock_critique
 from .pdf_ingestion import ingest_source_for_theorems
 from .source_verification import verify_source_grounding_from_theorems
 from .theorem_applicability import audit_theorem_applicability
+from .verifier import verify_computation_checks
 from .models import (
     AdmissionCheck,
     AgentContracts,
@@ -603,6 +604,26 @@ def audit_theorem_applicability_command(
     write_yaml(manifest_path, manifest)
     validate_run(run)
     typer.echo(f"Wrote theorem applicability audit to {run / 'theorem_applicability.yaml'}")
+
+
+@app.command("verify-computations")
+def verify_computations_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+) -> None:
+    """Execute machine_check specs with a real backend and write computation_verification.yaml.
+
+    Does not upgrade status. It records confirmed/refuted/error/unsupported per
+    check; validation then forbids a refuted check from claiming checked.
+    """
+    report = verify_computation_checks(run)
+    validate_run(run)
+    confirmed = sum(1 for r in report["results"] if r["verdict"] == "confirmed")
+    refuted = sum(1 for r in report["results"] if r["verdict"] == "refuted")
+    typer.echo(
+        f"Verified {len(report['results'])} machine check(s): "
+        f"{confirmed} confirmed, {refuted} refuted "
+        f"-> {run / 'computation_verification.yaml'}"
+    )
 
 
 @app.command("review-literature-agent")
