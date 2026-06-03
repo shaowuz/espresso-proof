@@ -107,6 +107,152 @@ def write_memory_entry(
     return entry_path
 
 
+def write_run_memory(
+    project_dir: Path | str,
+    run_dir: Path | str,
+    *,
+    project_id: str,
+    run_id: str,
+) -> list[Path]:
+    """Write advisory memory entries derived from a completed run's artifacts.
+
+    This is the single, unified memory writer (callers must not reimplement index
+    logic). Every entry is purely advisory: ``MemoryEntry`` has no status field,
+    so nothing written here can set source_backed, mark examples/computations
+    checked, or upgrade proof status. Entries are reusable lessons/ranking hints
+    only.
+
+    Categories produced when their source artifact is present:
+
+    - grade summary -> ``source_gap`` or ``failed_attempt``
+    - ``review.yaml`` strongest objection / failed reviewers -> ``reviewer_objection``
+    - ``counterexamples.yaml`` refuting/step-only pressure -> ``counterexample``
+    - ``theorem_applicability.yaml`` blocking usages -> ``theorem_applicability_failure``
+    - ``human_example_feedback.yaml`` items -> ``human_example_feedback``
+    """
+
+    project_path = Path(project_dir)
+    run_path = Path(run_dir)
+    written: list[Path] = []
+
+    def prov(name: str) -> str:
+        return f"projects/{project_id}/runs/{run_id}/{name}"
+
+    def emit(suffix: str, entry: dict) -> None:
+        filename = f"{run_id}.yaml" if not suffix else f"{run_id}_{suffix}.yaml"
+        written.append(write_memory_entry(project_path, entry, filename=filename))
+
+    idea_grade = read_yaml(run_path / "idea_grade.yaml")
+    claim_id = idea_grade["claim_id"]
+    timestamp = datetime.now(UTC).isoformat()
+
+    strategy_brief = read_yaml(run_path / "strategy_brief.yaml")
+    source_gaps = idea_grade.get("source_gaps") or []
+    top_strategies = strategy_brief.get("top_strategies") or []
+    top_strategy = top_strategies[0]["title"] if top_strategies else "none"
+    emit(
+        "",
+        {
+            "id": f"memory_{run_id}",
+            "timestamp": timestamp,
+            "project": project_id,
+            "type": "source_gap" if source_gaps else "failed_attempt",
+            "claim_id": claim_id,
+            "summary": f"{idea_grade['status']} score {idea_grade['score']}; top strategy: {top_strategy}",
+            "provenance": [prov("idea_grade.yaml"), prov("strategy_synthesis.yaml"), prov("strategy_brief.yaml")],
+            "reusable_lesson": idea_grade["next_cheapest_test"],
+        },
+    )
+
+    review_path = run_path / "review.yaml"
+    if review_path.exists():
+        review = read_yaml(review_path)
+        objection = (review.get("strongest_objection") or "").strip()
+        failed = [r["reviewer_id"] for r in review.get("reviewers", []) if r.get("verdict") == "fail"]
+        if objection or failed:
+            emit(
+                "reviewer",
+                {
+                    "id": f"memory_{run_id}_reviewer",
+                    "timestamp": timestamp,
+                    "project": project_id,
+                    "type": "reviewer_objection",
+                    "claim_id": claim_id,
+                    "summary": f"failed reviewers {failed or 'none'}: {objection or 'objection raised'}",
+                    "provenance": [prov("review.yaml")],
+                    "reusable_lesson": objection or "address the reviewer objection before reusing this route",
+                },
+            )
+
+    cx_path = run_path / "counterexamples.yaml"
+    if cx_path.exists():
+        counterexamples = read_yaml(cx_path)
+        pressure = [
+            test
+            for test in counterexamples.get("tests", [])
+            if test.get("refutes_claim") or test.get("refutes_step_only")
+        ]
+        if pressure:
+            first = pressure[0]
+            emit(
+                "counterexample",
+                {
+                    "id": f"memory_{run_id}_counterexample",
+                    "timestamp": timestamp,
+                    "project": project_id,
+                    "type": "counterexample",
+                    "claim_id": claim_id,
+                    "summary": f"counterexample {first.get('id')}: {(first.get('explanation') or '')[:80]}",
+                    "provenance": [prov("counterexamples.yaml")],
+                    "reusable_lesson": "retest this counterexample pressure in future runs",
+                },
+            )
+
+    ta_path = run_path / "theorem_applicability.yaml"
+    if ta_path.exists():
+        theorem_applicability = read_yaml(ta_path)
+        blocking = [
+            usage
+            for usage in theorem_applicability.get("usages", [])
+            if usage.get("blocks_source_backed") or usage.get("applicability_status") != "applicable"
+        ]
+        if blocking:
+            emit(
+                "applicability",
+                {
+                    "id": f"memory_{run_id}_applicability",
+                    "timestamp": timestamp,
+                    "project": project_id,
+                    "type": "theorem_applicability_failure",
+                    "claim_id": claim_id,
+                    "summary": f"{len(blocking)} blocking theorem usage(s) for source-backed steps",
+                    "provenance": [prov("theorem_applicability.yaml")],
+                    "reusable_lesson": "pin and check theorem hypotheses before reusing this theorem",
+                },
+            )
+
+    hef_path = run_path / "human_example_feedback.yaml"
+    if hef_path.exists():
+        feedback = read_yaml(hef_path)
+        items = feedback.get("feedback", [])
+        if items:
+            emit(
+                "feedback",
+                {
+                    "id": f"memory_{run_id}_feedback",
+                    "timestamp": timestamp,
+                    "project": project_id,
+                    "type": "human_example_feedback",
+                    "claim_id": claim_id,
+                    "summary": f"{len(items)} human example feedback item(s) recorded",
+                    "provenance": [prov("human_example_feedback.yaml")],
+                    "reusable_lesson": "reuse human taste as a ranking hint only, never as checked evidence",
+                },
+            )
+
+    return written
+
+
 def _memory_dir(project_path: Path) -> Path:
     if project_path.name == "memory":
         return project_path
@@ -252,4 +398,4 @@ def _memory_tags(entry: dict, *, extra: list[str]) -> list[str]:
     return sorted(tag for tag in tags if tag)
 
 
-__all__ = ["load_memory_index", "summarize_memory", "write_memory_entry"]
+__all__ = ["load_memory_index", "summarize_memory", "write_memory_entry", "write_run_memory"]

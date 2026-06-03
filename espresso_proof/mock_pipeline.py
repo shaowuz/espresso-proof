@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from .contracts import default_agent_contracts
 from .io import read_text, read_yaml, write_text, write_yaml
-from .models import MemoryEntry, MemoryIndex
+from .memory import write_run_memory
 from .validators import validate_run
 
 
@@ -1508,70 +1508,10 @@ def _vague_claim(text: str, run_id: str) -> dict[str, object]:
 
 
 def _write_memory_entry(run_dir: Path, output_root: Path, project_id: str, run_id: str) -> None:
-    idea_grade = read_yaml(run_dir / "idea_grade.yaml")
-    strategy_brief = read_yaml(run_dir / "strategy_brief.yaml")
-    source_gaps = idea_grade.get("source_gaps") or []
-    entry_type = "source_gap" if source_gaps else "failed_attempt"
-    top_strategy = "none"
-    if strategy_brief.get("top_strategies"):
-        top_strategy = strategy_brief["top_strategies"][0]["title"]
-    entry = {
-        "id": f"memory_{run_id}",
-        "timestamp": datetime.now(UTC).isoformat(),
-        "project": project_id,
-        "type": entry_type,
-        "claim_id": idea_grade["claim_id"],
-        "summary": f"{idea_grade['status']} score {idea_grade['score']}; top strategy: {top_strategy}",
-        "provenance": [
-            f"projects/{project_id}/runs/{run_id}/idea_grade.yaml",
-            f"projects/{project_id}/runs/{run_id}/strategy_synthesis.yaml",
-            f"projects/{project_id}/runs/{run_id}/strategy_brief.yaml",
-        ],
-        "reusable_lesson": idea_grade["next_cheapest_test"],
-    }
-    MemoryEntry.model_validate(entry)
-    memory_dir = output_root / "projects" / project_id / "memory"
-    entry_path = memory_dir / f"{run_id}.yaml"
-    write_yaml(entry_path, entry)
-    _update_memory_index(memory_dir, project_id, entry, run_id)
-
-
-def _update_memory_index(memory_dir: Path, project_id: str, entry: dict, run_id: str) -> None:
-    index_path = memory_dir / "index.yaml"
-    if index_path.exists():
-        index = read_yaml(index_path)
-    else:
-        index = {
-            "project_id": project_id,
-            "last_updated": datetime.now(UTC).isoformat(),
-            "lookup_keys": [],
-            "entries": [],
-        }
-
-    tags = [entry["type"]]
-    if "source" in entry["summary"].lower() or entry["type"] == "source_gap":
-        tags.append("source_gap")
-    if "fragile" in entry["summary"].lower():
-        tags.append("fragile")
-    if "unclear" in entry["summary"].lower():
-        tags.append("unclear")
-
-    index["entries"] = [item for item in index.get("entries", []) if item.get("id") != entry["id"]]
-    index["entries"].append(
-        {
-            "id": entry["id"],
-            "entry_path": f"projects/{project_id}/memory/{run_id}.yaml",
-            "claim_id": entry["claim_id"],
-            "type": entry["type"],
-            "tags": sorted(set(tags)),
-            "summary": entry["summary"],
-            "provenance": entry["provenance"],
-        }
+    # Unified writer: all memory writing/index logic lives in espresso_proof.memory.
+    write_run_memory(
+        output_root / "projects" / project_id,
+        run_dir,
+        project_id=project_id,
+        run_id=run_id,
     )
-    lookup_keys = set(index.get("lookup_keys", []))
-    lookup_keys.update(tags)
-    lookup_keys.update(entry["claim_id"] for entry in index["entries"])
-    index["lookup_keys"] = sorted(lookup_keys)
-    index["last_updated"] = datetime.now(UTC).isoformat()
-    MemoryIndex.model_validate(index)
-    write_yaml(index_path, index)

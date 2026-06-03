@@ -13,7 +13,12 @@ from espresso_proof.cli import _assert_fixture_expectations, app
 from espresso_proof.io import read_yaml
 from espresso_proof.kernel import KernelError, require_inside, safe_run_path, snapshot
 from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.memory import load_memory_index, summarize_memory, write_memory_entry
+from espresso_proof.memory import (
+    load_memory_index,
+    summarize_memory,
+    write_memory_entry,
+    write_run_memory,
+)
 from espresso_proof.models import (
     AdmissionCheck,
     AgentContracts,
@@ -581,6 +586,44 @@ def test_memory_entry_schema_rejects_status_fields() -> None:
     for forbidden in forbidden_fields:
         with pytest.raises(ValueError, match="Extra inputs"):
             MemoryEntry.model_validate(_memory_entry(**{forbidden: True}))
+
+
+def test_run_memory_produces_reviewer_and_counterexample_categories(tmp_path: Path) -> None:
+    # A real mock run must PRODUCE (not just be able to render) reviewer-objection
+    # and counterexample memory categories, via the unified write_run_memory.
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    summary = summarize_memory(run_dir.parents[1], claim_text="cubic fourfold hodge atom")
+    assert "Source gaps" in summary  # existing grade-summary entry preserved
+    assert "Reviewer objections" in summary
+    assert "Counterexamples" in summary
+
+
+def test_write_run_memory_emits_optional_categories(tmp_path: Path) -> None:
+    # When the optional theorem_applicability / human_example_feedback artifacts
+    # exist, write_run_memory produces those advisory memory categories too.
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    (run_dir / "theorem_applicability.yaml").write_text(
+        yaml.safe_dump({"usages": [{"blocks_source_backed": True, "applicability_status": "blocked"}]}),
+        encoding="utf-8",
+    )
+    (run_dir / "human_example_feedback.yaml").write_text(
+        yaml.safe_dump({"feedback": [{"feedback_id": "f1"}]}),
+        encoding="utf-8",
+    )
+    write_run_memory(
+        run_dir.parents[1], run_dir, project_id=run_dir.parents[1].name, run_id=run_dir.name
+    )
+    summary = summarize_memory(run_dir.parents[1], claim_text="cubic fourfold")
+    assert "Theorem applicability failures" in summary
+    assert "Human example feedback" in summary
 
 
 def test_memory_summary_includes_required_categories(tmp_path: Path) -> None:
