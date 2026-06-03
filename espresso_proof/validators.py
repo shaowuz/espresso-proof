@@ -13,6 +13,7 @@ from .models import (
     ComputationChecks,
     ComputationVerificationReport,
     CounterexampleReport,
+    FailureClassificationReport,
     ContinueDecision,
     ExampleSelection,
     ExampleFeedbackSummary,
@@ -73,6 +74,7 @@ def validate_run(run_dir: Path) -> None:
     examples = validate_yaml_model(run_dir / artifacts["examples"], ExampleSelection)
     computations = validate_yaml_model(run_dir / artifacts["computation_checks"], ComputationChecks)
     computation_verification = _load_optional_computation_verification(run_dir, manifest)
+    failure_classification = _load_optional_failure_classification(run_dir, manifest)
     counterexamples = validate_yaml_model(run_dir / artifacts["counterexamples"], CounterexampleReport)
     tests = validate_yaml_model(run_dir / artifacts["tests"], TestReport)
     source_grounding = validate_yaml_model(run_dir / artifacts["source_grounding"], SourceGroundingReport)
@@ -112,6 +114,7 @@ def validate_run(run_dir: Path) -> None:
     _validate_literature_review_separation(literature_review)
     _validate_test_report_evidence(computations, examples, counterexamples, tests)
     _validate_computation_verification(computations, computation_verification)
+    _validate_failure_classification(failure_classification, counterexamples, claim)
     _validate_example_evidence(computations, counterexamples, idea_grade)
     _validate_source_backing(source_grounding)
     _validate_theorem_applicability(manifest, claim, source_grounding, theorem_applicability)
@@ -189,6 +192,59 @@ def _load_optional_computation_verification(
         run_dir / optional["computation_verification"],
         ComputationVerificationReport,
     )
+
+
+def _load_optional_failure_classification(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> FailureClassificationReport | None:
+    optional = manifest.optional_artifacts
+    if "failure_classification" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["failure_classification"],
+        FailureClassificationReport,
+    )
+
+
+def _validate_failure_classification(
+    failure_classification: FailureClassificationReport | None,
+    counterexamples: CounterexampleReport,
+    claim: Claim,
+) -> None:
+    """Failure classification is advisory routing; it must not fabricate a refutation.
+
+    Only runs when the optional artifact is present. Rules:
+
+    - claim_id must match the locked claim;
+    - a ``claim_refuted`` classification requires an admissible all-hypotheses
+      counterexample (satisfies_all_claim_hypotheses is True and refutes_claim),
+      so a dropped-hypothesis or proof-step failure can never be promoted to a
+      claim refutation through routing.
+
+    The report model carries no source/evidence/proof status field, so a
+    classification cannot upgrade any status by construction.
+    """
+    if failure_classification is None:
+        return
+    if failure_classification.claim_id != claim.id:
+        raise KernelValidationError(
+            "failure_classification claim_id does not match locked claim"
+        )
+    claims_refuted = any(
+        item.category.value == "claim_refuted"
+        for item in failure_classification.classifications
+    )
+    if claims_refuted:
+        admissible = any(
+            test.satisfies_all_claim_hypotheses is True and test.refutes_claim
+            for test in counterexamples.tests
+        )
+        if not admissible:
+            raise KernelValidationError(
+                "failure_classification marks claim_refuted without an admissible "
+                "all-hypotheses counterexample"
+            )
 
 
 def _load_optional_theorem_extraction(

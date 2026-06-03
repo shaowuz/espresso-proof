@@ -390,6 +390,46 @@ class ComputationVerificationReport(StrictBaseModel):
         return self
 
 
+class FailureCategory(str, Enum):
+    claim_ambiguous = "claim_ambiguous"
+    claim_refuted = "claim_refuted"
+    strategy_failed_by_example = "strategy_failed_by_example"
+    proof_gap = "proof_gap"
+    theorem_condition_gap = "theorem_condition_gap"
+    source_gap = "source_gap"
+    misapplied_source = "misapplied_source"
+    computation_unchecked = "computation_unchecked"
+    budget_exhausted = "budget_exhausted"
+    no_progress = "no_progress"
+    human_blocked = "human_blocked"
+
+
+class FailureClassification(StrictBaseModel):
+    category: FailureCategory
+    signal: str
+    recommended_route: str
+    explanation: str
+
+
+class FailureClassificationReport(StrictBaseModel):
+    """Typed classification of reviewer objections / failed tests into actionable
+    failure categories with a routing recommendation.
+
+    This is advisory only: it changes routing, never status. The model carries no
+    source/evidence/proof status field, so a classification cannot upgrade
+    anything. ``claim_refuted`` is allowed only when an admissible all-hypotheses
+    counterexample exists (enforced by the validator), so a dropped-hypothesis or
+    proof-step failure can never be classified as a claim refutation here.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    classifications: list[FailureClassification]
+    notes: list[str] = Field(default_factory=list)
+
+
 class LiteratureItem(StrictBaseModel):
     id: str
     title: str
@@ -1493,6 +1533,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "machine_check_spec": MachineCheckSpec,
     "computation_verification": ComputationVerificationReport,
     "computation_verification_result": ComputationVerificationResult,
+    "failure_classification": FailureClassificationReport,
     "counterexamples": CounterexampleReport,
     "tests": TestReport,
     "source_grounding": SourceGroundingReport,

@@ -17,6 +17,7 @@ from .llm_agents import external_agent_diagnostic
 from .llm_agents import openai_agent_diagnostic
 from .llm_agents import run_llm_agent_pass
 from .llm_agents import write_initial_prover_round_artifacts
+from .failure_classifier import classify_failures
 from .memo import build_concise_memo
 from .memory import summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
@@ -225,6 +226,23 @@ def agent_doctor(
     else:
         raise typer.BadParameter("agent-doctor supports provider=openai or provider=external")
     typer.echo(json.dumps(report, indent=2, sort_keys=True))
+
+
+@app.command("classify-failures")
+def classify_failures_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+) -> None:
+    """Classify reviewer objections / failed tests into typed failure categories.
+
+    Advisory routing only: writes failure_classification.yaml and never upgrades
+    proof/source/evidence status. claim_refuted requires an admissible
+    all-hypotheses counterexample.
+    """
+    report = classify_failures(run)
+    validate_run(run)
+    categories = ", ".join(item["category"] for item in report["classifications"]) or "none"
+    typer.echo(f"Classified {len(report['classifications'])} failure(s): {categories}")
+    typer.echo(f"-> {run / 'failure_classification.yaml'}")
 
 
 @app.command()

@@ -1747,3 +1747,85 @@ def test_admission_check_rejects_admitted_with_blockers_or_missing_checks() -> N
                 "blockers": ["still needs review"],
             }
         )
+
+
+def test_classify_failures_routes_typed_categories(tmp_path: Path) -> None:
+    # Step 5 (Failure Classifier): reviewer/source/example signals become typed,
+    # advisory routing categories; an unbacked claim_refuted is never emitted.
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    result = CliRunner().invoke(app, ["classify-failures", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    report = read_yaml(run_dir / "failure_classification.yaml")
+    categories = {item["category"] for item in report["classifications"]}
+    assert "source_gap" in categories
+    assert "strategy_failed_by_example" in categories
+    assert "claim_refuted" not in categories  # no admissible counterexample in this run
+    for item in report["classifications"]:
+        assert set(item) == {"category", "signal", "recommended_route", "explanation"}
+
+
+def test_classify_failures_claim_refuted_requires_admissible_counterexample(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "refuted_by_all_hypotheses_counterexample" / "input.md",
+        tmp_path,
+    )
+    result = CliRunner().invoke(app, ["classify-failures", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    categories = {
+        item["category"]
+        for item in read_yaml(run_dir / "failure_classification.yaml")["classifications"]
+    }
+    assert "claim_refuted" in categories  # admissible all-hypotheses refutation
+    validate_run(run_dir)  # accepted
+
+
+def test_failure_classification_rejects_unbacked_claim_refuted(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim_id = read_yaml(run_dir / "idea_grade.yaml")["claim_id"]
+    report = {
+        "schema_version": 1,
+        "claim_id": claim_id,
+        "run_id": manifest["run_id"],
+        "generated_at": "2026-06-03T00:00:00+00:00",
+        "classifications": [
+            {
+                "category": "claim_refuted",
+                "signal": "fabricated",
+                "recommended_route": "stop",
+                "explanation": "should be rejected: no admissible counterexample",
+            }
+        ],
+        "notes": [],
+    }
+    (run_dir / "failure_classification.yaml").write_text(yaml.safe_dump(report), encoding="utf-8")
+    manifest.setdefault("optional_artifacts", {})["failure_classification"] = (
+        "failure_classification.yaml"
+    )
+    (run_dir / "run_manifest.yaml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    with pytest.raises(KernelValidationError, match="admissible all-hypotheses counterexample"):
+        validate_run(run_dir)
+
+
+def test_failure_classification_report_rejects_status_field() -> None:
+    from espresso_proof.models import FailureClassificationReport
+
+    data = {
+        "schema_version": 1,
+        "claim_id": "claim_001",
+        "run_id": "run_001",
+        "generated_at": "2026-06-03T00:00:00+00:00",
+        "classifications": [],
+        "source_backed": True,
+    }
+    with pytest.raises(ValueError, match="Extra inputs"):
+        FailureClassificationReport.model_validate(data)
