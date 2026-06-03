@@ -571,6 +571,51 @@ def test_memory_summary_is_deterministic(tmp_path: Path) -> None:
     assert first  # non-empty
 
 
+def test_inspect_shows_claim_grade_and_evidence_sections(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    result = CliRunner().invoke(app, ["inspect", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert "Claim" in out
+    assert "status:" in out  # claim locked / human_confirmed status line
+    assert "Grade" in out
+    assert "Source Gaps" in out
+    assert "Examples / Counterexamples" in out
+    assert "Top Strategies" in out
+    assert "Artifacts" in out
+    assert "locked_claim" in out  # artifact path listing
+
+
+def test_inspect_does_not_emit_proof_complete_language(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    result = CliRunner().invoke(app, ["inspect", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    lowered = result.output.lower()
+    assert "proof complete" not in lowered
+    assert "proved the theorem" not in lowered
+
+
+def test_inspect_does_not_mutate_run(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    before = {path.name: path.read_bytes() for path in sorted(run_dir.glob("*.yaml"))}
+    result = CliRunner().invoke(app, ["inspect", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    after = {path.name: path.read_bytes() for path in sorted(run_dir.glob("*.yaml"))}
+    assert before == after
+
+
 def test_workflow_generator_classifies_domains() -> None:
     hodge_spec = generate_workflow_spec(
         "KKPY Hodge atoms and mirror symmetry for cubic fourfolds",

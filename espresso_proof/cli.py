@@ -239,6 +239,8 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     strategy_brief = read_yaml(run / "strategy_brief.yaml")
     source_grounding = read_yaml(run / "source_grounding.yaml")
     human_choice = read_yaml(run / "human_choice.yaml")
+    examples = read_yaml(run / "examples.yaml")
+    counterexamples = read_yaml(run / "counterexamples.yaml")
 
     failed_reviewers = [
         reviewer["reviewer_id"]
@@ -262,6 +264,12 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     typer.echo("")
     typer.echo("Claim")
     typer.echo(f"- {claim.get('normalized_statement', '').strip()}")
+    claim_state = "locked" if claim.get("locked") else "unlocked"
+    if claim.get("human_confirmed"):
+        claim_state += ", human_confirmed"
+    if claim.get("repaired_from"):
+        claim_state += f", repaired_from {claim.get('repaired_from')}"
+    typer.echo(f"- status: {claim_state}")
     typer.echo("")
     typer.echo("Grade")
     typer.echo(
@@ -278,6 +286,27 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     typer.echo("Source Gaps")
     typer.echo(f"- {', '.join(source_gaps) if source_gaps else 'none'}")
     typer.echo(f"- source status: {', '.join(source_statuses) if source_statuses else 'none'}")
+    typer.echo("")
+    typer.echo("Examples / Counterexamples")
+    example_items = examples.get("examples", [])
+    if example_items:
+        for example in example_items[:3]:
+            typer.echo(
+                f"- example {example.get('id')}: {example.get('name')} "
+                f"-> {example.get('result_for_current_idea')}"
+            )
+    else:
+        typer.echo("- examples: none")
+    cx_items = counterexamples.get("tests", [])
+    if cx_items:
+        for cx in cx_items[:3]:
+            typer.echo(
+                f"- counterexample {cx.get('id')}: {cx.get('result')} "
+                f"(refutes_claim={cx.get('refutes_claim')}, "
+                f"refutes_step_only={cx.get('refutes_step_only')})"
+            )
+    else:
+        typer.echo("- counterexamples: none")
     theorem_applicability_path = _optional_artifact_path(
         run, optional_artifacts, "theorem_applicability"
     )
@@ -395,6 +424,12 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
         typer.echo("Memory")
         for line in memory_summary.splitlines()[:10]:
             typer.echo(line)
+    typer.echo("")
+    typer.echo("Artifacts")
+    for key, rel_path in manifest.get("artifacts", {}).items():
+        typer.echo(f"- {key}: {run / rel_path}")
+    for key, rel_path in optional_artifacts.items():
+        typer.echo(f"- {key} (optional): {run / rel_path}")
     typer.echo("")
     typer.echo(f"Final report: {run / 'final_report.md'}")
 
