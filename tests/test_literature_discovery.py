@@ -517,6 +517,63 @@ def test_source_backed_step_requires_applicable_theorem_conditions(tmp_path: Pat
         raise AssertionError("validate_run should reject source_backed step with blocked theorem conditions")
 
 
+def _setup_source_backed_run(tmp_path: Path):
+    """Mock run mutated so step[0] and ref[0] are source_backed with exact locator."""
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    source_grounding = read_yaml(run_dir / "source_grounding.yaml")
+    ref_id = source_grounding["source_refs"][0]["id"]
+    source_grounding["source_refs"][0]["status"] = "source_backed"
+    source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+    source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
+    source_grounding["steps"][0]["status"] = "source_backed"
+    source_grounding["steps"][0]["source_refs"] = [ref_id]
+    source_grounding["steps"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
+    write_yaml(run_dir / "source_grounding.yaml", source_grounding)
+    step_id = source_grounding["steps"][0]["proof_step_id"]
+    return run_dir, manifest, source_grounding, ref_id, step_id
+
+
+def _write_applicability(run_dir: Path, manifest: dict, claim_id: str, usages: list[dict]) -> None:
+    applicability = {
+        "schema_version": 1,
+        "claim_id": claim_id,
+        "run_id": manifest["run_id"],
+        "generated_at": "2026-06-02T00:00:00+00:00",
+        "source_grounding_artifact": "source_grounding.yaml",
+        "literature_review_agent_artifact": None,
+        "usages": usages,
+        "overall_status": "unclear",
+        "notes": ["test applicability fixture"],
+    }
+    write_yaml(run_dir / "theorem_applicability.yaml", applicability)
+    manifest.setdefault("optional_artifacts", {})["theorem_applicability"] = "theorem_applicability.yaml"
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+
+
+def test_source_backed_step_lacks_applicability_audit_is_rejected(tmp_path: Path) -> None:
+    # A source_backed step with NO matching applicability usage must be rejected
+    # (a tampered/incomplete audit cannot let a source_backed step through).
+    run_dir, manifest, source_grounding, _ref_id, _step_id = _setup_source_backed_run(tmp_path)
+    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[])
+    with pytest.raises(KernelValidationError, match="lacks applicability audit"):
+        validate_run(run_dir)
+
+
+def test_theorem_applicability_source_status_must_match_step(tmp_path: Path) -> None:
+    # A usage whose source_status disagrees with its source_grounding step is
+    # rejected (the audit cannot quietly downgrade/relabel the step's status).
+    run_dir, manifest, source_grounding, ref_id, step_id = _setup_source_backed_run(tmp_path)
+    usage = _theorem_usage(proof_step_id=step_id, source_ref_id=ref_id, source_status="candidate")
+    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[usage])
+    with pytest.raises(KernelValidationError, match="source_status does not match source_grounding step"):
+        validate_run(run_dir)
+
+
 def _theorem_usage(**overrides) -> dict:
     """A valid applicable theorem-applicability usage; override fields to break it."""
     usage = {
