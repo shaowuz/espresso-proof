@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from espresso_proof.cli import _assert_fixture_expectations, app
 from espresso_proof.io import read_yaml
+from espresso_proof.kernel import KernelError, safe_run_path, snapshot
 from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.memory import load_memory_index, summarize_memory
 from espresso_proof.models import (
@@ -65,6 +66,98 @@ def test_mock_fixtures_validate(fixture_dir: Path, tmp_path: Path) -> None:
     memory_dir = run_dir.parents[1] / "memory"
     assert any(memory_dir.glob("*.yaml"))
     MemoryIndex.model_validate(read_yaml(memory_dir / "index.yaml"))
+
+
+def test_kernel_snapshot_loads_projects_runs_and_current_artifacts(tmp_path: Path) -> None:
+    input_path = FIXTURES / "promising_but_unproved" / "input.md"
+    run_dir = run_mock_critique("hodge_atoms", input_path, tmp_path)
+
+    payload = snapshot(tmp_path, run_dir)
+
+    assert payload["workspace"] == str(tmp_path.resolve())
+    assert payload["selected_run"] == str(run_dir.resolve())
+    assert payload["current"]["state"] in {"completed", "stopped"}
+    assert payload["current"]["validation"]["status"] == "valid"
+    assert "locked_claim" in payload["current"]["artifact_paths"]
+    assert payload["current"]["artifacts"]["locked_claim"]["id"] == "claim_001"
+
+
+def test_kernel_safe_run_path_rejects_escape(tmp_path: Path) -> None:
+    run_dir = tmp_path / "projects" / "hodge_atoms" / "runs" / "run_001"
+    run_dir.mkdir(parents=True)
+
+    with pytest.raises(KernelError, match="relative"):
+        safe_run_path(run_dir, str(tmp_path / "outside.yaml"))
+    with pytest.raises(KernelError, match="cannot contain"):
+        safe_run_path(run_dir, "../outside.yaml")
+
+
+def test_kernel_snapshot_rejects_requested_run_outside_workspace(tmp_path: Path) -> None:
+    outside_run = tmp_path.parent / "outside-run"
+    outside_run.mkdir(exist_ok=True)
+
+    with pytest.raises(KernelError, match="outside workspace"):
+        snapshot(tmp_path, outside_run)
+
+
+def test_kernel_snapshot_rejects_manifest_artifact_escape(tmp_path: Path) -> None:
+    input_path = FIXTURES / "promising_but_unproved" / "input.md"
+    run_dir = run_mock_critique("hodge_atoms", input_path, tmp_path)
+    manifest_path = run_dir / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    manifest["artifacts"]["examples"] = "../outside.yaml"
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelError, match="cannot contain"):
+        snapshot(tmp_path, run_dir)
+
+
+def test_kernel_snapshot_rejects_symlink_artifact(tmp_path: Path) -> None:
+    input_path = FIXTURES / "promising_but_unproved" / "input.md"
+    run_dir = run_mock_critique("hodge_atoms", input_path, tmp_path)
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("not: trusted\n", encoding="utf-8")
+    examples_path = run_dir / "examples.yaml"
+    examples_path.unlink()
+    examples_path.symlink_to(outside)
+
+    with pytest.raises(KernelError, match="symlink"):
+        snapshot(tmp_path, run_dir)
+
+
+def test_bridge_open_detail_rejects_invalid_manifest_path(tmp_path: Path) -> None:
+    input_path = FIXTURES / "promising_but_unproved" / "input.md"
+    run_dir = run_mock_critique("hodge_atoms", input_path, tmp_path)
+    example_id = read_yaml(run_dir / "examples.yaml")["examples"][0]["id"]
+    manifest_path = run_dir / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    manifest["artifacts"]["examples"] = "../outside.yaml"
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/espresso_vscode_bridge.py",
+            "open-detail",
+            "--workspace",
+            str(tmp_path),
+            "--run",
+            str(run_dir),
+            "--kind",
+            "example",
+            "--target-id",
+            example_id,
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert completed.returncode == 1
+    payload = json.loads(completed.stdout)
+    assert payload["ok"] is False
+    assert "artifact path" in payload["error"] or "manifest" in payload["error"]
 
 
 def test_seed_files_validate() -> None:

@@ -643,6 +643,84 @@ class SourceGroundingReport(StrictBaseModel):
     steps: list[SourceGroundingStep]
 
 
+class TheoremApplicabilityCondition(StrictBaseModel):
+    id: str
+    text: str
+    condition_type: Literal[
+        "object",
+        "morphism",
+        "base_field",
+        "genericity",
+        "smoothness",
+        "properness",
+        "flatness",
+        "coherence",
+        "definition",
+        "other",
+    ]
+    status: Literal["satisfied", "missing", "mismatched", "unclear", "not_checked"]
+    evidence: str
+    definition_locator: Locator | None = None
+
+
+class TheoremApplicabilityUsage(StrictBaseModel):
+    proof_step_id: str
+    source_ref_id: str
+    theorem_id: str | None = None
+    theorem_label: str | None = None
+    theorem_statement: str
+    locator: Locator
+    source_status: SourceStatus
+    conclusion_status: Literal["compatible", "weaker", "stronger", "orthogonal", "contradicts", "unclear"]
+    conditions: list[TheoremApplicabilityCondition]
+    applicability_status: Literal["applicable", "blocked", "misapplied", "unclear"]
+    blocks_source_backed: bool
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_condition_status(self) -> TheoremApplicabilityUsage:
+        bad_conditions = {"missing", "mismatched", "unclear", "not_checked"}
+        has_bad_condition = any(condition.status in bad_conditions for condition in self.conditions)
+        if self.applicability_status == "applicable":
+            if has_bad_condition:
+                raise ValueError("applicable theorem usage requires all conditions satisfied")
+            if self.conclusion_status in {"orthogonal", "contradicts", "unclear"}:
+                raise ValueError("applicable theorem usage requires compatible conclusion")
+            if self.blocks_source_backed:
+                raise ValueError("applicable theorem usage cannot block source_backed")
+        if has_bad_condition and not self.blocks_source_backed:
+            raise ValueError("unsatisfied theorem conditions must block source_backed")
+        return self
+
+
+class TheoremApplicabilityReport(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    source_grounding_artifact: str
+    literature_review_agent_artifact: str | None = None
+    usages: list[TheoremApplicabilityUsage]
+    overall_status: Literal["all_applicable", "blocked", "misapplied", "unclear"]
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_overall_status(self) -> TheoremApplicabilityReport:
+        proof_step_ids = [usage.proof_step_id for usage in self.usages]
+        if len(proof_step_ids) != len(set(proof_step_ids)):
+            raise ValueError("theorem applicability usages must have unique proof_step_id values")
+        if self.overall_status == "all_applicable":
+            if any(usage.applicability_status != "applicable" for usage in self.usages):
+                raise ValueError("all_applicable requires every theorem usage applicable")
+        if any(usage.applicability_status == "misapplied" for usage in self.usages):
+            if self.overall_status != "misapplied":
+                raise ValueError("misapplied theorem usage requires overall_status=misapplied")
+        if any(usage.applicability_status == "blocked" for usage in self.usages):
+            if self.overall_status not in {"blocked", "misapplied"}:
+                raise ValueError("blocked theorem usage requires blocked or misapplied overall status")
+        return self
+
+
 class TestReportItem(StrictBaseModel):
     id: str
     description: str
@@ -1076,6 +1154,159 @@ class LLMAgentRunReport(StrictBaseModel):
         return self
 
 
+class ProverLoopReviewPointer(StrictBaseModel):
+    verifier_id: str
+    verdict: Literal["plausible_direction", "needs_revision", "needs_sources", "blocked"]
+    objection_count: int = Field(ge=0)
+    recommended_human_action: Literal["continue", "revise", "stop"]
+
+
+class ProverLoopAttempt(StrictBaseModel):
+    attempt_id: str
+    round_index: int = Field(ge=1)
+    strategy_id: str
+    parent_attempt_id: str | None = None
+    prover_attempt_id: str
+    source_request_count: int = Field(ge=0)
+    risk_count: int = Field(ge=0)
+    reviewer_ids: list[str]
+    reviewer_objections: list[ProverLoopReviewPointer]
+    time_allocation: Literal["expand", "repair", "cheap_check", "pause", "ask_human", "stop"]
+    status: Literal["candidate", "needs_repair", "blocked", "waiting_human", "stopped"]
+    blockers: list[str] = Field(default_factory=list)
+    next_action: str
+
+    @model_validator(mode="after")
+    def validate_attempt_reviewers(self) -> ProverLoopAttempt:
+        if not self.reviewer_ids:
+            raise ValueError("prover loop attempt requires reviewer_ids")
+        if len(self.reviewer_ids) != len(set(self.reviewer_ids)):
+            raise ValueError("prover loop attempt reviewer_ids must be unique")
+        pointer_ids = [review.verifier_id for review in self.reviewer_objections]
+        if len(pointer_ids) != len(set(pointer_ids)):
+            raise ValueError("reviewer_objections verifier_id values must be unique")
+        if set(pointer_ids) != set(self.reviewer_ids):
+            raise ValueError("reviewer_objections must match reviewer_ids")
+        if self.status in {"needs_repair", "blocked"} and not self.blockers:
+            raise ValueError("blocked/repair attempts require blockers")
+        return self
+
+
+class ProverLoopBudget(StrictBaseModel):
+    approved_effort: ExplorationMode
+    max_rounds: int = Field(ge=1)
+    rounds_used: int = Field(ge=0)
+    max_agent_calls: int = Field(ge=1)
+    agent_calls_used: int = Field(ge=0)
+    stop_if_human_gate_pending: bool = True
+
+    @model_validator(mode="after")
+    def validate_budget_use(self) -> ProverLoopBudget:
+        if self.rounds_used > self.max_rounds:
+            raise ValueError("rounds_used cannot exceed max_rounds")
+        if self.agent_calls_used > self.max_agent_calls:
+            raise ValueError("agent_calls_used cannot exceed max_agent_calls")
+        return self
+
+
+class ProverLoopReport(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    source_llm_agent_run: str
+    selected_strategy_id: str | None = None
+    budget: ProverLoopBudget
+    attempts: list[ProverLoopAttempt]
+    human_gate_status: Literal["pending", "resolved"]
+    loop_decision: Literal["continue", "repair", "switch_strategy", "ask_human", "stop"]
+    decision_reason: str
+    audit_note: str
+
+    @model_validator(mode="after")
+    def validate_loop_report(self) -> ProverLoopReport:
+        if not self.attempts:
+            raise ValueError("prover loop report requires at least one attempt")
+        attempt_ids = [attempt.attempt_id for attempt in self.attempts]
+        if len(attempt_ids) != len(set(attempt_ids)):
+            raise ValueError("prover loop attempt ids must be unique")
+        if self.budget.rounds_used != len({attempt.round_index for attempt in self.attempts}):
+            raise ValueError("rounds_used must match distinct attempt round_index values")
+        if self.human_gate_status == "pending" and self.loop_decision not in {"ask_human", "stop"}:
+            raise ValueError("pending human gate requires ask_human or stop loop decision")
+        return self
+
+
+class ProverRoundReport(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    round_index: int = Field(ge=1)
+    generated_at: str
+    source: Literal["initial_llm_agent_run", "appended_prover_loop_round"]
+    strategy_id: str
+    loop_attempt_id: str
+    parent_attempt_id: str | None = None
+    input_artifacts: list[str]
+    context_summary: str
+    prover_attempt: LLMAgentAttempt
+    verifier_reviews: list[LLMAgentVerifierReview]
+    reviewer_blockers: list[str] = Field(default_factory=list)
+    human_gate_status: Literal["pending", "resolved"]
+    time_allocation: Literal["expand", "repair", "cheap_check", "pause", "ask_human", "stop"]
+    status: Literal["candidate", "needs_repair", "blocked", "waiting_human", "stopped"]
+    next_action: str
+    safety_note: str
+
+    @model_validator(mode="after")
+    def validate_round_report(self) -> ProverRoundReport:
+        if self.prover_attempt.role != "prover":
+            raise ValueError("prover_attempt must have role=prover")
+        if len(self.verifier_reviews) < 3:
+            raise ValueError("proof-close-style prover round requires at least three verifier reviews")
+        reviewer_ids = [review.verifier_id for review in self.verifier_reviews]
+        if len(reviewer_ids) != len(set(reviewer_ids)):
+            raise ValueError("prover round verifier ids must be unique")
+        if self.status in {"needs_repair", "blocked"} and not self.reviewer_blockers:
+            raise ValueError("repair/blocked prover round requires reviewer_blockers")
+        if self.human_gate_status == "pending":
+            if self.time_allocation not in {"ask_human", "stop"}:
+                raise ValueError("pending human gate cannot allocate prover work")
+            if self.status not in {"waiting_human", "stopped"}:
+                raise ValueError("pending human gate requires waiting_human or stopped status")
+        lowered_note = self.safety_note.lower()
+        if "does not upgrade" not in lowered_note and "not proof status" not in lowered_note:
+            raise ValueError("prover round safety_note must preserve proof-status boundary")
+        return self
+
+
+class ProverRoundIndexEntry(StrictBaseModel):
+    round_index: int = Field(ge=1)
+    strategy_id: str
+    loop_attempt_id: str
+    artifact_path: str
+    status: Literal["candidate", "needs_repair", "blocked", "waiting_human", "stopped"]
+    time_allocation: Literal["expand", "repair", "cheap_check", "pause", "ask_human", "stop"]
+
+
+class ProverRoundIndex(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    source_prover_loop: str
+    rounds: list[ProverRoundIndexEntry]
+
+    @model_validator(mode="after")
+    def validate_round_index(self) -> ProverRoundIndex:
+        keys = [(entry.round_index, entry.loop_attempt_id) for entry in self.rounds]
+        if len(keys) != len(set(keys)):
+            raise ValueError("prover round index entries must be unique by round_index and loop_attempt_id")
+        if not self.rounds:
+            raise ValueError("prover round index requires at least one round")
+        return self
+
+
 class MemoryEntry(StrictBaseModel):
     id: str
     timestamp: str
@@ -1195,6 +1426,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "tests": TestReport,
     "source_grounding": SourceGroundingReport,
     "theorem_extraction": TheoremExtractionReport,
+    "theorem_applicability": TheoremApplicabilityReport,
     "review": Review,
     "idea_grade": IdeaGrade,
     "loop_control": LoopControl,
@@ -1204,6 +1436,9 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "human_example_feedback": HumanExampleFeedback,
     "example_feedback_summary": ExampleFeedbackSummary,
     "llm_agent_run": LLMAgentRunReport,
+    "prover_loop": ProverLoopReport,
+    "prover_round": ProverRoundReport,
+    "prover_round_index": ProverRoundIndex,
     "memory_entry": MemoryEntry,
     "memory_index": MemoryIndex,
     "run_manifest": RunManifest,

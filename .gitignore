@@ -9,6 +9,11 @@ projects/*/runs/
 projects/*/memory/
 runs/
 
+# Local research scratch notes generated during proof-search runs. Keep them on
+# disk for the mathematician, but do not mix them into product/kernel commits.
+/reviewer_*.md
+projects/*/input_*.txt
+
 # Local paper/source scratch files downloaded into the repository root.
 /*.pdf
 /*.txt
