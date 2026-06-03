@@ -567,11 +567,45 @@ def _memory_entry(**overrides) -> dict:
 
 def test_memory_entry_schema_rejects_status_fields() -> None:
     # Memory is advisory, not evidential: it cannot set source_backed, mark
-    # examples checked, or upgrade proof status (KERNEL_SAFETY_RULES; memory_reuse
-    # slice). The schema has no status slot, so any such field is rejected.
-    for forbidden in ("source_backed", "examples_checked", "proof_status"):
+    # examples/computations checked, or upgrade evidence/proof status
+    # (KERNEL_SAFETY_RULES; memory_reuse slice). The schema has no status slot,
+    # so any such field is rejected.
+    forbidden_fields = (
+        "source_backed",
+        "examples_checked",
+        "proof_status",
+        "evidence_status",
+        "computation_checked",
+        "computations_checked",
+    )
+    for forbidden in forbidden_fields:
         with pytest.raises(ValueError, match="Extra inputs"):
             MemoryEntry.model_validate(_memory_entry(**{forbidden: True}))
+
+
+def test_memory_summary_includes_required_categories(tmp_path: Path) -> None:
+    # The memory summary must surface every required category (MEMORY_REUSE
+    # Required Memory Categories), including theorem applicability failures,
+    # reviewer objections, and human example feedback.
+    project_dir = tmp_path / "projects" / "mem_categories"
+    sections = {
+        "theorem_applicability_failure": "Theorem applicability failures",
+        "reviewer_objection": "Reviewer objections",
+        "human_example_feedback": "Human example feedback",
+    }
+    for entry_type, header in sections.items():
+        write_memory_entry(
+            project_dir,
+            _memory_entry(
+                id=f"mem_{entry_type}",
+                type=entry_type,
+                summary=f"{entry_type} remembered for reuse",
+            ),
+        )
+
+    summary = summarize_memory(project_dir, claim_text="remembered for reuse")
+    for header in sections.values():
+        assert header in summary
 
 
 def test_memory_summary_includes_failed_route(tmp_path: Path) -> None:

@@ -1376,7 +1376,7 @@ class MemoryEntry(StrictBaseModel):
     id: str
     timestamp: str
     project: str
-    type: Literal["failed_attempt", "tested_example", "counterexample", "source_gap", "repaired_claim", "user_decision"]
+    type: Literal["failed_attempt", "tested_example", "counterexample", "source_gap", "repaired_claim", "user_decision", "theorem_applicability_failure", "reviewer_objection", "human_example_feedback"]
     claim_id: str
     summary: str
     provenance: list[str]
@@ -1387,7 +1387,7 @@ class MemoryIndexEntry(StrictBaseModel):
     id: str
     entry_path: str
     claim_id: str
-    type: Literal["failed_attempt", "tested_example", "counterexample", "source_gap", "repaired_claim", "user_decision"]
+    type: Literal["failed_attempt", "tested_example", "counterexample", "source_gap", "repaired_claim", "user_decision", "theorem_applicability_failure", "reviewer_objection", "human_example_feedback"]
     tags: list[str] = Field(default_factory=list)
     summary: str
     provenance: list[str]

@@ -13,6 +13,9 @@ _SUMMARY_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Source gaps", ("source_gap",)),
     ("Tested examples", ("tested_example",)),
     ("Counterexamples", ("counterexample",)),
+    ("Theorem applicability failures", ("theorem_applicability_failure",)),
+    ("Reviewer objections", ("reviewer_objection",)),
+    ("Human example feedback", ("human_example_feedback",)),
     ("User decisions", ("user_decision",)),
     ("Repaired claims", ("repaired_claim",)),
 )
