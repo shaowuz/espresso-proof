@@ -17,6 +17,7 @@ from .llm_agents import external_agent_diagnostic
 from .llm_agents import openai_agent_diagnostic
 from .llm_agents import run_llm_agent_pass
 from .llm_agents import write_initial_prover_round_artifacts
+from .memo import build_concise_memo
 from .memory import summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
 from .pdf_ingestion import ingest_source_for_theorems
@@ -224,6 +225,18 @@ def agent_doctor(
     else:
         raise typer.BadParameter("agent-doctor supports provider=openai or provider=external")
     typer.echo(json.dumps(report, indent=2, sort_keys=True))
+
+
+@app.command()
+def memo(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)) -> None:
+    """Validate a run and print a compact, artifact-backed research memo.
+
+    The concise user-facing product output: claim + grade, strongest obstruction,
+    source gaps, top routes, and the next cheapest test. Never upgrades status or
+    emits proof-complete language for weak artifacts.
+    """
+    validate_run(run)
+    typer.echo(build_concise_memo(run))
 
 
 @app.command()

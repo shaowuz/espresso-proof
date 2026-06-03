@@ -706,6 +706,56 @@ def test_inspect_does_not_emit_proof_complete_language(tmp_path: Path) -> None:
     assert "proved the theorem" not in lowered
 
 
+def test_memo_renders_compact_graded_sections(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    result = CliRunner().invoke(app, ["memo", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert "ESPRESSO MEMO" in out
+    assert "Verdict:" in out
+    assert "Source:" in out
+    assert "Top routes:" in out
+    assert "Next cheapest test:" in out
+    assert "idea_sketch" in out  # the real proof status is surfaced verbatim
+
+
+def test_memo_unclear_claim_recommends_locking(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "vague_claim_unclear" / "input.md",
+        tmp_path,
+    )
+    result = CliRunner().invoke(app, ["memo", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    lowered = result.output.lower()
+    assert "unclear" in lowered
+    assert "lock" in lowered  # "First action: lock..." / "Lock a precise claim first"
+
+
+def test_memo_no_proof_complete_language_for_weak_artifacts(tmp_path: Path) -> None:
+    # The memo must not overstate: for a proof_candidate it shows the real status,
+    # and never emits memo-generated proof-complete language (Concise Answer
+    # safety; AGENT_AUTOMATION_ENGINEERING_PLAN Step 1).
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    result = CliRunner().invoke(app, ["memo", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert "proof: proof_candidate" in out  # real status, not "proved"
+    # Check only the memo-GENERATED verdict section (everything from "Verdict:"),
+    # so the assertion does not depend on what the echoed claim text contains.
+    verdict_section = out.split("Verdict:", 1)[1].lower()
+    for forbidden in ("proof complete", "verified", "proof-close", "proved"):
+        assert forbidden not in verdict_section
+
+
 def test_inspect_does_not_mutate_run(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
         "hodge_atoms",
