@@ -740,6 +740,9 @@ class TheoremApplicabilityUsage(StrictBaseModel):
     conditions: list[TheoremApplicabilityCondition]
     applicability_status: Literal["applicable", "blocked", "misapplied", "unclear"]
     blocks_source_backed: bool
+    claim_scope: Literal["universal", "restricted", "unclear"] = "unclear"
+    theorem_scope: Literal["universal", "very_general", "generic", "restricted", "unclear"] = "unclear"
+    scope_justification: str = ""
     notes: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")

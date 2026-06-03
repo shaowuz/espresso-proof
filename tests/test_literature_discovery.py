@@ -603,6 +603,40 @@ def test_theorem_applicability_rejects_unknown_source_ref(tmp_path: Path) -> Non
         validate_run(run_dir)
 
 
+def test_source_backed_step_rejects_very_general_for_universal_claim(tmp_path: Path) -> None:
+    # A very-general / generic theorem cannot back a universal ("all") claim
+    # without an explicit scope justification (KERNEL_SAFETY_RULES "very general
+    # cannot support all unless explicitly justified"), now structurally gated.
+    run_dir, manifest, source_grounding, ref_id, step_id = _setup_source_backed_run(tmp_path)
+    usage = _theorem_usage(
+        proof_step_id=step_id,
+        source_ref_id=ref_id,
+        theorem_scope="very_general",
+        claim_scope="universal",
+    )
+    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[usage])
+    with pytest.raises(KernelValidationError, match="without an explicit scope_justification"):
+        validate_run(run_dir)
+
+
+def test_source_backed_step_allows_very_general_with_justification(tmp_path: Path) -> None:
+    # With an explicit scope_justification, the very-general/universal gate does
+    # not fire (the kernel requires the justification, it does not judge the math).
+    run_dir, manifest, source_grounding, ref_id, step_id = _setup_source_backed_run(tmp_path)
+    usage = _theorem_usage(
+        proof_step_id=step_id,
+        source_ref_id=ref_id,
+        theorem_scope="very_general",
+        claim_scope="universal",
+        scope_justification="The locked claim is itself restricted to the very-general locus.",
+    )
+    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[usage])
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "scope_justification" not in str(exc), f"scope gate wrongly fired: {exc}"
+
+
 def test_source_backed_step_lacks_applicability_audit_is_rejected(tmp_path: Path) -> None:
     # A source_backed step with NO matching applicability usage must be rejected
     # (a tampered/incomplete audit cannot let a source_backed step through).

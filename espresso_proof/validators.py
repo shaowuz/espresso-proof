@@ -469,6 +469,15 @@ def _validate_theorem_applicability(
             raise KernelValidationError(
                 f"{step.proof_step_id}: source_backed theorem step requires an exact applicability locator"
             )
+        if (
+            usage.theorem_scope in {"very_general", "generic"}
+            and usage.claim_scope == "universal"
+            and not usage.scope_justification.strip()
+        ):
+            raise KernelValidationError(
+                f"{step.proof_step_id}: a '{usage.theorem_scope}' theorem cannot back a universal "
+                f"('all') claim without an explicit scope_justification"
+            )
 
 
 def _validate_review_outcome(review: Review, idea_grade: IdeaGrade) -> None:
