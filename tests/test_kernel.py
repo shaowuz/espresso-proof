@@ -919,6 +919,31 @@ def test_strategy_rules_reject_high_score_for_likely_false_or_refuted_idea(tmp_p
         validate_run(run_dir)
 
 
+def test_strategy_rules_reject_high_score_for_refuted_idea(tmp_path: Path) -> None:
+    # A refuted idea cannot carry a high-confidence (>=75) strategy route
+    # (KERNEL_SAFETY_RULES Strategy Rules; strategy_scoring_gate slice). The
+    # sibling test exercises likely_false; this isolates the refuted status.
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "refuted_by_all_hypotheses_counterexample" / "input.md",
+        tmp_path,
+    )
+    grade_path = run_dir / "idea_grade.yaml"
+    grade = read_yaml(grade_path)
+    assert grade["status"] == "refuted"
+    grade["score"] = 60
+    grade_path.write_text(yaml.safe_dump(grade, sort_keys=False), encoding="utf-8")
+
+    synthesis_path = run_dir / "strategy_synthesis.yaml"
+    synthesis = read_yaml(synthesis_path)
+    synthesis["routes"][0]["score"] = 75
+    synthesis["routes"][0]["source_status"] = "candidate"
+    synthesis_path.write_text(yaml.safe_dump(synthesis, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="promising or fragile"):
+        validate_run(run_dir)
+
+
 def test_strategy_rules_reject_high_score_with_unchecked_evidence(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
         "hodge_atoms",
