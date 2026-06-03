@@ -1829,3 +1829,47 @@ def test_failure_classification_report_rejects_status_field() -> None:
     }
     with pytest.raises(ValueError, match="Extra inputs"):
         FailureClassificationReport.model_validate(data)
+
+
+def test_classify_failures_emits_budget_exhausted(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    loop_path = run_dir / "loop_control.yaml"
+    loop = read_yaml(loop_path)
+    loop["budget_exhausted"] = True
+    loop["should_stop"] = True
+    loop["stop_reasons"] = ["budget exhausted"]
+    loop["next_action"] = "stop"
+    loop_path.write_text(yaml.safe_dump(loop), encoding="utf-8")
+
+    from espresso_proof.failure_classifier import build_failure_classification
+
+    report = build_failure_classification(run_dir)
+    categories = {item["category"] for item in report["classifications"]}
+    assert "budget_exhausted" in categories
+
+
+def test_classify_failures_emits_no_progress(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    loop_path = run_dir / "loop_control.yaml"
+    loop = read_yaml(loop_path)
+    loop["no_new_counterexamples_cycles"] = 2
+    loop["no_new_references_cycles"] = 2
+    loop["grade_delta_last_two"] = 0
+    loop["should_stop"] = True
+    loop["stop_reasons"] = ["no progress"]
+    loop["next_action"] = "ask_human"
+    loop_path.write_text(yaml.safe_dump(loop), encoding="utf-8")
+
+    from espresso_proof.failure_classifier import build_failure_classification
+
+    report = build_failure_classification(run_dir)
+    categories = {item["category"] for item in report["classifications"]}
+    assert "no_progress" in categories

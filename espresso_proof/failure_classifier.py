@@ -39,6 +39,7 @@ def build_failure_classification(run_dir: Path) -> dict:
     counterexamples = artifact("counterexamples")
     source_grounding = artifact("source_grounding")
     computations = artifact("computation_checks")
+    loop_control = artifact("loop_control")
 
     classifications: list[dict] = []
     seen: set[str] = set()
@@ -142,6 +143,25 @@ def build_failure_classification(run_dir: Path) -> dict:
             "prover_loop human_gate_status=pending",
             "Human gate",
             "Work is paused at an unresolved human gate.",
+        )
+
+    if loop_control.get("budget_exhausted") is True:
+        add(
+            "budget_exhausted",
+            "loop_control.budget_exhausted=true",
+            "stop / ask human",
+            "The loop budget is exhausted; stop or ask the human instead of looping.",
+        )
+    if (
+        loop_control.get("no_new_counterexamples_cycles", 0) >= 2
+        and loop_control.get("no_new_references_cycles", 0) >= 2
+        and loop_control.get("grade_delta_last_two", 0) <= 0
+    ):
+        add(
+            "no_progress",
+            "loop_control: >=2 cycles with no new counterexamples/references and no grade gain",
+            "stop / ask human",
+            "Repeated cycles made no progress; stop or ask the human rather than continue.",
         )
 
     failed_reviewers = [
