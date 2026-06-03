@@ -10,13 +10,12 @@ from .models import (
     AgentContracts,
     AttemptStatus,
     Claim,
-    ComputationStatus,
     ComputationChecks,
+    ComputationVerificationReport,
     CounterexampleReport,
     ContinueDecision,
     ExampleSelection,
     ExampleFeedbackSummary,
-    ExampleStatus,
     HypothesisLedger,
     HumanChoice,
     HumanExampleFeedback,
@@ -43,12 +42,14 @@ from .models import (
     TheoremExtractionReport,
 )
 from .strategy_rules import validate_strategy_rules
+from .validation.errors import KernelValidationError
+from .validation.evidence import (
+    _validate_computation_verification,
+    _validate_example_evidence,
+    _validate_test_report_evidence,
+)
 from .validation.manifest import ManifestPathValidationError
 from .validation.manifest import validate_manifest_paths
-
-
-class KernelValidationError(Exception):
-    pass
 
 
 def validate_yaml_model(path: Path, model: type[BaseModel]) -> BaseModel:
@@ -71,6 +72,7 @@ def validate_run(run_dir: Path) -> None:
     )
     examples = validate_yaml_model(run_dir / artifacts["examples"], ExampleSelection)
     computations = validate_yaml_model(run_dir / artifacts["computation_checks"], ComputationChecks)
+    computation_verification = _load_optional_computation_verification(run_dir, manifest)
     counterexamples = validate_yaml_model(run_dir / artifacts["counterexamples"], CounterexampleReport)
     tests = validate_yaml_model(run_dir / artifacts["tests"], TestReport)
     source_grounding = validate_yaml_model(run_dir / artifacts["source_grounding"], SourceGroundingReport)
@@ -108,8 +110,8 @@ def validate_run(run_dir: Path) -> None:
     )
     _validate_agent_contracts(agent_contracts, artifacts)
     _validate_literature_review_separation(literature_review)
-    _validate_counterexample_scope(counterexamples)
     _validate_test_report_evidence(computations, examples, counterexamples, tests)
+    _validate_computation_verification(computations, computation_verification)
     _validate_example_evidence(computations, counterexamples, idea_grade)
     _validate_source_backing(source_grounding)
     _validate_theorem_applicability(manifest, claim, source_grounding, theorem_applicability)
@@ -174,6 +176,19 @@ def _load_optional_human_feedback(
             ExampleFeedbackSummary,
         )
     return feedback, summary
+
+
+def _load_optional_computation_verification(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> ComputationVerificationReport | None:
+    optional = manifest.optional_artifacts
+    if "computation_verification" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["computation_verification"],
+        ComputationVerificationReport,
+    )
 
 
 def _load_optional_theorem_extraction(
@@ -342,91 +357,6 @@ def _validate_literature_review_separation(literature_review: LiteratureReviewRe
             )
 
 
-def _validate_counterexample_scope(counterexamples: CounterexampleReport) -> None:
-    for test in counterexamples.tests:
-        if test.satisfies_all_claim_hypotheses is False and test.refutes_claim:
-            raise KernelValidationError(
-                f"{test.id}: dropped-hypothesis failure cannot refute the original claim"
-            )
-
-
-def _validate_example_evidence(
-    computations: ComputationChecks,
-    counterexamples: CounterexampleReport,
-    idea_grade: IdeaGrade,
-) -> None:
-    tests_by_id = {test.id: test for test in counterexamples.tests}
-    checks_by_example: dict[str, list[str]] = {}
-    for check in computations.checks:
-        checks_by_example.setdefault(check.example_id, []).append(check.status.value)
-    checked_examples = {
-        example_id
-        for example_id, statuses in checks_by_example.items()
-        if statuses and all(status in {"checked", "source_checked"} for status in statuses)
-    }
-
-    evidence_test_ids = set(idea_grade.survived_tests) | set(idea_grade.failed_tests)
-    for test_id in evidence_test_ids:
-        test = tests_by_id.get(test_id)
-        if test is None:
-            raise KernelValidationError(f"{test_id}: idea grade references unknown test")
-        if test.result not in {ExampleStatus.survived, ExampleStatus.failed}:
-            raise KernelValidationError(f"{test_id}: evidence test result is not survived/failed")
-        if test.example_id not in checked_examples:
-            raise KernelValidationError(
-                f"{test_id}: unchecked example {test.example_id} cannot support survived/failed evidence"
-            )
-
-
-def _validate_test_report_evidence(
-    computations: ComputationChecks,
-    examples: ExampleSelection,
-    counterexamples: CounterexampleReport,
-    tests: TestReport,
-) -> None:
-    example_ids = {example.id for example in examples.examples}
-    counterexamples_by_id = {test.id: test for test in counterexamples.tests}
-    counterexample_ids = set(counterexamples_by_id)
-    checks_by_example: dict[str, list[str]] = {}
-    for check in computations.checks:
-        checks_by_example.setdefault(check.example_id, []).append(check.status.value)
-    checked_examples = {
-        example_id
-        for example_id, statuses in checks_by_example.items()
-        if statuses and all(status in {"checked", "source_checked"} for status in statuses)
-    }
-
-    for test in tests.tests:
-        unknown_examples = set(test.uses_examples).difference(example_ids)
-        if unknown_examples:
-            raise KernelValidationError(f"{test.id}: unknown example ids {sorted(unknown_examples)}")
-        unknown_counterexamples = set(test.uses_counterexamples).difference(counterexample_ids)
-        if unknown_counterexamples:
-            raise KernelValidationError(
-                f"{test.id}: unknown counterexample ids {sorted(unknown_counterexamples)}"
-            )
-        if test.result in {ExampleStatus.survived, ExampleStatus.failed}:
-            if test.evidence_status not in {
-                ComputationStatus.checked,
-                ComputationStatus.source_checked,
-            }:
-                raise KernelValidationError(
-                    f"{test.id}: survived/failed tests require checked/source_checked evidence"
-                )
-            for example_id in test.uses_examples:
-                if example_id not in checked_examples:
-                    raise KernelValidationError(
-                        f"{test.id}: unchecked example {example_id} cannot support test result"
-                    )
-            for counterexample_id in test.uses_counterexamples:
-                counterexample = counterexamples_by_id[counterexample_id]
-                if counterexample.example_id not in checked_examples:
-                    raise KernelValidationError(
-                        f"{test.id}: unchecked counterexample example "
-                        f"{counterexample.example_id} cannot support test result"
-                    )
-
-
 def _validate_source_backing(source_grounding: SourceGroundingReport) -> None:
     refs = {ref.id: ref for ref in source_grounding.source_refs}
     for ref in refs.values():
@@ -534,6 +464,19 @@ def _validate_theorem_applicability(
         if any(condition.status != "satisfied" for condition in usage.conditions):
             raise KernelValidationError(
                 f"{step.proof_step_id}: source_backed theorem step has unsatisfied theorem conditions"
+            )
+        if not usage.locator.is_exact:
+            raise KernelValidationError(
+                f"{step.proof_step_id}: source_backed theorem step requires an exact applicability locator"
+            )
+        if (
+            usage.theorem_scope in {"very_general", "generic"}
+            and usage.claim_scope == "universal"
+            and not usage.scope_justification.strip()
+        ):
+            raise KernelValidationError(
+                f"{step.proof_step_id}: a '{usage.theorem_scope}' theorem cannot back a universal "
+                f"('all') claim without an explicit scope_justification"
             )
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
@@ -10,7 +11,12 @@ from espresso_proof.literature_discovery import discover_local_literature
 from espresso_proof.live_search import parse_ads_json, parse_arxiv_atom, parse_crossref_json
 from espresso_proof.literature_review_agent import ReviewSourceSpec, run_literature_review_agent
 from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import LiteratureReviewAgentReport, LiteratureReviewReport, TheoremApplicabilityReport
+from espresso_proof.models import (
+    LiteratureReviewAgentReport,
+    LiteratureReviewReport,
+    TheoremApplicabilityReport,
+    TheoremApplicabilityUsage,
+)
 from espresso_proof.pdf_ingestion import extract_text_from_pdf_bytes, extract_theorems
 from espresso_proof.validators import KernelValidationError, validate_run
 
@@ -287,6 +293,37 @@ def test_literature_review_agent_flags_very_general_theorem_for_universal_claim(
     assert parsed.relevance_summary.overall_status in {"unclear", "background_only"}
 
 
+def test_literature_review_agent_cannot_emit_source_backed_source(tmp_path: Path) -> None:
+    # Literature Review finds candidate references only; it cannot decide
+    # source_backed or misapplied (KERNEL_SAFETY_RULES Literature And Source
+    # Rules). Those remain Referencing / Source Grounding decisions.
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    source_path = tmp_path / "agent_source.txt"
+    source_path.write_text(
+        "Theorem 1.2. For all cubic fourfolds over base field C, "
+        "the Hodge atom obstruction proves irrationality.\n",
+        encoding="utf-8",
+    )
+    report = run_literature_review_agent(
+        run_dir=run_dir,
+        source_specs=[
+            ReviewSourceSpec(
+                source=str(source_path),
+                source_id="src_agent",
+                title="Agent source",
+            )
+        ],
+    )
+
+    report["input_sources"][0]["source_ref"]["status"] = "misapplied"
+    with pytest.raises(ValueError, match="may not emit source_backed or misapplied"):
+        LiteratureReviewAgentReport.model_validate(report)
+
+
 def test_literature_review_agent_cli_writes_optional_artifact(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
         "hodge_atoms",
@@ -478,6 +515,244 @@ def test_source_backed_step_requires_applicable_theorem_conditions(tmp_path: Pat
         assert "theorem applicability" in str(exc)
     else:
         raise AssertionError("validate_run should reject source_backed step with blocked theorem conditions")
+
+
+def _setup_source_backed_run(tmp_path: Path):
+    """Mock run mutated so step[0] and ref[0] are source_backed with exact locator."""
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    source_grounding = read_yaml(run_dir / "source_grounding.yaml")
+    ref_id = source_grounding["source_refs"][0]["id"]
+    source_grounding["source_refs"][0]["status"] = "source_backed"
+    source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+    source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
+    source_grounding["steps"][0]["status"] = "source_backed"
+    source_grounding["steps"][0]["source_refs"] = [ref_id]
+    source_grounding["steps"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
+    write_yaml(run_dir / "source_grounding.yaml", source_grounding)
+    step_id = source_grounding["steps"][0]["proof_step_id"]
+    return run_dir, manifest, source_grounding, ref_id, step_id
+
+
+def _write_applicability(
+    run_dir: Path, manifest: dict, claim_id: str, usages: list[dict], **report_overrides
+) -> None:
+    applicability = {
+        "schema_version": 1,
+        "claim_id": claim_id,
+        "run_id": manifest["run_id"],
+        "generated_at": "2026-06-02T00:00:00+00:00",
+        "source_grounding_artifact": "source_grounding.yaml",
+        "literature_review_agent_artifact": None,
+        "usages": usages,
+        "overall_status": "unclear",
+        "notes": ["test applicability fixture"],
+    }
+    applicability.update(report_overrides)
+    write_yaml(run_dir / "theorem_applicability.yaml", applicability)
+    manifest.setdefault("optional_artifacts", {})["theorem_applicability"] = "theorem_applicability.yaml"
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+
+
+def test_theorem_applicability_rejects_claim_id_mismatch(tmp_path: Path) -> None:
+    run_dir, manifest, source_grounding, _ref, _step = _setup_source_backed_run(tmp_path)
+    _write_applicability(run_dir, manifest, "claim_does_not_exist", usages=[])
+    with pytest.raises(KernelValidationError, match="claim_id does not match locked claim"):
+        validate_run(run_dir)
+
+
+def test_theorem_applicability_rejects_run_id_mismatch(tmp_path: Path) -> None:
+    run_dir, manifest, source_grounding, _ref, _step = _setup_source_backed_run(tmp_path)
+    _write_applicability(
+        run_dir, manifest, source_grounding["claim_id"], usages=[], run_id="run_does_not_exist"
+    )
+    with pytest.raises(KernelValidationError, match="run_id does not match manifest"):
+        validate_run(run_dir)
+
+
+def test_theorem_applicability_rejects_source_grounding_artifact_mismatch(tmp_path: Path) -> None:
+    run_dir, manifest, source_grounding, _ref, _step = _setup_source_backed_run(tmp_path)
+    _write_applicability(
+        run_dir,
+        manifest,
+        source_grounding["claim_id"],
+        usages=[],
+        source_grounding_artifact="not_source_grounding.yaml",
+    )
+    with pytest.raises(KernelValidationError, match="must cite the source_grounding artifact"):
+        validate_run(run_dir)
+
+
+def test_theorem_applicability_rejects_unknown_proof_step(tmp_path: Path) -> None:
+    run_dir, manifest, source_grounding, ref_id, _step = _setup_source_backed_run(tmp_path)
+    usage = _theorem_usage(proof_step_id="ghost_step", source_ref_id=ref_id)
+    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[usage])
+    with pytest.raises(KernelValidationError, match="references unknown proof step"):
+        validate_run(run_dir)
+
+
+def test_theorem_applicability_rejects_unknown_source_ref(tmp_path: Path) -> None:
+    run_dir, manifest, source_grounding, _ref, step_id = _setup_source_backed_run(tmp_path)
+    usage = _theorem_usage(proof_step_id=step_id, source_ref_id="ghost_ref")
+    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[usage])
+    with pytest.raises(KernelValidationError, match="references unknown source ref"):
+        validate_run(run_dir)
+
+
+def test_source_backed_step_rejects_very_general_for_universal_claim(tmp_path: Path) -> None:
+    # A very-general / generic theorem cannot back a universal ("all") claim
+    # without an explicit scope justification (KERNEL_SAFETY_RULES "very general
+    # cannot support all unless explicitly justified"), now structurally gated.
+    run_dir, manifest, source_grounding, ref_id, step_id = _setup_source_backed_run(tmp_path)
+    usage = _theorem_usage(
+        proof_step_id=step_id,
+        source_ref_id=ref_id,
+        theorem_scope="very_general",
+        claim_scope="universal",
+    )
+    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[usage])
+    with pytest.raises(KernelValidationError, match="without an explicit scope_justification"):
+        validate_run(run_dir)
+
+
+def test_source_backed_step_allows_very_general_with_justification(tmp_path: Path) -> None:
+    # With an explicit scope_justification, the very-general/universal gate does
+    # not fire (the kernel requires the justification, it does not judge the math).
+    run_dir, manifest, source_grounding, ref_id, step_id = _setup_source_backed_run(tmp_path)
+    usage = _theorem_usage(
+        proof_step_id=step_id,
+        source_ref_id=ref_id,
+        theorem_scope="very_general",
+        claim_scope="universal",
+        scope_justification="The locked claim is itself restricted to the very-general locus.",
+    )
+    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[usage])
+    try:
+        validate_run(run_dir)
+    except KernelValidationError as exc:
+        assert "scope_justification" not in str(exc), f"scope gate wrongly fired: {exc}"
+
+
+def test_source_backed_step_lacks_applicability_audit_is_rejected(tmp_path: Path) -> None:
+    # A source_backed step with NO matching applicability usage must be rejected
+    # (a tampered/incomplete audit cannot let a source_backed step through).
+    run_dir, manifest, source_grounding, _ref_id, _step_id = _setup_source_backed_run(tmp_path)
+    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[])
+    with pytest.raises(KernelValidationError, match="lacks applicability audit"):
+        validate_run(run_dir)
+
+
+def test_theorem_applicability_source_status_must_match_step(tmp_path: Path) -> None:
+    # A usage whose source_status disagrees with its source_grounding step is
+    # rejected (the audit cannot quietly downgrade/relabel the step's status).
+    run_dir, manifest, source_grounding, ref_id, step_id = _setup_source_backed_run(tmp_path)
+    usage = _theorem_usage(proof_step_id=step_id, source_ref_id=ref_id, source_status="candidate")
+    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[usage])
+    with pytest.raises(KernelValidationError, match="source_status does not match source_grounding step"):
+        validate_run(run_dir)
+
+
+def _theorem_usage(**overrides) -> dict:
+    """A valid applicable theorem-applicability usage; override fields to break it."""
+    usage = {
+        "proof_step_id": "step_1",
+        "source_ref_id": "src_1",
+        "theorem_id": None,
+        "theorem_label": "Theorem 1.2",
+        "theorem_statement": "For a smooth cubic fourfold, the obstruction applies.",
+        "locator": {"kind": "theorem", "value": "Theorem 1.2"},
+        "source_status": "source_backed",
+        "conclusion_status": "compatible",
+        "conditions": [
+            {
+                "id": "cond_1",
+                "text": "object is a smooth cubic fourfold",
+                "condition_type": "smoothness",
+                "status": "satisfied",
+                "evidence": "claim object matches the theorem hypothesis",
+                "definition_locator": None,
+            }
+        ],
+        "applicability_status": "applicable",
+        "blocks_source_backed": False,
+        "notes": [],
+    }
+    usage.update(overrides)
+    return usage
+
+
+def test_theorem_usage_rejects_applicable_with_mismatched_condition() -> None:
+    # A contradicted/mismatched theorem hypothesis cannot be called applicable
+    # (KERNEL_SAFETY_RULES Literature And Source Rules).
+    usage = _theorem_usage(
+        conditions=[
+            {
+                "id": "cond_1",
+                "text": "object is smooth",
+                "condition_type": "smoothness",
+                "status": "mismatched",
+                "evidence": "the claim object is singular, not smooth",
+                "definition_locator": None,
+            }
+        ]
+    )
+    with pytest.raises(ValueError, match="all conditions satisfied"):
+        TheoremApplicabilityUsage.model_validate(usage)
+
+
+def test_theorem_usage_rejects_applicable_with_contradicting_conclusion() -> None:
+    # A theorem whose conclusion does not match the supported step cannot be
+    # applicable (KERNEL_SAFETY_RULES: theorem conclusion must match the step).
+    usage = _theorem_usage(conclusion_status="contradicts")
+    with pytest.raises(ValueError, match="compatible conclusion"):
+        TheoremApplicabilityUsage.model_validate(usage)
+
+
+def test_source_backed_step_requires_exact_applicability_locator(tmp_path: Path) -> None:
+    # Even with satisfied conditions and a compatible conclusion, a source_backed
+    # theorem use must carry an exact applicability locator.
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    source_grounding = read_yaml(run_dir / "source_grounding.yaml")
+    ref_id = source_grounding["source_refs"][0]["id"]
+    source_grounding["source_refs"][0]["status"] = "source_backed"
+    source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+    source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
+    source_grounding["steps"][0]["status"] = "source_backed"
+    source_grounding["steps"][0]["source_refs"] = [ref_id]
+    source_grounding["steps"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
+    write_yaml(run_dir / "source_grounding.yaml", source_grounding)
+    applicability = {
+        "schema_version": 1,
+        "claim_id": source_grounding["claim_id"],
+        "run_id": manifest["run_id"],
+        "generated_at": "2026-06-02T00:00:00+00:00",
+        "source_grounding_artifact": "source_grounding.yaml",
+        "literature_review_agent_artifact": None,
+        "usages": [
+            _theorem_usage(
+                proof_step_id=source_grounding["steps"][0]["proof_step_id"],
+                source_ref_id=ref_id,
+                locator={"kind": "unknown", "value": "unknown"},
+            )
+        ],
+        "overall_status": "unclear",
+        "notes": ["Test fixture for inexact applicability locator."],
+    }
+    write_yaml(run_dir / "theorem_applicability.yaml", applicability)
+    manifest.setdefault("optional_artifacts", {})["theorem_applicability"] = "theorem_applicability.yaml"
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+
+    with pytest.raises(KernelValidationError, match="exact applicability locator"):
+        validate_run(run_dir)
 
 
 def test_theorem_applicability_rejects_duplicate_usage_for_same_step(tmp_path: Path) -> None:

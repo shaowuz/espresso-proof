@@ -11,17 +11,24 @@ from typer.testing import CliRunner
 
 from espresso_proof.cli import _assert_fixture_expectations, app
 from espresso_proof.io import read_yaml
-from espresso_proof.kernel import KernelError, safe_run_path, snapshot
+from espresso_proof.kernel import KernelError, require_inside, safe_run_path, snapshot
 from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.memory import load_memory_index, summarize_memory
+from espresso_proof.memory import (
+    load_memory_index,
+    summarize_memory,
+    write_memory_entry,
+    write_run_memory,
+)
 from espresso_proof.models import (
     AdmissionCheck,
     AgentContracts,
     ComputationChecks,
+    CounterexampleTest,
     ExampleBank,
     ExampleFeedbackSummary,
     HumanChoice,
     HumanExampleFeedback,
+    MemoryEntry,
     MemoryIndex,
     Review,
     SourceGroundingReport,
@@ -90,6 +97,32 @@ def test_kernel_safe_run_path_rejects_escape(tmp_path: Path) -> None:
         safe_run_path(run_dir, str(tmp_path / "outside.yaml"))
     with pytest.raises(KernelError, match="cannot contain"):
         safe_run_path(run_dir, "../outside.yaml")
+
+
+def test_kernel_safe_run_path_rejects_symlink(tmp_path: Path) -> None:
+    # The VS Code bridge resolves artifact paths through safe_run_path; a symlink
+    # pointing outside the run must be rejected (VS_CODE_ARTIFACT_DASHBOARD:
+    # artifact paths must not escape workspace).
+    run_dir = tmp_path / "projects" / "hodge_atoms" / "runs" / "run_001"
+    run_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("not: trusted\n", encoding="utf-8")
+    (run_dir / "linked.yaml").symlink_to(outside)
+
+    with pytest.raises(KernelError, match="symlink"):
+        safe_run_path(run_dir, "linked.yaml")
+
+
+def test_kernel_require_inside_confines_to_workspace(tmp_path: Path) -> None:
+    # require_inside is the bridge's workspace-confinement guard; verify it
+    # directly (it is otherwise only exercised through snapshot).
+    root = (tmp_path / "workspace").resolve()
+    inside = root / "projects" / "p" / "runs" / "r"
+    inside.mkdir(parents=True)
+
+    assert require_inside(root, inside.resolve()) == inside.resolve()
+    with pytest.raises(KernelError, match="outside workspace"):
+        require_inside(root, (root / ".." / "evil").resolve())
 
 
 def test_kernel_snapshot_rejects_requested_run_outside_workspace(tmp_path: Path) -> None:
@@ -522,6 +555,170 @@ def test_memory_summary_loads_written_memory(tmp_path: Path) -> None:
     assert "provenance:" in summary
 
 
+def _memory_entry(**overrides) -> dict:
+    entry = {
+        "id": "mem_entry_1",
+        "timestamp": "2026-06-03T00:00:00+00:00",
+        "project": "mem_proj",
+        "type": "failed_attempt",
+        "claim_id": "claim_1",
+        "summary": "specialization route stalled at step 3",
+        "provenance": ["run:demo"],
+        "reusable_lesson": "specialization route needs a flatness check first",
+    }
+    entry.update(overrides)
+    return entry
+
+
+def test_memory_entry_schema_rejects_status_fields() -> None:
+    # Memory is advisory, not evidential: it cannot set source_backed, mark
+    # examples/computations checked, or upgrade evidence/proof status
+    # (KERNEL_SAFETY_RULES; memory_reuse slice). The schema has no status slot,
+    # so any such field is rejected.
+    forbidden_fields = (
+        "source_backed",
+        "examples_checked",
+        "proof_status",
+        "evidence_status",
+        "computation_checked",
+        "computations_checked",
+    )
+    for forbidden in forbidden_fields:
+        with pytest.raises(ValueError, match="Extra inputs"):
+            MemoryEntry.model_validate(_memory_entry(**{forbidden: True}))
+
+
+def test_run_memory_produces_reviewer_and_counterexample_categories(tmp_path: Path) -> None:
+    # A real mock run must PRODUCE (not just be able to render) reviewer-objection
+    # and counterexample memory categories, via the unified write_run_memory.
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    summary = summarize_memory(run_dir.parents[1], claim_text="cubic fourfold hodge atom")
+    assert "Source gaps" in summary  # existing grade-summary entry preserved
+    assert "Reviewer objections" in summary
+    assert "Counterexamples" in summary
+
+
+def test_write_run_memory_emits_optional_categories(tmp_path: Path) -> None:
+    # When the optional theorem_applicability / human_example_feedback artifacts
+    # exist, write_run_memory produces those advisory memory categories too.
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    (run_dir / "theorem_applicability.yaml").write_text(
+        yaml.safe_dump({"usages": [{"blocks_source_backed": True, "applicability_status": "blocked"}]}),
+        encoding="utf-8",
+    )
+    (run_dir / "human_example_feedback.yaml").write_text(
+        yaml.safe_dump({"feedback": [{"feedback_id": "f1"}]}),
+        encoding="utf-8",
+    )
+    write_run_memory(
+        run_dir.parents[1], run_dir, project_id=run_dir.parents[1].name, run_id=run_dir.name
+    )
+    summary = summarize_memory(run_dir.parents[1], claim_text="cubic fourfold")
+    assert "Theorem applicability failures" in summary
+    assert "Human example feedback" in summary
+
+
+def test_memory_summary_includes_required_categories(tmp_path: Path) -> None:
+    # The memory summary must surface every required category (MEMORY_REUSE
+    # Required Memory Categories), including theorem applicability failures,
+    # reviewer objections, and human example feedback.
+    project_dir = tmp_path / "projects" / "mem_categories"
+    sections = {
+        "theorem_applicability_failure": "Theorem applicability failures",
+        "reviewer_objection": "Reviewer objections",
+        "human_example_feedback": "Human example feedback",
+    }
+    for entry_type, header in sections.items():
+        write_memory_entry(
+            project_dir,
+            _memory_entry(
+                id=f"mem_{entry_type}",
+                type=entry_type,
+                summary=f"{entry_type} remembered for reuse",
+            ),
+        )
+
+    summary = summarize_memory(project_dir, claim_text="remembered for reuse")
+    for header in sections.values():
+        assert header in summary
+
+
+def test_memory_summary_includes_failed_route(tmp_path: Path) -> None:
+    project_dir = tmp_path / "projects" / "mem_proj"
+    write_memory_entry(project_dir, _memory_entry(id="mem_failed_1"))
+
+    summary = summarize_memory(project_dir, claim_text="specialization route flatness")
+    assert "Previous failed routes:" in summary
+    assert "mem_failed_1" in summary
+
+
+def test_memory_summary_is_deterministic(tmp_path: Path) -> None:
+    project_dir = tmp_path / "projects" / "mem_det"
+    write_memory_entry(project_dir, _memory_entry(id="mem_a", type="failed_attempt"))
+    write_memory_entry(
+        project_dir,
+        _memory_entry(id="mem_b", type="source_gap", summary="missing exact locator for Theorem 1.2"),
+    )
+
+    first = summarize_memory(project_dir, claim_text="cubic fourfold locator")
+    second = summarize_memory(project_dir, claim_text="cubic fourfold locator")
+    assert first == second
+    assert first  # non-empty
+
+
+def test_inspect_shows_claim_grade_and_evidence_sections(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    result = CliRunner().invoke(app, ["inspect", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert "Claim" in out
+    assert "status:" in out  # claim locked / human_confirmed status line
+    assert "Grade" in out
+    assert "Source Gaps" in out
+    assert "Examples / Counterexamples" in out
+    assert "Top Strategies" in out
+    assert "Artifacts" in out
+    assert "locked_claim" in out  # artifact path listing
+
+
+def test_inspect_does_not_emit_proof_complete_language(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    result = CliRunner().invoke(app, ["inspect", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    lowered = result.output.lower()
+    assert "proof complete" not in lowered
+    assert "proved the theorem" not in lowered
+
+
+def test_inspect_does_not_mutate_run(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    before = {path.name: path.read_bytes() for path in sorted(run_dir.glob("*.yaml"))}
+    result = CliRunner().invoke(app, ["inspect", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    after = {path.name: path.read_bytes() for path in sorted(run_dir.glob("*.yaml"))}
+    assert before == after
+
+
 def test_workflow_generator_classifies_domains() -> None:
     hodge_spec = generate_workflow_spec(
         "KKPY Hodge atoms and mirror symmetry for cubic fourfolds",
@@ -550,6 +747,18 @@ def test_workflow_generator_classifies_domains() -> None:
     WorkflowSpec.model_validate(coherent_spec)
     WorkflowSpec.model_validate(stacks_spec)
     WorkflowSpec.model_validate(generic_spec)
+
+
+def test_workflow_spec_rejects_missing_lean_non_goal() -> None:
+    # Espresso is not Lean-heavy by default (KERNEL_SAFETY_RULES Mathematical
+    # Status Rules): a workflow spec must keep Lean formalization an explicit
+    # non-goal. Dropping that non-goal must be rejected.
+    spec = read_yaml(Path("projects/hodge_atoms/workflow_spec.yaml"))
+    spec["non_goals"] = [
+        goal for goal in spec["non_goals"] if "lean formalization" not in goal.lower()
+    ]
+    with pytest.raises(ValueError, match="reject Lean formalization"):
+        WorkflowSpec.model_validate(spec)
 
 
 def test_strategy_rules_reject_standard_score_overreach(tmp_path: Path) -> None:
@@ -906,6 +1115,31 @@ def test_strategy_rules_reject_high_score_for_likely_false_or_refuted_idea(tmp_p
         validate_run(run_dir)
 
 
+def test_strategy_rules_reject_high_score_for_refuted_idea(tmp_path: Path) -> None:
+    # A refuted idea cannot carry a high-confidence (>=75) strategy route
+    # (KERNEL_SAFETY_RULES Strategy Rules; strategy_scoring_gate slice). The
+    # sibling test exercises likely_false; this isolates the refuted status.
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "refuted_by_all_hypotheses_counterexample" / "input.md",
+        tmp_path,
+    )
+    grade_path = run_dir / "idea_grade.yaml"
+    grade = read_yaml(grade_path)
+    assert grade["status"] == "refuted"
+    grade["score"] = 60
+    grade_path.write_text(yaml.safe_dump(grade, sort_keys=False), encoding="utf-8")
+
+    synthesis_path = run_dir / "strategy_synthesis.yaml"
+    synthesis = read_yaml(synthesis_path)
+    synthesis["routes"][0]["score"] = 75
+    synthesis["routes"][0]["source_status"] = "candidate"
+    synthesis_path.write_text(yaml.safe_dump(synthesis, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(KernelValidationError, match="promising or fragile"):
+        validate_run(run_dir)
+
+
 def test_strategy_rules_reject_high_score_with_unchecked_evidence(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
         "hodge_atoms",
@@ -1203,6 +1437,118 @@ def test_human_feedback_schema_rejects_evidence_status_fields() -> None:
 
     with pytest.raises(ValueError, match="Extra inputs"):
         HumanExampleFeedback.model_validate(data)
+
+
+def _human_feedback_with_extra(extra: dict) -> dict:
+    """A valid human feedback payload plus one forbidden extra field."""
+    item = {
+        "feedback_id": "feedback_001",
+        "target_type": "source_ref",
+        "target_artifact": "source_grounding.yaml",
+        "target_id": "src_candidate_001",
+        "labels": ["needs_source"],
+        "reason": "Needs an exact theorem locator.",
+        "scope": "project",
+        "requested_actions": ["run_referencing"],
+        "human_confirmed": True,
+        **extra,
+    }
+    return {
+        "schema_version": 1,
+        "project_id": "hodge_atoms",
+        "claim_id": "claim_001",
+        "run_id": "run_001",
+        "created_at": "2026-05-28T12:00:00Z",
+        "feedback": [item],
+    }
+
+
+def test_human_feedback_schema_rejects_checked_status_fields() -> None:
+    # Human taste cannot mark examples/computations checked (KERNEL_SAFETY_RULES
+    # Human Feedback Rules): the feedback schema has no evidence-status slot.
+    data = _human_feedback_with_extra({"evidence_status": "checked"})
+    with pytest.raises(ValueError, match="Extra inputs"):
+        HumanExampleFeedback.model_validate(data)
+
+
+def test_human_feedback_schema_rejects_proof_status_field() -> None:
+    # Human taste cannot upgrade proof status (KERNEL_SAFETY_RULES Human Feedback
+    # Rules): the feedback schema has no proof-status slot.
+    data = _human_feedback_with_extra({"proof_status": "proof_complete"})
+    with pytest.raises(ValueError, match="Extra inputs"):
+        HumanExampleFeedback.model_validate(data)
+
+
+def _counterexample_test(**overrides) -> dict:
+    """A valid CounterexampleTest payload; override fields to break it."""
+    data = {
+        "id": "cx_1",
+        "operator_id": "op_specialize",
+        "example_id": "ex_1",
+        "satisfies_all_claim_hypotheses": True,
+        "target": "theorem",
+        "result": "survived",
+        "refutes_claim": False,
+        "refutes_step_only": False,
+        "exposes_missing_hypothesis": False,
+        "explanation": "A canonical test of the claim.",
+    }
+    data.update(overrides)
+    return data
+
+
+def test_counterexample_proof_step_attack_cannot_refute_claim() -> None:
+    # A proof-step failure is not automatically a theorem refutation
+    # (KERNEL_SAFETY_RULES Example And Counterexample Rules).
+    data = _counterexample_test(
+        target="proof_step",
+        result="failed",
+        refutes_step_only=True,
+        refutes_claim=True,
+    )
+    with pytest.raises(ValueError, match="proof-step attack cannot refute"):
+        CounterexampleTest.model_validate(data)
+
+
+def test_counterexample_dropped_hypothesis_cannot_refute_claim() -> None:
+    # Dropping a claim hypothesis cannot refute the original claim
+    # (KERNEL_SAFETY_RULES Example And Counterexample Rules), enforced at the
+    # model level, not only cross-artifact.
+    data = _counterexample_test(
+        satisfies_all_claim_hypotheses=False,
+        result="failed",
+        refutes_claim=True,
+    )
+    with pytest.raises(ValueError, match="dropped-hypothesis tests cannot refute"):
+        CounterexampleTest.model_validate(data)
+
+
+def test_counterexample_accepts_optional_support_fields() -> None:
+    # The optional missing_hypothesis / support fields are additive and accepted.
+    test = CounterexampleTest.model_validate(
+        _counterexample_test(
+            target="hypothesis",
+            exposes_missing_hypothesis=True,
+            missing_hypothesis="projectivity",
+            support="cited computation in source S1",
+        )
+    )
+    assert test.missing_hypothesis == "projectivity"
+    assert test.support == "cited computation in source S1"
+
+
+def test_human_choice_schema_cannot_override_applicability() -> None:
+    # Human preference cannot override theorem applicability / source status
+    # (KERNEL_SAFETY_RULES Human Feedback Rules): HumanChoice has no slot to
+    # set applicability or source status, so any such field is rejected.
+    data = {
+        "claim_id": "claim_001",
+        "status": "pending",
+        "continue_decision": "pending",
+        "applicability_status": "applicable",
+    }
+    with pytest.raises(ValueError, match="Extra inputs"):
+        HumanChoice.model_validate(data)
 
 
 def test_feedback_example_cli_writes_valid_optional_artifact(tmp_path: Path) -> None:

@@ -22,6 +22,7 @@ from .mock_pipeline import run_mock_critique
 from .pdf_ingestion import ingest_source_for_theorems
 from .source_verification import verify_source_grounding_from_theorems
 from .theorem_applicability import audit_theorem_applicability
+from .verifier import verify_computation_checks
 from .models import (
     AdmissionCheck,
     AgentContracts,
@@ -231,13 +232,21 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     validate_run(run)
     manifest = read_yaml(run / "run_manifest.yaml")
     optional_artifacts = manifest.get("optional_artifacts", {})
+    artifacts = manifest.get("artifacts", {})
     typer.echo(f"Run is valid: {run}")
-    claim = read_yaml(run / "locked_claim.yaml")
-    grade = read_yaml(run / "idea_grade.yaml")
-    review = read_yaml(run / "review.yaml")
-    strategy_brief = read_yaml(run / "strategy_brief.yaml")
-    source_grounding = read_yaml(run / "source_grounding.yaml")
-    human_choice = read_yaml(run / "human_choice.yaml")
+
+    def _artifact(key: str) -> dict:
+        # Resolve through the run manifest (source of truth), not hardcoded names.
+        return read_yaml(run / artifacts[key])
+
+    claim = _artifact("locked_claim")
+    grade = _artifact("idea_grade")
+    review = _artifact("review")
+    strategy_brief = _artifact("strategy_brief")
+    source_grounding = _artifact("source_grounding")
+    human_choice = _artifact("human_choice")
+    examples = _artifact("examples")
+    counterexamples = _artifact("counterexamples")
 
     failed_reviewers = [
         reviewer["reviewer_id"]
@@ -261,6 +270,12 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     typer.echo("")
     typer.echo("Claim")
     typer.echo(f"- {claim.get('normalized_statement', '').strip()}")
+    claim_state = "locked" if claim.get("locked") else "unlocked"
+    if claim.get("human_confirmed"):
+        claim_state += ", human_confirmed"
+    if claim.get("repaired_from"):
+        claim_state += f", repaired_from {claim.get('repaired_from')}"
+    typer.echo(f"- status: {claim_state}")
     typer.echo("")
     typer.echo("Grade")
     typer.echo(
@@ -277,6 +292,27 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     typer.echo("Source Gaps")
     typer.echo(f"- {', '.join(source_gaps) if source_gaps else 'none'}")
     typer.echo(f"- source status: {', '.join(source_statuses) if source_statuses else 'none'}")
+    typer.echo("")
+    typer.echo("Examples / Counterexamples")
+    example_items = examples.get("examples", [])
+    if example_items:
+        for example in example_items[:3]:
+            typer.echo(
+                f"- example {example.get('id')}: {example.get('name')} "
+                f"-> {example.get('result_for_current_idea')}"
+            )
+    else:
+        typer.echo("- examples: none")
+    cx_items = counterexamples.get("tests", [])
+    if cx_items:
+        for cx in cx_items[:3]:
+            typer.echo(
+                f"- counterexample {cx.get('id')}: {cx.get('result')} "
+                f"(refutes_claim={cx.get('refutes_claim')}, "
+                f"refutes_step_only={cx.get('refutes_step_only')})"
+            )
+    else:
+        typer.echo("- counterexamples: none")
     theorem_applicability_path = _optional_artifact_path(
         run, optional_artifacts, "theorem_applicability"
     )
@@ -394,6 +430,12 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
         typer.echo("Memory")
         for line in memory_summary.splitlines()[:10]:
             typer.echo(line)
+    typer.echo("")
+    typer.echo("Artifacts")
+    for key, rel_path in manifest.get("artifacts", {}).items():
+        typer.echo(f"- {key}: {run / rel_path}")
+    for key, rel_path in optional_artifacts.items():
+        typer.echo(f"- {key} (optional): {run / rel_path}")
     typer.echo("")
     typer.echo(f"Final report: {run / 'final_report.md'}")
 
@@ -603,6 +645,26 @@ def audit_theorem_applicability_command(
     write_yaml(manifest_path, manifest)
     validate_run(run)
     typer.echo(f"Wrote theorem applicability audit to {run / 'theorem_applicability.yaml'}")
+
+
+@app.command("verify-computations")
+def verify_computations_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+) -> None:
+    """Execute machine_check specs with a real backend and write computation_verification.yaml.
+
+    Does not upgrade status. It records confirmed/refuted/error/unsupported per
+    check; validation then forbids a refuted check from claiming checked.
+    """
+    report = verify_computation_checks(run)
+    validate_run(run)
+    confirmed = sum(1 for r in report["results"] if r["verdict"] == "confirmed")
+    refuted = sum(1 for r in report["results"] if r["verdict"] == "refuted")
+    typer.echo(
+        f"Verified {len(report['results'])} machine check(s): "
+        f"{confirmed} confirmed, {refuted} refuted "
+        f"-> {run / 'computation_verification.yaml'}"
+    )
 
 
 @app.command("review-literature-agent")

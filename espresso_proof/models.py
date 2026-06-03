@@ -288,6 +288,20 @@ class ExampleSelection(StrictBaseModel):
     examples: list[TestedExample]
 
 
+class MachineCheckSpec(StrictBaseModel):
+    """A machine-runnable specification a real verifier backend can execute.
+
+    This is what lets ``computation_checked`` mean something: instead of an
+    asserted ``result``, the check carries an ``expression`` the kernel can
+    actually evaluate and compare against ``expected``.
+    """
+
+    kind: Literal["exact_arithmetic", "permutation_order"]
+    expression: str
+    expected: str
+    notes: str = ""
+
+
 class ExampleComputationCheck(StrictBaseModel):
     id: str
     example_id: str
@@ -299,6 +313,7 @@ class ExampleComputationCheck(StrictBaseModel):
     result: str
     cross_check: list[str] = Field(default_factory=list)
     status: ComputationStatus
+    machine_check: MachineCheckSpec | None = None
     notes: str = ""
 
     @model_validator(mode="after")
@@ -326,6 +341,52 @@ class ComputationChecks(StrictBaseModel):
             raise ValueError(
                 f"computation check claim_id mismatch: {sorted(mismatches)}"
             )
+        return self
+
+
+class VerificationVerdict(str, Enum):
+    confirmed = "confirmed"
+    refuted = "refuted"
+    error = "error"
+    unsupported = "unsupported"
+
+
+class ComputationVerificationResult(StrictBaseModel):
+    check_id: str
+    claim_id: str
+    kind: str
+    backend: str
+    executed: bool
+    verdict: VerificationVerdict
+    computed: str
+    expected: str
+    detail: str = ""
+
+
+class ComputationVerificationReport(StrictBaseModel):
+    """Output of a real verifier backend that actually executed machine checks.
+
+    The verifier never upgrades status on its own. It only records, per check,
+    whether an executed computation reproduced (``confirmed``) or contradicted
+    (``refuted``) the claimed result. Validators then forbid a check from
+    claiming ``checked`` when the machine refuted it.
+    """
+
+    schema_version: int = 1
+    claim_id: str
+    generated_at: str
+    backend: str
+    results: list[ComputationVerificationResult]
+
+    @model_validator(mode="after")
+    def validate_claim_ids(self) -> ComputationVerificationReport:
+        mismatches = sorted(
+            result.check_id
+            for result in self.results
+            if result.claim_id != self.claim_id
+        )
+        if mismatches:
+            raise ValueError(f"verification result claim_id mismatch: {mismatches}")
         return self
 
 
@@ -613,6 +674,8 @@ class CounterexampleTest(StrictBaseModel):
     refutes_claim: bool
     refutes_step_only: bool
     exposes_missing_hypothesis: bool
+    missing_hypothesis: str | None = None
+    support: str | None = None
     explanation: str
     repaired_claim_suggestion: str | None = None
 
@@ -620,6 +683,8 @@ class CounterexampleTest(StrictBaseModel):
     def validate_refutation_scope(self) -> CounterexampleTest:
         if self.satisfies_all_claim_hypotheses is False and self.refutes_claim:
             raise ValueError("dropped-hypothesis tests cannot refute the original claim")
+        if self.refutes_step_only and self.refutes_claim:
+            raise ValueError("a proof-step attack cannot refute the original claim")
         return self
 
 
@@ -675,6 +740,9 @@ class TheoremApplicabilityUsage(StrictBaseModel):
     conditions: list[TheoremApplicabilityCondition]
     applicability_status: Literal["applicable", "blocked", "misapplied", "unclear"]
     blocks_source_backed: bool
+    claim_scope: Literal["universal", "restricted", "unclear"] = "unclear"
+    theorem_scope: Literal["universal", "very_general", "generic", "restricted", "unclear"] = "unclear"
+    scope_justification: str = ""
     notes: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -1311,7 +1379,7 @@ class MemoryEntry(StrictBaseModel):
     id: str
     timestamp: str
     project: str
-    type: Literal["failed_attempt", "tested_example", "counterexample", "source_gap", "repaired_claim", "user_decision"]
+    type: Literal["failed_attempt", "tested_example", "counterexample", "source_gap", "repaired_claim", "user_decision", "theorem_applicability_failure", "reviewer_objection", "human_example_feedback"]
     claim_id: str
     summary: str
     provenance: list[str]
@@ -1322,7 +1390,7 @@ class MemoryIndexEntry(StrictBaseModel):
     id: str
     entry_path: str
     claim_id: str
-    type: Literal["failed_attempt", "tested_example", "counterexample", "source_gap", "repaired_claim", "user_decision"]
+    type: Literal["failed_attempt", "tested_example", "counterexample", "source_gap", "repaired_claim", "user_decision", "theorem_applicability_failure", "reviewer_objection", "human_example_feedback"]
     tags: list[str] = Field(default_factory=list)
     summary: str
     provenance: list[str]
@@ -1422,6 +1490,9 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "example_bank": ExampleBank,
     "examples": ExampleSelection,
     "computation_checks": ComputationChecks,
+    "machine_check_spec": MachineCheckSpec,
+    "computation_verification": ComputationVerificationReport,
+    "computation_verification_result": ComputationVerificationResult,
     "counterexamples": CounterexampleReport,
     "tests": TestReport,
     "source_grounding": SourceGroundingReport,
