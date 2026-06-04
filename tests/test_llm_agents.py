@@ -1668,7 +1668,7 @@ def test_mock_agent_adapter_contains_unsafe_prover_prose() -> None:
     attempt = make_prover_attempt(raw, client=client, created_at="2026-06-03T00:00:00+00:00")
 
     assert attempt["status"] == "needs_human"  # adapter never grants a strong status
-    assert attempt["output_summary"].count("[withheld proof-like phrase:") >= 3
+    assert attempt["output_summary"].count("[withheld proof-like phrase]") >= 3
     assert attempt["proposed_steps"] == []  # prose carried no structured steps
     LLMAgentAttempt.model_validate(attempt)  # the candidate artifact is schema-valid
 
@@ -1703,3 +1703,15 @@ def test_llm_agent_attempt_rejects_noncontract_status() -> None:
         pass
     else:
         raise AssertionError("candidate attempt must reject a non-contract status like 'checked'")
+
+
+def test_safe_text_redaction_does_not_reintroduce_forbidden_word() -> None:
+    # Regression: the redaction marker must NOT echo the forbidden phrase, or the
+    # prover-round language guard would flag its own redaction (live agents tripped
+    # this with words like "verified").
+    from espresso_proof.validators import _first_forbidden_proof_language
+
+    redacted = safe_text("This result is verified and the proof is complete.")
+    assert "verified" not in redacted.lower()
+    assert "[withheld proof-like phrase]" in redacted
+    assert _first_forbidden_proof_language(redacted.lower()) is None

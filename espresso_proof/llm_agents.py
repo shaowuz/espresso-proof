@@ -1162,7 +1162,7 @@ def safe_text(value: object) -> str:
     for phrase in FORBIDDEN_LANGUAGE:
         text = re.sub(
             forbidden_pattern(phrase),
-            f"[withheld proof-like phrase: {phrase}]",
+            "[withheld proof-like phrase]",
             text,
             flags=re.IGNORECASE,
         )

@@ -1086,9 +1086,14 @@ def _validate_prover_round_language(loop_attempt_id: str, report: ProverRoundRep
                 *review.objections,
                 *review.missing_hypotheses,
                 *review.source_requests,
-                *review.unsafe_language,
             ]
         )
+    # NOTE: review.unsafe_language is deliberately excluded. It is the audit
+    # ledger of forbidden phrases the kernel DETECTED in raw agent output (via
+    # collect_unsafe_language) and recorded verbatim on purpose; scanning it would
+    # make the guard flag its own detection record. The actual content fields
+    # above are already redacted (safe_text/safe_list), so proof-language in real
+    # content is still caught.
     phrase = _first_forbidden_proof_language(" ".join(text_parts).lower())
     if phrase:
         raise KernelValidationError(
