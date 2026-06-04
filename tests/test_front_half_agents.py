@@ -398,6 +398,82 @@ def test_strategy_with_stub_stays_valid(tmp_path: Path) -> None:
     validate_run(run_dir)
 
 
+def test_attacker_cannot_upgrade_evidence_or_refute(tmp_path: Path) -> None:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+
+    # First seed counterexamples + admissibility tests (S4).
+    seed = _FakeClient(
+        {
+            "counterexamples": [
+                {
+                    "name": "Pressure cex A",
+                    "satisfies_all_claim_hypotheses": "unclear",
+                    "target": "theorem",
+                    "explanation": "candidate pressure",
+                }
+            ],
+            "tests": [
+                {
+                    "description": "seed admissibility test",
+                    "uses_counterexamples": ["cex_001"],
+                    "main_observation": "seed",
+                    "next_action": "run",
+                }
+            ],
+            "summary": "seed",
+        }
+    )
+    run_front_half_agent_pass(run_dir=run_dir, client=seed, stages=["counterexamples"])
+    tests_before = read_yaml(run_dir / artifacts["tests"])
+    seed_ids = {t["id"] for t in tests_before["tests"]}
+
+    # Now the attacker tries to declare a refutation with checked/failed evidence.
+    attacker = _FakeClient(
+        {
+            "attacks": [
+                {
+                    "target_id": "cex_001",
+                    "attacks": "proof_step",
+                    "survives": True,
+                    "observation": "this breaks the proof so the claim is refuted",
+                    "next_action": "declare refuted",
+                    "result": "failed",  # must be neutralized
+                    "evidence_status": "checked",  # must be neutralized
+                }
+            ],
+            "route_blockers": ["rigidity route blocked"],
+            "summary": "Refuted via proof-step attack.",
+        }
+    )
+    run_front_half_agent_pass(run_dir=run_dir, client=attacker, stages=["attacker"])
+    validate_run(run_dir)
+
+    tests_after = read_yaml(run_dir / artifacts["tests"])
+    after_ids = {t["id"] for t in tests_after["tests"]}
+    # existing (seed) test ids preserved.
+    assert seed_ids.issubset(after_ids)
+    # the attacker's appended observation stays unverified.
+    appended = [t for t in tests_after["tests"] if t["id"] not in seed_ids]
+    assert appended
+    for t in appended:
+        assert t["result"] == "not_tested"
+        assert t["evidence_status"] == "human_needed"
+
+
+def test_attacker_with_stub_stays_valid(tmp_path: Path) -> None:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+
+    run_front_half_agent_pass(
+        run_dir=run_dir, client=StubLLMClient(), stages=["attacker"]
+    )
+    validate_run(run_dir)
+
+
 def test_understanding_claim_with_stub_keeps_vague_claim_honest(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text("Prove the thing about the nice mirror object.", encoding="utf-8")
