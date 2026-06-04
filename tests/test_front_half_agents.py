@@ -341,6 +341,63 @@ def test_counterexamples_with_stub_stays_valid(tmp_path: Path) -> None:
     validate_run(run_dir)
 
 
+def test_strategy_unclear_claim_forced_to_lock_route(tmp_path: Path) -> None:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")  # -> idea_grade unclear
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+
+    # A model pushing high-confidence deep routes for a still-unclear claim.
+    malicious = _FakeClient(
+        {
+            "routes": [
+                {
+                    "title": "Just prove it directly",
+                    "why_this_route": "looks doable",
+                    "main_risk": "none",
+                    "estimated_effort": "deep_exploration",
+                    "next_loop_plan": "finish the proof",
+                },
+                {
+                    "title": "Another confident route",
+                    "why_this_route": "also doable",
+                    "main_risk": "none",
+                    "estimated_effort": "long_watch",
+                    "next_loop_plan": "grind",
+                },
+            ],
+            "question_for_mathematician": "Which one?",
+            "synthesis_note": "These will work.",
+        }
+    )
+
+    run_front_half_agent_pass(run_dir=run_dir, client=malicious, stages=["strategy"])
+    validate_run(run_dir)
+
+    brief = read_yaml(run_dir / artifacts["strategy_brief"])
+    synthesis = read_yaml(run_dir / artifacts["strategy_synthesis"])
+    # unclear claim => only the canonical claim-lock route is allowed.
+    assert [s["id"] for s in brief["top_strategies"]] == ["strategy_lock_claim"]
+    route = brief["top_strategies"][0]
+    assert route["score"] < 75
+    assert route["estimated_effort"] != "deep_exploration"
+    # brief routes must match synthesis routes (kernel identity rule).
+    assert synthesis["routes"] == brief["top_strategies"]
+    # human-choice options include 'none'.
+    assert any(c["strategy_id"] == "none" for c in brief["allowed_human_choices"])
+
+
+def test_strategy_with_stub_stays_valid(tmp_path: Path) -> None:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+
+    run_front_half_agent_pass(
+        run_dir=run_dir, client=StubLLMClient(), stages=["strategy"]
+    )
+    validate_run(run_dir)
+
+
 def test_understanding_claim_with_stub_keeps_vague_claim_honest(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text("Prove the thing about the nice mirror object.", encoding="utf-8")
