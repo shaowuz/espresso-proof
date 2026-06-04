@@ -230,6 +230,10 @@ class HypothesisLedger(StrictBaseModel):
     hypotheses: list[Hypothesis]
     missing_or_unclear: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    # Agent-supplied judgement of whether the claim is precise enough to study.
+    # Advisory only: it gates whether Grade/Strategy move past claim-locking; it
+    # can NEVER set source_backed, mark evidence checked, or upgrade proof status.
+    claim_precision: Literal["precise", "imprecise", "unclear"] = "unclear"
 
 
 class InvariantValue(StrictBaseModel):

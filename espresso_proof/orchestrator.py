@@ -98,6 +98,7 @@ def orchestrate_run(
     literature_providers: list[str] | None = None,
     max_references: int = 8,
     run_dir: Path | None = None,
+    front_half_client=None,
 ) -> dict:
     """Drive a run from a fresh claim to the human gate, validating each stage.
 
@@ -124,8 +125,8 @@ def orchestrate_run(
 
     # Stage 1 — front-half agents (S1–S8). Skipped when front_half == "mock".
     if not _reached(run_dir, "FRONT_HALF_DONE"):
-        if front_half != "mock":
-            client = build_client(
+        if front_half != "mock" or front_half_client is not None:
+            client = front_half_client or build_client(
                 provider=front_half,
                 model=model,
                 api_key_env=api_key_env,

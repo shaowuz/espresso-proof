@@ -43,6 +43,7 @@ from .models import (
     HypothesisLedger,
     IdeaGrade,
     LiteratureReviewReport,
+    Review,
     SourceGroundingReport,
     StrategyBrief,
     StrategySynthesis,
@@ -76,14 +77,15 @@ _NONTRIVIALITY = {"routine", "standard", "literature_counterexample", "research_
 # Front-half stages in Core-Flow order. Names are stable identifiers used by the
 # registry, the CLI ``--front-half`` plumbing, and the orchestrator.
 FRONT_HALF_STAGES: list[str] = [
-    "understanding_claim",  # S1: locked_claim + hypothesis_ledger
+    "understanding_claim",  # S1: locked_claim + hypothesis_ledger (+ claim_precision)
     "literature_review",    # S2: candidate references only
     "examples",             # S3: examples + computation_checks
     "counterexamples",      # S4: counterexamples + admissibility tests
+    "source_theorem",       # S7: source matching + theorem applicability (candidate)
+    "regrade",              # evidence-aware grade recompute (before strategy)
     "strategy",             # S5: strategy generator + grader + brief
     "attacker",             # S6: example/counterexample attacker
-    "source_theorem",       # S7: source matching + theorem applicability
-    "grade_memory_memo",    # S8: grade + memory + concise answer
+    "grade_memory_memo",    # S8: grade refresh + memory + concise answer
 ]
 
 # stage name -> normalizer(run_dir=..., client=..., context=...) -> dict
@@ -184,6 +186,8 @@ _UNDERSTANDING_SYSTEM = (
     "ambiguous term and every missing or unclear hypothesis instead of guessing. "
     "You may PROPOSE a precise statement, but you must NOT mark it "
     "human-confirmed and must NOT infer any proof, source, or evidence status. "
+    "Also judge claim_precision: 'precise' if the objects, hypotheses, and "
+    "conclusion are well-defined enough to start studying, else 'imprecise'. "
     "Respond with ONLY a JSON object."
 )
 
@@ -196,6 +200,7 @@ _UNDERSTANDING_OUTPUT_SCHEMA = {
     "conclusion": "string: the precise conclusion",
     "ambiguous_terms": ["string: ambiguous or undefined terms"],
     "missing_or_unclear": ["string: parts not yet precise"],
+    "claim_precision": "precise|imprecise (is the claim precise enough to study?)",
     "notes": ["string"],
 }
 
@@ -233,6 +238,43 @@ def _normalize_hypotheses(raw_hyps: object, *, fallback: list) -> list[dict]:
     if not result:
         result = [{"name": "claim hypotheses", "status": "unclear", "source": "agent"}]
     return result
+
+
+_IMPRECISE_CONCLUSION_MARKERS = (
+    "unclear",
+    "requires clarification",
+    "not precise",
+    "to be determined",
+)
+_IMPRECISE_OBJECT_MARKERS = ("unspecified", "does something", "nice", "mirror")
+_CORE_GAP_TERMS = {
+    "objects",
+    "main objects",
+    "object",
+    "hypotheses",
+    "hypothesis",
+    "conclusion",
+    "claim",
+    "statement",
+}
+
+
+def _looks_imprecise(
+    *, conclusion: str, objects: list[str], missing_or_unclear: list[str]
+) -> bool:
+    """Conservative safety floor for precision (cannot be over-ridden upward)."""
+
+    text = (conclusion or "").strip().lower()
+    if not text or any(marker in text for marker in _IMPRECISE_CONCLUSION_MARKERS):
+        return True
+    joined_objects = " ".join(str(o) for o in (objects or [])).lower()
+    if not joined_objects or any(
+        marker in joined_objects for marker in _IMPRECISE_OBJECT_MARKERS
+    ):
+        return True
+    if {str(item).strip().lower() for item in (missing_or_unclear or [])} & _CORE_GAP_TERMS:
+        return True
+    return False
 
 
 @register_stage("understanding_claim")
@@ -278,6 +320,18 @@ def _understanding_claim(*, run_dir: Path, client: LLMClient, context: dict) -> 
     missing_or_unclear = safe_list(raw.get("missing_or_unclear"))
     notes = safe_list(raw.get("notes"))
 
+    # Agent-supplied precision judgement, with a conservative safety floor: even
+    # if the agent says "precise", a placeholder conclusion / unspecified objects
+    # / a core missing piece forces "imprecise". Advisory only — gates activation,
+    # never upgrades any proof/source/evidence status.
+    claim_precision = raw.get("claim_precision")
+    if claim_precision not in {"precise", "imprecise"}:
+        claim_precision = "unclear"
+    if claim_precision == "precise" and _looks_imprecise(
+        conclusion=conclusion, objects=objects, missing_or_unclear=missing_or_unclear
+    ):
+        claim_precision = "imprecise"
+
     claim = {
         "id": current["id"],          # preserve id so downstream artifacts still resolve
         "raw_text": raw_text,         # never overwrite the user's original text
@@ -300,6 +354,7 @@ def _understanding_claim(*, run_dir: Path, client: LLMClient, context: dict) -> 
         or [
             "Locked claim proposed by the Understanding-Claim agent; not human-confirmed."
         ],
+        "claim_precision": claim_precision,
     }
     HypothesisLedger.model_validate(ledger)
 
@@ -935,7 +990,10 @@ def _strategy(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
             counterexamples=context.get("counterexamples"),
             tests=context.get("tests"),
         ):
-            routes = [_safe_lock_route(idea_grade)]
+            # Precise claim with no usable agent routes: offer a concrete
+            # investigation route (not just "lock the claim"). Still candidate,
+            # conservative, and no proof is claimed.
+            routes = [_default_investigation_route(idea_grade)]
 
     allowed_choices = [
         {"strategy_id": r["id"], "effort_options": [r["estimated_effort"]]} for r in routes
@@ -1352,3 +1410,159 @@ def _grade_memory_memo(*, run_dir: Path, client: LLMClient, context: dict) -> di
             "preserved, no upgrade); advisory memory written; memo renders"
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Evidence-aware regrade (runs before strategy; activates precise claims)
+# ---------------------------------------------------------------------------
+
+# Conservative scores (all strictly < HIGH_SCORE_THRESHOLD; high score still
+# requires real checked/source-backed support, which the front half never has).
+_REGRADE_SCORES = {
+    "unclear": 10,
+    "fragile": 40,
+    "likely_false": 25,
+    "refuted": 5,
+}
+
+
+def _default_investigation_route(idea_grade: dict) -> dict:
+    """A concrete, conservative next route for a precise-but-unproven claim.
+
+    Used when the claim is precise enough to study but the agent supplied no
+    usable route. It is candidate-only, scored well below the high-score
+    threshold and within the standard lift, and claims no proof.
+    """
+
+    idea_score = int(idea_grade.get("score", 0) or 0)
+    return {
+        "id": "strategy_investigate_route",
+        "title": "Investigate the leading route and pin its key lemma(s)",
+        "score": max(0, min(idea_score, 40)),
+        "status": "fragile",
+        "why_this_route": (
+            "The claim is precise enough to study; test the most plausible route "
+            "and identify the lemmas and sources it depends on."
+        ),
+        "survived_tests": [],
+        "failed_tests": [],
+        "main_risk": "The route may depend on unproven lemmas or missing sources.",
+        "source_status": "candidate",
+        "estimated_effort": "normal_pass",
+        "next_loop_plan": "Pin each needed lemma to an exact source and test small cases.",
+    }
+
+
+def _neutralize_review_if_failed(review: dict) -> dict | None:
+    """For a precise claim, relax a placeholder 'failed' review to neutral.
+
+    The front half has NOT run the real reviewers yet (those run in the
+    Prover/Reviewers pass), so a scaffolded ``failed`` verdict is not an honest
+    signal for a precise claim and would wrongly block meaningful routes. This
+    sets the reviewers to ``unclear`` (pending real review) without asserting any
+    pass/proof. Returns the new review dict, or None if nothing needed changing.
+    """
+
+    reviewers = review.get("reviewers", [])
+    if not any(r.get("verdict") in {"fail", "failed"} for r in reviewers):
+        return None
+    new_reviewers = []
+    for r in reviewers:
+        nr = dict(r)
+        nr["verdict"] = "unclear"
+        nr["severity"] = "medium"
+        nr["required_reruns"] = []
+        new_reviewers.append(nr)
+    new_review = dict(review)
+    new_review["reviewers"] = new_reviewers
+    new_review["attempt_status"] = "unclear"
+    new_review["verdict"] = "unclear"
+    note = "Front-half review pending; real reviewers run in the Prover/Reviewers pass."
+    new_review["downgrade_reasons"] = list(review.get("downgrade_reasons") or []) + [note]
+    Review.model_validate(new_review)
+    return new_review
+
+
+@register_stage("regrade")
+def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
+    artifacts = context["manifest"]["artifacts"]
+    claim = context["claim"]
+    claim_id = claim["id"]
+    ledger = context.get("hypothesis_ledger") or {}
+    current = dict(context.get("idea_grade") or {})
+    counterexamples = (context.get("counterexamples") or {}).get("tests", [])
+    source = context.get("source_grounding") or {}
+    review = context.get("review") or {}
+
+    precision = ledger.get("claim_precision", "unclear")
+
+    # Signals (read-only; never upgrade any status).
+    source_backed_steps = any(
+        s.get("status") == "source_backed" for s in source.get("steps", [])
+    )
+    source_gap = (not source_backed_steps) or bool(current.get("source_gaps"))
+    missing_hyps = bool(current.get("missing_hypotheses")) or bool(
+        ledger.get("missing_or_unclear")
+    )
+    counterexample_pressure = len(counterexamples) > 0
+    # A refutation requires an admissible all-hypotheses counterexample that is
+    # actually checked/refuting — the front half never produces one.
+    admissible_refutation = any(
+        c.get("satisfies_all_claim_hypotheses") is True and c.get("refutes_claim") is True
+        for c in counterexamples
+    )
+    theorem_applicability_failure = False  # no theorem-applicability artifact in the front half
+
+    review_note = None
+    if precision != "precise":
+        # Vague/ambiguous claim: keep it at claim-locking.
+        status = "unclear"
+    elif admissible_refutation:
+        status = "refuted"
+    else:
+        serious = sum(
+            [bool(missing_hyps), counterexample_pressure, theorem_applicability_failure]
+        )
+        status = "likely_false" if serious >= 2 else "fragile"
+        # Precise claim: relax the placeholder failed review so meaningful routes
+        # can activate (real reviewers still run later).
+        new_review = _neutralize_review_if_failed(review)
+        if new_review is not None:
+            write_yaml(run_dir / artifacts["review"], new_review)
+            review_note = "neutralized placeholder failed review (front-half pending)"
+
+    score = _REGRADE_SCORES.get(status, 10)
+    reason = {
+        "unclear": "Recomputed from live artifacts: the claim is not precise enough to study safely.",
+        "fragile": "Recomputed from live artifacts: the claim is precise, but the route has source gaps / missing hypotheses / counterexample pressure and no checked proof.",
+        "likely_false": "Recomputed from live artifacts: the claim is precise but faces multiple serious pressures; no checked counterexample has been verified.",
+        "refuted": "Recomputed from live artifacts: an admissible, checked counterexample violates the conclusion.",
+    }[status]
+
+    grade = {
+        "claim_id": claim_id,
+        "status": status,
+        "score": score,
+        "confidence": current.get("confidence", "low"),
+        "reasons": [reason] + list(current.get("reasons") or []),
+        "survived_tests": [],  # SAFETY: no checked evidence in the front half
+        "failed_tests": [],
+        "counterexample_candidates": [c["id"] for c in counterexamples],
+        "missing_hypotheses": list(current.get("missing_hypotheses") or [])
+        or list(ledger.get("missing_or_unclear") or []),
+        "source_gaps": list(current.get("source_gaps") or [])
+        or (["No step is source_backed yet."] if source_gap else []),
+        "repair_options": list(current.get("repair_options") or []),
+        "next_cheapest_test": current.get("next_cheapest_test", "")
+        or "Test the leading route on small/canonical cases and pin its key lemma.",
+        "human_review_required": True,
+        # SAFETY: never upgrade the proof-language status from the front half.
+        "proof_language_status": current.get("proof_language_status", "idea_sketch"),
+    }
+    IdeaGrade.model_validate(grade)
+    write_yaml(run_dir / artifacts["idea_grade"], grade)
+
+    notes = [f"regrade: precision={precision} -> status={status} (score {score})"]
+    if review_note:
+        notes.append(review_note)
+    return {"unsafe_language": [], "notes": notes}
