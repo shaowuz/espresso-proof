@@ -12,7 +12,9 @@ from .literature_discovery import discover_literature as run_literature_discover
 from .literature_review_agent import ReviewSourceSpec, run_literature_review_agent
 from .llm_agents import append_prover_loop_round
 from .llm_agents import resolve_agent_gate as resolve_llm_agent_gate
+from .llm_agents import build_client as build_llm_client
 from .llm_agents import build_prover_loop_report
+from .front_half_agents import run_front_half_agent_pass
 from .llm_agents import external_agent_diagnostic
 from .llm_agents import openai_agent_diagnostic
 from .llm_agents import run_llm_agent_pass
@@ -75,6 +77,23 @@ def critique_sketch(
     typer.echo(f"Wrote run artifacts to {run_dir}")
 
 
+@app.command("new-run")
+def new_run(
+    input: Path = typer.Option(..., "--input", "-i", exists=True, dir_okay=False),
+    project: str = typer.Option("hodge_atoms", "--project", "-p"),
+    output_root: Path = typer.Option(Path("."), "--output-root", file_okay=False),
+) -> None:
+    """Scaffold a kernel-valid 'unclear / needs_human' run for an arbitrary claim.
+
+    Any claim text becomes a minimal, honest run (claim text embedded, grade
+    unclear, no source_backed, needs_human). This unblocks arbitrary new claims
+    so front-half agents can enrich a real run.
+    """
+    run_dir = run_mock_critique(project, input, output_root)
+    validate_run(run_dir)
+    typer.echo(f"Wrote run artifacts to {run_dir}")
+
+
 @app.command("run-flow")
 def run_flow(
     input: Path = typer.Option(..., "--input", "-i", exists=True, dir_okay=False),
@@ -83,6 +102,7 @@ def run_flow(
     literature_provider: list[str] | None = typer.Option(None, "--literature-provider"),
     max_references: int = typer.Option(8, "--max-references", min=1, max=25),
     provider: str = typer.Option("stub", "--provider"),
+    front_half: str = typer.Option("mock", "--front-half"),
     model: str = typer.Option("gpt-4.1", "--model"),
     reviewer_set: str = typer.Option("espresso", "--reviewer-set"),
     api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
@@ -101,6 +121,8 @@ def run_flow(
         raise typer.BadParameter("literature-mode must be local or live")
     if provider not in {"stub", "openai", "external"}:
         raise typer.BadParameter("provider must be stub, openai, or external")
+    if front_half not in {"mock", "stub", "external"}:
+        raise typer.BadParameter("front-half must be mock, stub, or external")
     if reviewer_set not in {"generic", "espresso"}:
         raise typer.BadParameter("reviewer-set must be generic or espresso")
     provider_diagnostic = _preflight_agent_provider(
@@ -112,6 +134,21 @@ def run_flow(
     )
 
     run_dir = run_mock_critique(project, input, output_root)
+
+    front_half_report = None
+    if front_half != "mock":
+        front_half_client = build_llm_client(
+            provider=front_half,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+        )
+        front_half_report = run_front_half_agent_pass(
+            run_dir=run_dir,
+            client=front_half_client,
+        )
+        validate_run(run_dir)
+
     manifest_path = run_dir / "run_manifest.yaml"
     manifest = read_yaml(manifest_path)
     artifacts = manifest["artifacts"]
@@ -162,6 +199,14 @@ def run_flow(
 
     typer.echo(f"Wrote run artifacts to {run_dir}")
     typer.echo(f"Literature Discovery: {literature_mode}")
+    if front_half_report is not None:
+        ok = sum(1 for s in front_half_report["stages"] if s["status"] == "ok")
+        skipped = sum(1 for s in front_half_report["stages"] if s["status"] == "skipped")
+        typer.echo(
+            f"Front-half agents: mode={front_half}, ok={ok}, skipped={skipped}"
+        )
+    else:
+        typer.echo("Front-half agents: mode=mock (no live pass)")
     typer.echo(f"LLM agents: provider={provider}, reviewer_set={reviewer_set}")
     typer.echo(f"Human gate: {agent_report['human_gate']['status']}")
 
