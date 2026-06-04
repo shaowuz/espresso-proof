@@ -17,6 +17,7 @@ from .models import (
     FailurePatternAudit,
     LiteratureRetrievalReport,
     MathematicalJudgmentReport,
+    ProofVerificationReport,
     ContinueDecision,
     ExampleSelection,
     ExampleFeedbackSummary,
@@ -81,6 +82,7 @@ def validate_run(run_dir: Path) -> None:
     mathematical_judgment = _load_optional_mathematical_judgment(run_dir, manifest)
     failure_pattern_audit = _load_optional_failure_pattern_audit(run_dir, manifest)
     literature_retrieval = _load_optional_literature_retrieval(run_dir, manifest)
+    proof_verification = _load_optional_proof_verification(run_dir, manifest)
     counterexamples = validate_yaml_model(run_dir / artifacts["counterexamples"], CounterexampleReport)
     tests = validate_yaml_model(run_dir / artifacts["tests"], TestReport)
     source_grounding = validate_yaml_model(run_dir / artifacts["source_grounding"], SourceGroundingReport)
@@ -124,6 +126,7 @@ def validate_run(run_dir: Path) -> None:
     _validate_mathematical_judgment(mathematical_judgment, claim, manifest)
     _validate_failure_pattern_audit(failure_pattern_audit, claim, manifest)
     _validate_literature_retrieval(literature_retrieval, claim, manifest)
+    _validate_proof_verification(proof_verification, claim, manifest, idea_grade)
     _validate_example_evidence(computations, counterexamples, idea_grade)
     _validate_source_backing(source_grounding)
     _validate_theorem_applicability(manifest, claim, source_grounding, theorem_applicability)
@@ -400,6 +403,92 @@ def _validate_literature_retrieval(
         raise KernelValidationError(
             "literature_retrieval run_id does not match the run manifest"
         )
+
+
+def _load_optional_proof_verification(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> ProofVerificationReport | None:
+    optional = manifest.optional_artifacts
+    if "proof_verification" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["proof_verification"],
+        ProofVerificationReport,
+    )
+
+
+# verifier_type -> the only checked status it may earn (with a confirming result).
+_TRUSTED_EARNED = {
+    "finite_group_cayley": "instance_checked",
+    "exact_computation": "computation_checked",
+}
+
+
+def _validate_proof_verification(
+    proof_verification: ProofVerificationReport | None,
+    claim: Claim,
+    manifest: RunManifest,
+    idea_grade: IdeaGrade,
+) -> None:
+    """Proof verification bridge: only a trusted deterministic backend with a
+    confirming result may earn a checked status. Fails closed.
+
+    Rules (the report model already excludes a ``proved`` status by construction):
+
+    - claim_id / run_id bind to this run, and every entry's claim_id must match
+      the locked claim (a verifier result for a different claim cannot be
+      attached here);
+    - a checked status (``instance_checked`` / ``computation_checked``) requires
+      ``trusted`` AND ``confirmed`` AND the matching trusted ``verifier_type``;
+    - ``lean_checked`` is NOT earnable in V0 (reserved) -> always rejected;
+    - ``human_attested`` requires ``verifier_type == human_checked`` and is never
+      a machine-checked status;
+    - a non-trusted or non-confirming entry, and any ``lean_bridge`` entry, must be
+      ``unverified``.
+
+    Natural-language prover/reviewer approval never reaches this report; it cannot
+    set any checked status.
+    """
+    if proof_verification is None:
+        return
+    if proof_verification.claim_id != claim.id:
+        raise KernelValidationError("proof_verification claim_id does not match locked claim")
+    if proof_verification.run_id != manifest.run_id:
+        raise KernelValidationError("proof_verification run_id does not match the run manifest")
+    for entry in proof_verification.entries:
+        vt = entry.verifier_type.value
+        earned = entry.earned_status.value
+        if entry.claim_id != claim.id:
+            raise KernelValidationError(
+                f"proof_verification entry {entry.id!r} targets a different claim"
+            )
+        if earned == "lean_checked":
+            raise KernelValidationError(
+                f"proof_verification entry {entry.id!r}: lean_checked is not earnable in V0"
+            )
+        if earned in {"instance_checked", "computation_checked"}:
+            if not (entry.trusted and entry.confirmed):
+                raise KernelValidationError(
+                    f"proof_verification entry {entry.id!r} claims {earned} without a "
+                    "trusted + confirming verifier result"
+                )
+            if _TRUSTED_EARNED.get(vt) != earned:
+                raise KernelValidationError(
+                    f"proof_verification entry {entry.id!r}: verifier_type {vt!r} cannot "
+                    f"earn {earned!r}"
+                )
+        elif earned == "human_attested":
+            if vt != "human_checked":
+                raise KernelValidationError(
+                    f"proof_verification entry {entry.id!r}: human_attested requires "
+                    "verifier_type=human_checked"
+                )
+        # earned == unverified is always acceptable (fail-closed default)
+        if vt == "lean_bridge" and earned != "unverified":
+            raise KernelValidationError(
+                f"proof_verification entry {entry.id!r}: lean_bridge cannot earn {earned!r} in V0"
+            )
 
 
 def _load_optional_theorem_extraction(

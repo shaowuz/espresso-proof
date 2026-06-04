@@ -149,6 +149,18 @@ def build_concise_memo(run_dir: Path) -> str:
                     f"  [{m.get('tier')}] {m.get('pattern_id')}: {m.get('explanation')}"
                 )
 
+    # Proof verification bridge: scoped machine-verified instances only. NEVER a
+    # universal proof; the renderer never emits "proved".
+    if "proof_verification" in optional:
+        pv = read_yaml(run_dir / optional["proof_verification"])
+        checked = [e for e in pv.get("entries", []) if e.get("earned_status") == "instance_checked"]
+        if checked:
+            lines.append("")
+            lines.append("Machine-verified instances (scoped; NOT a proof of the universal claim):")
+            for e in checked:
+                lines.append(f"  - {e.get('target')}: {e.get('result')} [{e.get('earned_status')}]")
+            lines.append("  (the universal claim for all primes p is NOT proved by these finite checks)")
+
     lines.append("")
     lines.append(
         "Note: artifact-backed memo; an assessment is not a proof. "
