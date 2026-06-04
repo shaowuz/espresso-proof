@@ -601,7 +601,7 @@ def build_prover_loop_report(
         "loop_decision": decision,
         "decision_reason": _loop_decision_reason(gate, blockers),
         "audit_note": (
-            "proof-close-style loop scaffold: records attempt portfolio, reviewer objections, "
+            "Prover-loop scaffold: records attempt portfolio, reviewer objections, "
             "time allocation, and human gate without upgrading proof/source/evidence status."
         ),
     }

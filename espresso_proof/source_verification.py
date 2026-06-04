@@ -30,7 +30,18 @@ def verify_source_grounding_from_theorems(
             ledger.get("missing_or_unclear", []),
         )
         exact_locator = theorem.locator.is_exact
-        status = "source_backed" if exact_locator and hypothesis_match["matches"] is True else "candidate"
+        # Anti-plagiarism: source_backed requires attribution (author + title), in
+        # addition to an exact locator and a hypothesis match. Fail closed to
+        # candidate when attribution is incomplete (the SourceRef model validator
+        # is the hard boundary; this is the friendly early downgrade).
+        attributed = bool([a for a in source.authors if str(a).strip()]) and bool(
+            str(source.title).strip()
+        )
+        status = (
+            "source_backed"
+            if exact_locator and hypothesis_match["matches"] is True and attributed
+            else "candidate"
+        )
         ref_id = f"verified_{theorem.id}"
         existing_refs[ref_id] = {
             "id": ref_id,
@@ -53,13 +64,43 @@ def verify_source_grounding_from_theorems(
                 "hypotheses were found in the extracted statement."
             )
         else:
-            missing = ", ".join(hypothesis_match.get("mismatches", [])) or "unclear hypothesis match"
-            step["note"] = f"Candidate theorem found, but source-backed verification is blocked by {missing}."
+            if not attributed:
+                reason = "missing attribution (author/title) for the cited source"
+            elif not exact_locator:
+                reason = "no exact locator"
+            else:
+                reason = ", ".join(hypothesis_match.get("mismatches", [])) or "unclear hypothesis match"
+            step["note"] = f"Candidate theorem found, but source-backed verification is blocked by {reason}."
 
     source_grounding["source_refs"] = list(existing_refs.values())
     SourceGroundingReport.model_validate(source_grounding)
     write_yaml(run_dir / "source_grounding.yaml", source_grounding)
     return source_grounding
+
+
+def ground_run(*, run_dir: Path, theorem_extraction_path: Path) -> dict:
+    """Verify source grounding from extracted theorems, run the theorem
+    applicability audit, register it, and re-validate the run (fail closed).
+
+    Single reusable entry point shared by the ``verify-sources`` CLI and the
+    orchestrated ``--ground-source`` path so there is one grounding pipeline.
+    """
+
+    from .theorem_applicability import audit_theorem_applicability
+    from .validators import validate_run
+
+    verify_source_grounding_from_theorems(
+        run_dir=run_dir, theorem_extraction_path=theorem_extraction_path
+    )
+    audit_theorem_applicability(run_dir)  # writes theorem_applicability.yaml
+    manifest_path = run_dir / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    manifest.setdefault("optional_artifacts", {})["theorem_applicability"] = (
+        "theorem_applicability.yaml"
+    )
+    write_yaml(manifest_path, manifest)
+    validate_run(run_dir)
+    return read_yaml(run_dir / "source_grounding.yaml")
 
 
 def best_theorem_for_step(step: dict, theorems) -> object | None:

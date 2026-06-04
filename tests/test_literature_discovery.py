@@ -439,6 +439,8 @@ def test_source_backed_step_requires_theorem_applicability_artifact(tmp_path: Pa
     source_grounding = read_yaml(run_dir / "source_grounding.yaml")
     ref_id = source_grounding["source_refs"][0]["id"]
     source_grounding["source_refs"][0]["status"] = "source_backed"
+    source_grounding["source_refs"][0]["authors"] = ["A. Author"]
+    source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
@@ -464,6 +466,8 @@ def test_source_backed_step_requires_applicable_theorem_conditions(tmp_path: Pat
     source_grounding = read_yaml(run_dir / "source_grounding.yaml")
     ref_id = source_grounding["source_refs"][0]["id"]
     source_grounding["source_refs"][0]["status"] = "source_backed"
+    source_grounding["source_refs"][0]["authors"] = ["A. Author"]
+    source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
@@ -528,6 +532,8 @@ def _setup_source_backed_run(tmp_path: Path):
     source_grounding = read_yaml(run_dir / "source_grounding.yaml")
     ref_id = source_grounding["source_refs"][0]["id"]
     source_grounding["source_refs"][0]["status"] = "source_backed"
+    source_grounding["source_refs"][0]["authors"] = ["A. Author"]
+    source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
@@ -724,6 +730,8 @@ def test_source_backed_step_requires_exact_applicability_locator(tmp_path: Path)
     source_grounding = read_yaml(run_dir / "source_grounding.yaml")
     ref_id = source_grounding["source_refs"][0]["id"]
     source_grounding["source_refs"][0]["status"] = "source_backed"
+    source_grounding["source_refs"][0]["authors"] = ["A. Author"]
+    source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
@@ -787,6 +795,8 @@ def test_source_backed_step_applicability_usage_must_match_step_source_ref(tmp_p
     wrong_ref = {**good_ref, "id": "src_wrong_but_known"}
     for ref in (good_ref, wrong_ref):
         ref["status"] = "source_backed"
+        ref["authors"] = ["A. Author"]
+        ref["title"] = "Attributed exact source"
         ref["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
         ref["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["source_refs"] = [good_ref, wrong_ref]

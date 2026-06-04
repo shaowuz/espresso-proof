@@ -1,0 +1,168 @@
+"""Real source-grounding: a step EARNS source_backed only with exact locator +
+hypothesis match + attribution (author+title). No plagiarism, no grade upgrade."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+from espresso_proof.cli import app
+from espresso_proof.io import read_yaml, write_yaml
+from espresso_proof.mock_pipeline import run_mock_critique
+from espresso_proof.models import SourceGroundingReport
+from espresso_proof.pdf_ingestion import ingest_source_for_theorems
+from espresso_proof.source_verification import ground_run
+from espresso_proof.validators import validate_run
+
+FIXTURES = Path("tests/fixtures")
+# A statement that shares >=2 significant terms + the claim's hypothesis terms
+# ("cubic fourfold", "base field C") with the hodge run's source step, with an
+# exact "Theorem 1.2" locator (mirrors the existing passing ingest test).
+THM = (
+    "Theorem 1.2. Exact literature statement supporting the Hodge-theoretic step "
+    "over base field C for cubic fourfolds."
+)
+
+
+def _ingest(run_dir: Path, text: str, *, authors, title: str = "Real Source") -> Path:
+    src = run_dir / "src.txt"
+    src.write_text(text, encoding="utf-8")
+    claim = read_yaml(run_dir / read_yaml(run_dir / "run_manifest.yaml")["artifacts"]["locked_claim"])
+    report = ingest_source_for_theorems(
+        claim_id=claim["id"],
+        source=str(src),
+        source_id="src_real",
+        title=title,
+        authors=authors,
+        source_type="paper",
+    )
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    manifest.setdefault("optional_artifacts", {})["theorem_extraction"] = "theorem_extraction.yaml"
+    write_yaml(run_dir / "theorem_extraction.yaml", report)
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+    return run_dir / "theorem_extraction.yaml"
+
+
+def _hodge_run(tmp_path: Path) -> Path:
+    return run_mock_critique("hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path)
+
+
+def test_step_earns_source_backed_with_attribution(tmp_path: Path) -> None:
+    run_dir = _hodge_run(tmp_path)
+    grade_before = read_yaml(run_dir / read_yaml(run_dir / "run_manifest.yaml")["artifacts"]["idea_grade"])
+    ext = _ingest(run_dir, THM, authors=["J.-P. Serre"], title="Topics in Galois Theory")
+    ground_run(run_dir=run_dir, theorem_extraction_path=ext)
+    validate_run(run_dir)
+    sg = read_yaml(run_dir / "source_grounding.yaml")
+    backed = [r for r in sg["source_refs"] if r["status"] == "source_backed"]
+    assert backed, sg
+    for r in backed:
+        assert [a for a in r["authors"] if a.strip()]  # attributed
+        assert r["title"].strip()
+        assert r["locator"]["kind"] != "unknown"  # exact locator
+    assert any(s["status"] == "source_backed" for s in sg["steps"])
+    # grade is NOT changed by grounding (no proof upgrade).
+    grade_after = read_yaml(run_dir / read_yaml(run_dir / "run_manifest.yaml")["artifacts"]["idea_grade"])
+    assert grade_after["proof_language_status"] == grade_before["proof_language_status"]
+    assert grade_after["status"] == grade_before["status"]
+    # memo cites the source as grounded support, not a proof.
+    memo = CliRunner().invoke(app, ["memo", "--run", str(run_dir)]).output
+    assert "Grounded:" in memo
+    assert "J.-P. Serre" in memo
+    lower = memo.lower()
+    for phrase in ("proof-close", "proof complete", "we proved", "espresso proved"):
+        assert phrase not in lower
+
+
+def test_missing_attribution_stays_candidate(tmp_path: Path) -> None:
+    run_dir = _hodge_run(tmp_path)
+    ext = _ingest(run_dir, THM, authors=[], title="No-author source")  # no author
+    ground_run(run_dir=run_dir, theorem_extraction_path=ext)
+    validate_run(run_dir)
+    sg = read_yaml(run_dir / "source_grounding.yaml")
+    # writer fails closed -> never source_backed without attribution.
+    assert all(r["status"] != "source_backed" for r in sg["source_refs"])
+    assert all(s["status"] != "source_backed" for s in sg["steps"])
+
+
+def test_model_rejects_source_backed_without_attribution() -> None:
+    base = {
+        "claim_id": "claim_001",
+        "source_refs": [
+            {
+                "id": "src_x",
+                "type": "paper",
+                "title": "Some source",
+                "authors": [],  # missing attribution
+                "locator": {"kind": "theorem", "value": "Theorem 1.1"},
+                "statement_or_summary": "Exact statement.",
+                "hypothesis_match": {"matches": True, "mismatches": []},
+                "confidence": "high",
+                "status": "source_backed",
+            }
+        ],
+        "steps": [],
+    }
+    with pytest.raises(ValueError, match="attributed author"):
+        SourceGroundingReport.model_validate(base)
+    base["source_refs"][0]["authors"] = ["A. Author"]
+    base["source_refs"][0]["title"] = ""  # missing title
+    with pytest.raises(ValueError, match="source title"):
+        SourceGroundingReport.model_validate(base)
+
+
+def test_no_exact_locator_stays_candidate(tmp_path: Path) -> None:
+    run_dir = _hodge_run(tmp_path)
+    # statement with NO theorem label -> no exact locator extracted.
+    text = "An informal remark about Hodge structures over base field C for cubic fourfolds."
+    ext = _ingest(run_dir, text, authors=["A. Author"], title="Informal note")
+    ground_run(run_dir=run_dir, theorem_extraction_path=ext)
+    validate_run(run_dir)
+    sg = read_yaml(run_dir / "source_grounding.yaml")
+    assert all(s["status"] != "source_backed" for s in sg["steps"])
+
+
+def test_grounding_run_stays_kernel_valid_and_registers_audit(tmp_path: Path) -> None:
+    run_dir = _hodge_run(tmp_path)
+    ext = _ingest(run_dir, THM, authors=["J.-P. Serre"], title="Topics in Galois Theory")
+    ground_run(run_dir=run_dir, theorem_extraction_path=ext)
+    validate_run(run_dir)  # fail-closed: full kernel gate after grounding
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert manifest["optional_artifacts"]["theorem_applicability"] == "theorem_applicability.yaml"
+
+
+def test_orchestrate_ground_source_cli_earns_source_backed(tmp_path: Path) -> None:
+    # End-to-end CLI: orchestrate (front-half mock keeps the mock source steps) to
+    # the gate, then resume with --ground-source against a provided text source.
+    runner = CliRunner()
+    src = tmp_path / "provided.txt"
+    src.write_text(THM, encoding="utf-8")
+    fresh = runner.invoke(
+        app,
+        [
+            "orchestrate", "--input", str(FIXTURES / "hodge_all_cubic_fourfolds" / "input.md"),
+            "--project", "rsg", "--provider", "stub", "--front-half", "mock",
+            "--output-root", str(tmp_path),
+        ],
+    )
+    assert fresh.exit_code == 0, fresh.output
+    run_dir = Path(fresh.output.splitlines()[0].split("Wrote run artifacts to ")[-1])
+    brief = read_yaml(run_dir / read_yaml(run_dir / "run_manifest.yaml")["artifacts"]["strategy_brief"])
+    selected = brief["top_strategies"][0]["id"]
+    effort = brief["allowed_human_choices"][0]["effort_options"][0]
+    resumed = runner.invoke(
+        app,
+        [
+            "orchestrate", "--resume", str(run_dir), "--select-strategy", selected,
+            "--effort", effort, "--provider", "stub",
+            "--ground-source", str(src), "--source-author", "J.-P. Serre",
+            "--source-title", "Topics in Galois Theory",
+        ],
+    )
+    assert resumed.exit_code == 0, resumed.output
+    validate_run(run_dir)
+    sg = read_yaml(run_dir / "source_grounding.yaml")
+    assert any(s["status"] == "source_backed" for s in sg["steps"]), sg
+    assert "Grounded:" in resumed.output
