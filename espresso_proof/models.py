@@ -637,6 +637,80 @@ class LiteratureRetrievalReport(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class VerifierType(str, Enum):
+    """A trusted-verifier backend kind.
+
+    - ``finite_group_cayley``: deterministic brute-force check of an explicitly
+      given finite group (implemented; trusted).
+    - ``exact_computation``: the exact_arithmetic / permutation_order backend
+      (implemented elsewhere; trusted).
+    - ``lean_bridge``: a Lean/mathlib proof check (NOT executed in V0; registry
+      only -- it cannot earn a checked status here).
+    - ``human_checked``: a human attestation (NOT machine verification; a
+      separate, clearly-labelled status).
+    """
+
+    finite_group_cayley = "finite_group_cayley"
+    exact_computation = "exact_computation"
+    lean_bridge = "lean_bridge"
+    human_checked = "human_checked"
+
+
+class ProofVerificationStatus(str, Enum):
+    """What a verifier entry EARNED. There is deliberately NO ``proved`` value:
+    a finite/instance check can never earn a universal proof in V0.
+
+    - ``instance_checked``: a specific finite instance was machine-checked.
+    - ``computation_checked``: a computation was confirmed by a trusted backend.
+    - ``lean_checked``: a Lean proof compiled (reserved; not earnable in V0).
+    - ``human_attested``: a human checked it (separate from machine verification).
+    - ``unverified``: nothing earned / the verifier failed (fail closed).
+    """
+
+    instance_checked = "instance_checked"
+    computation_checked = "computation_checked"
+    lean_checked = "lean_checked"
+    human_attested = "human_attested"
+    unverified = "unverified"
+
+
+class ProofVerificationEntry(StrictBaseModel):
+    """One verifier run. ``trusted`` marks a deterministic machine backend; only a
+    trusted backend with a confirming result may earn a checked status (enforced by
+    the validator). ``scope_note`` must state exactly what was (and was not) shown.
+    """
+
+    id: str
+    verifier_type: VerifierType
+    claim_id: str
+    target: str
+    input_summary: str
+    result: str
+    trusted: bool
+    confirmed: bool
+    earned_status: ProofVerificationStatus
+    scope_note: str
+
+
+class ProofVerificationReport(StrictBaseModel):
+    """Proof Verification Bridge V0.
+
+    Records trusted-verifier runs and the SCOPED status each earned. Natural-
+    language prover/reviewer approval is not verification and cannot reach this
+    report. The model has no ``proved`` status: a finite/instance check earns only
+    ``instance_checked`` / ``computation_checked`` for what it actually covered;
+    ``lean_checked`` is reserved and not earnable in V0; a human check is recorded
+    as the separate ``human_attested``. The validator fails closed.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    entries: list[ProofVerificationEntry] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class LiteratureItem(StrictBaseModel):
     id: str
     title: str
@@ -1745,6 +1819,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "failure_pattern_bank": FailurePatternBank,
     "failure_pattern_audit": FailurePatternAudit,
     "literature_retrieval": LiteratureRetrievalReport,
+    "proof_verification": ProofVerificationReport,
     "counterexamples": CounterexampleReport,
     "tests": TestReport,
     "source_grounding": SourceGroundingReport,

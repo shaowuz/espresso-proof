@@ -26,6 +26,7 @@ from .failure_classifier import classify_failures
 from .failure_pattern_bank import audit_failure_patterns, seed_failure_pattern_bank
 from .literature_retrieval import retrieve_and_ground, retrieve_sources
 from .mathematical_judgment import judge_run
+from .proof_verification import verify_finite_groups
 from .memo import build_concise_memo
 from .memory import summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
@@ -473,6 +474,29 @@ def retrieve_sources_command(
     typer.echo(f"-> {run / 'literature_retrieval.yaml'}")
 
 
+@app.command("verify-finite-groups")
+def verify_finite_groups_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    prime: list[int] | None = typer.Option(None, "--prime", help="Prime p; checks all groups of order p^2. Repeatable."),
+) -> None:
+    """Machine-verify (deterministically) that every group of order p^2 is abelian,
+    for the given small primes -- a SCOPED finite check, not a universal proof.
+
+    Earns instance_checked for the enumerated groups only. There is no 'proved'
+    status: checking p=2,3 does not prove the claim for all primes p. Natural-
+    language prover/reviewer approval is not proof verification.
+    """
+    primes = prime or [2, 3]
+    report = verify_finite_groups(run, primes=primes)
+    validate_run(run)
+    checked = sum(1 for e in report["entries"] if e["earned_status"] == "instance_checked")
+    typer.echo(
+        f"Verified {checked}/{len(report['entries'])} finite group(s) abelian "
+        f"for primes {primes} (instance_checked; NOT a universal proof)."
+    )
+    typer.echo(f"-> {run / 'proof_verification.yaml'}")
+
+
 @app.command("show-pattern-bank")
 def show_pattern_bank_command() -> None:
     """Print the catalogued math failure patterns (candidate / audited / hard)."""
@@ -778,6 +802,25 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
         else:
             typer.echo("- no candidate sources retrieved (fail closed)")
         typer.echo("- retrieval never earns source_backed; only Source Grounding does")
+
+    proof_verification_path = _optional_artifact_path(run, optional_artifacts, "proof_verification")
+    if proof_verification_path is not None:
+        pv = read_yaml(proof_verification_path)
+        entries = pv.get("entries", [])
+        typer.echo("")
+        typer.echo("Proof Verification Bridge (scoped machine checks; no universal proof)")
+        if entries:
+            for entry in entries[:8]:
+                typer.echo(
+                    f"- {entry.get('target')}: {entry.get('result')} "
+                    f"[{entry.get('verifier_type')} -> {entry.get('earned_status')}]"
+                )
+        else:
+            typer.echo("- no verifier runs")
+        typer.echo(
+            "- instance_checked covers only the enumerated finite instances; "
+            "the universal claim is NOT proved (no 'proved' status exists here)"
+        )
 
     memory_summary = summarize_memory(run.parents[1], claim_text=claim.get("normalized_statement", ""))
     if memory_summary:
