@@ -17,6 +17,7 @@ from .llm_agents import build_client as build_llm_client
 from .llm_agents import build_prover_loop_report
 from .front_half_agents import run_front_half_agent_pass
 from .orchestrator import orchestrate_run, resume_run
+from .prover_loop_driver import continue_prover_loop
 from .llm_agents import external_agent_diagnostic
 from .llm_agents import openai_agent_diagnostic
 from .llm_agents import run_llm_agent_pass
@@ -113,6 +114,7 @@ def orchestrate(
     resume: Path | None = typer.Option(None, "--resume", file_okay=False),
     select_strategy: str | None = typer.Option(None, "--select-strategy"),
     effort: str | None = typer.Option(None, "--effort"),
+    rounds: int | None = typer.Option(None, "--rounds", min=0, max=50),
 ) -> None:
     """Run the Core Flow end-to-end for an arbitrary claim, stopping at the human gate.
 
@@ -126,10 +128,18 @@ def orchestrate(
     if resume is not None:
         if not select_strategy:
             raise typer.BadParameter("--resume requires --select-strategy")
+        if provider not in {"stub", "openai", "external"}:
+            raise typer.BadParameter("provider must be stub, openai, or external")
         memo = resume_run(
             run_dir=resume,
             selected_strategy=select_strategy,
             effort=effort,
+            rounds=rounds,
+            prover_provider=provider,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+            reviewer_set=reviewer_set,
         )
         typer.echo(memo)
         return
@@ -959,24 +969,32 @@ def run_prover_loop_round(
         "--external-agent-command-env",
     ),
 ) -> None:
-    """Append one resolved-gate prover/reviewer loop round."""
+    """Append one resolved-gate prover/reviewer loop round (delegates to the driver)."""
     if provider not in {"stub", "openai", "external"}:
         raise typer.BadParameter("provider must be stub, openai, or external")
     if reviewer_set not in {"generic", "espresso"}:
         raise typer.BadParameter("reviewer-set must be generic or espresso")
     validate_run(run)
-    report = append_prover_loop_round(
+    # Delegate to the single multi-round driver, capped to exactly one more round,
+    # so there is one validate-per-round code path.
+    manifest = read_yaml(run / "run_manifest.yaml")
+    loop_path = manifest.get("optional_artifacts", {}).get("prover_loop")
+    if not loop_path:
+        raise typer.BadParameter("run has no prover_loop.yaml; resolve the human gate first")
+    used = read_yaml(run / loop_path)["budget"]["rounds_used"]
+    result = continue_prover_loop(
         run_dir=run,
         provider=provider,
         model=model,
         api_key_env=api_key_env,
         external_agent_command_env=external_agent_command_env,
         reviewer_set=reviewer_set,
+        max_rounds=used + 1,
     )
-    ProverLoopReport.model_validate(report)
+    ProverLoopReport.model_validate(result["loop_report"])
     validate_run(run)
     typer.echo(
-        f"Appended prover loop round {report['budget']['rounds_used']} to {run / 'prover_loop.yaml'}"
+        f"Prover loop: ran {result['rounds_run']} round(s); stopped: {result['stop_reason']}"
     )
 
 

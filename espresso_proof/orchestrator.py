@@ -23,10 +23,12 @@ from .llm_agents import (
     build_prover_loop_report,
     external_agent_diagnostic,
     openai_agent_diagnostic,
+    resolve_agent_gate,
     run_llm_agent_pass,
     write_initial_prover_round_artifacts,
 )
 from .mock_pipeline import run_mock_critique
+from .prover_loop_driver import continue_prover_loop
 from .models import (
     HumanChoice,
     LiteratureReviewReport,
@@ -203,24 +205,58 @@ def orchestrate_run(
     }
 
 
+def _resolve_and_build_loop(run_dir: Path, *, decision: str, reason: str, human_choice: dict) -> None:
+    """Resolve the LLM-agent human gate and (re)build prover_loop with the real
+    human choice (mirrors the CLI ``resolve-agent-gate`` path)."""
+
+    report = resolve_agent_gate(run_dir=run_dir, decision=decision, reason=reason)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    artifacts = manifest["artifacts"]
+    loop_report = build_prover_loop_report(
+        agent_report=report,
+        strategy_brief=read_yaml(run_dir / artifacts["strategy_brief"]),
+        human_choice=human_choice,
+    )
+    ProverLoopReport.model_validate(loop_report)
+    manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"
+    manifest["optional_artifacts"]["prover_round_index"] = "prover_rounds/index.yaml"
+    write_yaml(run_dir / "prover_loop.yaml", loop_report)
+    write_initial_prover_round_artifacts(
+        run_dir=run_dir, agent_report=report, loop_report=loop_report
+    )
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+    validate_run(run_dir)
+
+
 def resume_run(
     *,
     run_dir: Path,
     selected_strategy: str,
     effort: str | None = None,
     taste_judgment: str = "",
+    rounds: int | None = None,
+    prover_provider: str = "stub",
+    model: str = "gpt-4.1",
+    api_key_env: str = "OPENAI_API_KEY",
+    external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+    reviewer_set: str = "espresso",
+    prover_client=None,
 ) -> str:
-    """Record a human choice at the gate and continue to a concise memo.
+    """Record a human choice, then run a BOUNDED Prover<->Reviewer loop and memo.
 
     The human gate may direct ranking / time allocation only — it can NEVER
-    upgrade proof / source / evidence status (the kernel re-validates the choice
-    and the whole run). Returns the rendered concise memo.
+    upgrade proof / source / evidence status (the kernel re-validates throughout).
+    Idempotent: a run already at COMPLETED_MEMO is not re-run. Returns the memo.
     """
 
     from .memo import build_concise_memo  # local import to avoid a cycle
 
+    run_dir = Path(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     state = manifest.get("current_state", "")
+    if state == "COMPLETED_MEMO":
+        # idempotent: do not re-resolve / re-append rounds.
+        return build_concise_memo(run_dir)
     if _state_index(state) < _state_index("WAITING_LLM_AGENT_HUMAN_GATE"):
         raise ValueError(
             f"run is not at the human gate (state={state!r}); finish the agent pass first"
@@ -230,6 +266,9 @@ def resume_run(
     claim = read_yaml(run_dir / artifacts["locked_claim"])
     # continue only makes sense with a real strategy; 'none' must stop.
     continue_decision = "stop" if selected_strategy == "none" else "continue"
+    if selected_strategy == "none" and effort is None:
+        # the 'none' human-choice option only offers quick_test.
+        effort = "quick_test"
     human_choice = {
         "claim_id": claim["id"],
         "status": "selected",
@@ -237,18 +276,42 @@ def resume_run(
         "effort": effort,
         "taste_judgment": taste_judgment,
         "continue_decision": continue_decision,
-        # human_confirmed here records that the human actually made THIS strategy
-        # selection (required by the HumanChoice model for status=selected). It is
-        # NOT claim confirmation: the locked claim's own human_confirmed stays
-        # False, and the human gate never upgrades proof/source/evidence status
-        # (the kernel re-validates the whole run).
+        # human_confirmed records that the human made THIS strategy selection
+        # (required by the model for status=selected). It is NOT claim
+        # confirmation: the locked claim's own human_confirmed stays False, and
+        # the human gate never upgrades proof/source/evidence status.
         "human_confirmed": True,
     }
     HumanChoice.model_validate(human_choice)
     write_yaml(run_dir / artifacts["human_choice"], human_choice)
-    # The kernel re-validates the whole run, including the human-choice rules
-    # (unknown strategy / disallowed effort / continue-with-none are rejected).
     validate_run(run_dir)
 
+    loop_summary: tuple[int, str] | None = None
+    if continue_decision == "continue":
+        # Resolve the LLM-agent gate + rebuild prover_loop with the real choice,
+        # then run a bounded Prover<->Reviewer loop. The budget (max_rounds) comes
+        # from the approved effort; ``rounds`` caps it further if given.
+        _resolve_and_build_loop(
+            run_dir,
+            decision="continue",
+            reason=f"human selected strategy {selected_strategy!r}",
+            human_choice=human_choice,
+        )
+        result = continue_prover_loop(
+            run_dir=run_dir,
+            provider=prover_provider,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+            reviewer_set=reviewer_set,
+            max_rounds=rounds,
+            client=prover_client,
+        )
+        loop_summary = (result["rounds_run"], result["stop_reason"])
+
     _set_state(run_dir, "COMPLETED_MEMO")
-    return build_concise_memo(run_dir)
+    memo = build_concise_memo(run_dir)
+    if loop_summary is not None:
+        # Controlled enum+integer line only (no model free text; no scrub needed).
+        memo += f"\n\nLoop: ran {loop_summary[0]} round(s); stopped: {loop_summary[1]}"
+    return memo
