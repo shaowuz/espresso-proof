@@ -16,8 +16,73 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .descriptions import describe_grade, describe_proof_language
+from .descriptions import (
+    describe_grade,
+    describe_proof_language,
+    evidence_phrase,
+    judgment_tier_phrase,
+    objection_phrase,
+)
 from .io import read_yaml
+
+
+def render_proof_route_steps(source_grounding: dict, computations: dict) -> list[str]:
+    """Render reference-backed and machine-checked proof-route steps.
+
+    Each step uses the human-readable mathematical-evidence shape:
+    ``Statement`` / ``Evidence phrase`` / ``Evidence detail`` / ``Scope of check
+    or source``. This only echoes already-earned artifact fields; it never sets
+    or upgrades status and never emits proof-complete language.
+    """
+
+    lines: list[str] = []
+    refs_by_id = {r.get("id"): r for r in source_grounding.get("source_refs", [])}
+    # Reference-backed steps: a cited result, never Espresso's own proof.
+    for step in source_grounding.get("steps", []):
+        if step.get("status") != "source_backed":
+            continue
+        details = []
+        for ref_id in step.get("source_refs", []):
+            ref = refs_by_id.get(ref_id)
+            if not ref:
+                continue
+            loc = ref.get("locator", {})
+            authors = ", ".join(ref.get("authors", [])) or "unknown author"
+            details.append(
+                f"{authors}, {ref.get('title', 'untitled')} "
+                f"[{loc.get('kind')}:{loc.get('value')}]"
+            )
+        lines.append(f"Statement: {step.get('needed_theorem', '').strip()}")
+        lines.append(f"Evidence phrase: {evidence_phrase('source_backed')}")
+        lines.append(
+            "Evidence detail: "
+            + ("; ".join(details) if details else "cited reference")
+        )
+        lines.append(
+            "Scope of check or source: cited reference support "
+            "(a cited result, not a proof of the claim)"
+        )
+        lines.append("-")
+    # Machine-checked computations: a confirmed deterministic result, not a proof.
+    for check in computations.get("checks", []):
+        if check.get("status") != "checked":
+            continue
+        mc = check.get("machine_check") or {}
+        if not mc:
+            continue
+        statement = (check.get("computed_quantity") or check.get("id") or "").strip()
+        lines.append(f"Statement: {statement}")
+        lines.append(f"Evidence phrase: {evidence_phrase('computation_checked')}")
+        lines.append(
+            "Evidence detail: "
+            f"{mc.get('kind')} check: {mc.get('expression')} = {mc.get('expected')}"
+        )
+        lines.append(
+            "Scope of check or source: this finite/computational instance only; "
+            "not a proof of the claim"
+        )
+        lines.append("-")
+    return lines
 
 
 def build_concise_memo(run_dir: Path) -> str:
@@ -72,40 +137,20 @@ def build_concise_memo(run_dir: Path) -> str:
         f"Confidence score: {score} (internal heuristic; not a probability of truth)"
     )
     lines.append(f"Proof state: {describe_proof_language(proof_status)}")
+    # Provenance in plain mathematical-evidence wording (never raw status tokens).
+    evidence_summary = sorted({evidence_phrase(s) for s in source_statuses})
     lines.append(
         "Source: gaps="
         + (", ".join(source_gaps) if source_gaps else "none")
-        + "; statuses="
-        + (", ".join(source_statuses) if source_statuses else "none")
+        + "; evidence so far: "
+        + ("; ".join(evidence_summary) if evidence_summary else "none recorded")
     )
-    # Attribution: a source_backed step is "grounded in <citation>" — a cited
-    # result is never presented as Espresso's own proof.
-    refs_by_id = {r.get("id"): r for r in source_grounding.get("source_refs", [])}
-    for step in source_grounding.get("steps", []):
-        if step.get("status") != "source_backed":
-            continue
-        for ref_id in step.get("source_refs", []):
-            ref = refs_by_id.get(ref_id)
-            if not ref:
-                continue
-            loc = ref.get("locator", {})
-            authors = ", ".join(ref.get("authors", [])) or "unknown author"
-            lines.append(
-                f"Grounded: {authors}, {ref.get('title', 'untitled')} "
-                f"[{loc.get('kind')}:{loc.get('value')}] (cited support, not a proof)"
-            )
-    # Machine-checked computations: a confirmed deterministic machine result, not a proof.
-    for check in computations.get("checks", []):
-        if check.get("status") != "checked":
-            continue
-        mc = check.get("machine_check") or {}
-        if not mc:
-            continue
-        lines.append(
-            f"Machine-checked: {check.get('id')} [{mc.get('kind')}] "
-            f"{mc.get('expression')} = {mc.get('expected')} "
-            "(machine-checked computation, not a proof of the claim)"
-        )
+    # Proof-route steps in the human-readable evidence shape.
+    route_steps = render_proof_route_steps(source_grounding, computations)
+    if route_steps:
+        lines.append("")
+        lines.append("Proof-route steps:")
+        lines.extend(route_steps)
     lines.append("")
     lines.append("Top routes:")
     if top:
@@ -132,8 +177,9 @@ def build_concise_memo(run_dir: Path) -> str:
             lines.append("Mathematical judgment (advisory risks / next checks — not a proof):")
             for f in findings:
                 lines.append(
-                    f"  [{f.get('tier')}] {f.get('kind')} ({f.get('subject')}): "
-                    f"{f.get('explanation')} -> {f.get('recommended_action')}"
+                    f"  {judgment_tier_phrase(f.get('tier'))}: {f.get('kind')} "
+                    f"({f.get('subject')}): {f.get('explanation')} "
+                    f"-> {f.get('recommended_action')}"
                 )
 
     # Failure pattern audit (advisory): matched risk shapes. Never a refutation
@@ -146,7 +192,8 @@ def build_concise_memo(run_dir: Path) -> str:
             lines.append("Failure patterns matched (advisory; not a refutation, not a proof):")
             for m in pmatches:
                 lines.append(
-                    f"  [{m.get('tier')}] {m.get('pattern_id')}: {m.get('explanation')}"
+                    f"  {objection_phrase(m.get('tier'))} "
+                    f"({m.get('pattern_id')}): {m.get('explanation')}"
                 )
 
     # Proof verification bridge: scoped machine-verified instances only. NEVER a
@@ -158,7 +205,10 @@ def build_concise_memo(run_dir: Path) -> str:
             lines.append("")
             lines.append("Machine-verified instances (scoped; NOT a proof of the universal claim):")
             for e in checked:
-                lines.append(f"  - {e.get('target')}: {e.get('result')} [{e.get('earned_status')}]")
+                lines.append(
+                    f"  - {e.get('target')}: {e.get('result')} "
+                    f"({evidence_phrase(e.get('earned_status'))})"
+                )
             lines.append("  (the universal claim for all primes p is NOT proved by these finite checks)")
 
     lines.append("")

@@ -69,7 +69,8 @@ def test_step_earns_source_backed_with_attribution(tmp_path: Path) -> None:
     assert grade_after["status"] == grade_before["status"]
     # memo cites the source as grounded support, not a proof.
     memo = CliRunner().invoke(app, ["memo", "--run", str(run_dir)]).output
-    assert "Grounded:" in memo
+    assert "Proof-route steps:" in memo
+    assert "Reference supports this stated claim" in memo
     assert "J.-P. Serre" in memo
     lower = memo.lower()
     for phrase in ("proof-close", "proof complete", "we proved", "espresso proved"):
@@ -165,4 +166,4 @@ def test_orchestrate_ground_source_cli_earns_source_backed(tmp_path: Path) -> No
     validate_run(run_dir)
     sg = read_yaml(run_dir / "source_grounding.yaml")
     assert any(s["status"] == "source_backed" for s in sg["steps"]), sg
-    assert "Grounded:" in resumed.output
+    assert "Reference supports this stated claim" in resumed.output
