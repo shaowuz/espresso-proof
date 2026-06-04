@@ -37,12 +37,24 @@ class VerifierError(Exception):
     """Raised when a machine check cannot be executed safely."""
 
 
+# Resource bounds so an attacker-/agent-controlled spec cannot hang the kernel or
+# exhaust memory (DoS). A confirmed result must be cheap to compute; anything
+# beyond these bounds fails closed to verdict ``error`` (never ``confirmed``).
+_MAX_EXPR_LEN = 1000          # input length (also bounds parse/recursion depth)
+_MAX_EXPONENT = 1000          # exponent magnitude for **
+_MAX_RESULT_BITS = 100_000    # estimated bit-length of a ** result
+
+
 def _eval_arith(expr: str) -> Fraction:
     """Evaluate an exact rational expression. Raises VerifierError on anything unsafe."""
+    if len(expr) > _MAX_EXPR_LEN:
+        raise VerifierError("expression too long for safe verification")
     try:
         tree = ast.parse(expr, mode="eval")
     except SyntaxError as exc:
         raise VerifierError(f"could not parse expression: {exc}") from exc
+    except RecursionError as exc:  # pragma: no cover - defensive
+        raise VerifierError("expression nested too deeply") from exc
     return _eval_node(tree.body)
 
 
@@ -63,7 +75,15 @@ def _eval_node(node: ast.AST) -> Fraction:
         # Pow
         if right.denominator != 1:
             raise VerifierError("only integer exponents are supported")
-        return left ** int(right)
+        exp = int(right)
+        if abs(exp) > _MAX_EXPONENT:
+            raise VerifierError("exponent too large for safe verification")
+        base_bits = max(
+            abs(left.numerator).bit_length(), abs(left.denominator).bit_length(), 1
+        )
+        if base_bits * abs(exp) > _MAX_RESULT_BITS:
+            raise VerifierError("exponentiation result too large for safe verification")
+        return left ** exp
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, _ARITH_UNARY):
         operand = _eval_node(node.operand)
         return operand if isinstance(node.op, ast.UAdd) else -operand
@@ -189,3 +209,47 @@ def verify_computation_checks(run_dir: Path) -> dict:
     )
     write_yaml(manifest_path, manifest)
     return report
+
+
+def audit_evidence(run_dir: Path) -> dict:
+    """Earn computation_checked from a TRUSTED MACHINE result.
+
+    Runs the machine verifier (the single writer of computation_verification.yaml)
+    and then derives each check's status FROM the machine verdict:
+
+    - ``confirmed`` -> status ``checked`` + method ``exact_arithmetic`` (the
+      machine-verification method label; ``machine_check.kind`` records the real
+      backend);
+    - ``refuted``   -> status ``wrong`` (the COMPUTATION's result is wrong — scoped
+      to this computation, NOT a claim-level refutation);
+    - ``error`` / ``unsupported`` / no result -> status ``human_needed``.
+
+    Only a confirming deterministic backend result can set ``checked`` — the agent
+    never self-certifies. Touches ONLY computation-check status/method; never
+    idea_grade, tests, source, or proof status. Re-validates the run (fail closed).
+    """
+
+    from .validators import validate_run  # local import to avoid an import cycle
+
+    report = verify_computation_checks(run_dir)
+    verdict_by_check = {r["check_id"]: r["verdict"] for r in report["results"]}
+
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    comp_path = run_dir / manifest["artifacts"]["computation_checks"]
+    computations = read_yaml(comp_path)
+    for check in computations.get("checks", []):
+        if not check.get("machine_check"):
+            continue
+        verdict = verdict_by_check.get(check["id"])
+        if verdict == "confirmed":
+            check["status"] = "checked"
+            check["method"] = "exact_arithmetic"
+        elif verdict == "refuted":
+            check["status"] = "wrong"  # the computed value is wrong (computation-scoped)
+        else:  # error / unsupported / not run
+            check["status"] = "human_needed"
+            check["method"] = "manual_review_needed"
+    ComputationChecks.model_validate(computations)
+    write_yaml(comp_path, computations)
+    validate_run(run_dir)  # fail closed: confirming-result + evidence-method rules fire here
+    return computations

@@ -38,6 +38,7 @@ def build_concise_memo(run_dir: Path) -> str:
     review = artifact("review")
     strategy_brief = artifact("strategy_brief")
     source_grounding = artifact("source_grounding")
+    computations = artifact("computation_checks")
 
     status = grade.get("status", "unknown")
     score = grade.get("score", "?")
@@ -93,6 +94,18 @@ def build_concise_memo(run_dir: Path) -> str:
                 f"Grounded: {authors}, {ref.get('title', 'untitled')} "
                 f"[{loc.get('kind')}:{loc.get('value')}] (cited support, not a proof)"
             )
+    # Machine-checked computations: a confirmed deterministic machine result, not a proof.
+    for check in computations.get("checks", []):
+        if check.get("status") != "checked":
+            continue
+        mc = check.get("machine_check") or {}
+        if not mc:
+            continue
+        lines.append(
+            f"Machine-checked: {check.get('id')} [{mc.get('kind')}] "
+            f"{mc.get('expression')} = {mc.get('expected')} "
+            "(machine-checked computation, not a proof of the claim)"
+        )
     lines.append("")
     lines.append("Top routes:")
     if top:

@@ -29,7 +29,7 @@ from .mock_pipeline import run_mock_critique
 from .pdf_ingestion import ingest_source_for_theorems
 from .source_verification import ground_run
 from .theorem_applicability import audit_theorem_applicability
-from .verifier import verify_computation_checks
+from .verifier import audit_evidence, verify_computation_checks
 from .models import (
     AdmissionCheck,
     AgentContracts,
@@ -120,6 +120,7 @@ def orchestrate(
     source_title: str = typer.Option("Ingested source", "--source-title"),
     source_author: list[str] | None = typer.Option(None, "--source-author"),
     source_type: str = typer.Option("paper", "--source-type"),
+    run_evidence_audit: bool = typer.Option(False, "--audit-evidence", help="Machine-check computations (earn computation_checked) before the loop (resume)."),
 ) -> None:
     """Run the Core Flow end-to-end for an arbitrary claim, stopping at the human gate.
 
@@ -155,6 +156,10 @@ def orchestrate(
             write_yaml(resume / "run_manifest.yaml", gmanifest)
             ground_run(run_dir=resume, theorem_extraction_path=resume / "theorem_extraction.yaml")
             typer.echo(f"Grounded against {ground_source} (source_backed earned only with exact locator + hypothesis match + attribution)")
+        if run_evidence_audit:
+            # Earn computation_checked from confirming machine results BEFORE the loop.
+            audit_evidence(resume)
+            typer.echo("Evidence audited (computation_checked earned only from confirming machine results)")
         memo = resume_run(
             run_dir=resume,
             selected_strategy=select_strategy,
@@ -428,6 +433,7 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     human_choice = _artifact("human_choice")
     examples = _artifact("examples")
     counterexamples = _artifact("counterexamples")
+    computations = _artifact("computation_checks")
 
     failed_reviewers = [
         reviewer["reviewer_id"]
@@ -490,6 +496,17 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
                 f"- grounded in {authors}, {ref.get('title', 'untitled')} "
                 f"[{loc.get('kind')}:{loc.get('value')}] (cited support, not a proof)"
             )
+    for check in computations.get("checks", []):
+        if check.get("status") != "checked":
+            continue
+        mc = check.get("machine_check") or {}
+        if not mc:
+            continue
+        typer.echo(
+            f"- machine-checked {check.get('id')} [{mc.get('kind')}] "
+            f"{mc.get('expression')} = {mc.get('expected')} "
+            "(machine-checked computation, not a proof)"
+        )
     typer.echo("")
     typer.echo("Examples / Counterexamples")
     example_items = examples.get("examples", [])
@@ -854,6 +871,23 @@ def verify_computations_command(
         f"Verified {len(report['results'])} machine check(s): "
         f"{confirmed} confirmed, {refuted} refuted "
         f"-> {run / 'computation_verification.yaml'}"
+    )
+
+
+@app.command("audit-evidence")
+def audit_evidence_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+) -> None:
+    """Evidence Auditor: a computation EARNS computation_checked only from a
+    confirming machine result (refuted -> wrong, error/unsupported -> human_needed).
+    The machine earns the status; the agent never self-certifies. idea_grade is
+    untouched."""
+    validate_run(run)
+    computations = audit_evidence(run)
+    checked = sum(1 for c in computations.get("checks", []) if c.get("status") == "checked")
+    typer.echo(
+        f"Evidence audit: {checked} computation(s) machine-checked "
+        f"-> {run / 'computation_checks.yaml'}"
     )
 
 
