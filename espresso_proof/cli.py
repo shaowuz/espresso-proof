@@ -27,7 +27,7 @@ from .memo import build_concise_memo
 from .memory import summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
 from .pdf_ingestion import ingest_source_for_theorems
-from .source_verification import ground_run, verify_source_grounding_from_theorems
+from .source_verification import ground_run
 from .theorem_applicability import audit_theorem_applicability
 from .verifier import verify_computation_checks
 from .models import (
