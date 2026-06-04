@@ -15,6 +15,7 @@ from .llm_agents import resolve_agent_gate as resolve_llm_agent_gate
 from .llm_agents import build_client as build_llm_client
 from .llm_agents import build_prover_loop_report
 from .front_half_agents import run_front_half_agent_pass
+from .orchestrator import orchestrate_run, resume_run
 from .llm_agents import external_agent_diagnostic
 from .llm_agents import openai_agent_diagnostic
 from .llm_agents import run_llm_agent_pass
@@ -92,6 +93,74 @@ def new_run(
     run_dir = run_mock_critique(project, input, output_root)
     validate_run(run_dir)
     typer.echo(f"Wrote run artifacts to {run_dir}")
+
+
+@app.command("orchestrate")
+def orchestrate(
+    input: Path | None = typer.Option(None, "--input", "-i", dir_okay=False),
+    project: str = typer.Option("hodge_atoms", "--project", "-p"),
+    provider: str = typer.Option("stub", "--provider"),
+    front_half: str = typer.Option("stub", "--front-half"),
+    model: str = typer.Option("gpt-4.1", "--model"),
+    reviewer_set: str = typer.Option("espresso", "--reviewer-set"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND", "--external-agent-command-env"
+    ),
+    literature_mode: str = typer.Option("local", "--literature-mode"),
+    output_root: Path = typer.Option(Path("."), "--output-root", file_okay=False),
+    resume: Path | None = typer.Option(None, "--resume", file_okay=False),
+    select_strategy: str | None = typer.Option(None, "--select-strategy"),
+    effort: str | None = typer.Option(None, "--effort"),
+) -> None:
+    """Run the Core Flow end-to-end for an arbitrary claim, stopping at the human gate.
+
+    Fresh run: provide --input. The orchestrator scaffolds the run, dispatches the
+    front-half agents, runs literature + the live Prover/Reviewers, validates after
+    each stage, and stops at the human gate. Resume: provide --resume <run_dir>
+    with --select-strategy (and --effort) to record the human choice and render the
+    concise memo. The kernel validates every stage; nothing here upgrades
+    proof/source/evidence status.
+    """
+    if resume is not None:
+        if not select_strategy:
+            raise typer.BadParameter("--resume requires --select-strategy")
+        memo = resume_run(
+            run_dir=resume,
+            selected_strategy=select_strategy,
+            effort=effort,
+        )
+        typer.echo(memo)
+        return
+
+    if input is None:
+        raise typer.BadParameter("provide --input for a fresh run, or --resume <run_dir>")
+    if provider not in {"stub", "openai", "external"}:
+        raise typer.BadParameter("provider must be stub, openai, or external")
+    if front_half not in {"mock", "stub", "external"}:
+        raise typer.BadParameter("front-half must be mock, stub, or external")
+    if reviewer_set not in {"generic", "espresso"}:
+        raise typer.BadParameter("reviewer-set must be generic or espresso")
+
+    result = orchestrate_run(
+        project=project,
+        input_path=input,
+        output_root=output_root,
+        provider=provider,
+        front_half=front_half,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        reviewer_set=reviewer_set,
+        literature_mode=literature_mode,
+    )
+    typer.echo(f"Wrote run artifacts to {result['run_dir']}")
+    typer.echo(f"State: {result['state']}")
+    typer.echo(f"Human gate: {result['human_gate'].get('status', 'unknown')}")
+    typer.echo(
+        f"Resume with: espresso orchestrate --resume {result['run_dir']} "
+        "--select-strategy <id> [--effort <mode>]"
+    )
 
 
 @app.command("run-flow")
