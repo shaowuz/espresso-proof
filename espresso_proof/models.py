@@ -507,6 +507,83 @@ class MathematicalJudgmentReport(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class FailurePatternTier(str, Enum):
+    """How strong a failure pattern is allowed to act. None earns/clears status.
+
+    - ``candidate``: WARN only (newly discovered / AI/reviewer-suggested patterns
+      enter here; they may never block or change ranking).
+    - ``audited``: may affect RANKING / TIME ALLOCATION only (advisory weight); it
+      never sets proof/source/evidence status and never blocks.
+    - ``hard``: maps to an EXISTING structural validator gate (named in
+      ``enforced_by``). The hard pattern does not itself block; it documents that
+      the kernel validator already fails closed on the unsafe use. A pattern can
+      never be promoted to ``hard`` at run time, by memory, or by human input.
+    """
+
+    candidate = "candidate"
+    audited = "audited"
+    hard = "hard"
+
+
+class FailurePatternAction(str, Enum):
+    warn = "warn"
+    rank_downgrade = "rank_downgrade"
+    block_via_validator = "block_via_validator"
+
+
+class FailurePattern(StrictBaseModel):
+    """One catalogued mathematical failure pattern.
+
+    Carries no status field: a pattern is a *risk shape*, never evidence of truth
+    or falsehood. ``enforced_by`` is set only for ``hard`` patterns and must name
+    an existing kernel validator (the pattern does not add new blocking logic).
+    """
+
+    id: str
+    family: str
+    summary: str
+    tier: FailurePatternTier
+    action: FailurePatternAction
+    enforced_by: str = ""
+    origin: Literal["seed", "ai_suggested", "reviewer_suggested"] = "seed"
+
+
+class FailurePatternBank(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    patterns: list[FailurePattern]
+
+
+class FailurePatternMatch(StrictBaseModel):
+    pattern_id: str
+    family: str
+    tier: FailurePatternTier
+    action: FailurePatternAction
+    subject: str
+    signal: str
+    explanation: str
+    enforced_by: str = ""
+
+
+class FailurePatternAudit(StrictBaseModel):
+    """Per-run record of which catalogued failure patterns the run's signals match.
+
+    Advisory by construction: no source/evidence/proof status field (and extras
+    are forbidden), so a match can never upgrade any status and is never a
+    counterexample / refutation. A ``hard`` match merely points at the existing
+    validator that already fails closed; a ``candidate`` match warns; an
+    ``audited`` match may inform ranking/time only. The validator re-checks that
+    each match's tier/action/enforced_by equals the canonical seed bank, so a run
+    cannot relabel a candidate pattern as hard.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    matches: list[FailurePatternMatch]
+    notes: list[str] = Field(default_factory=list)
+
+
 class LiteratureItem(StrictBaseModel):
     id: str
     title: str
@@ -1612,6 +1689,8 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "computation_verification_result": ComputationVerificationResult,
     "failure_classification": FailureClassificationReport,
     "mathematical_judgment": MathematicalJudgmentReport,
+    "failure_pattern_bank": FailurePatternBank,
+    "failure_pattern_audit": FailurePatternAudit,
     "counterexamples": CounterexampleReport,
     "tests": TestReport,
     "source_grounding": SourceGroundingReport,

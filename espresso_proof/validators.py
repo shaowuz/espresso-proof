@@ -14,6 +14,7 @@ from .models import (
     ComputationVerificationReport,
     CounterexampleReport,
     FailureClassificationReport,
+    FailurePatternAudit,
     MathematicalJudgmentReport,
     ContinueDecision,
     ExampleSelection,
@@ -77,6 +78,7 @@ def validate_run(run_dir: Path) -> None:
     computation_verification = _load_optional_computation_verification(run_dir, manifest)
     failure_classification = _load_optional_failure_classification(run_dir, manifest)
     mathematical_judgment = _load_optional_mathematical_judgment(run_dir, manifest)
+    failure_pattern_audit = _load_optional_failure_pattern_audit(run_dir, manifest)
     counterexamples = validate_yaml_model(run_dir / artifacts["counterexamples"], CounterexampleReport)
     tests = validate_yaml_model(run_dir / artifacts["tests"], TestReport)
     source_grounding = validate_yaml_model(run_dir / artifacts["source_grounding"], SourceGroundingReport)
@@ -118,6 +120,7 @@ def validate_run(run_dir: Path) -> None:
     _validate_computation_verification(computations, computation_verification)
     _validate_failure_classification(failure_classification, counterexamples, claim)
     _validate_mathematical_judgment(mathematical_judgment, claim, manifest)
+    _validate_failure_pattern_audit(failure_pattern_audit, claim, manifest)
     _validate_example_evidence(computations, counterexamples, idea_grade)
     _validate_source_backing(source_grounding)
     _validate_theorem_applicability(manifest, claim, source_grounding, theorem_applicability)
@@ -287,6 +290,76 @@ def _validate_mathematical_judgment(
         raise KernelValidationError(
             "mathematical_judgment run_id does not match the run manifest"
         )
+
+
+def _load_optional_failure_pattern_audit(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> FailurePatternAudit | None:
+    optional = manifest.optional_artifacts
+    if "failure_pattern_audit" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["failure_pattern_audit"],
+        FailurePatternAudit,
+    )
+
+
+def _validate_failure_pattern_audit(
+    failure_pattern_audit: FailurePatternAudit | None,
+    claim: Claim,
+    manifest: RunManifest,
+) -> None:
+    """The failure-pattern audit is advisory; it must not relabel or upgrade.
+
+    Only runs when the optional artifact is present. Rules (fail closed):
+
+    - claim_id / run_id must bind to this run;
+    - every matched pattern_id must exist in the canonical SEED bank, and its
+      tier / action / family / enforced_by must equal the bank verbatim -- so a
+      run (or memory, or a human edit) can NEVER promote a candidate pattern to
+      ``hard`` or change what it is allowed to do;
+    - a ``hard`` match must point at an EXISTING kernel validator
+      (``enforced_by`` in ENFORCING_VALIDATORS); it adds no new blocking.
+
+    The audit model carries no source/evidence/proof status field (and extras are
+    forbidden), so a match can never upgrade any status or refute the claim.
+    """
+    if failure_pattern_audit is None:
+        return
+    # Local import: failure_pattern_bank imports models+io only (no cycle).
+    from .failure_pattern_bank import ENFORCING_VALIDATORS, seed_failure_pattern_bank
+
+    if failure_pattern_audit.claim_id != claim.id:
+        raise KernelValidationError(
+            "failure_pattern_audit claim_id does not match locked claim"
+        )
+    if failure_pattern_audit.run_id != manifest.run_id:
+        raise KernelValidationError(
+            "failure_pattern_audit run_id does not match the run manifest"
+        )
+    canonical = {p.id: p for p in seed_failure_pattern_bank().patterns}
+    for match in failure_pattern_audit.matches:
+        pattern = canonical.get(match.pattern_id)
+        if pattern is None:
+            raise KernelValidationError(
+                f"failure_pattern_audit references unknown pattern {match.pattern_id!r}"
+            )
+        if (
+            match.tier != pattern.tier
+            or match.action != pattern.action
+            or match.family != pattern.family
+            or match.enforced_by != pattern.enforced_by
+        ):
+            raise KernelValidationError(
+                f"failure_pattern_audit relabels pattern {match.pattern_id!r} "
+                "(tier/action/family/enforced_by must equal the canonical bank)"
+            )
+        if match.tier.value == "hard" and match.enforced_by not in ENFORCING_VALIDATORS:
+            raise KernelValidationError(
+                f"hard pattern {match.pattern_id!r} must be enforced by an existing "
+                "kernel validator"
+            )
 
 
 def _load_optional_theorem_extraction(

@@ -23,6 +23,7 @@ from .llm_agents import openai_agent_diagnostic
 from .llm_agents import run_llm_agent_pass
 from .llm_agents import write_initial_prover_round_artifacts
 from .failure_classifier import classify_failures
+from .failure_pattern_bank import audit_failure_patterns, seed_failure_pattern_bank
 from .mathematical_judgment import judge_run
 from .memo import build_concise_memo
 from .memory import summarize_memory, write_memory_entry
@@ -419,6 +420,37 @@ def judge_command(
     typer.echo(f"-> {run / 'mathematical_judgment.yaml'}")
 
 
+@app.command("audit-patterns")
+def audit_patterns_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+) -> None:
+    """Match a run's signals against the math failure pattern bank (advisory only).
+
+    Writes failure_pattern_audit.yaml and re-validates. A pattern match never
+    proves falsehood, never refutes the claim, and never upgrades
+    proof/source/evidence status. candidate=warn; audited=ranking/time hint;
+    hard=points at an existing kernel validator (no new blocking added).
+    """
+    report = audit_failure_patterns(run)
+    validate_run(run)
+    tiers = ", ".join(sorted({m["tier"] for m in report["matches"]})) or "none"
+    typer.echo(f"Matched {len(report['matches'])} failure pattern(s) [tiers: {tiers}]")
+    typer.echo(f"-> {run / 'failure_pattern_audit.yaml'}")
+
+
+@app.command("show-pattern-bank")
+def show_pattern_bank_command() -> None:
+    """Print the catalogued math failure patterns (candidate / audited / hard)."""
+    bank = seed_failure_pattern_bank()
+    for tier in ("hard", "audited", "candidate"):
+        rows = [p for p in bank.patterns if p.tier.value == tier]
+        typer.echo(f"{tier} ({len(rows)}):")
+        for p in rows:
+            suffix = f" -> {p.enforced_by}" if p.enforced_by else ""
+            typer.echo(f"  - {p.id} [{p.family}]: {p.summary}{suffix}")
+    typer.echo(f"total: {len(bank.patterns)} patterns")
+
+
 @app.command()
 def memo(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)) -> None:
     """Validate a run and print a compact, artifact-backed research memo.
@@ -674,6 +706,26 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
         else:
             typer.echo("- no risks flagged")
         typer.echo("- judgment is advisory only; it never upgrades proof/source/evidence status")
+
+    pattern_audit_path = _optional_artifact_path(run, optional_artifacts, "failure_pattern_audit")
+    if pattern_audit_path is not None:
+        audit = read_yaml(pattern_audit_path)
+        pmatches = audit.get("matches", [])
+        typer.echo("")
+        typer.echo("Failure Pattern Audit (advisory; not a refutation, not a proof)")
+        if pmatches:
+            for match in pmatches[:8]:
+                suffix = f" [enforced_by {match.get('enforced_by')}]" if match.get("enforced_by") else ""
+                typer.echo(
+                    f"- [{match.get('tier')}] {match.get('pattern_id')} "
+                    f"({match.get('family')}): {match.get('explanation')}{suffix}"
+                )
+        else:
+            typer.echo("- no patterns matched")
+        typer.echo(
+            "- candidate=warn; audited=ranking/time only; hard=existing validator gate; "
+            "no match upgrades status"
+        )
 
     memory_summary = summarize_memory(run.parents[1], claim_text=claim.get("normalized_statement", ""))
     if memory_summary:
