@@ -720,7 +720,10 @@ def test_memo_renders_compact_graded_sections(tmp_path: Path) -> None:
     assert "Source:" in out
     assert "Top routes:" in out
     assert "Next cheapest test:" in out
-    assert "idea_sketch" in out  # the real proof status is surfaced verbatim
+    # proof state is rendered in concrete English, not the raw enum.
+    assert "Proof state:" in out
+    assert "idea sketch" in out.lower()
+    assert "idea_sketch" not in out  # no raw enum in user-visible text
 
 
 def test_memo_unclear_claim_recommends_locking(tmp_path: Path) -> None:
@@ -732,7 +735,9 @@ def test_memo_unclear_claim_recommends_locking(tmp_path: Path) -> None:
     result = CliRunner().invoke(app, ["memo", "--run", str(run_dir)])
     assert result.exit_code == 0, result.output
     lowered = result.output.lower()
-    assert "unclear" in lowered
+    # concrete English, not the abstract label "unclear".
+    assert "not precise enough" in lowered
+    assert "unclear" not in lowered
     assert "lock" in lowered  # "First action: lock..." / "Lock a precise claim first"
 
 
@@ -748,7 +753,9 @@ def test_memo_no_proof_complete_language_for_weak_artifacts(tmp_path: Path) -> N
     result = CliRunner().invoke(app, ["memo", "--run", str(run_dir)])
     assert result.exit_code == 0, result.output
     out = result.output
-    assert "proof: proof_candidate" in out  # real status, not "proved"
+    # proof state in concrete English, never the word "proved" or the raw enum.
+    assert "candidate argument" in out.lower()
+    assert "proof_candidate" not in out
     # Check only the memo-GENERATED verdict section (everything from "Verdict:"),
     # so the assertion does not depend on what the echoed claim text contains.
     verdict_section = out.split("Verdict:", 1)[1].lower()
