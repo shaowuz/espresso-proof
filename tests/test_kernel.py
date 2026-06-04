@@ -706,6 +706,56 @@ def test_inspect_does_not_emit_proof_complete_language(tmp_path: Path) -> None:
     assert "proved the theorem" not in lowered
 
 
+def test_memo_renders_compact_graded_sections(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    result = CliRunner().invoke(app, ["memo", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert "ESPRESSO MEMO" in out
+    assert "Verdict:" in out
+    assert "Source:" in out
+    assert "Top routes:" in out
+    assert "Next cheapest test:" in out
+    assert "idea_sketch" in out  # the real proof status is surfaced verbatim
+
+
+def test_memo_unclear_claim_recommends_locking(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "vague_claim_unclear" / "input.md",
+        tmp_path,
+    )
+    result = CliRunner().invoke(app, ["memo", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    lowered = result.output.lower()
+    assert "unclear" in lowered
+    assert "lock" in lowered  # "First action: lock..." / "Lock a precise claim first"
+
+
+def test_memo_no_proof_complete_language_for_weak_artifacts(tmp_path: Path) -> None:
+    # The memo must not overstate: for a proof_candidate it shows the real status,
+    # and never emits memo-generated proof-complete language (Concise Answer
+    # safety; AGENT_AUTOMATION_ENGINEERING_PLAN Step 1).
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "promising_but_unproved" / "input.md",
+        tmp_path,
+    )
+    result = CliRunner().invoke(app, ["memo", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert "proof: proof_candidate" in out  # real status, not "proved"
+    # Check only the memo-GENERATED verdict section (everything from "Verdict:"),
+    # so the assertion does not depend on what the echoed claim text contains.
+    verdict_section = out.split("Verdict:", 1)[1].lower()
+    for forbidden in ("proof complete", "verified", "proof-close", "proved"):
+        assert forbidden not in verdict_section
+
+
 def test_inspect_does_not_mutate_run(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
         "hodge_atoms",
@@ -1697,3 +1747,129 @@ def test_admission_check_rejects_admitted_with_blockers_or_missing_checks() -> N
                 "blockers": ["still needs review"],
             }
         )
+
+
+def test_classify_failures_routes_typed_categories(tmp_path: Path) -> None:
+    # Step 5 (Failure Classifier): reviewer/source/example signals become typed,
+    # advisory routing categories; an unbacked claim_refuted is never emitted.
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    result = CliRunner().invoke(app, ["classify-failures", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    report = read_yaml(run_dir / "failure_classification.yaml")
+    categories = {item["category"] for item in report["classifications"]}
+    assert "source_gap" in categories
+    assert "strategy_failed_by_example" in categories
+    assert "claim_refuted" not in categories  # no admissible counterexample in this run
+    for item in report["classifications"]:
+        assert set(item) == {"category", "signal", "recommended_route", "explanation"}
+
+
+def test_classify_failures_claim_refuted_requires_admissible_counterexample(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "refuted_by_all_hypotheses_counterexample" / "input.md",
+        tmp_path,
+    )
+    result = CliRunner().invoke(app, ["classify-failures", "--run", str(run_dir)])
+    assert result.exit_code == 0, result.output
+    categories = {
+        item["category"]
+        for item in read_yaml(run_dir / "failure_classification.yaml")["classifications"]
+    }
+    assert "claim_refuted" in categories  # admissible all-hypotheses refutation
+    validate_run(run_dir)  # accepted
+
+
+def test_failure_classification_rejects_unbacked_claim_refuted(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim_id = read_yaml(run_dir / "idea_grade.yaml")["claim_id"]
+    report = {
+        "schema_version": 1,
+        "claim_id": claim_id,
+        "run_id": manifest["run_id"],
+        "generated_at": "2026-06-03T00:00:00+00:00",
+        "classifications": [
+            {
+                "category": "claim_refuted",
+                "signal": "fabricated",
+                "recommended_route": "stop",
+                "explanation": "should be rejected: no admissible counterexample",
+            }
+        ],
+        "notes": [],
+    }
+    (run_dir / "failure_classification.yaml").write_text(yaml.safe_dump(report), encoding="utf-8")
+    manifest.setdefault("optional_artifacts", {})["failure_classification"] = (
+        "failure_classification.yaml"
+    )
+    (run_dir / "run_manifest.yaml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    with pytest.raises(KernelValidationError, match="admissible all-hypotheses counterexample"):
+        validate_run(run_dir)
+
+
+def test_failure_classification_report_rejects_status_field() -> None:
+    from espresso_proof.models import FailureClassificationReport
+
+    data = {
+        "schema_version": 1,
+        "claim_id": "claim_001",
+        "run_id": "run_001",
+        "generated_at": "2026-06-03T00:00:00+00:00",
+        "classifications": [],
+        "source_backed": True,
+    }
+    with pytest.raises(ValueError, match="Extra inputs"):
+        FailureClassificationReport.model_validate(data)
+
+
+def test_classify_failures_emits_budget_exhausted(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    loop_path = run_dir / "loop_control.yaml"
+    loop = read_yaml(loop_path)
+    loop["budget_exhausted"] = True
+    loop["should_stop"] = True
+    loop["stop_reasons"] = ["budget exhausted"]
+    loop["next_action"] = "stop"
+    loop_path.write_text(yaml.safe_dump(loop), encoding="utf-8")
+
+    from espresso_proof.failure_classifier import build_failure_classification
+
+    report = build_failure_classification(run_dir)
+    categories = {item["category"] for item in report["classifications"]}
+    assert "budget_exhausted" in categories
+
+
+def test_classify_failures_emits_no_progress(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    loop_path = run_dir / "loop_control.yaml"
+    loop = read_yaml(loop_path)
+    loop["no_new_counterexamples_cycles"] = 2
+    loop["no_new_references_cycles"] = 2
+    loop["grade_delta_last_two"] = 0
+    loop["should_stop"] = True
+    loop["stop_reasons"] = ["no progress"]
+    loop["next_action"] = "ask_human"
+    loop_path.write_text(yaml.safe_dump(loop), encoding="utf-8")
+
+    from espresso_proof.failure_classifier import build_failure_classification
+
+    report = build_failure_classification(run_dir)
+    categories = {item["category"] for item in report["classifications"]}
+    assert "no_progress" in categories

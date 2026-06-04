@@ -12,9 +12,23 @@ from typer.testing import CliRunner
 from espresso_proof.cli import app
 from espresso_proof.io import read_yaml
 from espresso_proof.io import write_yaml
-from espresso_proof.llm_agents import OpenAIResponsesClient, collect_unsafe_language, safe_text
+from espresso_proof.llm_agents import (
+    OpenAIResponsesClient,
+    StubLLMClient,
+    collect_unsafe_language,
+    make_prover_attempt,
+    make_verifier_review,
+    safe_text,
+)
 from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import LLMAgentRunReport, ProverLoopReport, ProverRoundIndex, ProverRoundReport
+from espresso_proof.models import (
+    LLMAgentAttempt,
+    LLMAgentRunReport,
+    LLMAgentVerifierReview,
+    ProverLoopReport,
+    ProverRoundIndex,
+    ProverRoundReport,
+)
 from espresso_proof.validators import validate_run
 from espresso_proof.validators import KernelValidationError
 
@@ -1642,3 +1656,62 @@ def test_safe_language_filter_preserves_unverified() -> None:
     assert "verified" not in collect_unsafe_language(
         {"summary": "This remains unverified.", "steps": [], "risks": []}
     )
+
+
+def test_mock_agent_adapter_contains_unsafe_prover_prose() -> None:
+    # Step 3 (deterministic mock agent artifact adapter): a prose-only,
+    # proof-overclaiming agent answer must be CONTAINED -- never auto-upgraded
+    # (status needs_human), proof-complete language withheld, and no structured
+    # steps invented from prose.
+    client = StubLLMClient(model="stub-espresso-agent")
+    raw = {"summary": "This is obviously proved and verified. proof-close. The claim is true."}
+    attempt = make_prover_attempt(raw, client=client, created_at="2026-06-03T00:00:00+00:00")
+
+    assert attempt["status"] == "needs_human"  # adapter never grants a strong status
+    assert attempt["output_summary"].count("[withheld proof-like phrase]") >= 3
+    assert attempt["proposed_steps"] == []  # prose carried no structured steps
+    LLMAgentAttempt.model_validate(attempt)  # the candidate artifact is schema-valid
+
+
+def test_mock_agent_adapter_records_unsafe_verifier_language() -> None:
+    # Unsafe agent language is recorded, not silently passed through as accepted.
+    client = StubLLMClient(model="stub-espresso-agent")
+    raw = {
+        "summary": "proved and verified",
+        "risks": ["the theorem is established"],
+        "verdict": "plausible_direction",
+    }
+    review = make_verifier_review(
+        raw, client=client, created_at="2026-06-03T00:00:00+00:00", index=1, reviewer_role="verifier"
+    )
+    for phrase in ("proved", "verified", "the theorem is established"):
+        assert phrase in review["unsafe_language"]
+    LLMAgentVerifierReview.model_validate(review)
+
+
+def test_llm_agent_attempt_rejects_noncontract_status() -> None:
+    # The candidate artifact contract forbids an out-of-enum status, so an agent
+    # cannot smuggle an evidence/proof status (e.g. "checked") into the kernel.
+    client = StubLLMClient(model="stub-espresso-agent")
+    attempt = make_prover_attempt(
+        {"summary": "x"}, client=client, created_at="2026-06-03T00:00:00+00:00"
+    )
+    attempt["status"] = "checked"
+    try:
+        LLMAgentAttempt.model_validate(attempt)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("candidate attempt must reject a non-contract status like 'checked'")
+
+
+def test_safe_text_redaction_does_not_reintroduce_forbidden_word() -> None:
+    # Regression: the redaction marker must NOT echo the forbidden phrase, or the
+    # prover-round language guard would flag its own redaction (live agents tripped
+    # this with words like "verified").
+    from espresso_proof.validators import _first_forbidden_proof_language
+
+    redacted = safe_text("This result is verified and the proof is complete.")
+    assert "verified" not in redacted.lower()
+    assert "[withheld proof-like phrase]" in redacted
+    assert _first_forbidden_proof_language(redacted.lower()) is None
