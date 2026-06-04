@@ -4,7 +4,7 @@ These pin that the memo / inspect / report renderers translate internal status
 enums (``SourceStatus``, ``ComputationStatus``, ``ProofVerificationStatus``,
 ``RetrievedSourceStatus``, ``FailurePatternTier`` ...) into plain
 mathematical-evidence phrases, and never print the raw enum tokens to the user.
-See ``docs/goals/HUMAN_READABLE_OUTPUT_LABELS.md``.
+See ``docs/engineering/EVIDENCE_DISPLAY_WORDING.md``.
 
 This is a presentation-layer test only: it asserts wording, never status
 semantics. Internal enums stay in schemas/validators (asserted elsewhere).
@@ -24,11 +24,21 @@ from espresso_proof.descriptions import (
 )
 from espresso_proof.failure_pattern_bank import audit_failure_patterns
 from espresso_proof.mathematical_judgment import judge_run
-from espresso_proof.memo import build_concise_memo, render_proof_route_steps
+from espresso_proof.memo import (
+    PROOF_ROUTE_STEP_HEADINGS,
+    build_concise_memo,
+    render_proof_route_steps,
+)
 from espresso_proof.mock_pipeline import run_mock_critique
+from espresso_proof.io import read_yaml
 from espresso_proof.proof_verification import verify_finite_groups
 
 FIXTURES = Path("tests/fixtures")
+
+
+def _grade(run_dir: Path) -> dict:
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    return read_yaml(run_dir / artifacts["idea_grade"])
 
 # Internal enum tokens that must never appear verbatim in renderer-controlled
 # output (status fields the renderer formats into labels). The English word
@@ -158,26 +168,88 @@ def test_render_proof_route_steps_uses_evidence_shape() -> None:
             },
         ],
     }
-    lines = render_proof_route_steps(source_grounding, computations)
+    # A theorem-applicability audit recording the satisfied "why it applies".
+    theorem_applicability = {
+        "usages": [
+            {
+                "proof_step_id": "s1",
+                "conditions": [
+                    {
+                        "status": "satisfied",
+                        "text": "The group is a finite p-group.",
+                    }
+                ],
+            }
+        ]
+    }
+    lines = render_proof_route_steps(source_grounding, computations, theorem_applicability)
     block = "\n".join(lines)
 
-    # The required four-field shape is present for each rendered step.
-    assert block.count("Statement:") == 2  # one source step + one computation
-    assert block.count("Evidence phrase:") == 2
-    assert block.count("Evidence detail:") == 2
-    assert block.count("Scope of check or source:") == 2
+    # The required seven-field shape is present for each rendered step.
+    for heading in PROOF_ROUTE_STEP_HEADINGS:
+        assert block.count(heading) == 2, heading  # one source step + one computation
 
     # The earned evidence phrases appear; the raw status tokens do not.
     assert "Reference supports this stated claim" in block
     assert "Checked by computation for the stated finite/computational scope" in block
     assert "Every finite p-group has nontrivial center." in block
     assert "A. Mathematician, On Finite p-Groups [theorem:1.1]" in block
+    # The recorded applicability reason is surfaced (not invented).
+    assert "Why it applies: The group is a finite p-group." in block
+    # Conservative defaults for fields with no per-step artifact data.
+    assert "Reviewer objections: none recorded" in block
+    assert "Remaining risk: this evidence does not prove the full theorem" in block
     _assert_no_raw_tokens(block)
 
     # Only earned steps render: the candidate step and the human_needed
     # computation are not echoed as proof-route evidence.
     assert "unbacked step" not in block
     assert "unchecked" not in block
+
+
+def test_source_backed_step_does_not_invent_applicability_reason() -> None:
+    """With no recorded applicability reason, "Why it applies" stays conservative."""
+
+    source_grounding = {
+        "source_refs": [
+            {
+                "id": "ref_1",
+                "authors": ["A. Mathematician"],
+                "title": "On Finite p-Groups",
+                "locator": {"kind": "theorem", "value": "1.1"},
+            }
+        ],
+        "steps": [
+            {
+                "proof_step_id": "s1",
+                "needed_theorem": "Every finite p-group has nontrivial center.",
+                "status": "source_backed",
+                "source_refs": ["ref_1"],
+            }
+        ],
+    }
+    # No theorem_applicability passed at all.
+    lines = render_proof_route_steps(source_grounding, {"checks": []})
+    block = "\n".join(lines)
+    assert "Why it applies: Needs a check" in block
+
+    # An applicability audit that exists but records no satisfied reason for the
+    # step also must not be turned into an invented reason.
+    empty_reason = {
+        "usages": [
+            {
+                "proof_step_id": "s1",
+                "conditions": [
+                    {"status": "mismatched", "text": "some unmet condition"},
+                    {"status": "satisfied", "text": ""},
+                ],
+            }
+        ]
+    }
+    block2 = "\n".join(render_proof_route_steps(source_grounding, {"checks": []}, empty_reason))
+    assert "Why it applies: Needs a check" in block2
+    # An unsatisfied condition's text is never promoted into the applies reason.
+    assert "some unmet condition" not in block2
 
 
 # --------------------------------------------------------------------------- #
@@ -244,3 +316,36 @@ def test_memo_cli_command_matches_builder(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     _assert_no_tier_labels(result.output)
     assert build_concise_memo(run) in result.output
+
+
+def _grade_label_lines(memo: str) -> str:
+    """The structured grade-label lines of a memo (Summary / Verdict / Proof state)."""
+
+    wanted = ("Summary:", "Verdict:", "Proof state:")
+    return "\n".join(
+        line for line in memo.splitlines() if line.startswith(wanted)
+    )
+
+
+def test_likely_false_not_shown_as_raw_status_label(tmp_path: Path) -> None:
+    run = run_mock_critique(
+        "lf", FIXTURES / "likely_false_multiple_pressures" / "input.md", tmp_path
+    )
+    grade = _grade(run)
+    assert grade["status"] == "likely_false"  # the fixture exercises this status
+    labels = _grade_label_lines(build_concise_memo(run))
+    # The structured grade labels never show the raw enum token...
+    assert "likely_false" not in labels
+    # ...they show the concrete-English description instead.
+    assert "no checked counterexample has been verified" in labels
+
+
+def test_fragile_not_shown_as_raw_status_label(tmp_path: Path) -> None:
+    run = run_mock_critique(
+        "fr", FIXTURES / "source_misapplication_very_general_to_all" / "input.md", tmp_path
+    )
+    grade = _grade(run)
+    assert grade["status"] == "fragile"  # the fixture exercises this status
+    labels = _grade_label_lines(build_concise_memo(run))
+    assert "fragile" not in labels
+    assert "missing hypotheses, source gaps, or counterexample pressure" in labels

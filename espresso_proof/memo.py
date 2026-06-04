@@ -26,15 +26,62 @@ from .descriptions import (
 from .io import read_yaml
 
 
-def render_proof_route_steps(source_grounding: dict, computations: dict) -> list[str]:
-    """Render reference-backed and machine-checked proof-route steps.
+# Conservative defaults for a proof-route field that has no specific artifact
+# data. Shown verbatim so a missing field never reads as support.
+_NO_APPLICABILITY_REASON = "Needs a check"
+_NO_REVIEWER_OBJECTIONS = "none recorded"
+_DEFAULT_REMAINING_RISK = "this evidence does not prove the full theorem"
 
-    Each step uses the human-readable mathematical-evidence shape:
-    ``Statement`` / ``Evidence phrase`` / ``Evidence detail`` / ``Scope of check
-    or source``. This only echoes already-earned artifact fields; it never sets
-    or upgrades status and never emits proof-complete language.
+# The seven required proof-route step headings (used by tests and the renderer).
+PROOF_ROUTE_STEP_HEADINGS = (
+    "Statement:",
+    "Evidence phrase:",
+    "Evidence detail:",
+    "Scope of check or source:",
+    "Why it applies:",
+    "Reviewer objections:",
+    "Remaining risk:",
+)
+
+
+def _applicability_reason(proof_step_id: str, theorem_applicability: dict) -> str:
+    """The applicability / hypothesis-match reason already recorded for a step.
+
+    Reads the satisfied-condition text from the theorem-applicability audit for
+    this step. Never invents a reason: if none is recorded, returns "Needs a
+    check".
     """
 
+    reasons: list[str] = []
+    for usage in theorem_applicability.get("usages", []):
+        if usage.get("proof_step_id") != proof_step_id:
+            continue
+        for condition in usage.get("conditions", []):
+            text = (condition.get("text") or "").strip()
+            if condition.get("status") == "satisfied" and text:
+                reasons.append(text)
+    # De-duplicate while preserving order.
+    reasons = list(dict.fromkeys(reasons))
+    return "; ".join(reasons) if reasons else _NO_APPLICABILITY_REASON
+
+
+def render_proof_route_steps(
+    source_grounding: dict,
+    computations: dict,
+    theorem_applicability: dict | None = None,
+) -> list[str]:
+    """Render reference-backed and machine-checked proof-route steps.
+
+    Each step uses the full human-readable mathematical-evidence shape:
+    ``Statement`` / ``Evidence phrase`` / ``Evidence detail`` / ``Scope of check
+    or source`` / ``Why it applies`` / ``Reviewer objections`` / ``Remaining
+    risk``. This only echoes already-earned artifact fields; it never sets or
+    upgrades status, never invents an applicability reason, and never emits
+    proof-complete language. Fields with no specific artifact data render
+    conservative text.
+    """
+
+    theorem_applicability = theorem_applicability or {}
     lines: list[str] = []
     refs_by_id = {r.get("id"): r for r in source_grounding.get("source_refs", [])}
     # Reference-backed steps: a cited result, never Espresso's own proof.
@@ -62,6 +109,12 @@ def render_proof_route_steps(source_grounding: dict, computations: dict) -> list
             "Scope of check or source: cited reference support "
             "(a cited result, not a proof of the claim)"
         )
+        lines.append(
+            "Why it applies: "
+            + _applicability_reason(step.get("proof_step_id", ""), theorem_applicability)
+        )
+        lines.append(f"Reviewer objections: {_NO_REVIEWER_OBJECTIONS}")
+        lines.append(f"Remaining risk: {_DEFAULT_REMAINING_RISK}")
         lines.append("-")
     # Machine-checked computations: a confirmed deterministic result, not a proof.
     for check in computations.get("checks", []):
@@ -81,6 +134,10 @@ def render_proof_route_steps(source_grounding: dict, computations: dict) -> list
             "Scope of check or source: this finite/computational instance only; "
             "not a proof of the claim"
         )
+        # A computation has no source-applicability reason of its own.
+        lines.append(f"Why it applies: {_NO_APPLICABILITY_REASON}")
+        lines.append(f"Reviewer objections: {_NO_REVIEWER_OBJECTIONS}")
+        lines.append(f"Remaining risk: {_DEFAULT_REMAINING_RISK}")
         lines.append("-")
     return lines
 
@@ -111,6 +168,13 @@ def build_concise_memo(run_dir: Path) -> str:
     claim_text = (claim.get("normalized_statement") or "").strip()
     claim_state = "locked" if claim.get("locked") else "unlocked"
     objection = (review.get("strongest_objection") or "none recorded").strip()
+
+    # Theorem-applicability audit (optional) carries the recorded "why it applies"
+    # reason for a source-backed step; load it if present (never invented here).
+    optional_artifacts = manifest.get("optional_artifacts", {})
+    theorem_applicability: dict = {}
+    if "theorem_applicability" in optional_artifacts:
+        theorem_applicability = read_yaml(run_dir / optional_artifacts["theorem_applicability"])
 
     source_gaps = grade.get("source_gaps") or []
     source_statuses = sorted(
@@ -146,7 +210,9 @@ def build_concise_memo(run_dir: Path) -> str:
         + ("; ".join(evidence_summary) if evidence_summary else "none recorded")
     )
     # Proof-route steps in the human-readable evidence shape.
-    route_steps = render_proof_route_steps(source_grounding, computations)
+    route_steps = render_proof_route_steps(
+        source_grounding, computations, theorem_applicability
+    )
     if route_steps:
         lines.append("")
         lines.append("Proof-route steps:")
