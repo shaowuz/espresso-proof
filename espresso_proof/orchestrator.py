@@ -318,6 +318,14 @@ def resume_run(
     judge_run(run_dir)
     validate_run(run_dir)
 
+    # Math Failure Pattern Bank (advisory): record which catalogued failure
+    # patterns this run's signals match. Never upgrades status, never refutes;
+    # hard matches only point at existing validators. validate_run re-checks.
+    from .failure_pattern_bank import audit_failure_patterns
+
+    audit_failure_patterns(run_dir)
+    validate_run(run_dir)
+
     _set_state(run_dir, "COMPLETED_MEMO")
     memo = build_concise_memo(run_dir)
     if loop_summary is not None:

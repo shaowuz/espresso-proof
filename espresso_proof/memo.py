@@ -136,6 +136,19 @@ def build_concise_memo(run_dir: Path) -> str:
                     f"{f.get('explanation')} -> {f.get('recommended_action')}"
                 )
 
+    # Failure pattern audit (advisory): matched risk shapes. Never a refutation
+    # and never a status upgrade.
+    if "failure_pattern_audit" in optional:
+        audit = read_yaml(run_dir / optional["failure_pattern_audit"])
+        pmatches = audit.get("matches", [])
+        if pmatches:
+            lines.append("")
+            lines.append("Failure patterns matched (advisory; not a refutation, not a proof):")
+            for m in pmatches:
+                lines.append(
+                    f"  [{m.get('tier')}] {m.get('pattern_id')}: {m.get('explanation')}"
+                )
+
     lines.append("")
     lines.append(
         "Note: artifact-backed memo; an assessment is not a proof. "
