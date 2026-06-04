@@ -440,6 +440,73 @@ class FailureClassificationReport(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class JudgmentRiskKind(str, Enum):
+    """The kind of mathematical risk a judgment finding flags."""
+
+    claim_precision_risk = "claim_precision_risk"
+    theorem_condition_risk = "theorem_condition_risk"
+    missing_hypothesis_in_prose = "missing_hypothesis_in_prose"
+    route_validity_risk = "route_validity_risk"
+    unsupported_confidence = "unsupported_confidence"
+    reviewer_objection_decisiveness = "reviewer_objection_decisiveness"
+
+
+class JudgmentRiskTier(str, Enum):
+    """How strong the advisory signal is. None of these upgrade any status.
+
+    - ``info``: a note for the reader.
+    - ``warn``: a caution / request more evidence.
+    - ``block_candidate``: ADVISORY recommendation to keep a step candidate (i.e.
+      NOT source_backed). It does not itself set or clear status -- the kernel's
+      source-backing / applicability validators remain the only gate. It can never
+      mark anything checked, source_backed, refuted, or proved.
+    """
+
+    info = "info"
+    warn = "warn"
+    block_candidate = "block_candidate"
+
+
+class JudgmentAction(str, Enum):
+    """A conservative next action the layer may recommend (advisory only)."""
+
+    request_source = "request_source"
+    request_example = "request_example"
+    request_computation = "request_computation"
+    request_human_review = "request_human_review"
+    downgrade_confidence = "downgrade_confidence"
+    none = "none"
+
+
+class MathematicalJudgmentFinding(StrictBaseModel):
+    kind: JudgmentRiskKind
+    tier: JudgmentRiskTier
+    subject: str
+    signal: str
+    recommended_action: JudgmentAction
+    explanation: str
+
+
+class MathematicalJudgmentReport(StrictBaseModel):
+    """Conservative middle layer: records mathematical RISK judgments without
+    becoming a proof verifier.
+
+    Hard boundary by construction: this model carries NO source/evidence/proof
+    status field (and StrictBaseModel forbids extras), so a judgment can only
+    warn / request evidence / downgrade confidence / ask for human review. It can
+    never set source_backed, mark a computation/example checked, mark a claim
+    refuted, upgrade proof status, or emit proof-complete language. The kernel
+    validators stay the only gate that earns any status.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    findings: list[MathematicalJudgmentFinding]
+    notes: list[str] = Field(default_factory=list)
+
+
 class LiteratureItem(StrictBaseModel):
     id: str
     title: str
@@ -1544,6 +1611,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "computation_verification": ComputationVerificationReport,
     "computation_verification_result": ComputationVerificationResult,
     "failure_classification": FailureClassificationReport,
+    "mathematical_judgment": MathematicalJudgmentReport,
     "counterexamples": CounterexampleReport,
     "tests": TestReport,
     "source_grounding": SourceGroundingReport,

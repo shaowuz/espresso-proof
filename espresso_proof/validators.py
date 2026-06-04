@@ -14,6 +14,7 @@ from .models import (
     ComputationVerificationReport,
     CounterexampleReport,
     FailureClassificationReport,
+    MathematicalJudgmentReport,
     ContinueDecision,
     ExampleSelection,
     ExampleFeedbackSummary,
@@ -75,6 +76,7 @@ def validate_run(run_dir: Path) -> None:
     computations = validate_yaml_model(run_dir / artifacts["computation_checks"], ComputationChecks)
     computation_verification = _load_optional_computation_verification(run_dir, manifest)
     failure_classification = _load_optional_failure_classification(run_dir, manifest)
+    mathematical_judgment = _load_optional_mathematical_judgment(run_dir, manifest)
     counterexamples = validate_yaml_model(run_dir / artifacts["counterexamples"], CounterexampleReport)
     tests = validate_yaml_model(run_dir / artifacts["tests"], TestReport)
     source_grounding = validate_yaml_model(run_dir / artifacts["source_grounding"], SourceGroundingReport)
@@ -115,6 +117,7 @@ def validate_run(run_dir: Path) -> None:
     _validate_test_report_evidence(computations, examples, counterexamples, tests)
     _validate_computation_verification(computations, computation_verification)
     _validate_failure_classification(failure_classification, counterexamples, claim)
+    _validate_mathematical_judgment(mathematical_judgment, claim, manifest)
     _validate_example_evidence(computations, counterexamples, idea_grade)
     _validate_source_backing(source_grounding)
     _validate_theorem_applicability(manifest, claim, source_grounding, theorem_applicability)
@@ -245,6 +248,45 @@ def _validate_failure_classification(
                 "failure_classification marks claim_refuted without an admissible "
                 "all-hypotheses counterexample"
             )
+
+
+def _load_optional_mathematical_judgment(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> MathematicalJudgmentReport | None:
+    optional = manifest.optional_artifacts
+    if "mathematical_judgment" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["mathematical_judgment"],
+        MathematicalJudgmentReport,
+    )
+
+
+def _validate_mathematical_judgment(
+    mathematical_judgment: MathematicalJudgmentReport | None,
+    claim: Claim,
+    manifest: RunManifest,
+) -> None:
+    """The mathematical judgment layer is advisory; it must never upgrade status.
+
+    Only runs when the optional artifact is present. The report model carries no
+    source/evidence/proof status field and StrictBaseModel forbids extras, so a
+    YAML that smuggles in ``source_backed`` / checked evidence / a proof status is
+    already rejected at load (validate_yaml_model). Here we additionally bind the
+    report to this run: claim_id must match the locked claim and run_id must match
+    the manifest, so a judgment for another claim/run cannot be attached here.
+    """
+    if mathematical_judgment is None:
+        return
+    if mathematical_judgment.claim_id != claim.id:
+        raise KernelValidationError(
+            "mathematical_judgment claim_id does not match locked claim"
+        )
+    if mathematical_judgment.run_id != manifest.run_id:
+        raise KernelValidationError(
+            "mathematical_judgment run_id does not match the run manifest"
+        )
 
 
 def _load_optional_theorem_extraction(

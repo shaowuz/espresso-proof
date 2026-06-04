@@ -23,6 +23,7 @@ from .llm_agents import openai_agent_diagnostic
 from .llm_agents import run_llm_agent_pass
 from .llm_agents import write_initial_prover_round_artifacts
 from .failure_classifier import classify_failures
+from .mathematical_judgment import judge_run
 from .memo import build_concise_memo
 from .memory import summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
@@ -400,6 +401,24 @@ def classify_failures_command(
     typer.echo(f"-> {run / 'failure_classification.yaml'}")
 
 
+@app.command("judge")
+def judge_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+) -> None:
+    """Record conservative mathematical risk judgments for a run (advisory only).
+
+    Writes mathematical_judgment.yaml and re-validates. The layer never upgrades
+    proof/source/evidence status: it can only warn, request more evidence,
+    downgrade confidence, or ask for human review. The kernel validators remain
+    the only gate that earns any status.
+    """
+    report = judge_run(run)
+    validate_run(run)
+    kinds = ", ".join(sorted({item["kind"] for item in report["findings"]})) or "none"
+    typer.echo(f"Recorded {len(report['findings'])} judgment finding(s): {kinds}")
+    typer.echo(f"-> {run / 'mathematical_judgment.yaml'}")
+
+
 @app.command()
 def memo(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)) -> None:
     """Validate a run and print a compact, artifact-backed research memo.
@@ -639,6 +658,23 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
                     f"  {item.get('loop_attempt_id')}: {item.get('artifact_path')} "
                     f"({item.get('status')}, {item.get('time_allocation')})"
                 )
+    judgment_path = _optional_artifact_path(run, optional_artifacts, "mathematical_judgment")
+    if judgment_path is not None:
+        judgment = read_yaml(judgment_path)
+        findings = judgment.get("findings", [])
+        typer.echo("")
+        typer.echo("Mathematical Judgment (advisory risks / next checks; not proof)")
+        if findings:
+            for finding in findings[:6]:
+                typer.echo(
+                    f"- [{finding.get('tier')}] {finding.get('kind')} "
+                    f"({finding.get('subject')}) -> {finding.get('recommended_action')}: "
+                    f"{finding.get('explanation')}"
+                )
+        else:
+            typer.echo("- no risks flagged")
+        typer.echo("- judgment is advisory only; it never upgrades proof/source/evidence status")
+
     memory_summary = summarize_memory(run.parents[1], claim_text=claim.get("normalized_statement", ""))
     if memory_summary:
         typer.echo("")
