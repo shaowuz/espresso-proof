@@ -24,6 +24,7 @@ from .llm_agents import run_llm_agent_pass
 from .llm_agents import write_initial_prover_round_artifacts
 from .failure_classifier import classify_failures
 from .failure_pattern_bank import audit_failure_patterns, seed_failure_pattern_bank
+from .literature_retrieval import retrieve_and_ground, retrieve_sources
 from .mathematical_judgment import judge_run
 from .memo import build_concise_memo
 from .memory import summarize_memory, write_memory_entry
@@ -438,6 +439,40 @@ def audit_patterns_command(
     typer.echo(f"-> {run / 'failure_pattern_audit.yaml'}")
 
 
+@app.command("retrieve-sources")
+def retrieve_sources_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    corpus: Path | None = typer.Option(None, "--corpus", help="Local source corpus directory."),
+    query: str | None = typer.Option(None, "--query"),
+    provider: list[str] | None = typer.Option(None, "--provider", help="local_corpus | arxiv"),
+    ground: bool = typer.Option(False, "--ground", help="Hand the top candidate to source grounding."),
+) -> None:
+    """Retrieve CANDIDATE sources for a run (advisory). With --ground, hand the top
+    local-corpus candidate to the EXISTING grounding pipeline.
+
+    Retrieval never sets source_backed; only Source Grounding (exact locator +
+    hypothesis match + attribution) earns it. A failed/empty search fails closed.
+    """
+    providers = provider or ["local_corpus"]
+    if ground:
+        if corpus is None:
+            raise typer.BadParameter("--ground requires --corpus")
+        result = retrieve_and_ground(run, corpus_dir=corpus, query=query)
+        validate_run(run)
+        if result.get("grounded"):
+            typer.echo("Retrieved a candidate and handed it to source grounding "
+                       "(source_backed earned only with exact locator + hypothesis match + attribution).")
+        else:
+            typer.echo(f"Retrieval found no groundable candidate ({result.get('reason')}); fail closed.")
+        return
+    report = retrieve_sources(run, corpus_dir=corpus, query=query, providers=providers)
+    validate_run(run)
+    typer.echo(f"Retrieved {len(report['hits'])} candidate source(s) [providers: {', '.join(providers)}]")
+    for hit in report["hits"][:5]:
+        typer.echo(f"- {hit['id']} [{hit['status']}] {hit['title']} (relevance {hit['relevance']})")
+    typer.echo(f"-> {run / 'literature_retrieval.yaml'}")
+
+
 @app.command("show-pattern-bank")
 def show_pattern_bank_command() -> None:
     """Print the catalogued math failure patterns (candidate / audited / hard)."""
@@ -726,6 +761,23 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
             "- candidate=warn; audited=ranking/time only; hard=existing validator gate; "
             "no match upgrades status"
         )
+
+    retrieval_path = _optional_artifact_path(run, optional_artifacts, "literature_retrieval")
+    if retrieval_path is not None:
+        retrieval = read_yaml(retrieval_path)
+        rhits = retrieval.get("hits", [])
+        typer.echo("")
+        typer.echo("Literature Retrieval (candidate sources only; not source_backed)")
+        if rhits:
+            for hit in rhits[:5]:
+                loc = hit.get("locator", {})
+                typer.echo(
+                    f"- {hit.get('id')} [{hit.get('status')}] {hit.get('title')} "
+                    f"[{loc.get('kind')}:{loc.get('value')}] via {hit.get('provider')}"
+                )
+        else:
+            typer.echo("- no candidate sources retrieved (fail closed)")
+        typer.echo("- retrieval never earns source_backed; only Source Grounding does")
 
     memory_summary = summarize_memory(run.parents[1], claim_text=claim.get("normalized_statement", ""))
     if memory_summary:
