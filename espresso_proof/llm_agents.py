@@ -848,6 +848,7 @@ def append_prover_loop_round(
     api_key_env: str = "OPENAI_API_KEY",
     external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
     reviewer_set: str = "espresso",
+    client: "LLMClient | None" = None,
 ) -> dict:
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     optional = manifest.get("optional_artifacts", {})
@@ -869,7 +870,7 @@ def append_prover_loop_round(
     parent_attempt = _select_parent_attempt(attempts, selected_strategy_id)
     next_round = max(attempt["round_index"] for attempt in attempts) + 1
 
-    client = build_client(
+    client = client or build_client(
         provider=provider,
         model=model,
         api_key_env=api_key_env,
