@@ -536,6 +536,68 @@ def test_source_theorem_with_stub_stays_valid(tmp_path: Path) -> None:
     validate_run(run_dir)
 
 
+def test_grade_cannot_upgrade_status_or_proof_language(tmp_path: Path) -> None:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    before = read_yaml(run_dir / artifacts["idea_grade"])
+
+    # A model trying to upgrade the grade to proved/promising/high score.
+    malicious = _FakeClient(
+        {
+            "reasons": ["this is essentially proved"],
+            "missing_hypotheses": [],
+            "source_gaps": ["need exact rigidity locator"],
+            "repair_options": ["formalize"],
+            "next_cheapest_test": "finish it",
+            "status": "promising",  # must be ignored
+            "score": 99,  # must be ignored
+            "proof_language_status": "lean_checked",  # must be ignored
+            "survived_tests": ["t1"],  # must be ignored
+            "failed_tests": ["t2"],  # must be ignored
+        }
+    )
+
+    run_front_half_agent_pass(
+        run_dir=run_dir, client=malicious, stages=["grade_memory_memo"]
+    )
+    validate_run(run_dir)
+
+    after = read_yaml(run_dir / artifacts["idea_grade"])
+    # kernel-controlled fields preserved (no upgrade from agent prose).
+    assert after["status"] == before["status"]
+    assert after["score"] == before["score"]
+    assert after["proof_language_status"] == before["proof_language_status"]
+    # evidence lists forced empty (no checked evidence in the front half).
+    assert after["survived_tests"] == []
+    assert after["failed_tests"] == []
+    assert after["human_review_required"] is True
+    # qualitative reasoning refreshed from the model.
+    assert "need exact rigidity locator" in after["source_gaps"]
+
+
+def test_full_front_half_pass_with_stub_is_valid(tmp_path: Path) -> None:
+    # All registered stages in order on an arbitrary claim, end to end.
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+
+    report = run_front_half_agent_pass(run_dir=run_dir, client=StubLLMClient())
+    validate_run(run_dir)
+
+    statuses = {s["stage"]: s["status"] for s in report["stages"]}
+    for stage in registered_stages():
+        assert statuses[stage] == "ok", report
+    # memo renders honestly (no proof-complete language) on the live skeleton.
+    from espresso_proof.memo import build_concise_memo
+
+    memo = build_concise_memo(run_dir)
+    lowered = memo.lower()
+    for banned in ("proof-close", "proof complete", "we proved", "this establishes the theorem"):
+        assert banned not in lowered
+
+
 def test_understanding_claim_with_stub_keeps_vague_claim_honest(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text("Prove the thing about the nice mirror object.", encoding="utf-8")
