@@ -15,6 +15,7 @@ from .models import (
     CounterexampleReport,
     FailureClassificationReport,
     FailurePatternAudit,
+    LiteratureRetrievalReport,
     MathematicalJudgmentReport,
     ContinueDecision,
     ExampleSelection,
@@ -79,6 +80,7 @@ def validate_run(run_dir: Path) -> None:
     failure_classification = _load_optional_failure_classification(run_dir, manifest)
     mathematical_judgment = _load_optional_mathematical_judgment(run_dir, manifest)
     failure_pattern_audit = _load_optional_failure_pattern_audit(run_dir, manifest)
+    literature_retrieval = _load_optional_literature_retrieval(run_dir, manifest)
     counterexamples = validate_yaml_model(run_dir / artifacts["counterexamples"], CounterexampleReport)
     tests = validate_yaml_model(run_dir / artifacts["tests"], TestReport)
     source_grounding = validate_yaml_model(run_dir / artifacts["source_grounding"], SourceGroundingReport)
@@ -121,6 +123,7 @@ def validate_run(run_dir: Path) -> None:
     _validate_failure_classification(failure_classification, counterexamples, claim)
     _validate_mathematical_judgment(mathematical_judgment, claim, manifest)
     _validate_failure_pattern_audit(failure_pattern_audit, claim, manifest)
+    _validate_literature_retrieval(literature_retrieval, claim, manifest)
     _validate_example_evidence(computations, counterexamples, idea_grade)
     _validate_source_backing(source_grounding)
     _validate_theorem_applicability(manifest, claim, source_grounding, theorem_applicability)
@@ -360,6 +363,43 @@ def _validate_failure_pattern_audit(
                 f"hard pattern {match.pattern_id!r} must be enforced by an existing "
                 "kernel validator"
             )
+
+
+def _load_optional_literature_retrieval(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> LiteratureRetrievalReport | None:
+    optional = manifest.optional_artifacts
+    if "literature_retrieval" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["literature_retrieval"],
+        LiteratureRetrievalReport,
+    )
+
+
+def _validate_literature_retrieval(
+    literature_retrieval: LiteratureRetrievalReport | None,
+    claim: Claim,
+    manifest: RunManifest,
+) -> None:
+    """Retrieval surfaces CANDIDATE sources only; it must not shortcut grounding.
+
+    Only runs when the optional artifact is present. The hit status enum has no
+    ``source_backed`` value (and StrictBaseModel forbids extras), so a retrieval
+    hit can never be source_backed -- only Source Grounding earns that. Here we
+    bind claim_id / run_id to this run (fail closed).
+    """
+    if literature_retrieval is None:
+        return
+    if literature_retrieval.claim_id != claim.id:
+        raise KernelValidationError(
+            "literature_retrieval claim_id does not match locked claim"
+        )
+    if literature_retrieval.run_id != manifest.run_id:
+        raise KernelValidationError(
+            "literature_retrieval run_id does not match the run manifest"
+        )
 
 
 def _load_optional_theorem_extraction(

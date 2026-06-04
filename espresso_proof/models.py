@@ -584,6 +584,59 @@ class FailurePatternAudit(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class RetrievedSourceStatus(str, Enum):
+    """Status a retrieval step may assign. There is deliberately NO ``source_backed``
+    value: retrieval can only surface candidates. Only Source Grounding
+    (exact locator + hypothesis match + attribution) earns source_backed."""
+
+    candidate = "candidate"
+    unverified = "unverified"
+    not_found = "not_found"
+
+
+class RetrievedSourceHit(StrictBaseModel):
+    """A candidate source surfaced by retrieval. Carries no source_backed status;
+    a short attributed snippet only (<=240 chars), never full verbatim text."""
+
+    id: str
+    title: str
+    authors: list[str] = Field(default_factory=list)
+    identifier: str = ""
+    locator: Locator
+    provider: str
+    relevance: float = 0.0
+    status: RetrievedSourceStatus = RetrievedSourceStatus.candidate
+    snippet: str = ""
+    local_path: str = ""
+
+    @model_validator(mode="after")
+    def validate_snippet_and_attribution(self) -> RetrievedSourceHit:
+        if len(self.snippet) > 240:
+            raise ValueError("retrieved snippet must be a short excerpt (<=240 chars)")
+        return self
+
+
+class LiteratureRetrievalReport(StrictBaseModel):
+    """Real Literature Retrieval V0 output: candidate sources only.
+
+    Retrieval may search providers / local indexes, read source text, and extract
+    citation metadata + candidate locators -- but it NEVER sets source_backed,
+    never skips exact locator / hypothesis match / attribution (those belong to
+    Source Grounding), never treats a snippet as a checked source, never hides a
+    failed search (a ``not_found`` note is recorded), and never fabricates
+    metadata. The model has no source/evidence/proof status field.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    query: str
+    providers: list[str]
+    hits: list[RetrievedSourceHit] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class LiteratureItem(StrictBaseModel):
     id: str
     title: str
@@ -1691,6 +1744,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "mathematical_judgment": MathematicalJudgmentReport,
     "failure_pattern_bank": FailurePatternBank,
     "failure_pattern_audit": FailurePatternAudit,
+    "literature_retrieval": LiteratureRetrievalReport,
     "counterexamples": CounterexampleReport,
     "tests": TestReport,
     "source_grounding": SourceGroundingReport,
