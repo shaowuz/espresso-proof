@@ -15,8 +15,9 @@ from espresso_proof.orchestrator import (
     orchestrate_run,
     resume_run,
 )
+import espresso_proof.prover_loop_driver as drv
 from espresso_proof.prover_loop_driver import continue_prover_loop
-from espresso_proof.validators import validate_run
+from espresso_proof.validators import KernelValidationError, validate_run
 from tests.test_evidence_aware_grade import FakeClaude
 
 _FORBIDDEN = ("proof-close", "proof complete", "we proved", "proved the", "this establishes the theorem")
@@ -141,6 +142,35 @@ def test_stop_ask_human_does_not_append(tmp_path: Path) -> None:
     result = continue_prover_loop(run_dir=run_dir, client=_ProverClient(objections=["x"]))
     assert result["stop_reason"] == "loop_decision_ask_human"
     assert result["rounds_run"] == 0
+
+
+def test_validation_error_mid_loop_rolls_back(tmp_path: Path, monkeypatch) -> None:
+    run_dir, _ = _to_resolved_loop(tmp_path, effort="normal_pass")
+    _bump_budget(run_dir, max_rounds=6, max_agent_calls=60)
+    before = read_yaml(run_dir / "prover_loop.yaml")
+    rounds_before = before["budget"]["rounds_used"]
+    attempts_before = len(before["attempts"])
+    files_before = len(list((run_dir / "prover_rounds").glob("*.yaml")))
+
+    real_validate = drv.validate_run
+    calls = {"n": 0}
+
+    def flaky(rd):  # pre-loop validate passes; the post-append validate raises
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise KernelValidationError("injected mid-loop validation failure")
+        return real_validate(rd)
+
+    monkeypatch.setattr(drv, "validate_run", flaky)
+    result = continue_prover_loop(run_dir=run_dir, client=_ProverClient(objections=["loc X"]))
+    assert result["stop_reason"] == "validation_error"
+    assert result["rounds_run"] == 0
+    # rolled back to the last valid state: real kernel validation passes again.
+    real_validate(run_dir)
+    after = read_yaml(run_dir / "prover_loop.yaml")
+    assert after["budget"]["rounds_used"] == rounds_before
+    assert len(after["attempts"]) == attempts_before
+    assert len(list((run_dir / "prover_rounds").glob("*.yaml"))) == files_before
 
 
 def test_max_rounds_arg_caps_below_budget(tmp_path: Path) -> None:
