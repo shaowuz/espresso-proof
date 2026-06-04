@@ -261,6 +261,86 @@ def test_examples_with_stub_stays_valid(tmp_path: Path) -> None:
     validate_run(run_dir)
 
 
+def test_counterexamples_dropped_hypothesis_and_proof_step_cannot_refute(tmp_path: Path) -> None:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+
+    # A model trying to refute the claim via a dropped hypothesis AND via a
+    # proof-step attack.
+    malicious = _FakeClient(
+        {
+            "counterexamples": [
+                {
+                    "name": "Drops the over-Q hypothesis (works over C)",
+                    "satisfies_all_claim_hypotheses": False,  # dropped hypothesis
+                    "target": "hypothesis",
+                    "missing_hypothesis": "base field is Q",
+                    "support": "M23 is realizable over C-bar trivially",
+                    "explanation": "this refutes it",
+                    "refutes_claim": True,  # must be neutralized
+                },
+                {
+                    "name": "Attacks the rigidity step",
+                    "satisfies_all_claim_hypotheses": True,
+                    "target": "proof_step",
+                    "explanation": "the rigidity computation fails",
+                    "refutes_claim": True,  # must be neutralized
+                    "refutes_step_only": True,
+                },
+            ],
+            "tests": [
+                {
+                    "description": "Run both counterexamples",
+                    "uses_counterexamples": ["cex_001", "cex_002", "bogus_id"],
+                    "main_observation": "claim is false",
+                    "next_action": "declare refuted",
+                    "result": "failed",  # must be neutralized
+                    "evidence_status": "checked",  # must be neutralized
+                }
+            ],
+            "summary": "Refuted.",
+        }
+    )
+
+    run_front_half_agent_pass(
+        run_dir=run_dir, client=malicious, stages=["counterexamples"]
+    )
+    validate_run(run_dir)
+
+    cex = read_yaml(run_dir / artifacts["counterexamples"])
+    tests = read_yaml(run_dir / artifacts["tests"])
+    assert len(cex["tests"]) == 2
+    for t in cex["tests"]:
+        # no agent counterexample can auto-refute the claim.
+        assert t["refutes_claim"] is False
+        assert t["result"] == "not_tested"
+    dropped = cex["tests"][0]
+    assert dropped["satisfies_all_claim_hypotheses"] is False
+    assert dropped["exposes_missing_hypothesis"] is True
+    assert dropped["missing_hypothesis"]
+    step = cex["tests"][1]
+    assert step["target"] == "proof_step"
+    assert step["refutes_step_only"] is True
+    # admissibility tests stay unverified and only reference known counterexamples.
+    for ti in tests["tests"]:
+        assert ti["result"] == "not_tested"
+        assert ti["evidence_status"] == "human_needed"
+        assert "bogus_id" not in ti["uses_counterexamples"]
+
+
+def test_counterexamples_with_stub_stays_valid(tmp_path: Path) -> None:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+
+    run_front_half_agent_pass(
+        run_dir=run_dir, client=StubLLMClient(), stages=["counterexamples"]
+    )
+    validate_run(run_dir)
+
+
 def test_understanding_claim_with_stub_keeps_vague_claim_honest(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text("Prove the thing about the nice mirror object.", encoding="utf-8")
