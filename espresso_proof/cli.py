@@ -27,7 +27,7 @@ from .memo import build_concise_memo
 from .memory import summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
 from .pdf_ingestion import ingest_source_for_theorems
-from .source_verification import verify_source_grounding_from_theorems
+from .source_verification import ground_run
 from .theorem_applicability import audit_theorem_applicability
 from .verifier import verify_computation_checks
 from .models import (
@@ -115,6 +115,11 @@ def orchestrate(
     select_strategy: str | None = typer.Option(None, "--select-strategy"),
     effort: str | None = typer.Option(None, "--effort"),
     rounds: int | None = typer.Option(None, "--rounds", min=0, max=50),
+    ground_source: Path | None = typer.Option(None, "--ground-source", help="Local PDF/text path or HTTPS URL of a source to ground steps against (resume)."),
+    source_id: str = typer.Option("source_001", "--source-id"),
+    source_title: str = typer.Option("Ingested source", "--source-title"),
+    source_author: list[str] | None = typer.Option(None, "--source-author"),
+    source_type: str = typer.Option("paper", "--source-type"),
 ) -> None:
     """Run the Core Flow end-to-end for an arbitrary claim, stopping at the human gate.
 
@@ -130,6 +135,26 @@ def orchestrate(
             raise typer.BadParameter("--resume requires --select-strategy")
         if provider not in {"stub", "openai", "external"}:
             raise typer.BadParameter("provider must be stub, openai, or external")
+        if ground_source is not None:
+            # Ground steps against a HUMAN-PROVIDED source BEFORE the loop: a step
+            # earns source_backed only with exact locator + hypothesis match +
+            # attribution (author+title). Reuses the single grounding pipeline.
+            gmanifest = read_yaml(resume / "run_manifest.yaml")
+            gclaim = read_yaml(resume / gmanifest["artifacts"]["locked_claim"])
+            extraction = ingest_source_for_theorems(
+                claim_id=gclaim["id"],
+                source=str(ground_source),
+                source_id=source_id,
+                title=source_title,
+                authors=source_author or [],
+                source_type=source_type,
+            )
+            TheoremExtractionReport.model_validate(extraction)
+            gmanifest.setdefault("optional_artifacts", {})["theorem_extraction"] = "theorem_extraction.yaml"
+            write_yaml(resume / "theorem_extraction.yaml", extraction)
+            write_yaml(resume / "run_manifest.yaml", gmanifest)
+            ground_run(run_dir=resume, theorem_extraction_path=resume / "theorem_extraction.yaml")
+            typer.echo(f"Grounded against {ground_source} (source_backed earned only with exact locator + hypothesis match + attribution)")
         memo = resume_run(
             run_dir=resume,
             selected_strategy=select_strategy,
@@ -451,6 +476,20 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     typer.echo("Source Gaps")
     typer.echo(f"- {', '.join(source_gaps) if source_gaps else 'none'}")
     typer.echo(f"- source status: {', '.join(source_statuses) if source_statuses else 'none'}")
+    _refs_by_id = {r.get("id"): r for r in source_grounding.get("source_refs", [])}
+    for step in source_grounding.get("steps", []):
+        if step.get("status") != "source_backed":
+            continue
+        for ref_id in step.get("source_refs", []):
+            ref = _refs_by_id.get(ref_id)
+            if not ref:
+                continue
+            loc = ref.get("locator", {})
+            authors = ", ".join(ref.get("authors", [])) or "unknown author"
+            typer.echo(
+                f"- grounded in {authors}, {ref.get('title', 'untitled')} "
+                f"[{loc.get('kind')}:{loc.get('value')}] (cited support, not a proof)"
+            )
     typer.echo("")
     typer.echo("Examples / Counterexamples")
     example_items = examples.get("examples", [])
@@ -773,15 +812,7 @@ def verify_sources(
         if not extraction_name:
             raise typer.BadParameter("run has no theorem_extraction optional artifact")
         extraction_path = run / extraction_name
-    verify_source_grounding_from_theorems(
-        run_dir=run,
-        theorem_extraction_path=extraction_path,
-    )
-    applicability = audit_theorem_applicability(run)
-    TheoremApplicabilityReport.model_validate(applicability)
-    manifest.setdefault("optional_artifacts", {})["theorem_applicability"] = "theorem_applicability.yaml"
-    write_yaml(run / "run_manifest.yaml", manifest)
-    validate_run(run)
+    ground_run(run_dir=run, theorem_extraction_path=extraction_path)
     typer.echo(f"Wrote source verification to {run / 'source_grounding.yaml'}")
     typer.echo(f"Wrote theorem applicability audit to {run / 'theorem_applicability.yaml'}")
 

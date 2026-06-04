@@ -197,6 +197,12 @@ class SourceRef(StrictBaseModel):
                 raise ValueError("source_backed requires an exact locator")
             if self.hypothesis_match.matches is not True:
                 raise ValueError("source_backed requires matching hypotheses")
+            # Anti-plagiarism: a source_backed citation MUST be attributed — a
+            # cited theorem can never be presented without author + title.
+            if not [a for a in self.authors if str(a).strip()]:
+                raise ValueError("source_backed requires attributed author(s)")
+            if not self.title.strip():
+                raise ValueError("source_backed requires a source title")
         return self
 
 

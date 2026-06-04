@@ -77,6 +77,22 @@ def build_concise_memo(run_dir: Path) -> str:
         + "; statuses="
         + (", ".join(source_statuses) if source_statuses else "none")
     )
+    # Attribution: a source_backed step is "grounded in <citation>" — a cited
+    # result is never presented as Espresso's own proof.
+    refs_by_id = {r.get("id"): r for r in source_grounding.get("source_refs", [])}
+    for step in source_grounding.get("steps", []):
+        if step.get("status") != "source_backed":
+            continue
+        for ref_id in step.get("source_refs", []):
+            ref = refs_by_id.get(ref_id)
+            if not ref:
+                continue
+            loc = ref.get("locator", {})
+            authors = ", ".join(ref.get("authors", [])) or "unknown author"
+            lines.append(
+                f"Grounded: {authors}, {ref.get('title', 'untitled')} "
+                f"[{loc.get('kind')}:{loc.get('value')}] (cited support, not a proof)"
+            )
     lines.append("")
     lines.append("Top routes:")
     if top:
