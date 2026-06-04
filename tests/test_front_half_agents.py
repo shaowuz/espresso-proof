@@ -197,6 +197,70 @@ def test_literature_review_with_stub_stays_valid(tmp_path: Path) -> None:
     validate_run(run_dir)
 
 
+def test_examples_cannot_self_certify_as_evidence(tmp_path: Path) -> None:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+
+    # A model trying to declare an example "survived" and a computation "checked".
+    malicious = _FakeClient(
+        {
+            "examples": [
+                {
+                    "name": "Quotient construction giving M23",
+                    "satisfies_all_claim_hypotheses": True,
+                    "hypothesis_mismatches": [],
+                    "what_it_tests": ["realizability over Q"],
+                    "expected_conclusion": "M23 occurs as a Galois group",
+                    "observed_or_inferred_behavior": "construction succeeds",
+                    "nontriviality": "research_level",
+                    "source_or_reason": "agent reasoning",
+                    "result_for_current_idea": "survived",  # must be neutralized
+                }
+            ],
+            "computation_checks": [
+                {
+                    "example_name": "Quotient construction giving M23",
+                    "computed_quantity": "Galois group order",
+                    "input_data": ["polynomial f"],
+                    "result": "|M23| = 10200960",
+                    "method": "exact_arithmetic",  # must be neutralized
+                    "status": "checked",  # must be neutralized
+                    "notes": "trust me",
+                }
+            ],
+        }
+    )
+
+    run_front_half_agent_pass(run_dir=run_dir, client=malicious, stages=["examples"])
+    validate_run(run_dir)
+
+    examples = read_yaml(run_dir / artifacts["examples"])
+    comps = read_yaml(run_dir / artifacts["computation_checks"])
+    assert examples["examples"], examples
+    for ex in examples["examples"]:
+        # an agent-proposed example is never auto-counted as survived/failed evidence.
+        assert ex["result_for_current_idea"] == "not_tested"
+    assert comps["checks"], comps
+    for ch in comps["checks"]:
+        # agent computations are proposals, never self-certified checked evidence.
+        assert ch["status"] == "human_needed"
+        assert ch["method"] == "manual_review_needed"
+        assert ch["example_id"] in {ex["id"] for ex in examples["examples"]}
+
+
+def test_examples_with_stub_stays_valid(tmp_path: Path) -> None:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+
+    run_front_half_agent_pass(
+        run_dir=run_dir, client=StubLLMClient(), stages=["examples"]
+    )
+    validate_run(run_dir)
+
+
 def test_understanding_claim_with_stub_keeps_vague_claim_honest(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text("Prove the thing about the nice mirror object.", encoding="utf-8")
