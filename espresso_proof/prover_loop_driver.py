@@ -33,6 +33,48 @@ STOP_REASONS = {
 }
 
 
+def _snapshot_run(run_dir: Path) -> dict:
+    """Capture the files a single ``append_prover_loop_round`` mutates, so a
+    mid-loop validation failure can be rolled back to the last valid state."""
+
+    snap: dict = {}
+    for rel in ("prover_loop.yaml", "run_manifest.yaml"):
+        p = run_dir / rel
+        snap[rel] = p.read_bytes() if p.exists() else None
+    rounds_dir = run_dir / "prover_rounds"
+    snap["__rounds__"] = (
+        {f.name: f.read_bytes() for f in rounds_dir.glob("*.yaml")}
+        if rounds_dir.exists()
+        else {}
+    )
+    return snap
+
+
+def _restore_run(run_dir: Path, snap: dict) -> None:
+    """Restore a snapshot taken by ``_snapshot_run`` (drop newly-written round
+    artifacts; rewrite prover_loop/manifest/round files to their prior bytes)."""
+
+    for rel, data in snap.items():
+        if rel == "__rounds__":
+            continue
+        p = run_dir / rel
+        if data is None:
+            if p.exists():
+                p.unlink()
+        else:
+            p.write_bytes(data)
+    rounds_dir = run_dir / "prover_rounds"
+    saved = snap.get("__rounds__", {})
+    if rounds_dir.exists():
+        for f in rounds_dir.glob("*.yaml"):
+            if f.name not in saved:
+                f.unlink()  # remove a round artifact written by the failed append
+    if saved:
+        rounds_dir.mkdir(exist_ok=True)
+        for name, data in saved.items():
+            (rounds_dir / name).write_bytes(data)
+
+
 def _round_blockers(attempts: list[dict]) -> dict[int, list[str]]:
     """Map round_index -> sorted blocker set.
 
@@ -130,7 +172,8 @@ def continue_prover_loop(
                 stop_reason = "no_progress"
                 break
 
-        # --- append exactly one round; fail closed on validation error ---
+        # --- append exactly one round; fail closed AND roll back on error ---
+        snapshot = _snapshot_run(run_dir)
         try:
             append_prover_loop_round(
                 run_dir=run_dir,
@@ -142,7 +185,10 @@ def continue_prover_loop(
                 client=client,
             )
             validate_run(run_dir)
-        except Exception as exc:  # noqa: BLE001 - fail closed
+        except Exception as exc:  # noqa: BLE001 - fail closed + roll back
+            # Restore the last valid state so a mid-loop failure never leaves a
+            # partially-mutated / invalid run on disk.
+            _restore_run(run_dir, snapshot)
             stop_reason = "validation_error"
             notes.append(str(exc))
             break
