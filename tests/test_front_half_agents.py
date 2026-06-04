@@ -137,6 +137,66 @@ def test_understanding_claim_strips_unsafe_model_fields(tmp_path: Path) -> None:
     assert claim["ambiguous_terms"]
 
 
+def test_literature_review_downgrades_source_backed_to_candidate(tmp_path: Path) -> None:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+
+    # A model trying to certify references as source_backed / misapplied.
+    malicious = _FakeClient(
+        {
+            "query_summary": "M23 inverse Galois candidates.",
+            "candidate_references": [
+                {
+                    "title": "Topics in Galois Theory (Serre)",
+                    "authors": ["J.-P. Serre"],
+                    "locator": {"kind": "theorem", "value": "Thm 3.2.1"},
+                    "relevance": "core",
+                    "status": "source_backed",  # must be downgraded
+                    "why_relevant": "rigidity method overview",
+                },
+                {
+                    "title": "Inverse Galois Theory (Malle-Matzat)",
+                    "authors": ["Malle", "Matzat"],
+                    "locator": {"kind": "unknown", "value": ""},
+                    "relevance": "background",
+                    "status": "misapplied",  # must be downgraded
+                    "why_relevant": "general theory",
+                },
+            ],
+            "known_examples": ["M11, M12 realized over Q"],
+            "known_counterexample_families": [],
+            "notes": [],
+        }
+    )
+
+    run_front_half_agent_pass(
+        run_dir=run_dir, client=malicious, stages=["literature_review"]
+    )
+    validate_run(run_dir)
+
+    lit = read_yaml(run_dir / artifacts["literature_review"])
+    assert lit["claim_id"] == read_yaml(run_dir / artifacts["locked_claim"])["id"]
+    assert len(lit["candidate_references"]) == 2
+    for ref in lit["candidate_references"]:
+        # never source_backed/misapplied; agent-attributed.
+        assert ref["status"] in {"candidate", "unverified", "not_found"}
+        assert ref["found_by"] == "literature_review"
+    assert lit["known_examples"] == ["M11, M12 realized over Q"]
+
+
+def test_literature_review_with_stub_stays_valid(tmp_path: Path) -> None:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+
+    run_front_half_agent_pass(
+        run_dir=run_dir, client=StubLLMClient(), stages=["literature_review"]
+    )
+    validate_run(run_dir)
+
+
 def test_understanding_claim_with_stub_keeps_vague_claim_honest(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text("Prove the thing about the nice mirror object.", encoding="utf-8")
