@@ -7,6 +7,7 @@ from pathlib import Path
 import typer
 
 from .contracts import DEFAULT_AGENT_FLOW, default_agent_contracts
+from .descriptions import describe_grade, describe_proof_language
 from .io import read_text, read_yaml, write_text, write_yaml
 from .literature_discovery import discover_literature as run_literature_discovery
 from .literature_review_agent import ReviewSourceSpec, run_literature_review_agent
@@ -424,8 +425,11 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     typer.echo("")
     typer.echo("Grade")
     typer.echo(
-        f"- {grade.get('status')} / {grade.get('score')} "
-        f"({grade.get('proof_language_status')})"
+        f"- {describe_grade(status=grade.get('status'), proof_language_status=grade.get('proof_language_status'))}"
+    )
+    typer.echo(
+        f"- confidence score {grade.get('score')} (internal heuristic); "
+        f"proof state: {describe_proof_language(grade.get('proof_language_status'))}"
     )
     typer.echo("")
     typer.echo("Strongest Objection")

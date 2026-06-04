@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .descriptions import describe_grade, describe_proof_language
 from .io import read_yaml
 
 
@@ -59,15 +60,17 @@ def build_concise_memo(run_dir: Path) -> str:
     lines.append("")
     lines.append(f"Claim [{claim_state}]: {claim_text}")
     lines.append("")
-    # 2-3 sentence summary, assembled only from artifact fields.
-    lines.append(
-        f"Summary: graded {status} (score {score}); proof status is {proof_status}. "
-        f"Strongest obstruction: {objection}"
-    )
+    # 2-3 sentence summary in concrete English (no abstract status labels).
+    assessment = describe_grade(status=status, proof_language_status=proof_status)
+    lines.append(f"Summary: {assessment} Strongest obstruction: {objection}")
     if status == "unclear":
         lines.append("First action: lock/clarify the claim before testing it.")
     lines.append("")
-    lines.append(f"Verdict: {status} | score {score} | proof: {proof_status}")
+    lines.append(f"Verdict: {assessment}")
+    lines.append(
+        f"Confidence score: {score} (internal heuristic; not a probability of truth)"
+    )
+    lines.append(f"Proof state: {describe_proof_language(proof_status)}")
     lines.append(
         "Source: gaps="
         + (", ".join(source_gaps) if source_gaps else "none")
@@ -90,10 +93,7 @@ def build_concise_memo(run_dir: Path) -> str:
     lines.append(f"Next cheapest test: {next_test}")
     lines.append("")
     lines.append(
-        "Labels: proof=" + proof_status + "; source=" + (", ".join(source_statuses) or "none")
-    )
-    lines.append(
-        "Note: artifact-backed memo; statuses are not proof. "
+        "Note: artifact-backed memo; an assessment is not a proof. "
         "Full detail: `espresso inspect --run <dir>`."
     )
     return "\n".join(lines)
