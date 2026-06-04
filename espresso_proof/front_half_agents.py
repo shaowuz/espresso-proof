@@ -584,6 +584,35 @@ def _normalize_examples(raw_examples: object, *, claim_id: str) -> list[dict]:
     return examples
 
 
+_MACHINE_CHECK_KINDS = {"exact_arithmetic", "permutation_order"}
+
+
+def _normalize_machine_check(raw: object) -> dict | None:
+    """Coerce an agent-supplied machine_check spec, or None.
+
+    The spec is STORED so the Evidence Auditor can run it later; the agent NEVER
+    self-certifies — the computation status stays human_needed until a trusted
+    machine result confirms it.
+    """
+
+    if not isinstance(raw, dict):
+        return None
+    kind = raw.get("kind")
+    if kind not in _MACHINE_CHECK_KINDS:
+        return None
+    expression = safe_text(raw.get("expression", "")).strip()
+    expected = safe_text(raw.get("expected", "")).strip()
+    sentinel = "No usable agent text returned."
+    if not expression or not expected or sentinel in (expression, expected):
+        return None
+    return {
+        "kind": kind,
+        "expression": expression,
+        "expected": expected,
+        "notes": safe_text(raw.get("notes", "")),
+    }
+
+
 def _normalize_computation_checks(
     raw_checks: object, *, claim_id: str, examples: list[dict]
 ) -> list[dict]:
@@ -613,9 +642,10 @@ def _normalize_computation_checks(
                 "tool_or_source": safe_text(raw.get("tool_or_source", "")) or "agent proposal",
                 "result": safe_text(raw.get("result", "")) or "not computed",
                 "cross_check": safe_list(raw.get("cross_check")),
-                # SAFETY: agent computations are never self-certified as evidence.
+                # SAFETY: agent computations are never self-certified as evidence;
+                # an attached machine_check is only a PROPOSAL to be machine-run.
                 "status": "human_needed",
-                "machine_check": None,
+                "machine_check": _normalize_machine_check(raw.get("machine_check")),
                 "notes": safe_text(raw.get("notes", "")),
             }
         )
