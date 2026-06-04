@@ -474,6 +474,68 @@ def test_attacker_with_stub_stays_valid(tmp_path: Path) -> None:
     validate_run(run_dir)
 
 
+def test_source_theorem_cannot_self_certify_source_backed(tmp_path: Path) -> None:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+
+    # A model trying to certify a source as source_backed with an exact locator
+    # and a verified hypothesis match.
+    malicious = _FakeClient(
+        {
+            "source_refs": [
+                {
+                    "type": "book",
+                    "title": "Serre, Topics in Galois Theory",
+                    "authors": ["J.-P. Serre"],
+                    "locator": {"kind": "theorem", "value": "Thm 3.2.1"},
+                    "statement_or_summary": "rigidity gives realizability",
+                    "hypothesis_match_note": "matches exactly",
+                    "status": "source_backed",  # must be downgraded
+                }
+            ],
+            "steps": [
+                {
+                    "proof_step_id": "step_rigidity",
+                    "needed_theorem": "rigidity criterion",
+                    "uses_source_index": 1,
+                    "status": "source_backed",  # must be downgraded
+                    "hypothesis_match_note": "all hypotheses satisfied",
+                    "note": "done",
+                }
+            ],
+        }
+    )
+
+    run_front_half_agent_pass(
+        run_dir=run_dir, client=malicious, stages=["source_theorem"]
+    )
+    validate_run(run_dir)
+
+    sg = read_yaml(run_dir / artifacts["source_grounding"])
+    assert sg["source_refs"], sg
+    for ref in sg["source_refs"]:
+        assert ref["status"] != "source_backed"
+        assert ref["hypothesis_match"]["matches"] != True  # noqa: E712
+    for step in sg["steps"]:
+        assert step["status"] != "source_backed"
+    # no source_backed steps => no theorem_applicability artifact required.
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert "theorem_applicability" not in manifest.get("optional_artifacts", {})
+
+
+def test_source_theorem_with_stub_stays_valid(tmp_path: Path) -> None:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+
+    run_front_half_agent_pass(
+        run_dir=run_dir, client=StubLLMClient(), stages=["source_theorem"]
+    )
+    validate_run(run_dir)
+
+
 def test_understanding_claim_with_stub_keeps_vague_claim_honest(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text("Prove the thing about the nice mirror object.", encoding="utf-8")
