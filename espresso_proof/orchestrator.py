@@ -309,6 +309,15 @@ def resume_run(
         )
         loop_summary = (result["rounds_run"], result["stop_reason"])
 
+    # Mathematical Judgment Layer (advisory): record conservative risk findings
+    # from the validated artifacts before rendering the memo. This NEVER upgrades
+    # proof/source/evidence status (the report carries no status field) and
+    # validate_run re-checks; it only surfaces warnings / next checks.
+    from .mathematical_judgment import judge_run
+
+    judge_run(run_dir)
+    validate_run(run_dir)
+
     _set_state(run_dir, "COMPLETED_MEMO")
     memo = build_concise_memo(run_dir)
     if loop_summary is not None:

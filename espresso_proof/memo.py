@@ -120,6 +120,22 @@ def build_concise_memo(run_dir: Path) -> str:
         lines.append("  none")
     lines.append("")
     lines.append(f"Next cheapest test: {next_test}")
+
+    # Mathematical judgment (advisory): risks / next checks only. Never a status
+    # upgrade and never proof-complete language.
+    optional = manifest.get("optional_artifacts", {})
+    if "mathematical_judgment" in optional:
+        judgment = read_yaml(run_dir / optional["mathematical_judgment"])
+        findings = judgment.get("findings", [])
+        if findings:
+            lines.append("")
+            lines.append("Mathematical judgment (advisory risks / next checks — not a proof):")
+            for f in findings:
+                lines.append(
+                    f"  [{f.get('tier')}] {f.get('kind')} ({f.get('subject')}): "
+                    f"{f.get('explanation')} -> {f.get('recommended_action')}"
+                )
+
     lines.append("")
     lines.append(
         "Note: artifact-backed memo; an assessment is not a proof. "
