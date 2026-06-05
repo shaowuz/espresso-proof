@@ -161,6 +161,38 @@ def fallback_statement_text(text: str) -> str:
     return text
 
 
+def extract_candidate_locators(text: str, *, source_ref_id: str = "src_fulltext") -> list[dict]:
+    """Autonomous Retrieval V1 primitive: pull candidate theorem/lemma/
+    proposition/corollary blocks WITH precise locators from full text.
+
+    Returns CANDIDATE-only records: ``{id, kind, label, locator, is_exact,
+    statement, status="candidate"}``. ``status`` is pinned to ``"candidate"`` —
+    extraction never sets ``source_backed`` or any earned status; only the
+    existing source-grounding gate (exact locator + hypothesis match +
+    attribution) can. ``is_exact`` reports whether the recorded locator is precise
+    enough to be groundable (a block with an unclear locator stays candidate /
+    "needs a source"). Deterministic, read-only, fail-closed (no network).
+    """
+
+    from .models import Locator
+
+    out: list[dict] = []
+    for theorem in extract_theorems(text, source_ref_id=source_ref_id):
+        locator = theorem["locator"]
+        out.append(
+            {
+                "id": theorem["id"],
+                "kind": theorem["kind"],
+                "label": theorem["label"],
+                "locator": locator,
+                "is_exact": Locator.model_validate(locator).is_exact,
+                "statement": theorem["statement"],
+                "status": "candidate",
+            }
+        )
+    return out
+
+
 def extract_theorems(text: str, *, source_ref_id: str) -> list[dict]:
     normalized = normalize_text(text)
     pattern = re.compile(

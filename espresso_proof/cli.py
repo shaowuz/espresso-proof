@@ -44,7 +44,12 @@ from .proof_verification import verify_finite_groups
 from .memo import build_concise_memo
 from .memory import summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
-from .pdf_ingestion import ingest_source_for_theorems
+from .pdf_ingestion import (
+    extract_candidate_locators,
+    extract_source_text,
+    ingest_source_for_theorems,
+    read_source_bytes,
+)
 from .source_verification import ground_run
 from .theorem_applicability import audit_theorem_applicability
 from .verifier import audit_evidence, verify_computation_checks
@@ -1139,6 +1144,31 @@ def ingest_pdf(
     write_yaml(manifest_path, manifest)
     validate_run(run)
     typer.echo(f"Wrote theorem extraction to {run / 'theorem_extraction.yaml'}")
+
+
+@app.command("extract-locators")
+def extract_locators_command(
+    source: str = typer.Option(..., "--source", help="Local full-text/PDF path or HTTPS URL."),
+) -> None:
+    """Extract CANDIDATE theorem/lemma/proposition/corollary blocks with precise
+    locators from full text (read-only; candidate-only).
+
+    Extraction never earns reference support: a block is shown as 'groundable'
+    only when its locator is exact, and only Source Grounding (exact locator +
+    hypothesis match + attribution) can earn source_backed. A read/parse failure
+    fails closed (no fabricated locators)."""
+    raw = read_source_bytes(source)
+    text, notes = extract_source_text(raw, source)
+    candidates = extract_candidate_locators(text)
+    typer.echo(f"Found {len(candidates)} candidate block(s) in {source} (proposed, not checked):")
+    for cand in candidates:
+        groundable = "groundable locator" if cand["is_exact"] else "needs a clearer locator"
+        typer.echo(
+            f"- [{cand['locator']['kind']}:{cand['locator']['value']}] ({groundable}) "
+            f"{cand['statement'][:80]}"
+        )
+    for note in notes:
+        typer.echo(f"note: {note}")
 
 
 @app.command("verify-sources")
