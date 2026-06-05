@@ -29,7 +29,9 @@ fixture migration), not a merge of that branch.
 
 from __future__ import annotations
 
+import os
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -110,7 +112,11 @@ def _item_files(bank_dir: Path) -> list[Path]:
     """Item YAML files in filename order (the ``NN`` prefix preserves list order)."""
 
     return sorted(
-        p for p in bank_dir.glob("*.yaml") if p.name != META_FILENAME and p.is_file()
+        p
+        for p in bank_dir.glob("*.yaml")
+        # Skip _meta.yaml and any in-flight temp file (".tmp-bankitem-*.yaml") so a
+        # concurrent reader never tries to validate a half-written item.
+        if p.name != META_FILENAME and not p.name.startswith(".") and p.is_file()
     )
 
 
@@ -207,13 +213,44 @@ def _safe_id_for_filename(item_id: str) -> str:
     return cleaned or "item"
 
 
-def append_bank_item(bank_dir: Path, item: dict, *, id_field: str = "id") -> Path:
-    """Append one validated item to a bank as a NEW file, never rewriting others.
+# Bounded retry when two appenders race for the same ordinal slot. Far above any
+# realistic per-bank item count; a runaway loop fails closed rather than spinning.
+_MAX_APPEND_ATTEMPTS = 10_000
 
-    Validates the item against the bank's item model BEFORE writing, refuses a
-    duplicate id, writes exactly one ``NN-<id>.yaml`` (next ordinal), and
-    re-aggregates to confirm the bank still validates (rolling back the new file
-    on failure). Returns the written path.
+
+def _atomic_link(src: Path, dst: Path) -> bool:
+    """Atomically, EXCLUSIVELY place ``src`` content at ``dst`` via a hardlink.
+
+    Returns ``True`` on success, ``False`` if ``dst`` already exists. ``os.link``
+    is used instead of ``os.rename`` precisely because ``rename`` would silently
+    OVERWRITE an existing item file under a race, and a bank must never rewrite an
+    existing item file. The link is atomic on a single filesystem (``src`` and
+    ``dst`` share the bank directory).
+    """
+
+    try:
+        os.link(src, dst)
+        return True
+    except FileExistsError:
+        return False
+
+
+def append_bank_item(bank_dir: Path, item: dict, *, id_field: str = "id") -> Path:
+    """Append one validated item to a bank as a NEW file, concurrency-safe.
+
+    Validates the item against the bank's item model BEFORE writing any final
+    file, refuses a duplicate id, writes the content to a TEMP file, then
+    atomically and exclusively places it at the next free ``NN-<id>.yaml`` ordinal
+    (retrying a later ordinal if two appenders raced for the same slot — never
+    overwriting an existing item file). Re-aggregates to confirm the bank still
+    validates (rolling back the new file on failure). The temp file is always
+    cleaned up. Returns the written path.
+
+    Note: the ``NN`` ordinal prefix is best-effort under true concurrency. Two
+    appenders with different ids racing for the same slot produce two distinct
+    filenames at the same ordinal (no overwrite, no lost item); loading stays
+    deterministic via the full-filename sort. The exclusive placement guarantees
+    only that an existing item file is never rewritten.
     """
 
     bank_dir = Path(bank_dir)
@@ -243,11 +280,30 @@ def append_bank_item(bank_dir: Path, item: dict, *, id_field: str = "id") -> Pat
                 f"{bank_dir}: duplicate {spec.kind} item id {item_id!r} (already in {path.name})"
             )
 
-    next_index = len(existing)
-    new_path = bank_dir / f"{next_index:02d}-{_safe_id_for_filename(item_id)}.yaml"
-    if new_path.exists():  # extremely unlikely; never clobber an existing file
-        raise KernelValidationError(f"{new_path}: refusing to overwrite an existing bank item file")
-    write_yaml(new_path, validated)
+    # Write the content to a temp file in the SAME directory, then atomically and
+    # exclusively place it at a free ordinal. Only a fully-written file is ever
+    # linked into place, so a concurrent reader never sees a partial item.
+    safe_id = _safe_id_for_filename(item_id)
+    fd, tmp_name = tempfile.mkstemp(prefix=".tmp-bankitem-", suffix=".yaml", dir=bank_dir)
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    new_path: Path | None = None
+    try:
+        write_yaml(tmp_path, validated)
+        index = len(existing)
+        for _ in range(_MAX_APPEND_ATTEMPTS):
+            candidate = bank_dir / f"{index:02d}-{safe_id}.yaml"
+            if _atomic_link(tmp_path, candidate):
+                new_path = candidate
+                break
+            index += 1
+        if new_path is None:
+            raise KernelValidationError(
+                f"{bank_dir}: could not place bank item after {_MAX_APPEND_ATTEMPTS} attempts"
+            )
+    finally:
+        tmp_path.unlink(missing_ok=True)  # always remove the temp file
+
     try:
         load_bank(bank_dir)  # fail closed: the bank must still aggregate validly
     except KernelValidationError:
