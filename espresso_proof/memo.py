@@ -177,6 +177,14 @@ def build_concise_memo(run_dir: Path) -> str:
     if _ta_rel and (run_dir / _ta_rel).exists():
         theorem_applicability = read_yaml(run_dir / _ta_rel)
 
+    # Autonomous literature search (optional): candidate sources found without a
+    # human-provided source. Rendered as "Found by autonomous literature search"
+    # + "Proposed, not checked"; it never claims reference support by itself.
+    autonomous_retrieval: dict = {}
+    _alr_rel = optional_artifacts.get("autonomous_literature_retrieval")
+    if _alr_rel and (run_dir / _alr_rel).exists():
+        autonomous_retrieval = read_yaml(run_dir / _alr_rel)
+
     source_gaps = grade.get("source_gaps") or []
     source_statuses = sorted(
         {ref.get("status") for ref in source_grounding.get("source_refs", []) if ref.get("status")}
@@ -218,6 +226,31 @@ def build_concise_memo(run_dir: Path) -> str:
         lines.append("")
         lines.append("Proof-route steps:")
         lines.extend(route_steps)
+    # Autonomous literature search candidates (proposed only; not checked).
+    candidates = autonomous_retrieval.get("candidates") or []
+    if candidates:
+        lines.append("")
+        lines.append("Autonomous literature search:")
+        for cand in candidates[:3]:
+            authors = ", ".join(cand.get("authors", [])) or "unknown author"
+            lines.append(
+                f"- Found by autonomous literature search: {cand.get('title', 'untitled')} "
+                f"({authors}) [{cand.get('provider')}] — {evidence_phrase('candidate')}."
+            )
+            if cand.get("why_relevant"):
+                lines.append(f"  Why relevant: {cand['why_relevant']}")
+        if autonomous_retrieval.get("earned_source_backed"):
+            lines.append(
+                "  A candidate was handed to source grounding and a reference now supports a step "
+                "(see the proof-route step above)."
+            )
+        elif autonomous_retrieval.get("grounded"):
+            lines.append(
+                "  A candidate was handed to source grounding, but it did not earn reference support: "
+                f"{evidence_phrase('not_found')}."
+            )
+        else:
+            lines.append(f"  No candidate earned reference support yet: {evidence_phrase('not_found')}.")
     lines.append("")
     lines.append("Top routes:")
     if top:

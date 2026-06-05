@@ -642,6 +642,75 @@ class LiteratureRetrievalReport(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class LiteratureSearchPlan(StrictBaseModel):
+    """LLM-guided retrieval PLAN: what theorem/source to look for. It proposes
+    search terms only and has NO source/evidence/proof status field. A plan can
+    never earn reference support — only Source Grounding (exact locator +
+    hypothesis match + attribution) can."""
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    search_questions: list[str] = Field(default_factory=list)
+    generated_queries: list[str] = Field(default_factory=list)
+    expected_theorem_shapes: list[str] = Field(default_factory=list)
+    risk_terms: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class AutonomousRetrievalCandidate(StrictBaseModel):
+    """One autonomously-retrieved candidate source. Candidate-only by
+    construction: ``status`` is pinned to the literal ``"candidate"`` so neither
+    a provider hit nor an LLM ``why_relevant`` explanation can mark anything
+    source_backed. The locator is provider-supplied; it is never invented here.
+    An abstract/snippet is a short excerpt, never full verbatim text."""
+
+    id: str
+    provider: str
+    query: str
+    title: str
+    authors: list[str] = Field(default_factory=list)
+    identifier: str = ""  # url / arXiv id / DOI as returned by the provider
+    snippet: str = ""  # abstract or snippet (short excerpt)
+    why_relevant: str = ""
+    relevance: float = 0.0
+    status: Literal["candidate"] = "candidate"
+    local_path: str = ""
+
+    @model_validator(mode="after")
+    def validate_candidate_excerpt(self) -> AutonomousRetrievalCandidate:
+        if len(self.snippet) > 600:
+            raise ValueError("retrieved snippet/abstract must be a short excerpt (<=600 chars)")
+        return self
+
+
+class AutonomousLiteratureRetrievalReport(StrictBaseModel):
+    """LLM-guided autonomous retrieval output: candidate sources only.
+
+    The retrieval layer may plan queries, search providers, read metadata, and
+    let an LLM rank/explain candidates -- but it NEVER sets source_backed, never
+    skips exact locator / hypothesis match / attribution (those belong to Source
+    Grounding), and never treats an abstract/title as theorem support. The model
+    has no source/evidence/proof status field; ``grounded`` only records whether
+    a candidate was HANDED to grounding (grounding alone decides source_backed)."""
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    providers: list[str]
+    queries: list[str] = Field(default_factory=list)
+    candidates: list[AutonomousRetrievalCandidate] = Field(default_factory=list)
+    # ``grounded`` only records that a candidate was HANDED to grounding;
+    # ``earned_source_backed`` records the actual outcome decided by grounding
+    # (exact locator + hypothesis match + attribution). Retrieval never sets the
+    # latter itself — it is read back from source_grounding after ground_run.
+    grounded: bool = False
+    earned_source_backed: bool = False
+    notes: list[str] = Field(default_factory=list)
+
+
 class VerifierType(str, Enum):
     """A trusted-verifier backend kind.
 
@@ -1824,6 +1893,8 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "failure_pattern_bank": FailurePatternBank,
     "failure_pattern_audit": FailurePatternAudit,
     "literature_retrieval": LiteratureRetrievalReport,
+    "literature_search_plan": LiteratureSearchPlan,
+    "autonomous_literature_retrieval": AutonomousLiteratureRetrievalReport,
     "proof_verification": ProofVerificationReport,
     "counterexamples": CounterexampleReport,
     "tests": TestReport,

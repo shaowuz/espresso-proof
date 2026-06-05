@@ -30,6 +30,7 @@ from .llm_agents import run_llm_agent_pass
 from .llm_agents import write_initial_prover_round_artifacts
 from .failure_classifier import classify_failures
 from .failure_pattern_bank import audit_failure_patterns, seed_failure_pattern_bank
+from .autonomous_retrieval import run_autonomous_retrieval
 from .literature_retrieval import retrieve_and_ground, retrieve_sources
 from .mathematical_judgment import judge_run
 from .proof_verification import verify_finite_groups
@@ -478,6 +479,62 @@ def retrieve_sources_command(
     for hit in report["hits"][:5]:
         typer.echo(f"- {hit['id']} ({evidence_phrase(hit['status'])}) {hit['title']} (relevance {hit['relevance']})")
     typer.echo(f"-> {run / 'literature_retrieval.yaml'}")
+
+
+@app.command("retrieve-autonomous")
+def retrieve_autonomous_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    provider: list[str] | None = typer.Option(None, "--provider", help="local_corpus | arxiv (repeatable)"),
+    corpus: Path | None = typer.Option(None, "--corpus", help="Local source corpus directory."),
+    llm_provider: str = typer.Option("stub", "--llm-provider", help="stub | openai | external"),
+    model: str = typer.Option("gpt-4.1", "--model"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND", "--external-agent-command-env"
+    ),
+    ground: bool = typer.Option(True, "--ground/--no-ground", help="Hand a readable local candidate to grounding."),
+) -> None:
+    """Autonomously find CANDIDATE sources with an LLM-guided planner, then hand a
+    readable local candidate to the EXISTING grounding pipeline.
+
+    The LLM plans queries and ranks candidates only. Retrieval never earns
+    reference support; only Source Grounding (exact locator + hypothesis match +
+    attribution) does. A failed/empty search fails closed and everything stays a
+    candidate ("Needs a source").
+    """
+    if llm_provider not in {"stub", "openai", "external"}:
+        raise typer.BadParameter("llm-provider must be stub, openai, or external")
+    client = build_llm_client(
+        provider=llm_provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+    )
+    report = run_autonomous_retrieval(
+        run,
+        client=client,
+        corpus_dir=corpus,
+        providers=provider or ["local_corpus"],
+        ground=ground,
+    )
+    typer.echo(
+        f"Autonomous retrieval: {len(report['candidates'])} candidate source(s) "
+        f"found by literature search [providers: {', '.join(report['providers'])}]."
+    )
+    for cand in report["candidates"][:5]:
+        typer.echo(
+            f"- {cand['id']} ({evidence_phrase(cand['status'])}) {cand['title']} "
+            f"[{cand['provider']}, relevance {cand['relevance']:.2f}]"
+        )
+    if report["grounded"]:
+        typer.echo(
+            "Handed the top local candidate to source grounding (a reference supports a "
+            "step only with exact locator, hypothesis match, and attribution)."
+        )
+    else:
+        typer.echo("No candidate earned reference support yet; grounding stayed candidate / Needs a source.")
+    typer.echo(f"-> {run / 'literature_search_plan.yaml'}")
+    typer.echo(f"-> {run / 'autonomous_literature_retrieval.yaml'}")
 
 
 @app.command("verify-finite-groups")
