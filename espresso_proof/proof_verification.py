@@ -28,8 +28,13 @@ from .finite_group_verifier import (
     verify_identity_on_table,
 )
 from .io import read_yaml, write_yaml
-from .models import ProofVerificationReport
+from .models import ProofVerificationReport, ScopedVerificationRequests
 from .symbolic_identity import verify_ring_identity_mod
+
+# Auto-wiring caps: stricter than the manual CLI caps because auto-wiring runs
+# unattended. A request beyond these is skipped (too expensive), never run.
+AUTO_MAX_TABLE_ORDER = 12
+AUTO_MAX_MODULUS = 50
 
 
 def build_finite_group_entries(claim_id: str, primes: list[int]) -> list[dict]:
@@ -214,3 +219,106 @@ def verify_ring_identity_in_run(run_dir: Path, *, identity: str, modulus: object
     entry = build_ring_identity_entry(claim_id, entry_id=entry_id, identity=identity, modulus=modulus, target=target)
     append_verification_entries(run_dir, [entry])
     return entry
+
+
+def load_scoped_verification_requests(run_dir: Path) -> dict | None:
+    """Read the strategy/prover stage's structured scoped-verification requests.
+
+    Looks at ``optional_artifacts['scoped_verification_requests']`` then the
+    conventional ``scoped_verification_requests.yaml``. Returns None if absent
+    (auto-wiring then does nothing). A PRESENT-but-malformed requests file is a
+    hard error (model_validate) so the producer cannot emit a broken structure;
+    individual incomplete requests are handled (skipped) by the wiring itself."""
+
+    run_dir = Path(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    rel = manifest.get("optional_artifacts", {}).get("scoped_verification_requests")
+    path = run_dir / rel if rel else run_dir / "scoped_verification_requests.yaml"
+    if not path.exists():
+        return None
+    data = read_yaml(path)
+    ScopedVerificationRequests.model_validate(data)  # fail closed on a malformed file
+    return data
+
+
+def auto_wire_scoped_verifications(
+    run_dir: Path,
+    *,
+    max_table_order: int = AUTO_MAX_TABLE_ORDER,
+    max_modulus: int = AUTO_MAX_MODULUS,
+) -> dict:
+    """Auto-run the strategy/prover stage's explicit scoped-verification requests
+    and append the results as proof-verification entries.
+
+    This is the non-manual path: a request that is CONCRETE and SAFE (right kind,
+    complete data, within cost caps, bound to this run's claim) is executed by the
+    existing trusted backend; a confirming result earns ``instance_checked``, a
+    non-confirming/malformed table earns ``unverified`` (fail closed). A request
+    that is structurally unusable (missing table/modulus, unsupported kind,
+    over-cap, claim mismatch) is SKIPPED with a reason and earns nothing.
+
+    Natural-language prose is never read -- only the structured requests artifact
+    -- so a run with no requests file (or prose-only strategy) auto-wires nothing.
+    Idempotent: an entry id already present is skipped. Re-validates the run (fail
+    closed). Never upgrades proof/theorem status; there is no ``proved`` status."""
+
+    from .validators import validate_run  # local import to avoid an import cycle
+
+    run_dir = Path(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
+    summary: dict = {"appended": [], "skipped": []}
+
+    requests_doc = load_scoped_verification_requests(run_dir)
+    if requests_doc is None:
+        return summary
+
+    def skip(rid: object, reason: str) -> None:
+        summary["skipped"].append({"id": rid, "reason": reason})
+
+    if requests_doc.get("claim_id") != claim_id:
+        for req in requests_doc.get("requests", []):
+            skip(req.get("id"), "requests claim_id does not match the locked claim")
+        return summary
+
+    pv_path = run_dir / "proof_verification.yaml"
+    existing_ids = {e["id"] for e in read_yaml(pv_path)["entries"]} if pv_path.exists() else set()
+    entries: list[dict] = []
+    for req in requests_doc.get("requests", []):
+        rid = req.get("id")
+        entry_id = f"auto_{rid}"
+        if entry_id in existing_ids:
+            skip(rid, "already wired")
+            continue
+        kind = req.get("kind")
+        identity = req.get("identity")
+        target = req.get("target", "")
+        if kind == "finite_identity_table":
+            table = req.get("table")
+            if not isinstance(table, list) or not table:
+                skip(rid, "missing or empty operation table")
+                continue
+            if len(table) > max_table_order:
+                skip(rid, f"table order {len(table)} exceeds auto cap {max_table_order} (too expensive)")
+                continue
+            entry = build_identity_table_entry(claim_id, entry_id=entry_id, table=table, identity=identity, target=target)
+        elif kind == "finite_ring_identity":
+            modulus = req.get("modulus")
+            if not isinstance(modulus, int) or isinstance(modulus, bool) or modulus < 1:
+                skip(rid, "missing or invalid modulus")
+                continue
+            if modulus > max_modulus:
+                skip(rid, f"modulus {modulus} exceeds auto cap {max_modulus} (too expensive)")
+                continue
+            entry = build_ring_identity_entry(claim_id, entry_id=entry_id, identity=identity, modulus=modulus, target=target)
+        else:
+            skip(rid, f"unsupported kind {kind!r}")
+            continue
+        entries.append(entry)
+        existing_ids.add(entry_id)
+        summary["appended"].append({"id": entry_id, "earned_status": entry["earned_status"]})
+
+    if entries:
+        append_verification_entries(run_dir, entries)
+    validate_run(run_dir)  # fail closed
+    return summary
