@@ -26,6 +26,7 @@ from pathlib import Path
 from .io import read_yaml, write_yaml
 from .llm_agents import LLMClient, safe_list, safe_text
 from .models import LiteratureSearchPlan
+from .research_bank import bankable_artifact_path, load_bankable_dict
 
 _PLANNER_SYSTEM = (
     "You are Espresso Proof's literature-search planner. Given a locked "
@@ -92,10 +93,12 @@ def _fallback_queries(claim: dict) -> list[str]:
 
 
 def _route_titles(run_dir: Path) -> list[str]:
-    path = run_dir / "strategy_synthesis.yaml"
+    # Resolve via the manifest + bank-aware loader so a materialized
+    # (bank-directory) run still contributes strategy route titles to the plan.
+    path = bankable_artifact_path(run_dir, "strategy_synthesis")
     if not path.exists():
         return []
-    data = read_yaml(path)
+    data = load_bankable_dict(run_dir, "strategy_synthesis")
     return [safe_text(r.get("title")) for r in data.get("routes", []) if r.get("title")]
 
 

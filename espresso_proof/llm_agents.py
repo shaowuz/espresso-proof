@@ -13,6 +13,7 @@ from typing import Protocol
 
 from .io import read_yaml, write_yaml
 from .models import LLMAgentRunReport, ProverLoopReport, ProverRoundIndex, ProverRoundReport
+from .research_bank import load_bankable_dict
 
 
 AGENT_OUTPUT_SCHEMA = {
@@ -1022,9 +1023,11 @@ def load_agent_context(run_dir: Path) -> dict:
         "claim": read_yaml(run_dir / artifacts["locked_claim"]),
         "hypothesis_ledger": read_yaml(run_dir / artifacts["hypothesis_ledger"]),
         "literature_review": read_yaml(run_dir / artifacts["literature_review"]),
-        "examples": read_yaml(run_dir / artifacts["examples"]),
+        # Bankable artifacts may be a single YAML file or a per-item bank dir;
+        # load them through the manifest + bank-aware loader.
+        "examples": load_bankable_dict(run_dir, "examples", manifest),
         "computation_checks": read_yaml(run_dir / artifacts["computation_checks"]),
-        "counterexamples": read_yaml(run_dir / artifacts["counterexamples"]),
+        "counterexamples": load_bankable_dict(run_dir, "counterexamples", manifest),
         "tests": read_yaml(run_dir / artifacts["tests"]),
         "source_grounding": read_yaml(run_dir / artifacts["source_grounding"]),
         "review": read_yaml(run_dir / artifacts["review"]),

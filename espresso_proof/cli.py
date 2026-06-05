@@ -32,7 +32,12 @@ from .failure_classifier import classify_failures
 from .failure_pattern_bank import audit_failure_patterns, seed_failure_pattern_bank
 from .autonomous_retrieval import run_autonomous_retrieval
 from .bank_dashboard import render_bank_dashboard
-from .research_bank import append_bank_item, materialize_run_banks
+from .research_bank import (
+    _BANKABLE_KINDS,
+    append_bank_item,
+    load_bankable_dict,
+    materialize_run_banks,
+)
 from .literature_retrieval import retrieve_and_ground, retrieve_sources
 from .mathematical_judgment import judge_run
 from .proof_verification import verify_finite_groups
@@ -658,6 +663,11 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
 
     def _artifact(key: str) -> dict:
         # Resolve through the run manifest (source of truth), not hardcoded names.
+        # Bankable artifacts may be a single YAML file or a per-item bank
+        # directory; load them through the bank-aware loader so a materialized run
+        # works exactly like a single-file run.
+        if key in _BANKABLE_KINDS:
+            return load_bankable_dict(run, key, manifest)
         return read_yaml(run / artifacts[key])
 
     claim = _artifact("locked_claim")
@@ -1393,7 +1403,7 @@ def feedback_example(
     labels = label or []
     if not labels:
         raise typer.BadParameter("provide at least one --label")
-    examples = read_yaml(run / "examples.yaml")
+    examples = load_bankable_dict(run, "examples")
     example_ids = {example["id"] for example in examples.get("examples", [])}
     if target not in example_ids:
         raise typer.BadParameter(f"unknown example target {target!r}")

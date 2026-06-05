@@ -18,11 +18,7 @@ from pathlib import Path
 
 from .descriptions import describe_idea_status, evidence_phrase
 from .io import read_yaml
-from .research_bank import (
-    load_counterexamples_artifact,
-    load_examples_artifact,
-    load_strategy_synthesis_artifact,
-)
+from .research_bank import load_bankable_dict
 
 _NONE = "—"
 
@@ -147,12 +143,12 @@ def render_bank_dashboard(run_dir: Path) -> str:
 
     run_dir = Path(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
-    artifacts = manifest["artifacts"]
     claim_id = manifest.get("project_id", "")
 
-    examples = load_examples_artifact(run_dir / artifacts["examples"]).model_dump(mode="json")
-    counterexamples = load_counterexamples_artifact(run_dir / artifacts["counterexamples"]).model_dump(mode="json")
-    strategies = load_strategy_synthesis_artifact(run_dir / artifacts["strategy_synthesis"]).model_dump(mode="json")
+    # Manifest-aware: works for single-file or per-item bank-directory layouts.
+    examples = load_bankable_dict(run_dir, "examples", manifest)
+    counterexamples = load_bankable_dict(run_dir, "counterexamples", manifest)
+    strategies = load_bankable_dict(run_dir, "strategy_synthesis", manifest)
 
     ex_items = examples.get("examples", [])
     ce_items = counterexamples.get("tests", [])
