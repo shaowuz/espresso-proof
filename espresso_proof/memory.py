@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .io import read_yaml, write_yaml
 from .models import MemoryEntry, MemoryIndex, MemoryIndexEntry
+from .research_bank import bankable_artifact_path, load_bankable_dict
 
 
 _SUMMARY_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -184,9 +185,11 @@ def write_run_memory(
                 },
             )
 
-    cx_path = run_path / "counterexamples.yaml"
+    # Resolve via the manifest + bank-aware loader so a materialized
+    # (bank-directory) run still contributes counterexample-pressure memory.
+    cx_path = bankable_artifact_path(run_path, "counterexamples")
     if cx_path.exists():
-        counterexamples = read_yaml(cx_path)
+        counterexamples = load_bankable_dict(run_path, "counterexamples")
         pressure = [
             test
             for test in counterexamples.get("tests", [])

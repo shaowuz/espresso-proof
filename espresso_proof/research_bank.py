@@ -208,6 +208,50 @@ def load_strategy_synthesis_artifact(path: Path) -> StrategySynthesis:
     return load_artifact(path, expected_kind="strategies")  # type: ignore[return-value]
 
 
+# Manifest artifact key -> bank kind, for the three bankable artifacts. Used by
+# manifest-aware consumers so a run works whether the artifact is a single YAML
+# file or a per-item bank directory (after `materialize-banks`).
+_BANKABLE_KINDS: dict[str, str] = {
+    "examples": "examples",
+    "counterexamples": "counterexamples",
+    "strategy_synthesis": "strategies",
+}
+
+
+def bankable_artifact_path(run_dir: Path, key: str, manifest: dict | None = None) -> Path:
+    """Resolve a bankable artifact's on-disk path (single file OR bank dir) via
+    the run manifest. Falls back to the conventional ``<key>.yaml`` name when the
+    manifest does not list the key (back-compat / partial manifests)."""
+
+    run_dir = Path(run_dir)
+    if manifest is None:
+        manifest = read_yaml(run_dir / "run_manifest.yaml")
+    rel = (manifest.get("artifacts", {}) or {}).get(key, f"{key}.yaml")
+    return run_dir / rel
+
+
+def load_bankable_artifact(run_dir: Path, key: str, manifest: dict | None = None) -> BaseModel:
+    """Load a bankable artifact through the manifest + the bank-aware loader.
+
+    Works for both layouts. Fails closed exactly like a hard-coded read would
+    (a missing path raises while reading), and never fabricates an empty model.
+    """
+
+    if key not in _BANKABLE_KINDS:
+        raise KernelValidationError(f"load_bankable_artifact: {key!r} is not a bankable artifact")
+    return load_artifact(
+        bankable_artifact_path(run_dir, key, manifest), expected_kind=_BANKABLE_KINDS[key]
+    )
+
+
+def load_bankable_dict(run_dir: Path, key: str, manifest: dict | None = None) -> dict:
+    """Same as :func:`load_bankable_artifact` but returns the aggregated dict --
+    identical in shape to ``read_yaml`` of the old single-file artifact, so it is
+    a drop-in replacement for hard-coded single-file reads."""
+
+    return load_bankable_artifact(run_dir, key, manifest).model_dump(mode="json")
+
+
 # Manifest artifact key -> (bank kind, conventional bank directory name). Used by
 # the opt-in bank-output mode; the single-file layout remains the default.
 BANK_OUTPUT_LAYOUT: dict[str, tuple[str, str]] = {
