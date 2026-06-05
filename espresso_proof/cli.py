@@ -41,7 +41,12 @@ from .research_bank import (
 from .literature_retrieval import retrieve_and_ground, retrieve_sources
 from .mathematical_judgment import judge_run
 from .finite_group_verifier import verify_identity_on_table
-from .proof_verification import verify_finite_groups
+from .proof_verification import (
+    verify_finite_groups,
+    verify_identity_table_in_run,
+    verify_ring_identity_in_run,
+)
+from .symbolic_identity import SUPPORTED_RING_IDENTITIES
 from .benchmark import run_benchmark
 from .memo import build_concise_memo
 from .reviewer_checklist import review_checklist
@@ -653,6 +658,53 @@ def verify_identity_command(
     )
     typer.echo(f"Identity '{identity}': {verdict}")
     typer.echo(f"Scope: {result['scope_note']}")
+
+
+@app.command("verify-identity-in-run")
+def verify_identity_in_run_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    table: Path = typer.Option(..., "--table", exists=True, dir_okay=False, help="YAML file: a finite operation table (list of lists of ints)."),
+    identity: str = typer.Option(..., "--identity", help="commutative | associative | idempotent | involutive"),
+    entry_id: str = typer.Option(..., "--id", help="Unique id for this verification entry."),
+    target: str = typer.Option("", "--target", help="Human description of what was checked."),
+) -> None:
+    """Connect an explicit finite-table identity check into the run's proof-
+    verification artifact. Earns instance_checked ONLY if the identity holds on
+    this finite table; otherwise fails closed to unverified. Re-validates the run.
+    There is no 'proved' status: this is a finite/computational check, not a
+    universal proof.
+    """
+    data = read_yaml(table)
+    entry = verify_identity_table_in_run(run, table=data, identity=identity, entry_id=entry_id, target=target)
+    validate_run(run)
+    typer.echo(
+        f"Entry {entry['id']}: {entry['earned_status']} -- {entry['result']} "
+        f"(checked in this finite case only; NOT a universal proof)."
+    )
+    typer.echo(f"Scope: {entry['scope_note']}")
+
+
+@app.command("verify-ring-identity-in-run")
+def verify_ring_identity_in_run_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    identity: str = typer.Option(..., "--identity", help=f"One of: {', '.join(SUPPORTED_RING_IDENTITIES)}"),
+    modulus: int = typer.Option(..., "--modulus", help="The modulus n; the identity is checked over all residues of Z/n."),
+    entry_id: str = typer.Option(..., "--id", help="Unique id for this verification entry."),
+    target: str = typer.Option("", "--target", help="Human description of what was checked."),
+) -> None:
+    """Connect an exhaustive Z/n algebraic-identity sanity check into the run's
+    proof-verification artifact. Earns instance_checked ONLY if the identity holds
+    for every residue mod n; otherwise fails closed to unverified. Re-validates the
+    run. This is a finite/computational sanity check over Z/n, never a universal
+    proof over a general ring or for all moduli.
+    """
+    entry = verify_ring_identity_in_run(run, identity=identity, modulus=modulus, entry_id=entry_id, target=target)
+    validate_run(run)
+    typer.echo(
+        f"Entry {entry['id']}: {entry['earned_status']} -- {entry['result']} "
+        f"(checked over Z/{modulus} only; NOT a universal proof)."
+    )
+    typer.echo(f"Scope: {entry['scope_note']}")
 
 
 @app.command("show-pattern-bank")

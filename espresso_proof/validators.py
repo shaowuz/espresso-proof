@@ -460,6 +460,8 @@ def _load_optional_proof_verification(
 # verifier_type -> the only checked status it may earn (with a confirming result).
 _TRUSTED_EARNED = {
     "finite_group_cayley": "instance_checked",
+    "finite_identity_table": "instance_checked",
+    "finite_ring_identity": "instance_checked",
     "exact_computation": "computation_checked",
 }
 
