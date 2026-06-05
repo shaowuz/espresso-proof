@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from .hypothesis_matching import match_hypothesis_semantically
 from .io import read_yaml, write_yaml
 from .models import SourceGroundingReport, TheoremExtractionReport
 
@@ -59,9 +60,12 @@ def verify_source_grounding_from_theorems(
         step["source_refs"] = [ref_id]
         step["hypothesis_match"] = hypothesis_match
         if status == "source_backed":
+            matched_reasons = hypothesis_match.get("matched", [])
+            why = ("; ".join(matched_reasons)) if matched_reasons else (
+                "required hypotheses were found in the extracted statement"
+            )
             step["note"] = (
-                f"Exact {theorem.kind} locator {theorem.label} matched and required "
-                "hypotheses were found in the extracted statement."
+                f"Exact {theorem.kind} locator {theorem.label} matched; {why}."
             )
         else:
             if not attributed:
@@ -123,24 +127,71 @@ def check_hypothesis_applicability(
     claim_hypotheses: list[dict],
     missing_or_unclear: list[str],
 ) -> dict:
-    lowered = statement.lower()
-    required = []
-    for hypothesis in claim_hypotheses:
-        if hypothesis.get("status") in {"explicit", "inferred"}:
-            required.extend(significant_terms(hypothesis.get("name", "")))
-            required.extend(expanded_hypothesis_terms(hypothesis.get("name", "")))
+    """Decide whether a cited source statement covers the required claim
+    hypotheses.
+
+    A required hypothesis is covered when either:
+
+    1. a conservative, explicit semantic-equivalence rule recognises the same
+       statement in different notation (e.g. ``"group of order p^2"`` vs
+       ``"|G| = p^2"``); or
+    2. every significant whole word of the hypothesis appears in the source
+       statement (the original, conservative token coverage, now whole-word
+       only so ``finite`` cannot match inside ``infinite``).
+
+    Returns ``matches: True`` with a list of ``matched`` human-readable reasons
+    only when ALL required hypotheses are covered; otherwise ``matches:
+    "unclear"`` with mismatches. Coverage here gates hypothesis compatibility
+    only — it never by itself earns ``source_backed`` (the exact locator and
+    attribution gates remain in :func:`verify_source_grounding_from_theorems`
+    and the :class:`SourceRef` validator).
+    """
+
     _ = missing_or_unclear
-    missing = [
-        term
-        for term in sorted(dict.fromkeys(required))
-        if term not in lowered and not term_covered(term, lowered)
-    ]
-    if missing:
-        return {
-            "matches": "unclear",
-            "mismatches": [f"required hypothesis term not found in source statement: {term}" for term in missing],
-        }
-    return {"matches": True, "mismatches": []}
+    matched_reasons: list[str] = []
+    mismatches: list[str] = []
+    unclear = False
+    for hypothesis in claim_hypotheses:
+        if hypothesis.get("status") not in {"explicit", "inferred"}:
+            continue
+        name = (hypothesis.get("name") or "").strip()
+        if not name:
+            continue
+        # 1) Conservative semantic equivalence (explicit, test-backed rules).
+        reason = match_hypothesis_semantically(name, statement)
+        if reason is not None:
+            matched_reasons.append(reason)
+            continue
+        # 2) Fall back to conservative whole-word token coverage.
+        terms = list(dict.fromkeys(significant_terms(name) + expanded_hypothesis_terms(name)))
+        missing_terms = [term for term in terms if not term_present(term, statement)]
+        if missing_terms:
+            unclear = True
+            mismatches.extend(
+                f"required hypothesis term not found in source statement: {term}"
+                for term in missing_terms
+            )
+        elif terms:
+            matched_reasons.append(f'"{name}" terms found in the source statement')
+    if unclear:
+        return {"matches": "unclear", "mismatches": mismatches, "matched": matched_reasons}
+    return {"matches": True, "mismatches": [], "matched": matched_reasons}
+
+
+def term_present(term: str, statement: str) -> bool:
+    """Whole-word coverage of ``term`` in ``statement`` (case-insensitive).
+
+    Whole-word matching is deliberate: it keeps ``finite`` from matching inside
+    ``infinite`` and ``singular`` from matching inside other words. Falls back to
+    the explicit :func:`term_covered` notation aliases. A token that fails to
+    match is treated as missing, which downgrades to a candidate — the safe
+    direction.
+    """
+
+    lowered = statement.lower()
+    if re.search(r"\b" + re.escape(term) + r"\b", lowered):
+        return True
+    return term_covered(term, lowered)
 
 
 def significant_terms(text: str) -> list[str]:
