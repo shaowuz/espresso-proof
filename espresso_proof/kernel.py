@@ -188,6 +188,13 @@ def artifact_diagnostic(key: str, path: Path, required: bool) -> dict[str, Any]:
 def read_artifact(path: Path) -> Any:
     if not path.exists():
         return None
+    # A bankable artifact may be a per-item bank directory (after
+    # `materialize-banks`); aggregate it leniently to the same dict shape as the
+    # old single-file artifact so the read-only snapshot works on both layouts.
+    if path.is_dir():
+        from .research_bank import aggregate_bank_dict, is_bank_dir
+
+        return aggregate_bank_dict(path) if is_bank_dir(path) else None
     if path.suffix in {".yaml", ".yml"}:
         return read_yaml(path)
     return path.read_text(encoding="utf-8")
@@ -196,7 +203,18 @@ def read_artifact(path: Path) -> Any:
 def artifact_preview(path: Path, limit: int = 4000) -> str | None:
     if not path.exists():
         return None
-    text = path.read_text(encoding="utf-8")
+    if path.is_dir():
+        import yaml
+
+        from .research_bank import aggregate_bank_dict, is_bank_dir
+
+        if not is_bank_dir(path):
+            return None
+        text = yaml.safe_dump(
+            aggregate_bank_dict(path), sort_keys=False, allow_unicode=False
+        )
+    else:
+        text = path.read_text(encoding="utf-8")
     if len(text) > limit:
         return text[:limit].rstrip() + "\n...[truncated]"
     return text
