@@ -162,7 +162,8 @@ def test_memo_and_inspect_render_machine_checked(tmp_path: Path) -> None:
     runner = CliRunner()
     memo = runner.invoke(app, ["memo", "--run", str(run_dir)]).output
     inspected = runner.invoke(app, ["inspect", "--run", str(run_dir)]).output
-    assert "Machine-checked:" in memo
+    assert "Proof-route steps:" in memo
+    assert "Checked by computation for the stated finite/computational scope" in memo
     assert "machine-checked" in inspected.lower()
     for surface in (memo.lower(), inspected.lower()):
         for phrase in ("proof-close", "proof complete", "we proved", "proved the claim"):

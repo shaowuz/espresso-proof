@@ -7,7 +7,13 @@ from pathlib import Path
 import typer
 
 from .contracts import DEFAULT_AGENT_FLOW, default_agent_contracts
-from .descriptions import describe_grade, describe_proof_language
+from .descriptions import (
+    describe_grade,
+    describe_proof_language,
+    evidence_phrase,
+    judgment_tier_phrase,
+    objection_phrase,
+)
 from .io import read_text, read_yaml, write_text, write_yaml
 from .literature_discovery import discover_literature as run_literature_discovery
 from .literature_review_agent import ReviewSourceSpec, run_literature_review_agent
@@ -159,11 +165,11 @@ def orchestrate(
             write_yaml(resume / "theorem_extraction.yaml", extraction)
             write_yaml(resume / "run_manifest.yaml", gmanifest)
             ground_run(run_dir=resume, theorem_extraction_path=resume / "theorem_extraction.yaml")
-            typer.echo(f"Grounded against {ground_source} (source_backed earned only with exact locator + hypothesis match + attribution)")
+            typer.echo(f"Grounded against {ground_source} (a reference supports a step only with exact locator, hypothesis match, and attribution)")
         if run_evidence_audit:
             # Earn computation_checked from confirming machine results BEFORE the loop.
             audit_evidence(resume)
-            typer.echo("Evidence audited (computation_checked earned only from confirming machine results)")
+            typer.echo("Evidence audited (a computation is checked only by a confirming machine result)")
         memo = resume_run(
             run_dir=resume,
             selected_strategy=select_strategy,
@@ -435,8 +441,8 @@ def audit_patterns_command(
     """
     report = audit_failure_patterns(run)
     validate_run(run)
-    tiers = ", ".join(sorted({m["tier"] for m in report["matches"]})) or "none"
-    typer.echo(f"Matched {len(report['matches'])} failure pattern(s) [tiers: {tiers}]")
+    objections = "; ".join(sorted({objection_phrase(m["tier"]) for m in report["matches"]})) or "none"
+    typer.echo(f"Matched {len(report['matches'])} failure pattern(s) [{objections}]")
     typer.echo(f"-> {run / 'failure_pattern_audit.yaml'}")
 
 
@@ -461,16 +467,16 @@ def retrieve_sources_command(
         result = retrieve_and_ground(run, corpus_dir=corpus, query=query)
         validate_run(run)
         if result.get("grounded"):
-            typer.echo("Retrieved a candidate and handed it to source grounding "
-                       "(source_backed earned only with exact locator + hypothesis match + attribution).")
+            typer.echo("Retrieved a proposed source and handed it to source grounding "
+                       "(a reference supports a step only with exact locator, hypothesis match, and attribution).")
         else:
             typer.echo(f"Retrieval found no groundable candidate ({result.get('reason')}); fail closed.")
         return
     report = retrieve_sources(run, corpus_dir=corpus, query=query, providers=providers)
     validate_run(run)
-    typer.echo(f"Retrieved {len(report['hits'])} candidate source(s) [providers: {', '.join(providers)}]")
+    typer.echo(f"Retrieved {len(report['hits'])} proposed source(s) [providers: {', '.join(providers)}]")
     for hit in report["hits"][:5]:
-        typer.echo(f"- {hit['id']} [{hit['status']}] {hit['title']} (relevance {hit['relevance']})")
+        typer.echo(f"- {hit['id']} ({evidence_phrase(hit['status'])}) {hit['title']} (relevance {hit['relevance']})")
     typer.echo(f"-> {run / 'literature_retrieval.yaml'}")
 
 
@@ -492,7 +498,7 @@ def verify_finite_groups_command(
     checked = sum(1 for e in report["entries"] if e["earned_status"] == "instance_checked")
     typer.echo(
         f"Verified {checked}/{len(report['entries'])} finite group(s) abelian "
-        f"for primes {primes} (instance_checked; NOT a universal proof)."
+        f"for primes {primes} (checked in this finite case only; NOT a universal proof)."
     )
     typer.echo(f"-> {run / 'proof_verification.yaml'}")
 
@@ -591,7 +597,11 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     typer.echo("")
     typer.echo("Source Gaps")
     typer.echo(f"- {', '.join(source_gaps) if source_gaps else 'none'}")
-    typer.echo(f"- source status: {', '.join(source_statuses) if source_statuses else 'none'}")
+    _evidence_summary = sorted({evidence_phrase(s) for s in source_statuses})
+    typer.echo(
+        "- evidence so far: "
+        + ("; ".join(_evidence_summary) if _evidence_summary else "none recorded")
+    )
     _refs_by_id = {r.get("id"): r for r in source_grounding.get("source_refs", [])}
     for step in source_grounding.get("steps", []):
         if step.get("status") != "source_backed":
@@ -758,7 +768,7 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
         if findings:
             for finding in findings[:6]:
                 typer.echo(
-                    f"- [{finding.get('tier')}] {finding.get('kind')} "
+                    f"- {judgment_tier_phrase(finding.get('tier'))}: {finding.get('kind')} "
                     f"({finding.get('subject')}) -> {finding.get('recommended_action')}: "
                     f"{finding.get('explanation')}"
                 )
@@ -774,16 +784,17 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
         typer.echo("Failure Pattern Audit (advisory; not a refutation, not a proof)")
         if pmatches:
             for match in pmatches[:8]:
-                suffix = f" [enforced_by {match.get('enforced_by')}]" if match.get("enforced_by") else ""
+                suffix = f" [enforced by {match.get('enforced_by')}]" if match.get("enforced_by") else ""
                 typer.echo(
-                    f"- [{match.get('tier')}] {match.get('pattern_id')} "
-                    f"({match.get('family')}): {match.get('explanation')}{suffix}"
+                    f"- {objection_phrase(match.get('tier'))} "
+                    f"({match.get('pattern_id')}, {match.get('family')}): "
+                    f"{match.get('explanation')}{suffix}"
                 )
         else:
             typer.echo("- no patterns matched")
         typer.echo(
-            "- candidate=warn; audited=ranking/time only; hard=existing validator gate; "
-            "no match upgrades status"
+            "- objections are advisory: a match is a warning or a ranking/time hint, "
+            "never a refutation and never a status change"
         )
 
     retrieval_path = _optional_artifact_path(run, optional_artifacts, "literature_retrieval")
@@ -791,17 +802,20 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
         retrieval = read_yaml(retrieval_path)
         rhits = retrieval.get("hits", [])
         typer.echo("")
-        typer.echo("Literature Retrieval (candidate sources only; not source_backed)")
+        typer.echo("Literature Retrieval (proposed sources only; not yet reference-backed)")
         if rhits:
             for hit in rhits[:5]:
                 loc = hit.get("locator", {})
                 typer.echo(
-                    f"- {hit.get('id')} [{hit.get('status')}] {hit.get('title')} "
+                    f"- {hit.get('id')} ({evidence_phrase(hit.get('status'))}) {hit.get('title')} "
                     f"[{loc.get('kind')}:{loc.get('value')}] via {hit.get('provider')}"
                 )
         else:
-            typer.echo("- no candidate sources retrieved (fail closed)")
-        typer.echo("- retrieval never earns source_backed; only Source Grounding does")
+            typer.echo("- no proposed sources retrieved (fail closed)")
+        typer.echo(
+            "- retrieval only proposes sources; a reference earns support only after "
+            "exact locator, hypothesis match, and attribution in source grounding"
+        )
 
     proof_verification_path = _optional_artifact_path(run, optional_artifacts, "proof_verification")
     if proof_verification_path is not None:
@@ -813,13 +827,13 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
             for entry in entries[:8]:
                 typer.echo(
                     f"- {entry.get('target')}: {entry.get('result')} "
-                    f"[{entry.get('verifier_type')} -> {entry.get('earned_status')}]"
+                    f"({entry.get('verifier_type')}: {evidence_phrase(entry.get('earned_status'))})"
                 )
         else:
             typer.echo("- no verifier runs")
         typer.echo(
-            "- instance_checked covers only the enumerated finite instances; "
-            "the universal claim is NOT proved (no 'proved' status exists here)"
+            "- these checks cover only the enumerated finite instances; "
+            "the universal claim is NOT proved"
         )
 
     memory_summary = summarize_memory(run.parents[1], claim_text=claim.get("normalized_statement", ""))
@@ -965,7 +979,7 @@ def discover_literature(
     write_yaml(run / artifacts["literature_review"], report)
     validate_run(run)
     typer.echo(f"Wrote {mode} literature discovery to {run / artifacts['literature_review']}")
-    typer.echo("Reference status remains candidate/unverified/not_found; Referencing owns source_backed.")
+    typer.echo("Discovered references stay proposed (not yet checked); only source grounding earns reference support.")
 
 
 @app.command("ingest-pdf")
@@ -1107,7 +1121,7 @@ def review_literature_agent(
     write_yaml(manifest_path, manifest)
     validate_run(run)
     typer.echo(f"Wrote literature review agent report to {run / 'literature_review_agent.yaml'}")
-    typer.echo("Review judgments remain candidate-level; Referencing owns source_backed.")
+    typer.echo("Review judgments stay proposed (not yet checked); only source grounding earns reference support.")
 
 
 @app.command("run-llm-agents")

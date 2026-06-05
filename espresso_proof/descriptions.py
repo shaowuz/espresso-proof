@@ -25,8 +25,8 @@ IDEA_STATUS_DESCRIPTIONS: dict[str, str] = {
         "checked."
     ),
     "likely_false": (
-        "The claim faces multiple serious pressures, but no checked "
-        "counterexample has been verified."
+        "The claim faces serious pressure, but no checked counterexample has "
+        "been verified."
     ),
     "refuted": (
         "A checked counterexample satisfies the claim hypotheses and violates "
@@ -85,3 +85,89 @@ def describe_grade(
     if str(proof_language_status) in VERIFIED_PROOF_STATUSES:
         return PROOF_CHECKED_DESCRIPTION
     return describe_idea_status(status)
+
+
+# ---------------------------------------------------------------------------
+# Mathematical evidence wording.
+#
+# Internal artifacts use stable status enums (``SourceStatus``,
+# ``ComputationStatus``, ``ProofVerificationStatus``, ``RetrievedSourceStatus``,
+# ``FailurePatternTier`` ...). User-facing memo / inspect / report surfaces must
+# never print those raw enum tokens; they translate to plain mathematical
+# evidence phrases here. See ``docs/engineering/EVIDENCE_DISPLAY_WORDING.md``.
+# These are display phrases only — they never set or upgrade any status.
+# ---------------------------------------------------------------------------
+
+# A short fallback that never asserts more than the artifact earned.
+_EVIDENCE_FALLBACK = "Needs a check"
+
+# Source / evidence / proof-verification status -> evidence phrase.
+EVIDENCE_PHRASES: dict[str, str] = {
+    "source_backed": (
+        "Reference supports this stated claim; see locator and applicability reason"
+    ),
+    # A source-checked argument is reference support, not a machine check.
+    "source_checked": (
+        "Reference supports this stated claim; see locator and applicability reason"
+    ),
+    "computation_checked": (
+        "Checked by computation for the stated finite/computational scope"
+    ),
+    # ComputationStatus.checked is the earned machine-checked computation result.
+    "checked": (
+        "Checked by computation for the stated finite/computational scope"
+    ),
+    "instance_checked": "Checked in this finite case only",
+    "lean_checked": "Checked by a trusted verifier for the stated scope",
+    "human_attested": "Attested by a human reviewer (not a machine check)",
+    "human_confirmed": "Confirmed by a human reviewer (not a machine check)",
+    "candidate": "Proposed, not checked",
+    "human_needed": "Needs human judgment",
+    "not_found": "Needs a source",
+    "unverified": "Needs a check",
+    "inconclusive": "Not enough information to assess safely",
+    "misapplied": "A reviewer found a gap in how the source applies",
+    "wrong": "A check found this does not hold as stated",
+}
+
+
+def evidence_phrase(label: str | None) -> str:
+    """Plain mathematical-evidence phrase for an internal source/evidence status.
+
+    Never echoes the raw enum token; an unknown label falls back to "Needs a
+    check" so a missing/unexpected status is shown as unproven, not as support.
+    """
+
+    if not label:
+        return _EVIDENCE_FALLBACK
+    return EVIDENCE_PHRASES.get(str(label), _EVIDENCE_FALLBACK)
+
+
+# FailurePatternTier value -> reviewer-objection phrase.
+OBJECTION_PHRASES: dict[str, str] = {
+    "hard": "Objection: matches a known failure pattern",
+    "audited": "Objection: matches a reviewed warning pattern",
+    "candidate": "Objection to review: possible failure pattern",
+}
+
+
+def objection_phrase(tier: str | None) -> str:
+    """Reviewer-objection phrase for a failure-pattern tier (advisory, never a refutation)."""
+
+    return OBJECTION_PHRASES.get(
+        str(tier), "Objection to review: possible failure pattern"
+    )
+
+
+# JudgmentRiskTier value -> readable severity word (advisory risk, never a status).
+JUDGMENT_TIER_PHRASES: dict[str, str] = {
+    "info": "Note",
+    "warn": "Caution",
+    "block_candidate": "Serious concern, needs human review",
+}
+
+
+def judgment_tier_phrase(tier: str | None) -> str:
+    """Readable severity word for a mathematical-judgment risk tier."""
+
+    return JUDGMENT_TIER_PHRASES.get(str(tier), "Note")
