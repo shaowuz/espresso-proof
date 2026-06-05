@@ -173,8 +173,9 @@ def build_concise_memo(run_dir: Path) -> str:
     # reason for a source-backed step; load it if present (never invented here).
     optional_artifacts = manifest.get("optional_artifacts", {})
     theorem_applicability: dict = {}
-    if "theorem_applicability" in optional_artifacts:
-        theorem_applicability = read_yaml(run_dir / optional_artifacts["theorem_applicability"])
+    _ta_rel = optional_artifacts.get("theorem_applicability")
+    if _ta_rel and (run_dir / _ta_rel).exists():
+        theorem_applicability = read_yaml(run_dir / _ta_rel)
 
     source_gaps = grade.get("source_gaps") or []
     source_statuses = sorted(

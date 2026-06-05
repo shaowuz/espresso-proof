@@ -349,3 +349,21 @@ def test_fragile_not_shown_as_raw_status_label(tmp_path: Path) -> None:
     labels = _grade_label_lines(build_concise_memo(run))
     assert "fragile" not in labels
     assert "missing hypotheses, source gaps, or counterexample pressure" in labels
+
+
+def test_rendering_does_not_mutate_persisted_artifacts(tmp_path: Path) -> None:
+    """Rendering is read-only: memo + inspect never rewrite any run artifact."""
+
+    run = _run_with_optional_artifacts(tmp_path)
+    before = {p: p.read_bytes() for p in sorted(run.glob("*.yaml"))}
+    assert before  # sanity: there are artifacts to protect
+
+    # Render every user-facing surface that this PR touches.
+    build_concise_memo(run)
+    assert CliRunner().invoke(app, ["memo", "--run", str(run)]).exit_code == 0
+    assert CliRunner().invoke(app, ["inspect", "--run", str(run)]).exit_code == 0
+
+    after = {p: p.read_bytes() for p in sorted(run.glob("*.yaml"))}
+    assert after.keys() == before.keys(), "rendering added/removed an artifact file"
+    for path, original in before.items():
+        assert after[path] == original, f"rendering mutated persisted artifact {path.name}"
