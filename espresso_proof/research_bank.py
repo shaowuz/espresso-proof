@@ -252,6 +252,26 @@ def load_bankable_dict(run_dir: Path, key: str, manifest: dict | None = None) ->
     return load_bankable_artifact(run_dir, key, manifest).model_dump(mode="json")
 
 
+def aggregate_bank_dict(bank_dir: Path) -> dict:
+    """Lenient aggregation for READ-ONLY DISPLAY (snapshot / detail previews).
+
+    Reads ``_meta.yaml`` + item files into the same aggregated dict shape as the
+    old single-file artifact, WITHOUT model validation -- mirroring the leniency
+    of ``read_yaml`` on a single file (the strict path is :func:`load_bank` /
+    ``validate_run``). Item order follows the ``NN`` filename prefix. An unknown
+    bank kind degrades to exposing the raw items under ``items``."""
+
+    bank_dir = Path(bank_dir)
+    meta = read_yaml(bank_dir / META_FILENAME) or {}
+    items = [read_yaml(p) for p in _item_files(bank_dir)]
+    spec = BANK_SPECS.get(str(meta.get("kind")))
+    if spec is None:
+        return {**{k: v for k, v in meta.items() if k != "kind"}, "items": items}
+    out: dict = {field: meta.get(field) for field in spec.meta_fields}
+    out[spec.list_field] = items
+    return out
+
+
 # Manifest artifact key -> (bank kind, conventional bank directory name). Used by
 # the opt-in bank-output mode; the single-file layout remains the default.
 BANK_OUTPUT_LAYOUT: dict[str, tuple[str, str]] = {
