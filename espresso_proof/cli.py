@@ -42,6 +42,7 @@ from .literature_retrieval import retrieve_and_ground, retrieve_sources
 from .mathematical_judgment import judge_run
 from .finite_group_verifier import verify_identity_on_table
 from .proof_verification import verify_finite_groups
+from .benchmark import run_benchmark
 from .memo import build_concise_memo
 from .memory import summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
@@ -1553,6 +1554,26 @@ def summarize_feedback(
     write_yaml(manifest_path, manifest)
     validate_run(run)
     typer.echo(f"Wrote feedback summary to {run / 'example_feedback_summary.yaml'}")
+
+
+@app.command("benchmark")
+def benchmark_command(
+    output_root: Path = typer.Option(Path(".benchmark_runs"), "--out-root", help="Where benchmark runs are written."),
+) -> None:
+    """Run the regression benchmark (curated conservative-behaviour cases over the
+    existing mock fixtures) and print a stable report. Exits non-zero if any case
+    regresses. Never asserts a claim is proved.
+    """
+    report = run_benchmark(output_root)
+    passed = sum(1 for row in report if row["passed"])
+    for row in report:
+        mark = "PASS" if row["passed"] else "FAIL"
+        typer.echo(f"[{mark}] {row['category']:24s} {row['fixture']:42s} status={row['idea_status']}")
+        for problem in row["problems"]:
+            typer.echo(f"        - {problem}")
+    typer.echo(f"benchmark: {passed}/{len(report)} case(s) passed")
+    if passed != len(report):
+        raise typer.Exit(code=1)
 
 
 @app.command()
