@@ -208,6 +208,113 @@ def load_strategy_synthesis_artifact(path: Path) -> StrategySynthesis:
     return load_artifact(path, expected_kind="strategies")  # type: ignore[return-value]
 
 
+# Manifest artifact key -> (bank kind, conventional bank directory name). Used by
+# the opt-in bank-output mode; the single-file layout remains the default.
+BANK_OUTPUT_LAYOUT: dict[str, tuple[str, str]] = {
+    "examples": ("examples", "examples"),
+    "counterexamples": ("counterexamples", "counterexamples"),
+    "strategy_synthesis": ("strategies", "strategies"),
+}
+
+
+def write_bank(bank_dir: Path, aggregate, *, kind: str) -> Path:
+    """Write an aggregated model (or dict) out as a per-item bank directory.
+
+    Validates the aggregate against the existing model first, then writes
+    ``_meta.yaml`` (the non-list fields + ``kind``) and one ``NN-<id>.yaml`` per
+    item, and finally re-loads the bank to confirm it round-trips to the same
+    model (fail closed). Refuses to write into a directory that already holds a
+    bank or item files. Adds no status and changes no item content.
+    """
+
+    spec = BANK_SPECS.get(kind)
+    if spec is None:
+        raise KernelValidationError(f"write_bank: unknown bank kind {kind!r}")
+    bank_dir = Path(bank_dir)
+    data = aggregate if isinstance(aggregate, dict) else aggregate.model_dump(mode="json")
+    try:
+        validated = spec.model_cls.model_validate(data).model_dump(mode="json")
+    except ValidationError as exc:
+        raise KernelValidationError(
+            f"write_bank: aggregate is not a valid {spec.model_cls.__name__}\n{exc}"
+        ) from exc
+
+    bank_dir.mkdir(parents=True, exist_ok=True)
+    if (bank_dir / META_FILENAME).exists() or _item_files(bank_dir):
+        raise KernelValidationError(f"{bank_dir}: refusing to write into a non-empty bank directory")
+
+    meta = {"kind": kind}
+    for field in spec.meta_fields:
+        meta[field] = validated[field]
+    write_yaml(bank_dir / META_FILENAME, meta)
+
+    seen_ids: set[str] = set()
+    for index, item in enumerate(validated[spec.list_field]):
+        item_id = str(item.get(spec.id_field, ""))
+        if item_id in seen_ids:
+            raise KernelValidationError(
+                f"{bank_dir}: duplicate {kind} item id {item_id!r} while writing bank"
+            )
+        seen_ids.add(item_id)
+        write_yaml(bank_dir / f"{index:02d}-{_safe_id_for_filename(item_id)}.yaml", item)
+
+    # Fail closed: the written bank must aggregate back to the same model.
+    if load_bank(bank_dir).model_dump(mode="json") != validated:
+        raise KernelValidationError(f"{bank_dir}: bank round-trip does not match the source model")
+    return bank_dir
+
+
+def materialize_run_banks(run_dir: Path, *, keys: list[str] | None = None) -> list[str]:
+    """Opt-in: convert a run's single-file research artifacts into bank dirs.
+
+    For each requested artifact key (default: all three bankable ones), reads the
+    existing single YAML via the bank-aware loader, writes a bank directory,
+    removes the old single file, and repoints BOTH the manifest artifact and the
+    matching ``agent_contracts`` output to the directory (so contract path checks
+    still pass). Idempotent: an artifact already pointing at a bank dir is skipped.
+    Does not change item content or any status. The caller runs ``validate_run``.
+
+    Returns the list of artifact keys that were converted.
+    """
+
+    run_dir = Path(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    contracts = read_yaml(run_dir / manifest["artifacts"]["agent_contracts"])
+    target_keys = keys or list(BANK_OUTPUT_LAYOUT)
+
+    # Plan the conversions and load each aggregate up front.
+    plan: list[tuple[str, str, str, str, object]] = []
+    for key in target_keys:
+        if key not in BANK_OUTPUT_LAYOUT:
+            raise KernelValidationError(f"materialize_run_banks: {key!r} is not a bankable artifact")
+        kind, dir_name = BANK_OUTPUT_LAYOUT[key]
+        old_value = manifest["artifacts"][key]
+        if (run_dir / old_value).is_dir():
+            continue  # already a bank directory (idempotent)
+        aggregate = load_artifact(run_dir / old_value, expected_kind=kind)
+        plan.append((key, old_value, dir_name, kind, aggregate))
+
+    # Phase 1 (non-destructive): write every bank directory first. If any write
+    # fails, the original single files + manifest are untouched, so the run stays
+    # valid (only an unreferenced stray dir may remain).
+    for _key, _old, dir_name, kind, aggregate in plan:
+        write_bank(run_dir / dir_name, aggregate, kind=kind)
+
+    # Phase 2 (commit): remove old single files and repoint the manifest +
+    # agent_contracts. Only unlinks/writes, which do not fail under normal use.
+    for key, old_value, dir_name, _kind, _agg in plan:
+        (run_dir / old_value).unlink()
+        manifest["artifacts"][key] = dir_name
+        for contract in contracts.get("contracts", []):
+            if contract.get("output_artifact") == old_value:
+                contract["output_artifact"] = dir_name
+
+    if plan:
+        write_yaml(run_dir / manifest["artifacts"]["agent_contracts"], contracts)
+        write_yaml(run_dir / "run_manifest.yaml", manifest)
+    return [key for key, _o, _d, _k, _a in plan]
+
+
 def _safe_id_for_filename(item_id: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", item_id).strip("_")
     return cleaned or "item"

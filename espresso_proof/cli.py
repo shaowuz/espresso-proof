@@ -31,7 +31,7 @@ from .llm_agents import write_initial_prover_round_artifacts
 from .failure_classifier import classify_failures
 from .failure_pattern_bank import audit_failure_patterns, seed_failure_pattern_bank
 from .autonomous_retrieval import run_autonomous_retrieval
-from .research_bank import append_bank_item
+from .research_bank import append_bank_item, materialize_run_banks
 from .literature_retrieval import retrieve_and_ground, retrieve_sources
 from .mathematical_judgment import judge_run
 from .proof_verification import verify_finite_groups
@@ -552,6 +552,30 @@ def add_bank_item_command(
     item_data = read_yaml(item)
     new_path = append_bank_item(bank, item_data)
     typer.echo(f"Appended one bank item -> {new_path}")
+
+
+@app.command("materialize-banks")
+def materialize_banks_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    artifact: list[str] | None = typer.Option(
+        None, "--artifact",
+        help="Artifact key(s) to convert: examples | counterexamples | strategy_synthesis. Default: all three.",
+    ),
+) -> None:
+    """Opt-in: convert a run's single-file research artifacts into per-item bank
+    directories (examples/, counterexamples/, strategies/) and repoint the
+    manifest + agent_contracts at them.
+
+    Storage/layout only: item content and all statuses are unchanged; the
+    aggregated bank matches the old model shape. Default runs keep single-file
+    output -- this command is the only way to switch a run to bank output.
+    """
+    converted = materialize_run_banks(run, keys=artifact)
+    validate_run(run)
+    if converted:
+        typer.echo(f"Converted {len(converted)} artifact(s) to bank directories: {', '.join(converted)}")
+    else:
+        typer.echo("No artifacts converted (already bank directories or none requested).")
 
 
 @app.command("verify-finite-groups")
