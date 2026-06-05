@@ -791,6 +791,35 @@ class ProofVerificationReport(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class ScopedVerificationRequest(StrictBaseModel):
+    """A CONCRETE, machine-runnable scoped-verification request proposed by the
+    strategy/prover stage so a finite/computational check can be auto-wired into a
+    run instead of only run by hand.
+
+    It is ONLY a proposal: a trusted deterministic backend runs it and only a
+    confirming result earns ``instance_checked`` (via the existing proof-
+    verification gate). It carries NO status / earned field, so a request can never
+    self-certify, and natural-language prose is never read here. Auto-wiring fails
+    closed on a missing / ambiguous / too-expensive request (it earns nothing).
+    """
+
+    id: str
+    kind: Literal["finite_identity_table", "finite_ring_identity"]
+    identity: str
+    table: list[list[int]] | None = None  # required for finite_identity_table
+    modulus: int | None = None  # required for finite_ring_identity
+    target: str = ""
+
+
+class ScopedVerificationRequests(StrictBaseModel):
+    """The strategy/prover stage's structured scoped-verification proposals for a
+    run. The auto-wiring reader executes only these explicit, concrete requests;
+    prose in other artifacts is never parsed into a request."""
+
+    claim_id: str
+    requests: list[ScopedVerificationRequest] = Field(default_factory=list)
+
+
 class LiteratureItem(StrictBaseModel):
     id: str
     title: str
@@ -1902,6 +1931,8 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "literature_search_plan": LiteratureSearchPlan,
     "autonomous_literature_retrieval": AutonomousLiteratureRetrievalReport,
     "proof_verification": ProofVerificationReport,
+    "scoped_verification_request": ScopedVerificationRequest,
+    "scoped_verification_requests": ScopedVerificationRequests,
     "counterexamples": CounterexampleReport,
     "tests": TestReport,
     "source_grounding": SourceGroundingReport,

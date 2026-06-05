@@ -42,6 +42,7 @@ from .literature_retrieval import retrieve_and_ground, retrieve_sources
 from .mathematical_judgment import judge_run
 from .finite_group_verifier import verify_identity_on_table
 from .proof_verification import (
+    auto_wire_scoped_verifications,
     verify_finite_groups,
     verify_identity_table_in_run,
     verify_ring_identity_in_run,
@@ -152,6 +153,7 @@ def orchestrate(
     source_author: list[str] | None = typer.Option(None, "--source-author"),
     source_type: str = typer.Option("paper", "--source-type"),
     run_evidence_audit: bool = typer.Option(False, "--audit-evidence", help="Machine-check computations (earn computation_checked) before the loop (resume)."),
+    run_auto_wire_verifications: bool = typer.Option(False, "--auto-wire-verifications", help="Run the strategy/prover stage's explicit scoped finite/computational checks (earn instance_checked) before the loop (resume)."),
 ) -> None:
     """Run the Core Flow end-to-end for an arbitrary claim, stopping at the human gate.
 
@@ -191,6 +193,16 @@ def orchestrate(
             # Earn computation_checked from confirming machine results BEFORE the loop.
             audit_evidence(resume)
             typer.echo("Evidence audited (a computation is checked only by a confirming machine result)")
+        if run_auto_wire_verifications:
+            # Run the strategy/prover stage's explicit scoped finite/computational
+            # checks BEFORE the loop; a confirming result earns instance_checked
+            # (finite/computational scope only, never a universal proof).
+            summary = auto_wire_scoped_verifications(resume)
+            typer.echo(
+                f"Auto-wired scoped checks: {len(summary['appended'])} run, "
+                f"{len(summary['skipped'])} skipped (checked in this finite/computational "
+                "scope only; NOT a universal proof)"
+            )
         memo = resume_run(
             run_dir=resume,
             selected_strategy=select_strategy,
@@ -705,6 +717,37 @@ def verify_ring_identity_in_run_command(
         f"(checked over Z/{modulus} only; NOT a universal proof)."
     )
     typer.echo(f"Scope: {entry['scope_note']}")
+
+
+@app.command("auto-wire-verifications")
+def auto_wire_verifications_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+) -> None:
+    """Run the strategy/prover stage's EXPLICIT scoped-verification requests
+    (from scoped_verification_requests.yaml) through the trusted backend and append
+    the results to proof_verification.yaml. A confirming result earns
+    instance_checked; a non-confirming/malformed one fails closed to unverified; a
+    structurally unusable / too-expensive / claim-mismatched request is skipped.
+
+    Natural-language prose is never read -- only explicit structured requests -- so
+    this cannot manufacture a checked status from text. There is no 'proved'
+    status: every result is a finite/computational check, not a universal proof.
+    """
+    _earned_phrase = {
+        "instance_checked": "checked in this finite/computational scope only",
+        "unverified": "not established (no checked status)",
+    }
+    summary = auto_wire_scoped_verifications(run)
+    for item in summary["appended"]:
+        phrase = _earned_phrase.get(item["earned_status"], item["earned_status"])
+        typer.echo(f"[run] {item['id']}: {phrase} [{item['earned_status']}]")
+    for item in summary["skipped"]:
+        typer.echo(f"[skip] {item['id']}: {item['reason']}")
+    typer.echo(
+        f"Auto-wired {len(summary['appended'])} scoped check(s), skipped "
+        f"{len(summary['skipped'])} (checked in this finite/computational scope only; "
+        "NOT a universal proof)."
+    )
 
 
 @app.command("show-pattern-bank")
