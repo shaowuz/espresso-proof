@@ -41,5 +41,12 @@ def validate_manifest_paths(run_dir: Path, manifest: RunManifest) -> None:
             ) from exc
         if not resolved.exists():
             raise ManifestPathValidationError(f"{label}: manifest path is missing: {raw_path!r}")
+        # An artifact path is normally a single file, but a research-bank artifact
+        # may be a DIRECTORY that contains a ``_meta.yaml`` (per-item bank). The
+        # escape/``..``/absolute guards above still apply to the directory path.
         if not resolved.is_file():
-            raise ManifestPathValidationError(f"{label}: manifest path is not a file: {raw_path!r}")
+            if resolved.is_dir() and (resolved / "_meta.yaml").is_file():
+                continue
+            raise ManifestPathValidationError(
+                f"{label}: manifest path is not a file or research bank directory: {raw_path!r}"
+            )
