@@ -44,6 +44,7 @@ from .finite_group_verifier import verify_identity_on_table
 from .proof_verification import verify_finite_groups
 from .benchmark import run_benchmark
 from .memo import build_concise_memo
+from .reviewer_checklist import review_checklist
 from .memory import summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
 from .pdf_ingestion import (
@@ -677,6 +678,27 @@ def memo(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)) -
     """
     validate_run(run)
     typer.echo(build_concise_memo(run))
+
+
+@app.command("review-checklist")
+def review_checklist_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+) -> None:
+    """Run the artifact-grounded reviewer calibration checklist on a run
+    (read-only). Flags proof-complete language and invalid source_backed refs,
+    each citing the artifact. Exits non-zero if a blocker is found; non-blocking
+    suggestions never block. Earns no status; mutates nothing.
+    """
+    validate_run(run)
+    result = review_checklist(run)
+    if not result["findings"]:
+        typer.echo("Reviewer checklist: no blocking findings (artifact-grounded, read-only).")
+    for finding in result["findings"]:
+        mark = "BLOCKER" if finding["severity"] == "blocker" else "non-blocker"
+        typer.echo(f"[{mark}] {finding['text']}")
+    typer.echo(f"merge_allowed: {result['merge_allowed']}")
+    if not result["merge_allowed"]:
+        raise typer.Exit(code=1)
 
 
 @app.command()
