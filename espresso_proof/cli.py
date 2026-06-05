@@ -31,6 +31,7 @@ from .llm_agents import write_initial_prover_round_artifacts
 from .failure_classifier import classify_failures
 from .failure_pattern_bank import audit_failure_patterns, seed_failure_pattern_bank
 from .autonomous_retrieval import run_autonomous_retrieval
+from .bank_dashboard import render_bank_dashboard
 from .research_bank import append_bank_item, materialize_run_banks
 from .literature_retrieval import retrieve_and_ground, retrieve_sources
 from .mathematical_judgment import judge_run
@@ -576,6 +577,26 @@ def materialize_banks_command(
         typer.echo(f"Converted {len(converted)} artifact(s) to bank directories: {', '.join(converted)}")
     else:
         typer.echo("No artifacts converted (already bank directories or none requested).")
+
+
+@app.command("bank-dashboard")
+def bank_dashboard_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    out: Path | None = typer.Option(None, "--out", help="Write the HTML here; otherwise print to stdout."),
+) -> None:
+    """Render a read-only static HTML dashboard of a run's research banks.
+
+    Reads examples / counterexamples / strategies through the bank-aware loaders
+    (bank directories OR single YAML) and never mutates any artifact. Statuses are
+    shown as recorded in human-readable wording; no proof-complete language.
+    """
+    validate_run(run)  # read-only; just confirms the run is valid before viewing
+    html_text = render_bank_dashboard(run)
+    if out is not None:
+        write_text(out, html_text)
+        typer.echo(f"Wrote research bank dashboard -> {out}")
+    else:
+        typer.echo(html_text)
 
 
 @app.command("verify-finite-groups")
