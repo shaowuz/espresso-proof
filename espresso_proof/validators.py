@@ -9,6 +9,7 @@ from .io import read_text, read_yaml
 from .models import (
     AgentContracts,
     AttemptStatus,
+    AutonomousLiteratureRetrievalReport,
     Claim,
     ComputationChecks,
     ComputationVerificationReport,
@@ -16,6 +17,7 @@ from .models import (
     FailureClassificationReport,
     FailurePatternAudit,
     LiteratureRetrievalReport,
+    LiteratureSearchPlan,
     MathematicalJudgmentReport,
     ProofVerificationReport,
     ContinueDecision,
@@ -96,6 +98,8 @@ def validate_run(run_dir: Path) -> None:
     human_choice = validate_yaml_model(run_dir / artifacts["human_choice"], HumanChoice)
     _load_optional_theorem_extraction(run_dir, manifest)
     _load_optional_literature_review_agent(run_dir, manifest)
+    _load_optional_literature_search_plan(run_dir, manifest)
+    _load_optional_autonomous_literature_retrieval(run_dir, manifest)
     theorem_applicability = _load_optional_theorem_applicability(run_dir, manifest)
     llm_agent_run = _load_optional_llm_agent_run(run_dir, manifest)
     prover_loop = _load_optional_prover_loop(run_dir, manifest)
@@ -378,6 +382,36 @@ def _load_optional_literature_retrieval(
     return validate_yaml_model(
         run_dir / optional["literature_retrieval"],
         LiteratureRetrievalReport,
+    )
+
+
+def _load_optional_literature_search_plan(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> LiteratureSearchPlan | None:
+    optional = manifest.optional_artifacts
+    if "literature_search_plan" not in optional:
+        return None
+    # The model has no status field, so loading it is the candidate-only guard:
+    # a plan can never carry source_backed / proof status.
+    return validate_yaml_model(
+        run_dir / optional["literature_search_plan"],
+        LiteratureSearchPlan,
+    )
+
+
+def _load_optional_autonomous_literature_retrieval(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> AutonomousLiteratureRetrievalReport | None:
+    optional = manifest.optional_artifacts
+    if "autonomous_literature_retrieval" not in optional:
+        return None
+    # AutonomousRetrievalCandidate.status is Literal["candidate"]; validating here
+    # fails closed if any candidate were ever written with another status.
+    return validate_yaml_model(
+        run_dir / optional["autonomous_literature_retrieval"],
+        AutonomousLiteratureRetrievalReport,
     )
 
 
