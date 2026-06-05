@@ -95,6 +95,23 @@ SEMANTIC_EQUIVALENCE_RULES: tuple[EquivalenceRule, ...] = (
         ),
     ),
     EquivalenceRule(
+        # Ambient object-type: "G is a group" against the way a cited theorem
+        # introduces the object. Word-boundary \bgroup\b never fires inside
+        # "semigroup"/"subgroup", and monoid/ring/module/etc. lack the word, so
+        # a weaker/different structure can never match here.
+        concept="G is a group",
+        claim_patterns=(
+            r"\bg\s+is\s+(?:a\s+)?group\b",
+            r"\bgroup\s+g\b",
+        ),
+        source_patterns=(
+            r"\blet\s+g\s+be\s+a\s+group\b",
+            r"\bg\s+is\s+(?:a\s+)?group\b",
+            r"\bgroup\s+g\b",
+            r"\bgroup\s+of\s+order\s+p\s*\^?\s*2\b",
+        ),
+    ),
+    EquivalenceRule(
         concept="center is nontrivial",
         claim_patterns=(
             r"\bcent(?:er|re)\s+is\s+non-?trivial\b",
