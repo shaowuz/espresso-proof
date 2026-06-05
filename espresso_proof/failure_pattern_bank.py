@@ -103,6 +103,12 @@ _SEED: list[dict] = [
     {"id": "converse_not_equivalent", "family": "logic",
      "summary": "A theorem does not give its converse; do not assume equivalence.",
      "tier": "candidate", "action": "warn", "enforced_by": ""},
+    {"id": "finite_not_infinite", "family": "cardinality",
+     "summary": "A result for finite objects need not hold for infinite ones.",
+     "tier": "candidate", "action": "warn", "enforced_by": ""},
+    {"id": "compact_proper_complete_assumption", "family": "topology",
+     "summary": "A result assuming compactness / properness / completeness need not hold without it.",
+     "tier": "candidate", "action": "warn", "enforced_by": ""},
 ]
 
 # Keyword triggers for the candidate (warn-only) textual patterns.
@@ -113,6 +119,17 @@ _CANDIDATE_TRIGGERS: dict[str, list[str]] = {
     "finite_dim_not_infinite_dim": ["finite-dimensional", "finite dimensional", "infinite-dimensional"],
     "iso_noncanonical_not_equality": ["isomorphism", "isomorphic", "canonical"],
     "local_not_global": ["local", "global"],
+    # General finite-vs-infinite swap (distinct from finite_dim_not_infinite_dim);
+    # specific phrases to avoid firing on every legitimate "finite group" claim.
+    "finite_not_infinite": [
+        "infinite group", "infinite order", "infinitely many", "infinite set",
+        "infinite cardinality", "infinite-dimensional",
+    ],
+    # Dropping a compactness / properness / completeness assumption.
+    "compact_proper_complete_assumption": [
+        "compact", "compactness", "properness", "proper morphism", "proper map",
+        "complete variety", "completeness",
+    ],
 }
 
 
