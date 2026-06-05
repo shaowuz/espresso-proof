@@ -22,9 +22,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .finite_group_verifier import all_groups_of_order_p_squared, verify_group_abelian
+from .finite_group_verifier import (
+    all_groups_of_order_p_squared,
+    verify_group_abelian,
+    verify_identity_on_table,
+)
 from .io import read_yaml, write_yaml
 from .models import ProofVerificationReport
+from .symbolic_identity import verify_ring_identity_mod
 
 
 def build_finite_group_entries(claim_id: str, primes: list[int]) -> list[dict]:
@@ -99,3 +104,113 @@ def verify_finite_groups(run_dir: Path, *, primes: list[int]) -> dict:
     )
     write_yaml(manifest_path, manifest)
     return report
+
+
+def build_identity_table_entry(claim_id: str, *, entry_id: str, table: object, identity: str, target: str = "") -> dict:
+    """Run ``verify_identity_on_table`` and shape one proof-verification entry.
+
+    Earns ``instance_checked`` only when the identity holds on the explicit finite
+    table (``trusted`` + ``confirmed``); a non-holding / malformed / unsupported
+    result fails closed to ``unverified``. The scope_note is the verifier's own
+    finite-scope note: it covers THIS table only, never a universal claim."""
+
+    result = verify_identity_on_table(table, identity)
+    confirmed = bool(result["holds"])
+    return {
+        "id": entry_id,
+        "verifier_type": "finite_identity_table",
+        "claim_id": claim_id,
+        "target": target or f"identity '{identity}' on a finite operation table of order {result['order']}",
+        "input_summary": f"finite operation table (order {result['order']}), identity={identity}",
+        "result": result["detail"] or ("holds on this finite table" if confirmed else "not established"),
+        "trusted": True,
+        "confirmed": confirmed,
+        "earned_status": "instance_checked" if confirmed else "unverified",
+        "scope_note": result["scope_note"],
+    }
+
+
+def build_ring_identity_entry(claim_id: str, *, entry_id: str, identity: str, modulus: object, target: str = "") -> dict:
+    """Run ``verify_ring_identity_mod`` and shape one proof-verification entry.
+
+    Earns ``instance_checked`` only when the identity holds for EVERY residue mod
+    n; otherwise fails closed to ``unverified``. The scope_note states this is a
+    finite/computational sanity check over Z/n, not a universal proof."""
+
+    result = verify_ring_identity_mod(identity, modulus)
+    confirmed = bool(result["holds"])
+    return {
+        "id": entry_id,
+        "verifier_type": "finite_ring_identity",
+        "claim_id": claim_id,
+        "target": target or f"algebraic identity '{identity}' over Z/{result['modulus']}",
+        "input_summary": f"identity={identity} over Z/{result['modulus']}",
+        "result": result["detail"] or ("holds for all residues" if confirmed else "not established"),
+        "trusted": True,
+        "confirmed": confirmed,
+        "earned_status": "instance_checked" if confirmed else "unverified",
+        "scope_note": result["scope_note"],
+    }
+
+
+def append_verification_entries(run_dir: Path, entries: list[dict]) -> dict:
+    """Append entries to proof_verification.yaml (creating + registering it with an
+    empty base if absent), validate the full report model, and write it back.
+
+    Binds claim_id / run_id to the run; duplicate entry ids are rejected so a
+    re-run cannot silently double-count a checked instance. Fails closed: the
+    report is validated before writing, so a malformed entry never lands."""
+
+    run_dir = Path(run_dir)
+    manifest_path = run_dir / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])
+    pv_path = run_dir / "proof_verification.yaml"
+    if pv_path.exists():
+        report = read_yaml(pv_path)
+    else:
+        report = {
+            "schema_version": 1,
+            "claim_id": claim["id"],
+            "run_id": manifest["run_id"],
+            "generated_at": datetime.now(UTC).isoformat(),
+            "entries": [],
+            "notes": [
+                "Proof verification bridge: only a trusted deterministic backend with a "
+                "confirming result earns a checked status.",
+                "instance_checked covers only the explicit finite instance checked; it is "
+                "NOT a universal proof. There is no 'proved' status here.",
+                "Natural-language prover/reviewer approval is not proof verification.",
+            ],
+        }
+    existing_ids = {e["id"] for e in report["entries"]}
+    for entry in entries:
+        if entry["id"] in existing_ids:
+            raise ValueError(f"duplicate proof_verification entry id {entry['id']!r}")
+        existing_ids.add(entry["id"])
+    report["entries"].extend(entries)
+    ProofVerificationReport.model_validate(report)  # fail closed before writing
+    write_yaml(pv_path, report)
+    manifest.setdefault("optional_artifacts", {})["proof_verification"] = "proof_verification.yaml"
+    write_yaml(manifest_path, manifest)
+    return report
+
+
+def verify_identity_table_in_run(run_dir: Path, *, table: object, identity: str, entry_id: str, target: str = "") -> dict:
+    """Connect ``verify_identity_on_table`` into the run's proof-verification flow."""
+    run_dir = Path(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
+    entry = build_identity_table_entry(claim_id, entry_id=entry_id, table=table, identity=identity, target=target)
+    append_verification_entries(run_dir, [entry])
+    return entry
+
+
+def verify_ring_identity_in_run(run_dir: Path, *, identity: str, modulus: object, entry_id: str, target: str = "") -> dict:
+    """Connect ``verify_ring_identity_mod`` into the run's proof-verification flow."""
+    run_dir = Path(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
+    entry = build_ring_identity_entry(claim_id, entry_id=entry_id, identity=identity, modulus=modulus, target=target)
+    append_verification_entries(run_dir, [entry])
+    return entry

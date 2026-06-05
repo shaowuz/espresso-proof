@@ -716,6 +716,10 @@ class VerifierType(str, Enum):
 
     - ``finite_group_cayley``: deterministic brute-force check of an explicitly
       given finite group (implemented; trusted).
+    - ``finite_identity_table``: exhaustive check of an algebraic identity on an
+      explicitly-given finite operation table (implemented; trusted).
+    - ``finite_ring_identity``: exhaustive check of a named algebraic identity
+      over Z/n for an explicit modulus n (implemented; trusted).
     - ``exact_computation``: the exact_arithmetic / permutation_order backend
       (implemented elsewhere; trusted).
     - ``lean_bridge``: a Lean/mathlib proof check (NOT executed in V0; registry
@@ -725,6 +729,8 @@ class VerifierType(str, Enum):
     """
 
     finite_group_cayley = "finite_group_cayley"
+    finite_identity_table = "finite_identity_table"
+    finite_ring_identity = "finite_ring_identity"
     exact_computation = "exact_computation"
     lean_bridge = "lean_bridge"
     human_checked = "human_checked"

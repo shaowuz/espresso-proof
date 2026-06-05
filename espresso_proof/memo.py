@@ -309,7 +309,9 @@ def build_concise_memo(run_dir: Path) -> str:
                     f"  - {e.get('target')}: {e.get('result')} "
                     f"({evidence_phrase(e.get('earned_status'))})"
                 )
-            lines.append("  (the universal claim for all primes p is NOT proved by these finite checks)")
+                if e.get("scope_note"):
+                    lines.append(f"      Scope: {e.get('scope_note')}")
+            lines.append("  (these finite/computational checks do NOT prove the universal claim)")
 
     lines.append("")
     lines.append(
