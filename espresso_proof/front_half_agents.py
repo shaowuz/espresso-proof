@@ -31,6 +31,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .hypothesis_normalization import normalize_ambient_object_hypotheses
 from .io import write_yaml
 from .llm_agents import LLMClient, load_agent_context, safe_list, safe_text
 from .memo import build_concise_memo
@@ -311,8 +312,10 @@ def _understanding_claim(*, run_dir: Path, client: LLMClient, context: dict) -> 
         or current.get("conclusion")
         or "Claim conclusion requires clarification."
     )
-    hypotheses = _normalize_hypotheses(
-        raw.get("hypotheses"), fallback=list(current.get("hypotheses") or [])
+    hypotheses = normalize_ambient_object_hypotheses(
+        _normalize_hypotheses(
+            raw.get("hypotheses"), fallback=list(current.get("hypotheses") or [])
+        )
     )
     ambiguous_terms = safe_list(raw.get("ambiguous_terms")) or list(
         current.get("ambiguous_terms") or []
