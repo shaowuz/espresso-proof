@@ -177,6 +177,11 @@ class Locator(StrictBaseModel):
 class HypothesisMatch(StrictBaseModel):
     matches: bool | Literal["unclear"]
     mismatches: list[str] = Field(default_factory=list)
+    # Human-readable matched-pair reasons (e.g. '"group of order p^2" matched
+    # "|G| = p^2"'). Advisory display detail only: it explains WHICH hypotheses
+    # matched and never relaxes the source_backed gate (exact locator +
+    # attribution + matches is True are still required by the validator below).
+    matched: list[str] = Field(default_factory=list)
 
 
 class SourceRef(StrictBaseModel):

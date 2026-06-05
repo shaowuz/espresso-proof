@@ -157,15 +157,19 @@ def _conditions_from_comparison(comparison) -> list[dict]:
 def _conditions_from_step(step) -> list[dict]:
     mismatches = list(step.hypothesis_match.mismatches)
     if step.hypothesis_match.matches is True:
+        reasons = list(step.hypothesis_match.matched) or [
+            "Source grounding hypothesis_match reports matching hypotheses."
+        ]
         return [
             {
-                "id": "cond_001",
-                "text": "Source grounding hypothesis_match reports matching hypotheses.",
-                "condition_type": "other",
+                "id": f"cond_{index:03d}",
+                "text": reason,
+                "condition_type": _condition_type(reason),
                 "status": "satisfied",
                 "evidence": step.note,
                 "definition_locator": None,
             }
+            for index, reason in enumerate(reasons, start=1)
         ]
     return [
         {
