@@ -66,6 +66,94 @@ def verify_group_abelian(cayley: list[list[int]]) -> dict:
     }
 
 
+SUPPORTED_IDENTITIES = ("commutative", "associative", "idempotent", "involutive")
+
+
+def _table_is_malformed(table: object) -> bool:
+    # Treat ANY non list-of-lists input as malformed (fail closed, never raise):
+    # the CLI feeds arbitrary user YAML here (null / scalar / flat list).
+    if not isinstance(table, list) or len(table) == 0:
+        return True
+    n = len(table)
+    if any(not isinstance(row, list) or len(row) != n for row in table):
+        return True
+    return any(not isinstance(x, int) or x < 0 or x >= n for row in table for x in row)
+
+
+def verify_identity_on_table(table: list[list[int]], identity: str) -> dict:
+    """Exhaustively check a single algebraic identity on an EXPLICITLY-GIVEN
+    finite operation table (``table[a][b]`` = a*b over elements 0..n-1).
+
+    Supported identities: ``commutative`` (a*b=b*a), ``associative``
+    ((a*b)*c=a*(b*c)), ``idempotent`` (a*a=a), ``involutive`` (a*a=e for the
+    table's identity element). Returns a SCOPED result: ``holds`` is true only
+    for THIS finite table; ``scope_note`` states it is a finite/computational
+    check, never a universal proof. Fails closed: an unsupported identity, a
+    malformed table, or (for ``involutive``) a missing identity element yields
+    ``holds=False`` and never raises. Earns no ``proved`` status."""
+
+    n = len(table) if isinstance(table, list) else 0
+    scope_note = (
+        f"checked exhaustively only on this explicit finite operation table of "
+        f"order {n}; a finite/computational check, not a universal proof"
+    )
+    result = {
+        "identity": identity,
+        "order": n,
+        "supported": identity in SUPPORTED_IDENTITIES,
+        "holds": False,
+        "checked": 0,
+        "scope_note": scope_note,
+        "detail": "",
+    }
+    if identity not in SUPPORTED_IDENTITIES:
+        result["detail"] = f"unsupported identity {identity!r} (fail closed)"
+        return result
+    if _table_is_malformed(table):
+        result["detail"] = "malformed operation table (fail closed)"
+        return result
+
+    checked = 0
+    if identity == "commutative":
+        for a in range(n):
+            for b in range(n):
+                checked += 1
+                if table[a][b] != table[b][a]:
+                    result.update(checked=checked, detail=f"fails at ({a},{b})")
+                    return result
+    elif identity == "associative":
+        for a in range(n):
+            for b in range(n):
+                ab = table[a][b]
+                for c in range(n):
+                    checked += 1
+                    if table[ab][c] != table[a][table[b][c]]:
+                        result.update(checked=checked, detail=f"fails at ({a},{b},{c})")
+                        return result
+    elif identity == "idempotent":
+        for a in range(n):
+            checked += 1
+            if table[a][a] != a:
+                result.update(checked=checked, detail=f"fails at {a}")
+                return result
+    elif identity == "involutive":
+        e = next(
+            (x for x in range(n) if all(table[x][y] == y and table[y][x] == y for y in range(n))),
+            None,
+        )
+        if e is None:
+            result["detail"] = "no identity element; involution undefined (fail closed)"
+            return result
+        for a in range(n):
+            checked += 1
+            if table[a][a] != e:
+                result.update(checked=checked, detail=f"fails at {a}")
+                return result
+
+    result.update(holds=True, checked=checked, detail=f"holds on this finite table (order {n})")
+    return result
+
+
 def cyclic_group_table(n: int) -> list[list[int]]:
     """Cayley table of the cyclic group C_n (addition mod n)."""
     return [[(a + b) % n for b in range(n)] for a in range(n)]

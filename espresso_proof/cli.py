@@ -40,6 +40,7 @@ from .research_bank import (
 )
 from .literature_retrieval import retrieve_and_ground, retrieve_sources
 from .mathematical_judgment import judge_run
+from .finite_group_verifier import verify_identity_on_table
 from .proof_verification import verify_finite_groups
 from .memo import build_concise_memo
 from .memory import summarize_memory, write_memory_entry
@@ -630,6 +631,26 @@ def verify_finite_groups_command(
         f"for primes {primes} (checked in this finite case only; NOT a universal proof)."
     )
     typer.echo(f"-> {run / 'proof_verification.yaml'}")
+
+
+@app.command("verify-identity")
+def verify_identity_command(
+    table: Path = typer.Option(..., "--table", exists=True, dir_okay=False, help="YAML file: a finite operation table (list of lists of ints)."),
+    identity: str = typer.Option(..., "--identity", help="commutative | associative | idempotent | involutive"),
+) -> None:
+    """Exhaustively check an algebraic identity on an EXPLICITLY-GIVEN finite
+    operation table -- a SCOPED finite/computational check, never a universal
+    proof. Read-only; fails closed on a malformed table or unsupported identity.
+    """
+    data = read_yaml(table)
+    result = verify_identity_on_table(data, identity)
+    verdict = (
+        f"holds on this finite table (order {result['order']}, {result['checked']} cases checked)"
+        if result["holds"]
+        else f"NOT established: {result['detail']}"
+    )
+    typer.echo(f"Identity '{identity}': {verdict}")
+    typer.echo(f"Scope: {result['scope_note']}")
 
 
 @app.command("show-pattern-bank")
