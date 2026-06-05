@@ -6,6 +6,11 @@ from pathlib import Path
 from pydantic import BaseModel, ValidationError
 
 from .io import read_text, read_yaml
+from .research_bank import (
+    load_counterexamples_artifact,
+    load_examples_artifact,
+    load_strategy_synthesis_artifact,
+)
 from .models import (
     AgentContracts,
     AttemptStatus,
@@ -77,7 +82,7 @@ def validate_run(run_dir: Path) -> None:
     literature_review = validate_yaml_model(
         run_dir / artifacts["literature_review"], LiteratureReviewReport
     )
-    examples = validate_yaml_model(run_dir / artifacts["examples"], ExampleSelection)
+    examples = load_examples_artifact(run_dir / artifacts["examples"])
     computations = validate_yaml_model(run_dir / artifacts["computation_checks"], ComputationChecks)
     computation_verification = _load_optional_computation_verification(run_dir, manifest)
     failure_classification = _load_optional_failure_classification(run_dir, manifest)
@@ -85,14 +90,14 @@ def validate_run(run_dir: Path) -> None:
     failure_pattern_audit = _load_optional_failure_pattern_audit(run_dir, manifest)
     literature_retrieval = _load_optional_literature_retrieval(run_dir, manifest)
     proof_verification = _load_optional_proof_verification(run_dir, manifest)
-    counterexamples = validate_yaml_model(run_dir / artifacts["counterexamples"], CounterexampleReport)
+    counterexamples = load_counterexamples_artifact(run_dir / artifacts["counterexamples"])
     tests = validate_yaml_model(run_dir / artifacts["tests"], TestReport)
     source_grounding = validate_yaml_model(run_dir / artifacts["source_grounding"], SourceGroundingReport)
     review = validate_yaml_model(run_dir / artifacts["review"], Review)
     idea_grade = validate_yaml_model(run_dir / artifacts["idea_grade"], IdeaGrade)
     loop_control = validate_yaml_model(run_dir / artifacts["loop_control"], LoopControl)
-    strategy_synthesis = validate_yaml_model(
-        run_dir / artifacts["strategy_synthesis"], StrategySynthesis
+    strategy_synthesis = load_strategy_synthesis_artifact(
+        run_dir / artifacts["strategy_synthesis"]
     )
     strategy_brief = validate_yaml_model(run_dir / artifacts["strategy_brief"], StrategyBrief)
     human_choice = validate_yaml_model(run_dir / artifacts["human_choice"], HumanChoice)
@@ -653,19 +658,25 @@ def _validate_agent_contracts(agent_contracts: AgentContracts, artifacts: dict[s
         "locked_claim.yaml",
         "hypothesis_ledger.yaml",
         "literature_review.yaml",
-        "examples.yaml",
         "computation_checks.yaml",
-        "counterexamples.yaml",
         "tests.yaml",
         "source_grounding.yaml",
         "review.yaml",
         "idea_grade.yaml",
         "loop_control.yaml",
-        "strategy_synthesis.yaml",
         "strategy_brief.yaml",
         "human_choice.yaml",
         "final_report.md",
     }
+    # The three bankable artifacts may be a single YAML file OR a per-item bank
+    # directory; require whatever path the manifest actually uses (so agent
+    # contracts and the manifest stay consistent in either layout).
+    for key, default in (
+        ("examples", "examples.yaml"),
+        ("counterexamples", "counterexamples.yaml"),
+        ("strategy_synthesis", "strategy_synthesis.yaml"),
+    ):
+        required_outputs.add(artifacts.get(key, default))
     missing_outputs = required_outputs.difference(output_artifacts)
     if missing_outputs:
         raise KernelValidationError(f"agent_contracts missing outputs {sorted(missing_outputs)}")

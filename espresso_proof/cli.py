@@ -31,6 +31,7 @@ from .llm_agents import write_initial_prover_round_artifacts
 from .failure_classifier import classify_failures
 from .failure_pattern_bank import audit_failure_patterns, seed_failure_pattern_bank
 from .autonomous_retrieval import run_autonomous_retrieval
+from .research_bank import append_bank_item
 from .literature_retrieval import retrieve_and_ground, retrieve_sources
 from .mathematical_judgment import judge_run
 from .proof_verification import verify_finite_groups
@@ -535,6 +536,22 @@ def retrieve_autonomous_command(
         typer.echo("No candidate earned reference support yet; grounding stayed candidate / Needs a source.")
     typer.echo(f"-> {run / 'literature_search_plan.yaml'}")
     typer.echo(f"-> {run / 'autonomous_literature_retrieval.yaml'}")
+
+
+@app.command("add-bank-item")
+def add_bank_item_command(
+    bank: Path = typer.Option(..., "--bank", exists=True, file_okay=False, help="A research bank directory (with _meta.yaml)."),
+    item: Path = typer.Option(..., "--item", exists=True, dir_okay=False, help="A YAML file with one bank item."),
+) -> None:
+    """Append one validated item to a per-item research bank as a NEW file.
+
+    Storage/layout only: the item is validated against the bank's existing item
+    model and refused on a duplicate id; it never changes example/counterexample/
+    strategy/source/evidence/proof status. Existing item files are not rewritten.
+    """
+    item_data = read_yaml(item)
+    new_path = append_bank_item(bank, item_data)
+    typer.echo(f"Appended one bank item -> {new_path}")
 
 
 @app.command("verify-finite-groups")
