@@ -499,6 +499,7 @@ _TRUSTED_EARNED = {
     "finite_group_cayley": "instance_checked",
     "finite_identity_table": "instance_checked",
     "finite_ring_identity": "instance_checked",
+    "matrix_rank": "instance_checked",
     "exact_computation": "computation_checked",
 }
 

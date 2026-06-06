@@ -731,6 +731,7 @@ class VerifierType(str, Enum):
     finite_group_cayley = "finite_group_cayley"
     finite_identity_table = "finite_identity_table"
     finite_ring_identity = "finite_ring_identity"
+    matrix_rank = "matrix_rank"
     exact_computation = "exact_computation"
     lean_bridge = "lean_bridge"
     human_checked = "human_checked"
@@ -804,10 +805,12 @@ class ScopedVerificationRequest(StrictBaseModel):
     """
 
     id: str
-    kind: Literal["finite_identity_table", "finite_ring_identity"]
-    identity: str
-    table: list[list[int]] | None = None  # required for finite_identity_table
+    kind: Literal["finite_identity_table", "finite_ring_identity", "matrix_rank"]
+    identity: str = ""
+    table: list[list[int]] | None = None  # operation table (finite_identity_table) or matrix (matrix_rank)
     modulus: int | None = None  # required for finite_ring_identity
+    expected_rank: int | None = None  # matrix_rank
+    expected_determinant: int | None = None  # matrix_rank (square only)
     target: str = ""
 
 
