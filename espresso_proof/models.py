@@ -454,6 +454,7 @@ class JudgmentRiskKind(str, Enum):
     route_validity_risk = "route_validity_risk"
     unsupported_confidence = "unsupported_confidence"
     reviewer_objection_decisiveness = "reviewer_objection_decisiveness"
+    reviewer_approval_without_verifier = "reviewer_approval_without_verifier"
 
 
 class JudgmentRiskTier(str, Enum):

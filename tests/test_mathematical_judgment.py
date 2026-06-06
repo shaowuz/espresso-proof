@@ -196,3 +196,36 @@ def test_judgment_run_id_mismatch_rejected(tmp_path: Path) -> None:
     write_yaml(judgment_path, doc)
     with pytest.raises(KernelValidationError):
         validate_run(run_dir)
+
+
+def test_reviewer_approval_without_verifier_is_flagged_not_proof(tmp_path: Path) -> None:
+    """Goal 07 detector: reviewers PASS but no source/checker support -> advisory
+    flag (reviewer approval is not proof verification), never a status upgrade."""
+    run_dir = _build(tmp_path, "vague_claim_unclear")
+    # Force all reviewers to pass with no objection (positive reviewer language).
+    review = _artifact(run_dir, "review")
+    for r in review["reviewers"]:
+        r["verdict"] = "pass"
+        r["objections"] = []
+    review["attempt_status"] = "passed"
+    review["strongest_objection"] = "No blocking objection recorded."
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    write_yaml(run_dir / artifacts["review"], review)
+
+    before = _grade(run_dir)
+    report = build_mathematical_judgment(run_dir)
+    kinds = {f["kind"] for f in report["findings"]}
+    assert "reviewer_approval_without_verifier" in kinds
+    # advisory only: action stays in the conservative set, no status vocabulary.
+    finding = next(f for f in report["findings"] if f["kind"] == "reviewer_approval_without_verifier")
+    assert finding["recommended_action"] == "request_human_review"
+    assert finding["tier"] in {"info", "warn", "block_candidate"}
+
+    judge_run(run_dir)
+    validate_run(run_dir)
+    after = _grade(run_dir)
+    assert after["status"] == before["status"]
+    assert after["proof_language_status"] == before["proof_language_status"]
+    # the run earned nothing: no source_backed, no checked computation.
+    sg = _artifact(run_dir, "source_grounding")
+    assert all(s.get("status") != "source_backed" for s in sg.get("steps", []))
