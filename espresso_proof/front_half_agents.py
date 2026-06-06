@@ -32,7 +32,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .hypothesis_normalization import normalize_ambient_object_hypotheses
-from .io import write_yaml
+from .io import read_yaml, write_yaml
 from .llm_agents import LLMClient, load_agent_context, safe_list, safe_text
 from .memo import build_concise_memo
 from .memory import write_run_memory
@@ -694,6 +694,26 @@ def _examples(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
 
     write_yaml(run_dir / artifacts["examples"], example_selection)
     write_yaml(run_dir / artifacts["computation_checks"], computation_checks)
+
+    # SAFETY/CONSISTENCY: replacing examples.yaml can orphan a seeded tests.yaml
+    # whose uses_examples points at scaffold example ids (e.g. the hodge_atoms
+    # mock seeds ex_special_cubic). The post-stage validate_run would then fail
+    # before the counterexamples stage rewrites tests.yaml. Prune uses_examples
+    # to the example ids we actually wrote (conservative: drops an unsupported
+    # test reference, never invents one, never upgrades any status).
+    example_ids = {ex["id"] for ex in examples}
+    tests_path = run_dir / artifacts["tests"]
+    if tests_path.exists():
+        test_report = read_yaml(tests_path)
+        changed = False
+        for test in test_report.get("tests", []):
+            kept = [eid for eid in test.get("uses_examples", []) if eid in example_ids]
+            if kept != test.get("uses_examples", []):
+                test["uses_examples"] = kept
+                changed = True
+        if changed:
+            TestReport.model_validate(test_report)
+            write_yaml(tests_path, test_report)
     return {
         "unsafe_language": [],
         "notes": [
@@ -1594,6 +1614,47 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     }
     IdeaGrade.model_validate(grade)
     write_yaml(run_dir / artifacts["idea_grade"], grade)
+
+    # SAFETY/CONSISTENCY: recomputing the grade can invalidate a seeded
+    # strategy_synthesis/brief whose routes were scored against the OLD grade
+    # (e.g. the hodge_atoms mock seeds high-scoring non-lock routes). The
+    # post-stage validate_run would then trip strategy_rules before the strategy
+    # stage rewrites them. Reconcile to the single safe claim-lock route, which is
+    # valid under the strategy rules for ANY grade; the strategy stage (next)
+    # regenerates the real routes. This never invents support or upgrades status.
+    run_id = context["manifest"]["run_id"]
+    lock_route = _safe_lock_route(grade)
+    synthesis = {
+        "claim_id": claim_id,
+        "synthesized_from": [
+            run_id,
+            "literature_review.yaml",
+            "tests.yaml",
+            "counterexamples.yaml",
+            "source_grounding.yaml",
+            "review.yaml",
+            "idea_grade.yaml",
+            "loop_control.yaml",
+        ],
+        "routes": [lock_route],
+        "discarded_routes": [],
+        "synthesis_note": "Strategy routes reset to claim-locking pending the strategy stage after regrade.",
+    }
+    brief = {
+        "claim_id": claim_id,
+        "generated_after_runs": [run_id],
+        "top_strategies": [lock_route],
+        "also_considered": [],
+        "question_for_mathematician": "Which route should receive time, if any?",
+        "allowed_human_choices": [
+            {"strategy_id": lock_route["id"], "effort_options": [lock_route["estimated_effort"]]},
+            {"strategy_id": "none", "effort_options": ["quick_test"]},
+        ],
+    }
+    StrategySynthesis.model_validate(synthesis)
+    StrategyBrief.model_validate(brief)
+    write_yaml(run_dir / artifacts["strategy_synthesis"], synthesis)
+    write_yaml(run_dir / artifacts["strategy_brief"], brief)
 
     notes = [f"regrade: precision={precision} -> status={status} (score {score})"]
     if review_note:
