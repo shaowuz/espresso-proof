@@ -1,0 +1,196 @@
+"""Goal 04: source locator + theorem extraction reliability.
+
+Covers >=5 locator shapes, explicit exact-locator predicate tests, multi-block
+splitting (the Goal 01 concatenation bug), and the required negatives: an
+abstract-only / unlabeled / malformed header cannot earn source support, the
+extracted statement is the source text (not a fabricated summary), and a long
+source statement is capped (not copied wholesale).
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from espresso_proof.io import read_yaml, write_yaml
+from espresso_proof.mock_pipeline import run_mock_critique
+from espresso_proof.models import Locator
+from espresso_proof.pdf_ingestion import extract_theorems, ingest_source_for_theorems
+from espresso_proof.source_verification import ground_run
+from espresso_proof.validators import validate_run
+
+FIXTURE = Path(__file__).parent / "fixtures" / "hodge_all_cubic_fourfolds" / "input.md"
+
+
+def _one(text: str) -> dict:
+    ts = extract_theorems(text, source_ref_id="s")
+    assert ts, f"expected an extracted block from: {text!r}"
+    return ts[0]
+
+
+def _exact(theorem: dict) -> bool:
+    return Locator.model_validate(theorem["locator"]).is_exact
+
+
+# --- >=5 locator shapes, each must yield an EXACT locator -------------------
+
+def test_locator_shape_numeric_dotted() -> None:
+    t = _one("Theorem 1.2. Let X be smooth; then X is rational.")
+    assert t["locator"] == {"kind": "theorem", "value": "Theorem 1.2"}
+    assert _exact(t)
+
+
+def test_locator_shape_letter_dot_number() -> None:
+    t = _one("Lemma A.3. Every finite group has a composition series.")
+    assert t["locator"] == {"kind": "lemma", "value": "Lemma A.3"}
+    assert _exact(t)
+
+
+def test_locator_shape_single_number() -> None:
+    t = _one("Proposition 5. The center of a p-group is nontrivial.")
+    assert t["locator"] == {"kind": "proposition", "value": "Proposition 5"}
+    assert _exact(t)
+
+
+def test_locator_shape_parenthetical_name_only() -> None:
+    t = _one("Definition (Smooth Variety). A variety is smooth if its local rings are regular.")
+    assert t["locator"]["kind"] == "definition"
+    assert t["locator"]["value"] == "Definition (Smooth Variety)"
+    assert _exact(t)
+
+
+def test_locator_shape_number_and_name() -> None:
+    t = _one("Corollary 2.1 (Main result). The map is an isomorphism.")
+    assert t["locator"]["value"] == "Corollary 2.1"
+    assert _exact(t)
+
+
+def test_multi_block_splitting_keeps_three_exact_blocks() -> None:
+    note = (
+        "Theorem 1 (Nontrivial center). Let p be a prime and let G be a finite "
+        "p-group with G nontrivial. Then the center Z(G) is nontrivial. "
+        "Proposition 2 (Central quotient cyclic implies abelian). Let G be a "
+        "group. If the quotient G/Z(G) is cyclic, then G is abelian. "
+        "Lemma 3 (Prime order is cyclic). Let p be a prime. Every group of order "
+        "p is cyclic."
+    )
+    ts = extract_theorems(note, source_ref_id="s")
+    assert [t["kind"] for t in ts] == ["theorem", "proposition", "lemma"]
+    assert [t["locator"]["value"] for t in ts] == ["Theorem 1", "Proposition 2", "Lemma 3"]
+    assert all(_exact(t) for t in ts)
+    # statements did NOT concatenate across blocks.
+    assert "Proposition" not in ts[0]["statement"]
+    assert "Lemma" not in ts[1]["statement"]
+
+
+# --- explicit exact-locator predicate -------------------------------------
+
+def test_unlabeled_header_is_not_exact() -> None:
+    t = _one("Theorem. A vague statement with no label at all here.")
+    assert t["locator"]["value"] == ""
+    assert not _exact(t)
+
+
+def test_malformed_label_does_not_masquerade_as_exact() -> None:
+    # "in" is not a locator-like label token.
+    t = _one("Theorem in chapter five about finite groups and their centers.")
+    assert t["locator"]["value"] == ""
+    assert not _exact(t)
+
+
+def test_mid_sentence_reference_does_not_split_statement() -> None:
+    ts = extract_theorems(
+        "Theorem 1.1. We use the result, and by Theorem 5 we conclude the bound holds.",
+        source_ref_id="s",
+    )
+    assert len(ts) == 1
+
+
+# --- statement fidelity + length cap --------------------------------------
+
+def test_extracted_statement_is_source_text_not_a_summary() -> None:
+    text = "Theorem 7.4. The specific source sentence about modular forms holds here."
+    t = _one(text)
+    assert "specific source sentence about modular forms" in t["statement"]
+
+
+def test_long_source_statement_is_capped() -> None:
+    long_tail = " padding clause that repeats" * 400  # >> 2500 chars
+    t = _one(f"Theorem 1.1. A real statement.{long_tail}")
+    assert len(t["statement"]) <= 2500
+
+
+# --- end-to-end: extraction feeds the UNCHANGED source-backed gate ---------
+
+def _hodge_run(tmp_path: Path) -> Path:
+    run_dir = run_mock_critique("hodge_atoms", FIXTURE, tmp_path)
+    claim = read_yaml(run_dir / "locked_claim.yaml")
+    claim["hypotheses"] = [
+        {"name": "group of order p^2", "status": "explicit", "source": "user"},
+        {"name": "p is prime", "status": "explicit", "source": "user"},
+    ]
+    write_yaml(run_dir / "locked_claim.yaml", claim)
+    sg = read_yaml(run_dir / "source_grounding.yaml")
+    sg["steps"][0]["needed_theorem"] = "group order abelian center"
+    sg["steps"][0]["status"] = "candidate"
+    sg["steps"][0]["source_refs"] = []
+    sg["steps"][0]["hypothesis_match"] = {"matches": "unclear", "mismatches": []}
+    write_yaml(run_dir / "source_grounding.yaml", sg)
+    return run_dir
+
+
+def _ingest_and_ground(run_dir: Path, text: str, *, authors: list[str], title: str) -> None:
+    claim = read_yaml(run_dir / "locked_claim.yaml")
+    ext = ingest_source_for_theorems(
+        claim_id=claim["id"], source=_write(run_dir, text), source_id="src",
+        title=title, authors=authors, source_type="paper",
+    )
+    ext_path = run_dir / "theorem_extraction.yaml"
+    write_yaml(ext_path, ext)
+    ground_run(run_dir=run_dir, theorem_extraction_path=ext_path)
+
+
+def _write(run_dir: Path, text: str) -> str:
+    p = run_dir / "src.txt"
+    p.write_text(text, encoding="utf-8")
+    return str(p)
+
+
+def _step_backed(run_dir: Path) -> bool:
+    sg = read_yaml(run_dir / "source_grounding.yaml")
+    return sg["steps"][0]["status"] == "source_backed"
+
+
+def test_labeled_matching_source_earns_support(tmp_path: Path) -> None:
+    run_dir = _hodge_run(tmp_path)
+    _ingest_and_ground(
+        run_dir,
+        "Theorem 1.1. Let G be a group with |G| = p^2 where p is prime; then the "
+        "center Z(G) is nontrivial and G is abelian.",
+        authors=["A. Mathematician"], title="A Note on p-groups",
+    )
+    validate_run(run_dir)
+    assert _step_backed(run_dir)
+
+
+def test_abstract_only_source_stays_candidate(tmp_path: Path) -> None:
+    run_dir = _hodge_run(tmp_path)
+    _ingest_and_ground(
+        run_dir,
+        "Abstract. We survey groups of order p^2 where p is prime and discuss "
+        "abelianness, but state no labeled theorem here.",
+        authors=["A. Mathematician"], title="Survey",
+    )
+    validate_run(run_dir)
+    assert not _step_backed(run_dir)
+
+
+def test_unlabeled_paragraph_source_stays_candidate(tmp_path: Path) -> None:
+    run_dir = _hodge_run(tmp_path)
+    _ingest_and_ground(
+        run_dir,
+        "Theorem. Let G be a group with |G| = p^2 where p is prime; then G is abelian.",
+        authors=["A. Mathematician"], title="Unlabeled",
+    )
+    validate_run(run_dir)
+    # No exact locator (bare 'Theorem') -> cannot be source_backed.
+    assert not _step_backed(run_dir)
