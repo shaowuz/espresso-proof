@@ -39,13 +39,28 @@ AGENT_OUTPUT_SCHEMA = {
     ],
 }
 
+# Phrases redacted from live agent text by safe_text/safe_list. This MUST stay a
+# superset of the proof-complete phrases the kernel forbids in
+# validators._first_forbidden_proof_language: the prover-round language guard
+# scans the (already redacted) content fields, so any phrase the validator
+# detects but redaction misses would let a live reviewer/prover sentence (e.g.
+# "... is proven irrational") fail the run closed instead of being contained.
+# test_forbidden_language_redaction_covers_validator pins this invariant.
 FORBIDDEN_LANGUAGE = [
     "proved",
+    "proven",
+    "proves",
     "verified",
     "certainly",
     "obviously",
     "clearly",
     "complete proof",
+    "proof complete",
+    "this proof",
+    "full proof",
+    "proof establishes",
+    "establishes the theorem",
+    "establishes the claim",
     "no gaps remain",
     "the claim is true",
     "the theorem is established",

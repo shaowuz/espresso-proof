@@ -1715,3 +1715,39 @@ def test_safe_text_redaction_does_not_reintroduce_forbidden_word() -> None:
     assert "verified" not in redacted.lower()
     assert "[withheld proof-like phrase]" in redacted
     assert _first_forbidden_proof_language(redacted.lower()) is None
+
+
+def test_forbidden_language_redaction_covers_validator() -> None:
+    """Regression (Golden Dogfood Run): every proof-complete phrase the kernel's
+    prover-round language guard detects must be redacted by safe_text. A live
+    reviewer/prover sentence like "... is proven irrational" must be contained
+    (redacted) rather than slip past safe_text and fail the run closed at the
+    validator. Pins safe_text's FORBIDDEN_LANGUAGE as a superset of the validator
+    forbidden set so the two layers cannot drift apart.
+    """
+    from espresso_proof.validators import _first_forbidden_proof_language
+
+    # One natural sentence per validator-forbidden phrase (lowercased to match the
+    # validator's scan of the joined artifact text).
+    samples = [
+        "the result is verified by the package",
+        "with this the proof complete and final",
+        "we proved the bound for every member",
+        "this proved the theorem for all x",
+        "a single cubic fourfold is proven irrational",
+        "the obstruction proves the claim outright",
+        "the argument proves the theorem in general",
+        "the statement has been proven already",
+        "this proof closes the remaining gap",
+        "a complete proof is now available",
+        "a full proof of irrationality follows",
+        "the lemma establishes the theorem directly",
+        "the witness establishes the claim for all x",
+        "the proof establishes irrationality everywhere",
+    ]
+    for sentence in samples:
+        # Precondition: the validator would flag the raw sentence.
+        assert _first_forbidden_proof_language(sentence) is not None, sentence
+        # After redaction the validator finds nothing forbidden.
+        redacted = safe_text(sentence).lower()
+        assert _first_forbidden_proof_language(redacted) is None, (sentence, redacted)
