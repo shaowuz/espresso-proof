@@ -183,6 +183,25 @@ def build_mathematical_judgment(run_dir: Path) -> dict:
             "a claim refutation and never upgrades status.",
         )
 
+    # --- reviewer approval without a verifier --------------------------------
+    # A reviewer PASSING (positive verdict, no failures) is NOT proof
+    # verification: if no step is source_backed and no computation is checked,
+    # the approval must not be read as evidence. Advisory only; never upgrades.
+    reviewer_verdicts = [r.get("verdict") for r in review.get("reviewers", [])]
+    reviewers_approve = bool(reviewer_verdicts) and all(
+        v == "pass" for v in reviewer_verdicts
+    )
+    if reviewers_approve and not any_source_backed and not any_checked:
+        add(
+            "reviewer_approval_without_verifier",
+            "warn",
+            idea_grade.get("claim_id", claim.get("id", "claim")),
+            "all reviewers pass, but no source_backed step and no checked evidence",
+            "request_human_review",
+            "Reviewer approval is not proof verification: no trusted source or checker "
+            "supports this yet, so the approval must not be read as proof.",
+        )
+
     report = {
         "schema_version": 1,
         "claim_id": idea_grade.get("claim_id", claim.get("id")),
