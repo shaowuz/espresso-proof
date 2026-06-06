@@ -47,6 +47,7 @@ from .proof_verification import (
     auto_wire_scoped_verifications,
     verify_finite_groups,
     verify_identity_table_in_run,
+    verify_matrix_rank_in_run,
     verify_ring_identity_in_run,
 )
 from .symbolic_identity import SUPPORTED_RING_IDENTITIES
@@ -717,6 +718,39 @@ def verify_ring_identity_in_run_command(
     typer.echo(
         f"Entry {entry['id']}: {entry['earned_status']} -- {entry['result']} "
         f"(checked over Z/{modulus} only; NOT a universal proof)."
+    )
+    typer.echo(f"Scope: {entry['scope_note']}")
+
+
+@app.command("verify-matrix-rank-in-run")
+def verify_matrix_rank_in_run_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    matrix: str = typer.Option(..., "--matrix", help='Integer matrix as JSON, e.g. "[[1,2],[2,4]]".'),
+    entry_id: str = typer.Option(..., "--id", help="Unique id for this verification entry."),
+    expected_rank: int | None = typer.Option(None, "--expected-rank", help="Expected rank of the matrix."),
+    expected_determinant: int | None = typer.Option(None, "--expected-determinant", help="Expected determinant (square matrix only)."),
+    target: str = typer.Option("", "--target", help="Human description of what was checked."),
+) -> None:
+    """Machine-check the rank and/or determinant of ONE explicit integer matrix and
+    record it in the run's proof-verification artifact. Earns instance_checked ONLY
+    when every provided expectation matches; otherwise fails closed to unverified.
+    This is a finite/computational check of this specific matrix (e.g. witnessing a
+    concrete rank/dimension jump), NEVER a universal proof about any family.
+    """
+    try:
+        parsed = json.loads(matrix)
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"--matrix must be valid JSON: {exc}")
+    if expected_rank is None and expected_determinant is None:
+        raise typer.BadParameter("provide --expected-rank and/or --expected-determinant")
+    entry = verify_matrix_rank_in_run(
+        run, matrix=parsed, entry_id=entry_id,
+        expected_rank=expected_rank, expected_determinant=expected_determinant, target=target,
+    )
+    validate_run(run)
+    typer.echo(
+        f"Entry {entry['id']}: {entry['earned_status']} -- {entry['result']} "
+        "(checked for this specific matrix only; NOT a universal proof)."
     )
     typer.echo(f"Scope: {entry['scope_note']}")
 

@@ -158,6 +158,65 @@ def build_ring_identity_entry(claim_id: str, *, entry_id: str, identity: str, mo
     }
 
 
+def build_matrix_rank_entry(
+    claim_id: str,
+    *,
+    entry_id: str,
+    matrix: object,
+    expected_rank: object = None,
+    expected_determinant: object = None,
+    target: str = "",
+) -> dict:
+    """Run the matrix rank/determinant verifier and shape one proof-verification
+    entry. Earns ``instance_checked`` only when every provided expectation matches
+    for THIS explicit integer matrix; a mismatch / malformed / unsupported request
+    fails closed to ``unverified``. Scope is this one matrix, not any family."""
+    from .matrix_verifier import verify_matrix_rank
+
+    result = verify_matrix_rank(
+        matrix, expected_rank=expected_rank, expected_determinant=expected_determinant
+    )
+    confirmed = result["verdict"] == "confirmed"
+    dims = (
+        f"{len(matrix)}x{len(matrix[0])}"
+        if isinstance(matrix, list) and matrix and isinstance(matrix[0], list)
+        else "?"
+    )
+    return {
+        "id": entry_id,
+        "verifier_type": "matrix_rank",
+        "claim_id": claim_id,
+        "target": target or f"rank/determinant of a {dims} integer matrix",
+        "input_summary": f"{dims} matrix; expected_rank={expected_rank}, expected_determinant={expected_determinant}",
+        "result": result["detail"] or result["verdict"],
+        "trusted": True,
+        "confirmed": confirmed,
+        "earned_status": "instance_checked" if confirmed else "unverified",
+        "scope_note": result["scope_note"],
+    }
+
+
+def verify_matrix_rank_in_run(
+    run_dir: Path,
+    *,
+    matrix: object,
+    entry_id: str,
+    expected_rank: object = None,
+    expected_determinant: object = None,
+    target: str = "",
+) -> dict:
+    """Connect the matrix rank/determinant verifier into the run's proof-verification flow."""
+    run_dir = Path(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
+    entry = build_matrix_rank_entry(
+        claim_id, entry_id=entry_id, matrix=matrix,
+        expected_rank=expected_rank, expected_determinant=expected_determinant, target=target,
+    )
+    append_verification_entries(run_dir, [entry])
+    return entry
+
+
 def append_verification_entries(run_dir: Path, entries: list[dict]) -> dict:
     """Append entries to proof_verification.yaml (creating + registering it with an
     empty base if absent), validate the full report model, and write it back.
@@ -311,6 +370,22 @@ def auto_wire_scoped_verifications(
                 skip(rid, f"modulus {modulus} exceeds auto cap {max_modulus} (too expensive)")
                 continue
             entry = build_ring_identity_entry(claim_id, entry_id=entry_id, identity=identity, modulus=modulus, target=target)
+        elif kind == "matrix_rank":
+            matrix = req.get("table")
+            if not isinstance(matrix, list) or not matrix or not isinstance(matrix[0], list):
+                skip(rid, "missing or malformed matrix (use the table field)")
+                continue
+            if len(matrix) > max_table_order or len(matrix[0]) > max_table_order:
+                skip(rid, f"matrix dimension exceeds auto cap {max_table_order} (too expensive)")
+                continue
+            if req.get("expected_rank") is None and req.get("expected_determinant") is None:
+                skip(rid, "no expected_rank or expected_determinant to check")
+                continue
+            entry = build_matrix_rank_entry(
+                claim_id, entry_id=entry_id, matrix=matrix,
+                expected_rank=req.get("expected_rank"),
+                expected_determinant=req.get("expected_determinant"), target=target,
+            )
         else:
             skip(rid, f"unsupported kind {kind!r}")
             continue
