@@ -109,6 +109,19 @@ _SEED: list[dict] = [
     {"id": "compact_proper_complete_assumption", "family": "topology",
      "summary": "A result assuming compactness / properness / completeness need not hold without it.",
      "tier": "candidate", "action": "warn", "enforced_by": ""},
+    # Additional named seed families (Goal 05): scope, geometry, coefficient, local/global.
+    {"id": "generic_to_special", "family": "generality",
+     "summary": "A property of the generic object need not hold for a special / specific one.",
+     "tier": "candidate", "action": "warn", "enforced_by": ""},
+    {"id": "projective_to_proper", "family": "geometry",
+     "summary": "Projective and proper are not interchangeable: a proper object need not be projective.",
+     "tier": "candidate", "action": "warn", "enforced_by": ""},
+    {"id": "rational_to_integral_coefficients", "family": "coefficients",
+     "summary": "A result with rational coefficients need not hold with integral coefficients.",
+     "tier": "candidate", "action": "warn", "enforced_by": ""},
+    {"id": "dense_open_not_whole_space", "family": "local_global",
+     "summary": "A property on a dense open subset need not hold on the whole space.",
+     "tier": "candidate", "action": "warn", "enforced_by": ""},
 ]
 
 # Keyword triggers for the candidate (warn-only) textual patterns.
@@ -130,6 +143,13 @@ _CANDIDATE_TRIGGERS: dict[str, list[str]] = {
         "compact", "compactness", "properness", "proper morphism", "proper map",
         "complete variety", "completeness",
     ],
+    "generic_to_special": ["generic", "special fiber", "special member", "specialization"],
+    "projective_to_proper": ["projective", "proper but not projective", "proper scheme", "proper variety"],
+    "rational_to_integral_coefficients": [
+        "rational coefficients", "integral coefficients", "rational cohomology",
+        "integral cohomology", "with q-coefficients", "with z-coefficients",
+    ],
+    "dense_open_not_whole_space": ["dense open", "zariski dense", "whole space", "dense subset"],
 }
 
 
@@ -273,6 +293,43 @@ def build_failure_pattern_audit(run_dir: Path) -> dict:
     }
     FailurePatternAudit.model_validate(report)
     return report
+
+
+def failure_pattern_allocation_hints(audit: dict) -> dict:
+    """Derive ADVISORY ranking / time-allocation hints from a failure-pattern
+    audit. This is the audited-tier effect: an audited (``rank_downgrade``) match
+    recommends downgrading the ranking of the route/step it touches and reallocating
+    effort (repair / switch / ask-human). It is advisory weight only: it returns
+    recommendations and NEVER mutates a score, grade, or proof/source/evidence
+    status. Pure and read-only over the audit dict.
+    """
+    matches = audit.get("matches", [])
+    rank_downgrade = [
+        {
+            "pattern_id": m.get("pattern_id"),
+            "subject": m.get("subject"),
+            "reason": m.get("explanation"),
+        }
+        for m in matches
+        if m.get("action") == "rank_downgrade"
+    ]
+    time_allocation: list[str] = []
+    if rank_downgrade:
+        time_allocation.append(
+            "Audited failure-pattern pressure: spend the next effort on repair "
+            "(pin sources / re-scope the claim) before deeper proof search."
+        )
+    if len(rank_downgrade) >= 2:
+        time_allocation.append(
+            "Multiple audited patterns matched: consider switching route or asking "
+            "a human before allocating more time."
+        )
+    return {
+        "rank_downgrade": rank_downgrade,
+        "time_allocation": time_allocation,
+        "note": "Advisory only: these affect ranking/time-allocation guidance, "
+        "never a score, grade, or proof/source/evidence status.",
+    }
 
 
 def audit_failure_patterns(run_dir: Path) -> dict:

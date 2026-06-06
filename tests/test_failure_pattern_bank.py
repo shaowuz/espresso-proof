@@ -182,3 +182,77 @@ def test_unknown_pattern_id_and_id_mismatch_rejected(tmp_path: Path) -> None:
     write_yaml(audit_path, doc)
     with pytest.raises(KernelValidationError):
         validate_run(run_dir)
+
+
+# --- Goal 05: additional named patterns + audited ranking/time-allocation hint ---
+
+def test_new_named_seed_patterns_present_as_candidate() -> None:
+    bank = seed_failure_pattern_bank()
+    by_id = {p.id: p for p in bank.patterns}
+    for pid in (
+        "generic_to_special",
+        "projective_to_proper",
+        "rational_to_integral_coefficients",
+        "dense_open_not_whole_space",
+    ):
+        assert pid in by_id, pid
+        assert by_id[pid].tier.value == "candidate"
+        assert by_id[pid].action.value == "warn"
+        assert by_id[pid].enforced_by == ""
+
+
+def test_new_candidate_patterns_match_claim_text(tmp_path: Path) -> None:
+    run_dir = _build(tmp_path, "source_misapplication_very_general_to_all")
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    claim_path = run_dir / artifacts["locked_claim"]
+    claim = read_yaml(claim_path)
+    claim["normalized_statement"] = (
+        "A generic projective variety with rational coefficients holds on a dense "
+        "open subset of the moduli space."
+    )
+    write_yaml(claim_path, claim)
+    matched = {m["pattern_id"] for m in build_failure_pattern_audit(run_dir)["matches"]}
+    for pid in (
+        "generic_to_special",
+        "projective_to_proper",
+        "rational_to_integral_coefficients",
+        "dense_open_not_whole_space",
+    ):
+        assert pid in matched, pid
+
+
+def test_allocation_hints_from_audited_match(tmp_path: Path) -> None:
+    from espresso_proof.failure_pattern_bank import failure_pattern_allocation_hints
+
+    run_dir = _build(tmp_path, "source_misapplication_very_general_to_all")
+    audit = build_failure_pattern_audit(run_dir)
+    assert any(m["action"] == "rank_downgrade" for m in audit["matches"])  # fixture triggers audited
+    hints = failure_pattern_allocation_hints(audit)
+    # An audited pattern produces a concrete ranking + time-allocation recommendation.
+    assert hints["rank_downgrade"]
+    assert hints["time_allocation"]
+    # ...but the hint carries NO score/grade/proof/source/evidence status field.
+    forbidden = {"score", "status", "source_backed", "proof_status", "idea_grade", "computation_checked"}
+    assert not (set(hints) & forbidden)
+    for h in hints["rank_downgrade"]:
+        assert not (set(h) & forbidden)
+
+
+def test_allocation_hints_empty_without_audited() -> None:
+    from espresso_proof.failure_pattern_bank import failure_pattern_allocation_hints
+
+    audit = {"matches": [{"pattern_id": "smooth_not_singular", "action": "warn", "tier": "candidate"}]}
+    hints = failure_pattern_allocation_hints(audit)
+    assert hints["rank_downgrade"] == []
+    assert hints["time_allocation"] == []
+
+
+def test_allocation_hints_is_read_only() -> None:
+    from copy import deepcopy
+    from espresso_proof.failure_pattern_bank import failure_pattern_allocation_hints
+
+    audit = {"matches": [{"pattern_id": "finite_check_not_universal", "action": "rank_downgrade",
+                          "tier": "audited", "subject": "computation_checks", "explanation": "x"}]}
+    snapshot = deepcopy(audit)
+    failure_pattern_allocation_hints(audit)
+    assert audit == snapshot  # pure: does not mutate the audit

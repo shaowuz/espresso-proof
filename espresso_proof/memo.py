@@ -23,6 +23,7 @@ from .descriptions import (
     judgment_tier_phrase,
     objection_phrase,
 )
+from .failure_pattern_bank import failure_pattern_allocation_hints
 from .io import read_yaml
 
 
@@ -295,6 +296,19 @@ def build_concise_memo(run_dir: Path) -> str:
                     f"  {objection_phrase(m.get('tier'))} "
                     f"({m.get('pattern_id')}): {m.get('explanation')}"
                 )
+            # Audited-tier effect: ranking / time-allocation guidance (advisory
+            # weight only; never changes a score, grade, or status).
+            hints = failure_pattern_allocation_hints(audit)
+            if hints["rank_downgrade"]:
+                subjects = ", ".join(
+                    sorted({h["subject"] for h in hints["rank_downgrade"] if h.get("subject")})
+                )
+                lines.append(
+                    "  Ranking/time-allocation hint (advisory; no score/status change): "
+                    f"downgrade ranking of routes touching {subjects or 'the affected steps'}."
+                )
+                for rec in hints["time_allocation"]:
+                    lines.append(f"  Next-effort hint: {rec}")
 
     # Proof verification bridge: scoped machine-verified instances only. NEVER a
     # universal proof; the renderer never emits "proved".
