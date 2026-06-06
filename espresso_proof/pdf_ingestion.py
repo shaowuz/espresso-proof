@@ -193,37 +193,66 @@ def extract_candidate_locators(text: str, *, source_ref_id: str = "src_fulltext"
     return out
 
 
+# A locator-like label: numeric (1, 1.2, 2.1.3) or letter+dotted-number (A.3),
+# NOT an arbitrary word ("about", "Smoothness") that merely follows the keyword.
+_THEOREM_KINDS = "Theorem|Proposition|Lemma|Corollary|Definition|Remark"
+_LABEL_TOKEN = r"[0-9]+(?:\.[0-9A-Za-z]+)*|[A-Z]\.[0-9]+(?:\.[0-9]+)*"
+# A theorem header starts at text start or after a sentence boundary, so a
+# mid-sentence reference like "by Theorem 5" does not split a statement.
+_HEADER_RE = re.compile(
+    rf"(?:(?<=[.:;]\s)|^)(?P<kind>{_THEOREM_KINDS})"
+    rf"(?:\s+(?P<label>{_LABEL_TOKEN}))?"
+    rf"(?:\s*\((?P<name>[^)]+)\))?"
+    rf"\s*[.:]?\s",
+    flags=re.IGNORECASE,
+)
+
+
+def _theorem_locator(kind: str, label: str, name: str) -> dict:
+    """Build a locator. EXACT only when there is a concrete label or a
+    parenthetical name a reviewer can find; otherwise the value is empty so
+    ``Locator.is_exact`` is False (an unlabeled/malformed header stays candidate)."""
+    locator_kind = locator_kind_for_statement(kind)
+    if label:
+        value = f"{kind.title()} {label}"
+    elif name:
+        value = f"{kind.title()} ({name})"
+    else:
+        value = ""  # no concrete locator -> not exact
+    return {"kind": locator_kind, "value": value}
+
+
 def extract_theorems(text: str, *, source_ref_id: str) -> list[dict]:
     normalized = normalize_text(text)
-    pattern = re.compile(
-        r"\b(Theorem|Proposition|Lemma|Corollary|Definition|Remark)\s*"
-        r"(?:\(([^)]+)\)|([A-Za-z0-9_.-]+))?\s*[:.]?\s+"
-        r"(.+?)(?=\b(?:Theorem|Proposition|Lemma|Corollary|Definition|Remark)\s*(?:\([^)]+\)|[A-Za-z0-9_.-]+)?\s*[:.]|\Z)",
-        flags=re.IGNORECASE | re.DOTALL,
-    )
+    # 1) Find every theorem-like HEADER and its position. 2) Each statement runs
+    # from the end of its header to the start of the next header (or end of text).
+    # This splits consecutive blocks (Theorem 1 ... Proposition 2 ... Lemma 3 ...)
+    # instead of concatenating them into one statement.
+    headers = list(_HEADER_RE.finditer(normalized))
     theorems = []
-    for index, match in enumerate(pattern.finditer(normalized), start=1):
-        kind = match.group(1).lower()
-        label = clean_label(match.group(2) or match.group(3) or str(index))
-        statement = clean_statement(fallback_statement_text(match.group(4)))
+    for index, match in enumerate(headers, start=1):
+        kind = match.group("kind").lower()
+        raw_label = (match.group("label") or "").strip()
+        name = (match.group("name") or "").strip()
+        end = headers[index].start() if index < len(headers) else len(normalized)
+        body = normalized[match.end():end]
+        statement = clean_statement(fallback_statement_text(body))
         if not statement:
             continue
-        locator_kind = locator_kind_for_statement(kind)
-        theorem_id = f"thm_{index:03d}"
+        # Display label: the locator-like label, else the parenthetical name,
+        # else the running index (display only; does not affect exactness).
+        label = clean_label(raw_label or name or str(index))
         theorems.append(
             {
-                "id": theorem_id,
+                "id": f"thm_{index:03d}",
                 "source_ref_id": source_ref_id,
                 "kind": kind,
                 "label": label,
-                "locator": {
-                    "kind": locator_kind,
-                    "value": f"{kind.title()} {label}",
-                },
+                "locator": _theorem_locator(kind, raw_label, name),
                 "statement": statement[:2500],
                 "context": "",
                 "hypothesis_terms": extract_hypothesis_terms(statement),
-                "confidence": "medium" if label else "low",
+                "confidence": "medium" if (raw_label or name) else "low",
             }
         )
     return theorems
