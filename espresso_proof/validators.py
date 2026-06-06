@@ -21,6 +21,7 @@ from .models import (
     CounterexampleReport,
     FailureClassificationReport,
     FailurePatternAudit,
+    LiteratureCandidates,
     LiteratureRetrievalReport,
     LiteratureSearchPlan,
     MathematicalJudgmentReport,
@@ -105,6 +106,7 @@ def validate_run(run_dir: Path) -> None:
     _load_optional_literature_review_agent(run_dir, manifest)
     _load_optional_literature_search_plan(run_dir, manifest)
     _load_optional_autonomous_literature_retrieval(run_dir, manifest)
+    _load_optional_literature_candidates(run_dir, manifest)
     theorem_applicability = _load_optional_theorem_applicability(run_dir, manifest)
     llm_agent_run = _load_optional_llm_agent_run(run_dir, manifest)
     prover_loop = _load_optional_prover_loop(run_dir, manifest)
@@ -417,6 +419,23 @@ def _load_optional_autonomous_literature_retrieval(
     return validate_yaml_model(
         run_dir / optional["autonomous_literature_retrieval"],
         AutonomousLiteratureRetrievalReport,
+    )
+
+
+def _load_optional_literature_candidates(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> LiteratureCandidates | None:
+    optional = manifest.optional_artifacts
+    if "literature_candidates" not in optional:
+        return None
+    # LiteratureCandidate.status is Literal["candidate"]; validating here fails
+    # closed if any candidate were ever written (or hand-edited) with another
+    # status (e.g. source_backed). The scout artifact has no checked/proof/grade
+    # field, so it can never upgrade trusted status.
+    return validate_yaml_model(
+        run_dir / optional["literature_candidates"],
+        LiteratureCandidates,
     )
 
 
