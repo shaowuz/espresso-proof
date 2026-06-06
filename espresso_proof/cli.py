@@ -17,6 +17,7 @@ from .descriptions import (
 from .io import read_text, read_yaml, write_text, write_yaml
 from .literature_discovery import discover_literature as run_literature_discovery
 from .literature_review_agent import ReviewSourceSpec, run_literature_review_agent
+from .literature_scout import run_literature_scout
 from .llm_agents import append_prover_loop_round
 from .llm_agents import resolve_agent_gate as resolve_llm_agent_gate
 from .llm_agents import build_client as build_llm_client
@@ -1420,6 +1421,43 @@ def review_literature_agent(
     validate_run(run)
     typer.echo(f"Wrote literature review agent report to {run / 'literature_review_agent.yaml'}")
     typer.echo("Review judgments stay proposed (not yet checked); only source grounding earns reference support.")
+
+
+@app.command("literature-scout")
+def literature_scout_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    provider: str = typer.Option("stub", "--provider"),
+    model: str = typer.Option("gpt-4.1", "--model"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND", "--external-agent-command-env"
+    ),
+) -> None:
+    """Run the LLM Literature Scout: propose CANDIDATE sources per proof step.
+
+    LLM = scout, kernel = judge. Writes a candidate-only literature_candidates.yaml
+    (no source_backed / checked / proof status — those are earned later by
+    retrieval + grounding + validation). Re-validates the run (fail closed).
+    """
+    if provider not in {"stub", "openai", "external"}:
+        raise typer.BadParameter("provider must be stub, openai, or external")
+    client = build_llm_client(
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+    )
+    report = run_literature_scout(run_dir=run, client=client)
+    n_steps = len(report["proof_step_candidates"])
+    n_cands = sum(len(s["candidates"]) for s in report["proof_step_candidates"])
+    typer.echo(
+        f"Literature Scout wrote {n_cands} candidate(s) across {n_steps} proof step(s) "
+        f"-> {run / 'literature_candidates.yaml'}"
+    )
+    typer.echo(
+        "Candidates only; a source is reference-supported only after retrieval + "
+        "exact locator + attribution + hypothesis match + validation."
+    )
 
 
 @app.command("run-llm-agents")

@@ -820,6 +820,50 @@ class ScopedVerificationRequests(StrictBaseModel):
     requests: list[ScopedVerificationRequest] = Field(default_factory=list)
 
 
+class LiteratureCandidate(StrictBaseModel):
+    """A single CANDIDATE source the LLM Literature Scout proposes for a specific
+    proof step. It is candidate-only by construction: ``status`` is a fixed
+    Literal so a model/hand-edited file cannot smuggle ``source_backed`` (it is
+    rejected at load), and there is no checked/proof/grade field. Reference
+    support is earned only later by retrieval + extraction + grounding +
+    validation, never by this artifact.
+    """
+
+    id: str
+    title: str
+    authors: list[str] = Field(default_factory=list)
+    source_type: Literal["paper", "book", "notes", "web", "local", "unknown"] = "unknown"
+    locator_hint: str = ""
+    statement_hint: str = ""
+    url_or_identifier: str = ""
+    why_relevant: str = ""
+    missing_metadata: list[str] = Field(default_factory=list)
+    # SAFETY: candidate-only. Any other value is rejected at validation; the
+    # normalizer also forces this so the scout can never self-certify a source.
+    status: Literal["candidate"] = "candidate"
+
+
+class ProofStepCandidates(StrictBaseModel):
+    """Candidate sources tied to one proof step (by proof_step_id)."""
+
+    proof_step_id: str
+    proof_step_summary: str = ""
+    candidates: list[LiteratureCandidate] = Field(default_factory=list)
+
+
+class LiteratureCandidates(StrictBaseModel):
+    """The LLM Literature Scout artifact: candidate sources/locator hints tied to
+    proof steps. LLM = scout, kernel = judge. It carries NO source_backed /
+    checked / proof / grade / refutation field, so nothing here can upgrade any
+    trusted status."""
+
+    schema_version: int = 1
+    claim_id: str
+    generated_at: str = ""
+    proof_step_candidates: list[ProofStepCandidates] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class LiteratureItem(StrictBaseModel):
     id: str
     title: str
@@ -1933,6 +1977,8 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "proof_verification": ProofVerificationReport,
     "scoped_verification_request": ScopedVerificationRequest,
     "scoped_verification_requests": ScopedVerificationRequests,
+    "literature_candidate": LiteratureCandidate,
+    "literature_candidates": LiteratureCandidates,
     "counterexamples": CounterexampleReport,
     "tests": TestReport,
     "source_grounding": SourceGroundingReport,
