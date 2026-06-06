@@ -18,6 +18,7 @@ from .io import read_text, read_yaml, write_text, write_yaml
 from .literature_discovery import discover_literature as run_literature_discovery
 from .literature_review_agent import ReviewSourceSpec, run_literature_review_agent
 from .literature_scout import run_literature_scout
+from .retrieval_grounding import retrieve_and_ground
 from .llm_agents import append_prover_loop_round
 from .llm_agents import resolve_agent_gate as resolve_llm_agent_gate
 from .llm_agents import build_client as build_llm_client
@@ -1421,6 +1422,49 @@ def review_literature_agent(
     validate_run(run)
     typer.echo(f"Wrote literature review agent report to {run / 'literature_review_agent.yaml'}")
     typer.echo("Review judgments stay proposed (not yet checked); only source grounding earns reference support.")
+
+
+@app.command("retrieve-and-ground")
+def retrieve_and_ground_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    candidate: str | None = typer.Option(None, "--candidate", help="A literature_candidates.yaml candidate id to resolve."),
+    local_corpus: Path | None = typer.Option(None, "--local-corpus", file_okay=False, help="Directory of local source text/PDF files."),
+    local_source: Path | None = typer.Option(None, "--local-source", dir_okay=False, help="Explicit local source text/PDF path."),
+    url: str | None = typer.Option(None, "--url", help="Explicit URL or arXiv URL (only fetched with --network)."),
+    network: bool = typer.Option(False, "--network/--no-network", help="Allow fetching a url/arxiv source (default off; fail closed)."),
+    source_id: str = typer.Option("retrieved_src", "--source-id"),
+    title: str = typer.Option("", "--source-title"),
+    author: list[str] | None = typer.Option(None, "--source-author"),
+    source_type: str = typer.Option("paper", "--source-type"),
+) -> None:
+    """Resolve a candidate source (local file / corpus / url / arXiv), extract
+    theorems, and hand to the existing source-grounding pipeline; then validate.
+
+    Candidate-only until grounding earns support (exact locator + attribution +
+    hypothesis match). Fails closed: an unresolved candidate, disabled network, or
+    a download/extraction error writes a failure/skip report and leaves the run
+    valid without granting any source support. Records retrieval_resolution.yaml.
+    """
+    report = retrieve_and_ground(
+        run_dir=run,
+        candidate_id=candidate,
+        local_corpus=local_corpus,
+        local_source=local_source,
+        url=url,
+        source_id=source_id,
+        title=title,
+        authors=author or [],
+        source_type=source_type,
+        network_enabled=network,
+    )
+    typer.echo(
+        f"Retrieval resolution: {report['resolution_status']} "
+        f"(kind={report['source_kind']}, grounding_attempted={report['grounding_attempted']})"
+    )
+    typer.echo(
+        "Retrieval never sets source_backed; a step is reference-supported only "
+        "after exact locator + attribution + hypothesis match + validation."
+    )
 
 
 @app.command("literature-scout")
