@@ -864,6 +864,35 @@ class LiteratureCandidates(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class RetrievalMetadata(StrictBaseModel):
+    """Citation metadata carried alongside a resolved source. Descriptive only."""
+
+    title: str = ""
+    authors: list[str] = Field(default_factory=list)
+    identifier: str = ""
+
+
+class RetrievalResolutionReport(StrictBaseModel):
+    """Records one retrieval-to-grounding attempt: how a candidate source was
+    resolved (local file / corpus / url / arxiv), whether grounding was attempted,
+    and the outcome. It carries NO source_backed / checked / proof / grade /
+    refutation field, so resolving a source can never by itself grant trusted
+    status — grounding + validation still own that.
+    """
+
+    schema_version: int = 1
+    claim_id: str
+    generated_at: str = ""
+    candidate_id: str = ""
+    resolution_status: Literal["resolved", "failed", "skipped"]
+    source_kind: Literal["local_file", "local_corpus", "url", "arxiv", "none"] = "none"
+    source_path_or_url: str = ""
+    metadata: RetrievalMetadata = Field(default_factory=RetrievalMetadata)
+    extraction_artifact: str = ""
+    grounding_attempted: bool = False
+    notes: list[str] = Field(default_factory=list)
+
+
 class LiteratureItem(StrictBaseModel):
     id: str
     title: str
@@ -1979,6 +2008,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "scoped_verification_requests": ScopedVerificationRequests,
     "literature_candidate": LiteratureCandidate,
     "literature_candidates": LiteratureCandidates,
+    "retrieval_resolution": RetrievalResolutionReport,
     "counterexamples": CounterexampleReport,
     "tests": TestReport,
     "source_grounding": SourceGroundingReport,

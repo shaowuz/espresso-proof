@@ -22,6 +22,7 @@ from .models import (
     FailureClassificationReport,
     FailurePatternAudit,
     LiteratureCandidates,
+    RetrievalResolutionReport,
     LiteratureRetrievalReport,
     LiteratureSearchPlan,
     MathematicalJudgmentReport,
@@ -107,6 +108,7 @@ def validate_run(run_dir: Path) -> None:
     _load_optional_literature_search_plan(run_dir, manifest)
     _load_optional_autonomous_literature_retrieval(run_dir, manifest)
     _load_optional_literature_candidates(run_dir, manifest)
+    _load_optional_retrieval_resolution(run_dir, manifest)
     theorem_applicability = _load_optional_theorem_applicability(run_dir, manifest)
     llm_agent_run = _load_optional_llm_agent_run(run_dir, manifest)
     prover_loop = _load_optional_prover_loop(run_dir, manifest)
@@ -436,6 +438,22 @@ def _load_optional_literature_candidates(
     return validate_yaml_model(
         run_dir / optional["literature_candidates"],
         LiteratureCandidates,
+    )
+
+
+def _load_optional_retrieval_resolution(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> RetrievalResolutionReport | None:
+    optional = manifest.optional_artifacts
+    if "retrieval_resolution" not in optional:
+        return None
+    # RetrievalResolutionReport (StrictBaseModel, extra=forbid) has no
+    # source_backed / checked / proof / grade field; validating here fails closed
+    # if a retrieval report were ever written/hand-edited with a trusted status.
+    return validate_yaml_model(
+        run_dir / optional["retrieval_resolution"],
+        RetrievalResolutionReport,
     )
 
 
