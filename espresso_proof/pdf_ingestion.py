@@ -193,8 +193,9 @@ def extract_candidate_locators(text: str, *, source_ref_id: str = "src_fulltext"
     return out
 
 
-# A locator-like label: numeric (1, 1.2, 2.1.3) or letter+dotted-number (A.3),
-# NOT an arbitrary word ("about", "Smoothness") that merely follows the keyword.
+# A locator-like label: numeric (1, 1.2, 2.1.3) or letter+dotted-number (A.3;
+# matched case-insensitively via the IGNORECASE header regex), NOT an arbitrary
+# word ("about", "Smoothness") that merely follows the keyword.
 _THEOREM_KINDS = "Theorem|Proposition|Lemma|Corollary|Definition|Remark"
 _LABEL_TOKEN = r"[0-9]+(?:\.[0-9A-Za-z]+)*|[A-Z]\.[0-9]+(?:\.[0-9]+)*"
 # A theorem header starts at text start or after a sentence boundary, so a
