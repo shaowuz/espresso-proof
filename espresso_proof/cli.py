@@ -50,6 +50,7 @@ from .literature_retrieval import retrieve_and_ground as retrieve_and_ground_fro
 from .literature_retrieval import retrieve_sources
 from .mathematical_judgment import judge_run
 from .memory_context import build_memory_context
+from .subgoal_graph import build_subgoal_graph
 from .finite_group_verifier import verify_identity_on_table
 from .proof_verification import (
     auto_wire_scoped_verifications,
@@ -500,6 +501,31 @@ def judge_command(
     kinds = ", ".join(sorted({item["kind"] for item in report["findings"]})) or "none"
     typer.echo(f"Recorded {len(report['findings'])} judgment finding(s): {kinds}")
     typer.echo(f"-> {run / 'mathematical_judgment.yaml'}")
+
+
+@app.command("build-subgoal-graph")
+def build_subgoal_graph_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+) -> None:
+    """Build the durable subgoal-graph proof-SEARCH state for a run (advisory only).
+
+    Writes proof_goal_graph.yaml and re-validates. The graph is search-management
+    state, NOT proof evidence: it can never set or upgrade idea_grade /
+    proof_language / source / evidence / claim status, never claim a theorem is
+    proved, and a node may carry source_supported / scoped_checked only when it
+    references support the kernel already earned. The validators remain the gate.
+    """
+    graph = build_subgoal_graph(run)
+    validate_run(run)
+    summary = graph["summary"]
+    typer.echo(
+        f"Built subgoal graph with {len(graph['nodes'])} node(s): "
+        f"{summary['open']} open, {summary['sketched']} sketched, "
+        f"{summary['source_supported']} reference-supported, "
+        f"{summary['finite_or_computation_checked']} finite/computational-checked, "
+        f"{summary['blocked']} blocked."
+    )
+    typer.echo(f"-> {run / 'proof_goal_graph.yaml'}")
 
 
 @app.command("memory-context")

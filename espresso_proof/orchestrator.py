@@ -340,6 +340,20 @@ def resume_run(
     build_memory_context(run_dir)
     validate_run(run_dir)
 
+    # Subgoal Graph (advisory search-management state): build a durable graph of
+    # subgoals from the validated artifacts. It NEVER upgrades proof / source /
+    # evidence / grade status. Fail closed: if the freshly built graph cannot pass
+    # the full run validation, drop it (rather than leave an invalid artifact) and
+    # continue — the memo/dashboard simply render without a graph.
+    from .subgoal_graph import build_subgoal_graph, remove_subgoal_graph
+
+    try:
+        build_subgoal_graph(run_dir)
+        validate_run(run_dir)
+    except Exception:  # noqa: BLE001 - advisory layer must fail closed, not block resume
+        remove_subgoal_graph(run_dir)
+        validate_run(run_dir)
+
     _set_state(run_dir, "COMPLETED_MEMO")
     memo = build_concise_memo(run_dir)
     write_run_dashboard(run_dir)

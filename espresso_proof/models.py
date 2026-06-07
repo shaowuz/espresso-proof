@@ -1882,6 +1882,175 @@ class ProverRoundIndex(StrictBaseModel):
         return self
 
 
+class SubgoalState(str, Enum):
+    """The proof-search state of a single subgoal node.
+
+    These are SEARCH-MANAGEMENT states, not trusted statuses. There is
+    deliberately NO ``proved`` / ``verified`` / ``proof_complete`` value: a
+    subgoal graph can never record proof completion (the kernel boundary owns
+    proof/source/evidence status, never this artifact).
+
+    - ``open``: nothing earned yet; still to be shown.
+    - ``sketched``: an informal route/argument exists but nothing is grounded.
+    - ``source_supported``: backed ONLY as a reference by an earned
+      source-grounding step (still not a proof of the whole claim).
+    - ``scoped_checked``: confirmed ONLY in a finite / computational scope by a
+      deterministic verifier.
+    - ``blocked_missing_source``: cannot progress without a missing source.
+    - ``blocked_reviewer_objection``: held open by a reviewer objection.
+    - ``contradicted``: refuted/rejected under the current hypotheses by an
+      existing counterexample/refutation validator (never by prose).
+    """
+
+    open = "open"
+    sketched = "sketched"
+    source_supported = "source_supported"
+    scoped_checked = "scoped_checked"
+    blocked_missing_source = "blocked_missing_source"
+    blocked_reviewer_objection = "blocked_reviewer_objection"
+    contradicted = "contradicted"
+
+
+# States a subgoal may carry only when matching EARNED evidence is referenced.
+_SUBGOAL_EVIDENCE_STATES = {SubgoalState.source_supported, SubgoalState.scoped_checked}
+
+# Tokens that must never appear in a subgoal graph (it cannot claim proof
+# completion). Mirrors the final-report proof-language guard.
+_SUBGOAL_FORBIDDEN_TOKENS = (
+    "proved",
+    "proven",
+    "proof-close",
+    "verified",
+    "proof complete",
+    "proof_complete",
+    "proof-complete",
+)
+
+
+class SubgoalRole(str, Enum):
+    main_goal = "main_goal"
+    lemma = "lemma"
+    reduction = "reduction"
+    hypothesis_check = "hypothesis_check"
+    computation_check = "computation_check"
+    reference_check = "reference_check"
+
+
+class SubgoalNode(StrictBaseModel):
+    """One subgoal in the proof-search graph.
+
+    ``supported_by_*`` lists are REFERENCES into earned artifacts; the run
+    validator checks each reference actually earned its support (a node cannot
+    self-certify). Reviewer objections / counterexample pressure are advisory
+    attachments and never close a subgoal as proof.
+    """
+
+    id: str
+    statement: str
+    role: SubgoalRole
+    state: SubgoalState
+    closure_contract: str
+    depends_on: list[str] = Field(default_factory=list)
+    supported_by_source_steps: list[str] = Field(default_factory=list)
+    supported_by_computations: list[str] = Field(default_factory=list)
+    supported_by_scoped_checks: list[str] = Field(default_factory=list)
+    reviewer_objections: list[str] = Field(default_factory=list)
+    counterexample_pressure: list[str] = Field(default_factory=list)
+    remaining_risk: str = ""
+
+
+class SubgoalEdge(StrictBaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    from_node: str = Field(alias="from")
+    to: str
+    relation: Literal["needed_for", "supports", "refines", "blocks"]
+
+
+class SubgoalGraphSummary(StrictBaseModel):
+    open: int = Field(ge=0)
+    sketched: int = Field(ge=0)
+    source_supported: int = Field(ge=0)
+    finite_or_computation_checked: int = Field(ge=0)
+    blocked: int = Field(ge=0)
+
+
+class SubgoalGraphGeneratedFrom(StrictBaseModel):
+    strategy_brief: str | None = None
+    prover_loop: str | None = None
+    source_grounding: str | None = None
+
+
+class ProofGoalGraph(StrictBaseModel):
+    """A durable, advisory proof-SEARCH state artifact (``proof_goal_graph.yaml``).
+
+    It records what must be shown, what is open/sketched, what is only
+    reference-supported, what is checked only in a finite/computational scope,
+    and what is blocked. It is NOT proof evidence: it cannot set or upgrade
+    ``idea_grade`` / ``proof_language_status`` / source / evidence / claim
+    status, and it can never contain proof-complete language. The model and the
+    run validator both fail closed.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    selected_strategy: str | None = None
+    generated_from: SubgoalGraphGeneratedFrom = Field(
+        default_factory=SubgoalGraphGeneratedFrom
+    )
+    nodes: list[SubgoalNode]
+    edges: list[SubgoalEdge] = Field(default_factory=list)
+    summary: SubgoalGraphSummary
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_graph_structure(self) -> ProofGoalGraph:
+        if not self.nodes:
+            raise ValueError("proof goal graph requires at least one node")
+        node_ids = [node.id for node in self.nodes]
+        if len(node_ids) != len(set(node_ids)):
+            raise ValueError("proof goal graph node ids must be unique")
+        known = set(node_ids)
+        main_goals = [node for node in self.nodes if node.role == SubgoalRole.main_goal]
+        if len(main_goals) != 1:
+            raise ValueError("proof goal graph requires exactly one main_goal node")
+        for edge in self.edges:
+            if edge.from_node not in known:
+                raise ValueError(f"proof goal graph edge from unknown node {edge.from_node!r}")
+            if edge.to not in known:
+                raise ValueError(f"proof goal graph edge to unknown node {edge.to!r}")
+        for node in self.nodes:
+            for dep in node.depends_on:
+                if dep not in known:
+                    raise ValueError(
+                        f"{node.id}: depends_on references unknown node {dep!r}"
+                    )
+        # A subgoal graph can never carry proof-complete language.
+        haystack = " ".join(self._text_fields()).lower()
+        for token in _SUBGOAL_FORBIDDEN_TOKENS:
+            if token in haystack:
+                raise ValueError(
+                    f"proof goal graph uses forbidden proof-complete language: {token!r}"
+                )
+        return self
+
+    def _text_fields(self) -> list[str]:
+        parts: list[str] = list(self.notes)
+        for node in self.nodes:
+            parts.extend(
+                [
+                    node.statement,
+                    node.closure_contract,
+                    node.remaining_risk,
+                    *node.reviewer_objections,
+                    *node.counterexample_pressure,
+                ]
+            )
+        return parts
+
+
 class MemoryEntry(StrictBaseModel):
     id: str
     timestamp: str
@@ -2059,6 +2228,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "prover_loop": ProverLoopReport,
     "prover_round": ProverRoundReport,
     "prover_round_index": ProverRoundIndex,
+    "proof_goal_graph": ProofGoalGraph,
     "memory_entry": MemoryEntry,
     "memory_index": MemoryIndex,
     "memory_context": MemoryContext,

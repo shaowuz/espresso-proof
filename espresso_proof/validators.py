@@ -27,7 +27,10 @@ from .models import (
     LiteratureRetrievalReport,
     LiteratureSearchPlan,
     MathematicalJudgmentReport,
+    ProofGoalGraph,
     ProofVerificationReport,
+    ProofVerificationStatus,
+    SubgoalState,
     ContinueDecision,
     ExampleSelection,
     ExampleFeedbackSummary,
@@ -115,6 +118,7 @@ def validate_run(run_dir: Path) -> None:
     llm_agent_run = _load_optional_llm_agent_run(run_dir, manifest)
     prover_loop = _load_optional_prover_loop(run_dir, manifest)
     prover_round_index = _load_optional_prover_round_index(run_dir, manifest)
+    proof_goal_graph = _load_optional_proof_goal_graph(run_dir, manifest)
     human_feedback, feedback_summary = _load_optional_human_feedback(run_dir, manifest)
 
     _validate_claim_id_consistency(
@@ -142,6 +146,16 @@ def validate_run(run_dir: Path) -> None:
     _validate_failure_pattern_audit(failure_pattern_audit, claim, manifest)
     _validate_literature_retrieval(literature_retrieval, claim, manifest)
     _validate_proof_verification(proof_verification, claim, manifest, idea_grade)
+    _validate_subgoal_graph(
+        proof_goal_graph,
+        claim,
+        manifest,
+        source_grounding,
+        proof_verification,
+        computation_verification,
+        idea_grade,
+        strategy_brief,
+    )
     _validate_example_evidence(computations, counterexamples, idea_grade)
     _validate_source_backing(source_grounding)
     _validate_theorem_applicability(manifest, claim, source_grounding, theorem_applicability)
@@ -664,6 +678,130 @@ def _load_optional_prover_round_index(
         run_dir / optional["prover_round_index"],
         ProverRoundIndex,
     )
+
+
+def _load_optional_proof_goal_graph(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> ProofGoalGraph | None:
+    optional = manifest.optional_artifacts
+    if "proof_goal_graph" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["proof_goal_graph"],
+        ProofGoalGraph,
+    )
+
+
+def _validate_subgoal_graph(
+    proof_goal_graph: ProofGoalGraph | None,
+    claim: Claim,
+    manifest: RunManifest,
+    source_grounding: SourceGroundingReport,
+    proof_verification: ProofVerificationReport | None,
+    computation_verification: ComputationVerificationReport | None,
+    idea_grade: IdeaGrade,
+    strategy_brief: StrategyBrief,
+) -> None:
+    """Subgoal-graph proof-search state (advisory). Fails closed.
+
+    The graph is a SEARCH-MANAGEMENT artifact, never proof evidence. This
+    validator enforces that it cannot smuggle trusted status:
+
+    - claim_id / run_id bind to this run;
+    - a ``source_supported`` node (or any ``supported_by_source_steps`` ref) must
+      point at a source-grounding step whose ``source_backed`` status was earned
+      by the existing grounding gate -- prose / reviewer / human / memory can
+      never earn it here;
+    - a ``scoped_checked`` node (or any ``supported_by_computations`` /
+      ``supported_by_scoped_checks`` ref) must point at a deterministic, trusted,
+      confirming proof-verification or computation-verification entry;
+    - a ``contradicted`` node is allowed only when the kernel's own refutation
+      logic already refuted the claim (``idea_grade.status == refuted``), so a
+      reviewer objection / dropped-hypothesis counterexample cannot close a
+      subgoal as refuted here;
+    - the model already forbids proof-complete language and a missing main goal.
+
+    The graph has no status field that feeds back into the run, so its presence
+    can never change idea_grade / proof_language / source / evidence / claim
+    status (the StrictBaseModel forbids such fields by construction).
+    """
+    if proof_goal_graph is None:
+        return
+    if proof_goal_graph.claim_id != claim.id:
+        raise KernelValidationError("proof_goal_graph claim_id does not match locked claim")
+    if proof_goal_graph.run_id != manifest.run_id:
+        raise KernelValidationError("proof_goal_graph run_id does not match the run manifest")
+
+    known_strategy_ids = {strategy.id for strategy in strategy_brief.top_strategies}
+    known_strategy_ids.add("none")
+    selected = proof_goal_graph.selected_strategy
+    if selected is not None and selected not in known_strategy_ids:
+        raise KernelValidationError(
+            f"proof_goal_graph selected_strategy {selected!r} is not a known strategy"
+        )
+
+    earned_source_steps = {
+        step.proof_step_id
+        for step in source_grounding.steps
+        if step.status == SourceStatus.source_backed
+    }
+    earned_computations: set[str] = set()
+    if proof_verification is not None:
+        for entry in proof_verification.entries:
+            if (
+                entry.trusted
+                and entry.confirmed
+                and entry.earned_status
+                in {
+                    ProofVerificationStatus.instance_checked,
+                    ProofVerificationStatus.computation_checked,
+                }
+            ):
+                earned_computations.add(entry.id)
+    confirmed_scoped_checks: set[str] = set()
+    if computation_verification is not None:
+        for result in computation_verification.results:
+            if result.executed and result.verdict.value == "confirmed":
+                confirmed_scoped_checks.add(result.check_id)
+
+    claim_refuted = idea_grade.status == IdeaStatus.refuted
+
+    for node in proof_goal_graph.nodes:
+        for step_id in node.supported_by_source_steps:
+            if step_id not in earned_source_steps:
+                raise KernelValidationError(
+                    f"{node.id}: supported_by_source_steps references {step_id!r} which is not an "
+                    "earned source_backed grounding step"
+                )
+        for comp_id in node.supported_by_computations:
+            if comp_id not in earned_computations:
+                raise KernelValidationError(
+                    f"{node.id}: supported_by_computations references {comp_id!r} which is not a "
+                    "trusted confirming proof-verification entry"
+                )
+        for check_id in node.supported_by_scoped_checks:
+            if check_id not in confirmed_scoped_checks:
+                raise KernelValidationError(
+                    f"{node.id}: supported_by_scoped_checks references {check_id!r} which is not a "
+                    "confirmed deterministic computation-verification result"
+                )
+        if node.state == SubgoalState.source_supported and not node.supported_by_source_steps:
+            raise KernelValidationError(
+                f"{node.id}: source_supported requires an earned source-grounding step reference"
+            )
+        if node.state == SubgoalState.scoped_checked and not (
+            node.supported_by_computations or node.supported_by_scoped_checks
+        ):
+            raise KernelValidationError(
+                f"{node.id}: scoped_checked requires a deterministic verification reference"
+            )
+        if node.state == SubgoalState.contradicted and not claim_refuted:
+            raise KernelValidationError(
+                f"{node.id}: contradicted requires the claim to be refuted by the kernel "
+                "(idea_grade.status=refuted); a reviewer objection or dropped-hypothesis "
+                "counterexample cannot close a subgoal as refuted"
+            )
 
 
 def _validate_manifest_paths(run_dir: Path, manifest: RunManifest) -> None:
