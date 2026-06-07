@@ -59,6 +59,7 @@ from .proof_verification import (
 )
 from .symbolic_identity import SUPPORTED_RING_IDENTITIES
 from .benchmark import run_benchmark
+from .calibration import run_calibration
 from .memo import build_concise_memo
 from .reviewer_checklist import review_checklist
 from .memory import summarize_memory, write_memory_entry
@@ -1859,6 +1860,39 @@ def benchmark_command(
             typer.echo(f"        - {problem}")
     typer.echo(f"benchmark: {passed}/{len(report)} case(s) passed")
     if passed != len(report):
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def calibration(
+    output_root: Path = typer.Option(Path(".benchmark_runs"), "--out-root", help="Where calibration runs are written."),
+) -> None:
+    """Aggregate the product's core SAFETY metrics over the mock fixtures.
+
+    Reports per-fixture validation, source-support false positives, proof-language
+    violations, strategy high-score false positives, and memo honesty. All safety
+    metrics must be 0; the command exits non-zero on any regression. Earns no
+    status and never asserts a claim is proved.
+    """
+    report = run_calibration(output_root)
+    m = report["metrics"]
+    for row in report["rows"]:
+        mark = "ok " if row["memo_honest"] and not row["source_support_false_positives"] \
+            and not row["strategy_high_score_false_positives"] else "BAD"
+        typer.echo(
+            f"[{mark}] {row['fixture']:44s} validated={row['validated']} "
+            f"src_fp={row['source_support_false_positives']} "
+            f"hiscore_fp={row['strategy_high_score_false_positives']} "
+            f"proof_lang={len(row['proof_language'])}"
+        )
+    typer.echo(
+        f"calibration: {m['fixtures_validated']}/{m['fixtures_total']} validated; "
+        f"source-support false positives={m['source_support_false_positives']}; "
+        f"proof-language violations={m['proof_language_violations']}; "
+        f"high-score false positives={m['strategy_high_score_false_positives']}; "
+        f"memo honest={m['memo_honest']}/{m['fixtures_total']}"
+    )
+    if not m["clean"]:
         raise typer.Exit(code=1)
 
 
