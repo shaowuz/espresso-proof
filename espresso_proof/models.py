@@ -1893,6 +1893,35 @@ class MemoryEntry(StrictBaseModel):
     reusable_lesson: str
 
 
+class MemoryContextEntry(StrictBaseModel):
+    """One prior-memory entry deemed relevant to the current run, with an advisory
+    recommended use. It carries NO source/evidence/proof status field, so reusing
+    memory can only change ranking / time-allocation / what-to-test-first, never a
+    trusted status."""
+
+    id: str
+    type: Literal[
+        "failed_attempt", "tested_example", "counterexample", "source_gap",
+        "repaired_claim", "user_decision", "theorem_applicability_failure",
+        "reviewer_objection", "human_example_feedback",
+    ]
+    relevance_reason: str
+    recommended_use: Literal["avoid", "retest", "request_source", "prioritize", "ask_human", "note"]
+    summary: str
+
+
+class MemoryContext(StrictBaseModel):
+    """Advisory memory influence for a run: prior-run lessons matched to this
+    claim, with recommended uses. Advisory only — never upgrades any status and
+    never overrides current-run artifacts (StrictBaseModel forbids status fields)."""
+
+    schema_version: int = 1
+    claim_id: str
+    generated_at: str = ""
+    matched_entries: list[MemoryContextEntry] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+
+
 class MemoryIndexEntry(StrictBaseModel):
     id: str
     entry_path: str
@@ -2032,6 +2061,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "prover_round_index": ProverRoundIndex,
     "memory_entry": MemoryEntry,
     "memory_index": MemoryIndex,
+    "memory_context": MemoryContext,
     "run_manifest": RunManifest,
     "workflow_spec": WorkflowSpec,
     "source_ref": SourceRef,
