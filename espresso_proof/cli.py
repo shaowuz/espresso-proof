@@ -311,7 +311,13 @@ def run_flow(
     ),
     output_root: Path = typer.Option(Path("."), "--output-root", file_okay=False),
 ) -> None:
-    """Run the current end-to-end multiagent critique flow."""
+    """Compatibility command: run the end-to-end critique flow to the human gate.
+
+    ``run-flow`` is a thin compatibility wrapper. ``orchestrate`` is the canonical
+    runtime path; this delegates to the SAME ``orchestrate_run`` lifecycle so the
+    two entrypoints can never drift in stage sequencing or safety behavior. It
+    cannot upgrade proof/source/evidence status or create human_confirmed=True.
+    """
     if literature_mode not in {"local", "live"}:
         raise typer.BadParameter("literature-mode must be local or live")
     if provider not in {"stub", "openai", "external"}:
@@ -320,90 +326,28 @@ def run_flow(
         raise typer.BadParameter("front-half must be mock, stub, or external")
     if reviewer_set not in {"generic", "espresso"}:
         raise typer.BadParameter("reviewer-set must be generic or espresso")
-    provider_diagnostic = _preflight_agent_provider(
+
+    result = orchestrate_run(
+        project=project,
+        input_path=input,
+        output_root=output_root,
         provider=provider,
-        model=model,
-        api_key_env=api_key_env,
-        external_agent_command_env=external_agent_command_env,
-        network_check=agent_network_preflight,
-    )
-
-    run_dir = run_mock_critique(project, input, output_root)
-
-    front_half_report = None
-    if front_half != "mock":
-        front_half_client = build_llm_client(
-            provider=front_half,
-            model=model,
-            api_key_env=api_key_env,
-            external_agent_command_env=external_agent_command_env,
-        )
-        front_half_report = run_front_half_agent_pass(
-            run_dir=run_dir,
-            client=front_half_client,
-        )
-        validate_run(run_dir)
-
-    manifest_path = run_dir / "run_manifest.yaml"
-    manifest = read_yaml(manifest_path)
-    artifacts = manifest["artifacts"]
-    project_dir = run_dir.parents[1]
-
-    literature = run_literature_discovery(
-        project_dir=project_dir,
-        locked_claim_path=run_dir / artifacts["locked_claim"],
-        hypothesis_ledger_path=run_dir / artifacts["hypothesis_ledger"],
-        max_references=max_references,
-        query=read_text(input),
-        mode=literature_mode,
-        providers=literature_provider,
-    )
-    LiteratureReviewReport.model_validate(literature)
-    write_yaml(run_dir / artifacts["literature_review"], literature)
-    validate_run(run_dir)
-
-    agent_report = run_llm_agent_pass(
-        run_dir=run_dir,
-        provider=provider,
+        front_half=front_half,
         model=model,
         api_key_env=api_key_env,
         external_agent_command_env=external_agent_command_env,
         reviewer_set=reviewer_set,
-        provider_diagnostic=provider_diagnostic,
+        literature_mode=literature_mode,
+        literature_providers=literature_provider,
+        max_references=max_references,
+        agent_network_preflight=agent_network_preflight,
     )
-    LLMAgentRunReport.model_validate(agent_report)
-    loop_report = build_prover_loop_report(
-        agent_report=agent_report,
-        strategy_brief=read_yaml(run_dir / artifacts["strategy_brief"]),
-        human_choice=read_yaml(run_dir / artifacts["human_choice"]),
-    )
-    ProverLoopReport.model_validate(loop_report)
-    manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
-    manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"
-    manifest.setdefault("optional_artifacts", {})["prover_round_index"] = "prover_rounds/index.yaml"
-    manifest["current_state"] = "WAITING_LLM_AGENT_HUMAN_GATE"
-    write_yaml(run_dir / "llm_agent_run.yaml", agent_report)
-    write_yaml(run_dir / "prover_loop.yaml", loop_report)
-    write_initial_prover_round_artifacts(
-        run_dir=run_dir,
-        agent_report=agent_report,
-        loop_report=loop_report,
-    )
-    write_yaml(manifest_path, manifest)
-    validate_run(run_dir)
 
-    typer.echo(f"Wrote run artifacts to {run_dir}")
+    typer.echo(f"Wrote run artifacts to {result['run_dir']}")
     typer.echo(f"Literature Discovery: {literature_mode}")
-    if front_half_report is not None:
-        ok = sum(1 for s in front_half_report["stages"] if s["status"] == "ok")
-        skipped = sum(1 for s in front_half_report["stages"] if s["status"] == "skipped")
-        typer.echo(
-            f"Front-half agents: mode={front_half}, ok={ok}, skipped={skipped}"
-        )
-    else:
-        typer.echo("Front-half agents: mode=mock (no live pass)")
+    typer.echo(f"Front-half agents: mode={front_half}")
     typer.echo(f"LLM agents: provider={provider}, reviewer_set={reviewer_set}")
-    typer.echo(f"Human gate: {agent_report['human_gate']['status']}")
+    typer.echo(f"Human gate: {result['human_gate'].get('status', 'unknown')}")
 
 
 def _preflight_agent_provider(

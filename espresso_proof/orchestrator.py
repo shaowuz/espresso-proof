@@ -69,21 +69,28 @@ def _reached(run_dir: Path, state: str) -> bool:
 
 
 def _preflight_provider(
-    provider: str, *, model: str, api_key_env: str, command_env: str
-) -> None:
-    """Fail early (with a clear message) if a live provider is not configured."""
+    provider: str, *, model: str, api_key_env: str, command_env: str, network_check: bool = False
+) -> dict | None:
+    """Fail early (with a clear message) if a live provider is not configured.
+
+    Returns the provider diagnostic report (or ``None`` for the stub provider) so
+    a caller can thread it into the agent pass. With ``network_check=True`` the
+    diagnostic performs a real provider call and the run fails closed BEFORE any
+    artifact is written if it is unreachable.
+    """
 
     if provider == "stub":
-        return
+        return None
     if provider == "openai":
-        report = openai_agent_diagnostic(model=model, api_key_env=api_key_env, network_check=False)
+        report = openai_agent_diagnostic(model=model, api_key_env=api_key_env, network_check=network_check)
     elif provider == "external":
-        report = external_agent_diagnostic(model=model, command_env=command_env, network_check=False)
+        report = external_agent_diagnostic(model=model, command_env=command_env, network_check=network_check)
     else:
         raise RuntimeError(f"unsupported provider: {provider}")
     if report["status"] not in {"configured", "ready"}:
         message = report.get("error") or report.get("message") or f"{provider} provider is not ready."
         raise RuntimeError(str(message))
+    return report
 
 
 def orchestrate_run(
@@ -100,6 +107,7 @@ def orchestrate_run(
     literature_mode: str = "local",
     literature_providers: list[str] | None = None,
     max_references: int = 8,
+    agent_network_preflight: bool = False,
     run_dir: Path | None = None,
     front_half_client=None,
 ) -> dict:
@@ -108,16 +116,27 @@ def orchestrate_run(
     Returns a dict with the run_dir, the final lifecycle state, and the human
     gate status. Resumable: pass an existing ``run_dir`` to continue from its
     recorded state (completed stages are skipped).
+
+    This is the single canonical runtime path. ``agent_network_preflight=True``
+    performs a real provider call before scaffolding (so an unreachable live
+    provider fails closed before any artifact is written) and threads the
+    resulting diagnostic into the agent pass.
     """
 
-    # Fail early if a live provider is requested but not configured (parity with
-    # run-flow; avoids scaffolding a run that cannot complete its agent pass).
+    # Fail early if a live provider is requested but not configured (avoids
+    # scaffolding a run that cannot complete its agent pass). The front-half
+    # provider is only configuration-checked; the prover provider honours the
+    # network-preflight flag and its diagnostic is reused by the agent pass.
     if front_half != "mock":
         _preflight_provider(
             front_half, model=model, api_key_env=api_key_env, command_env=external_agent_command_env
         )
-    _preflight_provider(
-        provider, model=model, api_key_env=api_key_env, command_env=external_agent_command_env
+    provider_diagnostic = _preflight_provider(
+        provider,
+        model=model,
+        api_key_env=api_key_env,
+        command_env=external_agent_command_env,
+        network_check=agent_network_preflight,
     )
 
     # Stage 0 — scaffold a kernel-valid "unclear/needs_human" run for any claim.
@@ -163,7 +182,6 @@ def orchestrate_run(
 
     # Stage 3 — live Prover + Reviewers; stop at the human gate.
     if not _reached(run_dir, "WAITING_LLM_AGENT_HUMAN_GATE"):
-        provider_diagnostic = None
         agent_report = run_llm_agent_pass(
             run_dir=run_dir,
             provider=provider,
