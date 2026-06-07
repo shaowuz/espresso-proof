@@ -26,6 +26,9 @@ espresso = "espresso_proof.cli:app"
 where = ["."]
 include = ["espresso_proof*"]
 
+[tool.setuptools.package-data]
+espresso_proof = ["agent_skills/*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

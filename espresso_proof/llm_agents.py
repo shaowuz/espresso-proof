@@ -87,6 +87,8 @@ ESPRESSO_REVIEWER_ROLES = [
     "line_proof_reviewer",
 ]
 
+CODEX_EXTERNAL_MODEL = "gpt-5.5-xhigh"
+
 
 class LLMClient(Protocol):
     provider: str
@@ -278,6 +280,8 @@ class ExternalCommandClient:
         self.command = shlex.split(raw_command)
         if not self.command:
             raise RuntimeError(f"{command_env} is empty")
+        if _is_codex_external_command(self.command):
+            self.model = CODEX_EXTERNAL_MODEL
 
     def complete_json(self, *, system: str, prompt: str) -> dict:
         request = {
@@ -311,6 +315,10 @@ class ExternalCommandClient:
         if isinstance(data.get("output"), dict):
             return data["output"]
         return data
+
+
+def _is_codex_external_command(command: list[str]) -> bool:
+    return any(Path(part).name == "espresso_codex_agent.py" for part in command)
 
 
 def openai_agent_diagnostic(
@@ -393,10 +401,15 @@ def external_agent_diagnostic(
     timeout: int = 120,
 ) -> dict:
     """Report whether a local JSON agent command is configured and callable."""
-    command_present = bool(os.environ.get(command_env, ""))
+    raw_command = os.environ.get(command_env, "")
+    command_present = bool(raw_command)
+    command = shlex.split(raw_command) if raw_command else []
+    effective_model = CODEX_EXTERNAL_MODEL if _is_codex_external_command(command) else (
+        model or "external-json-agent"
+    )
     report = {
         "provider": "external",
-        "model": model or "external-json-agent",
+        "model": effective_model,
         "command_env": command_env,
         "command_present": command_present,
         "structured_output": {
