@@ -62,11 +62,18 @@ def build_memory_context(run_dir: Path, *, generated_at: str | None = None) -> d
                 continue  # only genuinely relevant memory is surfaced
             mem = _load_memory_entry(project_dir, index_entry)
             summary = (mem.summary if mem else index_entry.summary)
+            # _score_entry also scores over tags/provenance, so a relevant entry
+            # may share no SUMMARY terms; report that honestly instead of "shares 0".
+            reason = (
+                f"shares claim term(s): {', '.join(shared)}"
+                if shared
+                else "matches this claim on tags/metadata"
+            )
             matched.append(
                 {
                     "id": index_entry.id,
                     "type": index_entry.type,
-                    "relevance_reason": f"shares {len(shared)} claim term(s): {', '.join(shared)}",
+                    "relevance_reason": reason,
                     "recommended_use": _USE_BY_TYPE.get(index_entry.type, "note"),
                     "summary": summary,
                 }
