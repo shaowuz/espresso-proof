@@ -310,6 +310,20 @@ def build_concise_memo(run_dir: Path) -> str:
                 for rec in hints["time_allocation"]:
                     lines.append(f"  Next-effort hint: {rec}")
 
+    # Memory influence (advisory): prior-run lessons matched to this claim. Never
+    # changes status; only suggests what to avoid / retest / source / prioritize.
+    if "memory_context" in optional:
+        mc = read_yaml(run_dir / optional["memory_context"])
+        matched = mc.get("matched_entries", [])
+        if matched:
+            lines.append("")
+            lines.append("Memory from prior runs (advisory; never changes status):")
+            for m in matched:
+                lines.append(
+                    f"  [{m.get('recommended_use')}] {m.get('summary')} "
+                    f"({m.get('type')}; {m.get('relevance_reason')})"
+                )
+
     # Proof verification bridge: scoped machine-verified instances only. NEVER a
     # universal proof; the renderer never emits "proved".
     if "proof_verification" in optional:

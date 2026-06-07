@@ -22,6 +22,7 @@ from .models import (
     FailureClassificationReport,
     FailurePatternAudit,
     LiteratureCandidates,
+    MemoryContext,
     RetrievalResolutionReport,
     LiteratureRetrievalReport,
     LiteratureSearchPlan,
@@ -109,6 +110,7 @@ def validate_run(run_dir: Path) -> None:
     _load_optional_autonomous_literature_retrieval(run_dir, manifest)
     _load_optional_literature_candidates(run_dir, manifest)
     _load_optional_retrieval_resolution(run_dir, manifest)
+    _load_optional_memory_context(run_dir, manifest)
     theorem_applicability = _load_optional_theorem_applicability(run_dir, manifest)
     llm_agent_run = _load_optional_llm_agent_run(run_dir, manifest)
     prover_loop = _load_optional_prover_loop(run_dir, manifest)
@@ -454,6 +456,22 @@ def _load_optional_retrieval_resolution(
     return validate_yaml_model(
         run_dir / optional["retrieval_resolution"],
         RetrievalResolutionReport,
+    )
+
+
+def _load_optional_memory_context(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> MemoryContext | None:
+    optional = manifest.optional_artifacts
+    if "memory_context" not in optional:
+        return None
+    # MemoryContext / MemoryContextEntry (StrictBaseModel, extra=forbid) have no
+    # source/evidence/proof status field; validating here fails closed if a memory
+    # context were ever written/hand-edited with a trusted status.
+    return validate_yaml_model(
+        run_dir / optional["memory_context"],
+        MemoryContext,
     )
 
 

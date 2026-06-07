@@ -48,6 +48,7 @@ from .research_bank import (
 from .literature_retrieval import retrieve_and_ground as retrieve_and_ground_from_corpus
 from .literature_retrieval import retrieve_sources
 from .mathematical_judgment import judge_run
+from .memory_context import build_memory_context
 from .finite_group_verifier import verify_identity_on_table
 from .proof_verification import (
     auto_wire_scoped_verifications,
@@ -494,6 +495,26 @@ def judge_command(
     kinds = ", ".join(sorted({item["kind"] for item in report["findings"]})) or "none"
     typer.echo(f"Recorded {len(report['findings'])} judgment finding(s): {kinds}")
     typer.echo(f"-> {run / 'mathematical_judgment.yaml'}")
+
+
+@app.command("memory-context")
+def memory_context_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+) -> None:
+    """Match prior project memory to this run's claim (advisory only).
+
+    Writes memory_context.yaml and re-validates. Memory can only influence route
+    ranking / time allocation / what to test first (avoid / retest /
+    request_source / prioritize / ask_human). It never sets source_backed, checked
+    evidence, proof status, or a refutation, and never overrides current artifacts.
+    """
+    report = build_memory_context(run)
+    validate_run(run)
+    typer.echo(
+        f"Matched {len(report['matched_entries'])} prior-memory entr(ies) "
+        "(advisory; never changes status)."
+    )
+    typer.echo(f"-> {run / 'memory_context.yaml'}")
 
 
 @app.command("audit-patterns")

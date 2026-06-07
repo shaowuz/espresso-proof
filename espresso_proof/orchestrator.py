@@ -326,6 +326,15 @@ def resume_run(
     audit_failure_patterns(run_dir)
     validate_run(run_dir)
 
+    # Memory influence (advisory): match prior project memory to this claim and
+    # record recommended uses (avoid / retest / request_source / prioritize /
+    # ask_human). Never upgrades status or overrides current artifacts; the report
+    # carries no status field and validate_run re-checks.
+    from .memory_context import build_memory_context
+
+    build_memory_context(run_dir)
+    validate_run(run_dir)
+
     _set_state(run_dir, "COMPLETED_MEMO")
     memo = build_concise_memo(run_dir)
     if loop_summary is not None:
