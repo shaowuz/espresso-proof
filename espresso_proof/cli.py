@@ -40,7 +40,13 @@ from .research_bank import (
     load_bankable_dict,
     materialize_run_banks,
 )
-from .literature_retrieval import retrieve_and_ground, retrieve_sources
+# NOTE: literature_retrieval.retrieve_and_ground (corpus_dir/query, older
+# retrieve-sources --ground path) is a DIFFERENT function from
+# retrieval_grounding.retrieve_and_ground (Goal 03, candidate/local_corpus). Alias
+# this one so it does not shadow the Goal 03 import above (which the
+# `retrieve-and-ground` command depends on).
+from .literature_retrieval import retrieve_and_ground as retrieve_and_ground_from_corpus
+from .literature_retrieval import retrieve_sources
 from .mathematical_judgment import judge_run
 from .finite_group_verifier import verify_identity_on_table
 from .proof_verification import (
@@ -157,6 +163,8 @@ def orchestrate(
     source_type: str = typer.Option("paper", "--source-type"),
     run_evidence_audit: bool = typer.Option(False, "--audit-evidence", help="Machine-check computations (earn computation_checked) before the loop (resume)."),
     run_auto_wire_verifications: bool = typer.Option(False, "--auto-wire-verifications", help="Run the strategy/prover stage's explicit scoped finite/computational checks (earn instance_checked) before the loop (resume)."),
+    run_lit_scout: bool = typer.Option(False, "--literature-scout", help="Run the LLM Literature Scout (candidate sources per proof step) before the loop (resume)."),
+    auto_ground: Path | None = typer.Option(None, "--auto-ground", file_okay=False, help="Local corpus directory: auto resolve + ground a source from it before the loop (resume; fail-closed)."),
 ) -> None:
     """Run the Core Flow end-to-end for an arbitrary claim, stopping at the human gate.
 
@@ -205,6 +213,30 @@ def orchestrate(
                 f"Auto-wired scoped checks: {len(summary['appended'])} run, "
                 f"{len(summary['skipped'])} skipped (checked in this finite/computational "
                 "scope only; NOT a universal proof)"
+            )
+        if run_lit_scout:
+            # LLM Literature Scout: candidate sources per proof step (advisory,
+            # candidate-only; never earns source_backed). Uses the resume provider.
+            scout_client = build_llm_client(
+                provider=provider, model=model, api_key_env=api_key_env,
+                external_agent_command_env=external_agent_command_env,
+            )
+            scout = run_literature_scout(run_dir=resume, client=scout_client)
+            n = sum(len(s["candidates"]) for s in scout["proof_step_candidates"])
+            typer.echo(f"Literature scout: {n} candidate source(s) proposed (candidate-only, never source_backed)")
+        if auto_ground is not None:
+            # Auto resolve + ground a source from a LOCAL corpus before the loop.
+            # Fail-closed by construction: an unresolved/failed retrieval leaves the
+            # run valid and the step candidate (support is earned only by the
+            # grounding gate: exact locator + attribution + hypothesis match).
+            ag = retrieve_and_ground(
+                run_dir=resume, local_corpus=auto_ground,
+                source_id=source_id, title=source_title, authors=source_author or [],
+                source_type="local_note",
+            )
+            typer.echo(
+                f"Auto-ground (local-first): resolution={ag['resolution_status']} "
+                f"(retrieval never sets source_backed; the grounding gate decides)"
             )
         memo = resume_run(
             run_dir=resume,
@@ -500,7 +532,7 @@ def retrieve_sources_command(
     if ground:
         if corpus is None:
             raise typer.BadParameter("--ground requires --corpus")
-        result = retrieve_and_ground(run, corpus_dir=corpus, query=query)
+        result = retrieve_and_ground_from_corpus(run, corpus_dir=corpus, query=query)
         validate_run(run)
         if result.get("grounded"):
             typer.echo("Retrieved a proposed source and handed it to source grounding "
