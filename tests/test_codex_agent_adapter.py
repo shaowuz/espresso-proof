@@ -208,4 +208,35 @@ def test_external_client_records_codex_model_when_command_is_codex_adapter(
     client = ExternalCommandClient(model="gpt-4.1")
 
     assert client.model == "gpt-5.5-xhigh"
+    assert client.timeout == 360
     assert client.complete_json(system="Return JSON only.", prompt="{}")["verdict"] == "needs_sources"
+
+
+def test_external_client_timeout_defaults_and_env_override(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    legacy = tmp_path / "legacy_agent.py"
+    legacy.write_text(
+        "\n".join(
+            [
+                "import json",
+                "import sys",
+                "json.loads(sys.stdin.read())",
+                "json.dump({'verdict': 'needs_sources'}, sys.stdout)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    codex = tmp_path / "espresso_codex_agent.py"
+    codex.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
+
+    monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_COMMAND", f"{sys.executable} {legacy}")
+    assert ExternalCommandClient(model="external").timeout == 120
+
+    monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_COMMAND", f"{sys.executable} {codex}")
+    assert ExternalCommandClient(model="external").timeout == 360
+
+    monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_TIMEOUT_SECONDS", "450")
+    assert ExternalCommandClient(model="external").timeout == 450
