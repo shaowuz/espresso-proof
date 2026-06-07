@@ -2185,6 +2185,55 @@ class WorkflowSpec(FlexibleBaseModel):
         return self
 
 
+class FrontHalfStageResult(StrictBaseModel):
+    """Audit record for ONE front-half stage. Process evidence only.
+
+    ``extra="forbid"`` (StrictBaseModel) rejects any status-upgrade field such as
+    ``source_backed`` / ``checked`` / ``proved`` / ``human_confirmed`` /
+    ``refutes_claim`` / ``lean_checked`` / ``proof_status``: this record can never
+    carry mathematical status. ``unsafe_language`` is an internal downgrade
+    ledger, not proof text.
+    """
+
+    stage: str
+    status: Literal["ok", "skipped", "error"]
+    input_artifacts: list[str] = Field(default_factory=list)
+    output_artifacts: list[str] = Field(default_factory=list)
+    validation: Literal["ok", "error", "not_run"] = "not_run"
+    unsafe_language: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_stage_result(self) -> FrontHalfStageResult:
+        # An error stage can never be silently recorded as a passing validation.
+        if self.status == "error" and self.validation == "ok":
+            raise ValueError("error stage cannot have validation=ok")
+        for path in (*self.input_artifacts, *self.output_artifacts):
+            if path.startswith("/") or ".." in path.split("/"):
+                raise ValueError(f"front_half_run artifact path must be run-relative: {path!r}")
+        return self
+
+
+class FrontHalfRunReport(StrictBaseModel):
+    """Durable, audit-only record of a front-half agent pass (``front_half_run``).
+
+    It records WHICH front-half stage produced what and any unsafe-language
+    downgrades, for debugging and auditing. It is evidence about process, not
+    about the theorem: it must not affect grades, proof/source/evidence status,
+    or lifecycle state, and (via StrictBaseModel) cannot carry a status-upgrade
+    field.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    provider: str
+    model: str
+    stages: list[FrontHalfStageResult]
+    notes: list[str] = Field(default_factory=list)
+
+
 MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "claim": Claim,
     "agent_contracts": AgentContracts,
@@ -2229,6 +2278,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "prover_round": ProverRoundReport,
     "prover_round_index": ProverRoundIndex,
     "proof_goal_graph": ProofGoalGraph,
+    "front_half_run": FrontHalfRunReport,
     "memory_entry": MemoryEntry,
     "memory_index": MemoryIndex,
     "memory_context": MemoryContext,

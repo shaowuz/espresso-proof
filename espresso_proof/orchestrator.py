@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .front_half_agents import run_front_half_agent_pass
+from .front_half_agents import run_front_half_agent_pass, write_front_half_run
+from .validation.front_half import validate_front_half_run
 from .io import read_text, read_yaml, write_yaml
 from .literature_discovery import discover_literature as run_literature_discovery
 from .llm_agents import (
@@ -160,6 +161,7 @@ def orchestrate_run(
     # Stage 1 — front-half agents (S1–S8). Skipped when front_half == "mock".
     if not _reached(run_dir, "FRONT_HALF_DONE"):
         def _front_half() -> None:
+            pass_report = None
             if front_half != "mock" or front_half_client is not None:
                 client = front_half_client or build_client(
                     provider=front_half,
@@ -167,13 +169,22 @@ def orchestrate_run(
                     api_key_env=api_key_env,
                     external_agent_command_env=external_agent_command_env,
                 )
-                run_front_half_agent_pass(run_dir=run_dir, client=client)
+                pass_report = run_front_half_agent_pass(run_dir=run_dir, client=client)
+            # Persist the durable audit-only front_half_run.yaml inside the
+            # transaction (rolled back with the stage if validation fails).
+            write_front_half_run(
+                run_dir, pass_report=pass_report, provider=front_half, model=model
+            )
+
+        def _validate_front_half() -> None:
+            validate_run(run_dir)
+            validate_front_half_run(run_dir)
 
         # Whole-run snapshot: the front-half pass may rewrite many artifacts.
         runner.run(
             name="front_half",
             mutate=_front_half,
-            validate=lambda: validate_run(run_dir),
+            validate=_validate_front_half,
             state_after="FRONT_HALF_DONE",
         )
 

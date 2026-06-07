@@ -41,6 +41,7 @@ from .models import (
     ComputationChecks,
     CounterexampleReport,
     ExampleSelection,
+    FrontHalfRunReport,
     HypothesisLedger,
     IdeaGrade,
     LiteratureReviewReport,
@@ -138,7 +139,13 @@ def run_front_half_agent_pass(
         normalizer = _STAGE_REGISTRY.get(stage)
         if normalizer is None:
             results.append(
-                {"stage": stage, "status": "skipped", "errors": [], "unsafe_language": []}
+                {
+                    "stage": stage,
+                    "status": "skipped",
+                    "validation": "not_run",
+                    "errors": [],
+                    "unsafe_language": [],
+                }
             )
             continue
         try:
@@ -147,7 +154,13 @@ def run_front_half_agent_pass(
             validate_run(run_dir)
         except Exception as exc:  # noqa: BLE001 - fail closed, record, optionally re-raise
             results.append(
-                {"stage": stage, "status": "error", "errors": [str(exc)], "unsafe_language": []}
+                {
+                    "stage": stage,
+                    "status": "error",
+                    "validation": "error",
+                    "errors": [str(exc)],
+                    "unsafe_language": [],
+                }
             )
             if strict:
                 raise
@@ -156,6 +169,7 @@ def run_front_half_agent_pass(
             {
                 "stage": stage,
                 "status": "ok",
+                "validation": "ok",
                 "errors": [],
                 "unsafe_language": list(outcome.get("unsafe_language", [])),
             }
@@ -173,6 +187,79 @@ def run_front_half_agent_pass(
             "Every stage is re-validated by the Python kernel before being accepted.",
         ],
     }
+
+
+FRONT_HALF_RUN_FILENAME = "front_half_run.yaml"
+
+
+def build_front_half_run_report(
+    run_dir: Path,
+    *,
+    pass_report: dict | None,
+    provider: str,
+    model: str,
+) -> dict:
+    """Build a model-valid ``front_half_run`` report dict (audit-only).
+
+    With ``pass_report=None`` (mock mode, no live pass) every stage is recorded
+    as a durable ``skipped`` entry rather than dropped.
+    """
+
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])
+    if pass_report is None:
+        stages = [
+            {
+                "stage": stage,
+                "status": "skipped",
+                "validation": "not_run",
+                "errors": [],
+                "unsafe_language": [],
+            }
+            for stage in FRONT_HALF_STAGES
+        ]
+        generated_at = datetime.now(UTC).isoformat()
+        notes = [
+            "Front-half pass skipped (mock mode); no stage executed.",
+            "Process audit only; never upgrades source/evidence/proof status.",
+        ]
+    else:
+        stages = pass_report["stages"]
+        generated_at = pass_report.get("generated_at", datetime.now(UTC).isoformat())
+        notes = pass_report.get("notes", [])
+
+    report = {
+        "schema_version": 1,
+        "claim_id": claim["id"],
+        "run_id": manifest["run_id"],
+        "generated_at": generated_at,
+        "provider": provider,
+        "model": model,
+        "stages": stages,
+        "notes": notes,
+    }
+    FrontHalfRunReport.model_validate(report)
+    return report
+
+
+def write_front_half_run(
+    run_dir: Path,
+    *,
+    pass_report: dict | None,
+    provider: str,
+    model: str,
+) -> dict:
+    """Persist ``front_half_run.yaml`` (rewritten, not appended -> idempotent) and
+    register it as the optional manifest artifact ``front_half_run``."""
+
+    report = build_front_half_run_report(
+        run_dir, pass_report=pass_report, provider=provider, model=model
+    )
+    write_yaml(run_dir / FRONT_HALF_RUN_FILENAME, report)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    manifest.setdefault("optional_artifacts", {})["front_half_run"] = FRONT_HALF_RUN_FILENAME
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+    return report
 
 
 # ---------------------------------------------------------------------------
