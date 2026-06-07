@@ -35,6 +35,12 @@ def all_fixtures() -> list[str]:
 
 
 def _source_support_false_positives(run_dir: Path) -> int:
+    # A redundant cross-check layered on top of validate_run, which (via
+    # SourceRef.validate_source_backed) remains the authoritative source_backed
+    # gate. Use the kernel's own Locator.is_exact so this cannot drift looser than
+    # the gate it shadows.
+    from .models import Locator
+
     sg = read_yaml(run_dir / "source_grounding.yaml") or {}
     refs = {r.get("id"): r for r in sg.get("source_refs", [])}
     fp = 0
@@ -43,8 +49,10 @@ def _source_support_false_positives(run_dir: Path) -> int:
             continue
         for rid in step.get("source_refs", []):
             ref = refs.get(rid, {})
-            loc = ref.get("locator", {}) or {}
-            exact = loc.get("kind") not in (None, "unknown") and bool(str(loc.get("value", "")).strip())
+            try:
+                exact = Locator.model_validate(ref.get("locator", {}) or {}).is_exact
+            except Exception:  # noqa: BLE001 - a malformed locator is not exact
+                exact = False
             attributed = bool([a for a in ref.get("authors", []) if str(a).strip()]) and bool(ref.get("title"))
             if not (exact and attributed and ref.get("status") == "source_backed"):
                 fp += 1
