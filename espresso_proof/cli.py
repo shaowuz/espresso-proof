@@ -73,6 +73,7 @@ from .pdf_ingestion import (
     read_source_bytes,
 )
 from .source_verification import ground_run
+from .source_grounding_stage import prepare_source_grounding
 from .theorem_applicability import audit_theorem_applicability
 from .verifier import audit_evidence, verify_computation_checks
 from .models import (
@@ -185,24 +186,18 @@ def orchestrate(
         if provider not in {"stub", "openai", "external"}:
             raise typer.BadParameter("provider must be stub, openai, or external")
         if ground_source is not None:
-            # Ground steps against a HUMAN-PROVIDED source BEFORE the loop: a step
-            # earns source_backed only with exact locator + hypothesis match +
-            # attribution (author+title). Reuses the single grounding pipeline.
-            gmanifest = read_yaml(resume / "run_manifest.yaml")
-            gclaim = read_yaml(resume / gmanifest["artifacts"]["locked_claim"])
-            extraction = ingest_source_for_theorems(
-                claim_id=gclaim["id"],
-                source=str(ground_source),
+            # Ground steps against a HUMAN-PROVIDED source BEFORE the loop via the
+            # single auditable, transactional source-grounding stage: a step earns
+            # source_backed only with exact locator + hypothesis match +
+            # attribution (author+title). Fails closed (run stays at this gate).
+            prepare_source_grounding(
+                run_dir=resume,
+                ground_source=ground_source,
                 source_id=source_id,
                 title=source_title,
-                authors=source_author or [],
+                authors=source_author,
                 source_type=source_type,
             )
-            TheoremExtractionReport.model_validate(extraction)
-            gmanifest.setdefault("optional_artifacts", {})["theorem_extraction"] = "theorem_extraction.yaml"
-            write_yaml(resume / "theorem_extraction.yaml", extraction)
-            write_yaml(resume / "run_manifest.yaml", gmanifest)
-            ground_run(run_dir=resume, theorem_extraction_path=resume / "theorem_extraction.yaml")
             typer.echo(f"Grounded against {ground_source} (a reference supports a step only with exact locator, hypothesis match, and attribution)")
         if run_evidence_audit:
             # Earn computation_checked from confirming machine results BEFORE the loop.
