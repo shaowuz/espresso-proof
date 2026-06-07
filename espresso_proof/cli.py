@@ -34,6 +34,7 @@ from .failure_classifier import classify_failures
 from .failure_pattern_bank import audit_failure_patterns, seed_failure_pattern_bank
 from .autonomous_retrieval import run_autonomous_retrieval
 from .bank_dashboard import render_bank_dashboard
+from .run_dashboard import render_run_dashboard, write_run_dashboard
 from .research_bank import (
     _BANKABLE_KINDS,
     append_bank_item,
@@ -252,6 +253,8 @@ def orchestrate(
             reviewer_set=reviewer_set,
         )
         typer.echo(memo)
+        dashboard = write_run_dashboard(resume)
+        typer.echo(f"Dashboard: {dashboard}")
         return
 
     if input is None:
@@ -276,6 +279,7 @@ def orchestrate(
         literature_mode=literature_mode,
     )
     typer.echo(f"Wrote run artifacts to {result['run_dir']}")
+    typer.echo(f"Dashboard: {result['dashboard']}")
     typer.echo(f"State: {result['state']}")
     typer.echo(f"Human gate: {result['human_gate'].get('status', 'unknown')}")
     typer.echo(
@@ -684,6 +688,25 @@ def bank_dashboard_command(
         typer.echo(f"Wrote research bank dashboard -> {out}")
     else:
         typer.echo(html_text)
+
+
+@app.command("run-dashboard")
+def run_dashboard_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    out: Path | None = typer.Option(None, "--out", help="Write the HTML here; default: <run>/research_dashboard.html."),
+) -> None:
+    """Render the minimal interactive product dashboard for one run.
+
+    This is the primary human-facing run view: claim status, route picker,
+    reviewer repair state, and next command. It is read-only with respect to
+    mathematical artifacts; it never changes proof/source/evidence status.
+    """
+    validate_run(run)
+    if out is None:
+        out = write_run_dashboard(run)
+    else:
+        write_text(out, render_run_dashboard(run))
+    typer.echo(f"Wrote run dashboard -> {out}")
 
 
 @app.command("verify-finite-groups")

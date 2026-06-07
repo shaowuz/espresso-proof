@@ -87,6 +87,11 @@ ESPRESSO_REVIEWER_ROLES = [
     "line_proof_reviewer",
 ]
 
+CODEX_EXTERNAL_MODEL = "gpt-5.5-xhigh"
+DEFAULT_EXTERNAL_TIMEOUT_SECONDS = 120
+DEFAULT_CODEX_EXTERNAL_TIMEOUT_SECONDS = 360
+EXTERNAL_AGENT_TIMEOUT_ENV = "ESPRESSO_EXTERNAL_AGENT_TIMEOUT_SECONDS"
+
 
 class LLMClient(Protocol):
     provider: str
@@ -267,17 +272,19 @@ class ExternalCommandClient:
         *,
         model: str,
         command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
-        timeout: int = 120,
+        timeout: int | None = None,
     ) -> None:
         self.model = model or "external-json-agent"
         self.command_env = command_env
-        self.timeout = timeout
         raw_command = os.environ.get(command_env, "")
         if not raw_command:
             raise RuntimeError(f"{command_env} is not set")
         self.command = shlex.split(raw_command)
         if not self.command:
             raise RuntimeError(f"{command_env} is empty")
+        if _is_codex_external_command(self.command):
+            self.model = CODEX_EXTERNAL_MODEL
+        self.timeout = _resolve_external_timeout(self.command, requested_timeout=timeout)
 
     def complete_json(self, *, system: str, prompt: str) -> dict:
         request = {
@@ -311,6 +318,27 @@ class ExternalCommandClient:
         if isinstance(data.get("output"), dict):
             return data["output"]
         return data
+
+
+def _is_codex_external_command(command: list[str]) -> bool:
+    return any(Path(part).name == "espresso_codex_agent.py" for part in command)
+
+
+def _resolve_external_timeout(command: list[str], *, requested_timeout: int | None) -> int:
+    if requested_timeout is not None:
+        return requested_timeout
+    raw_env = os.environ.get(EXTERNAL_AGENT_TIMEOUT_ENV)
+    if raw_env:
+        try:
+            value = int(raw_env)
+        except ValueError as exc:
+            raise RuntimeError(f"{EXTERNAL_AGENT_TIMEOUT_ENV} must be an integer") from exc
+        if value < 1:
+            raise RuntimeError(f"{EXTERNAL_AGENT_TIMEOUT_ENV} must be positive")
+        return value
+    if _is_codex_external_command(command):
+        return DEFAULT_CODEX_EXTERNAL_TIMEOUT_SECONDS
+    return DEFAULT_EXTERNAL_TIMEOUT_SECONDS
 
 
 def openai_agent_diagnostic(
@@ -393,10 +421,15 @@ def external_agent_diagnostic(
     timeout: int = 120,
 ) -> dict:
     """Report whether a local JSON agent command is configured and callable."""
-    command_present = bool(os.environ.get(command_env, ""))
+    raw_command = os.environ.get(command_env, "")
+    command_present = bool(raw_command)
+    command = shlex.split(raw_command) if raw_command else []
+    effective_model = CODEX_EXTERNAL_MODEL if _is_codex_external_command(command) else (
+        model or "external-json-agent"
+    )
     report = {
         "provider": "external",
-        "model": model or "external-json-agent",
+        "model": effective_model,
         "command_env": command_env,
         "command_present": command_present,
         "structured_output": {

@@ -1,6 +1,7 @@
 .venv/
 .eval_runs/
 .benchmark_runs/
+.espresso_agent_logs/
 __pycache__/
 *.py[cod]
 .pytest_cache/

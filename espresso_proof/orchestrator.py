@@ -29,6 +29,7 @@ from .llm_agents import (
 )
 from .mock_pipeline import run_mock_critique
 from .prover_loop_driver import continue_prover_loop
+from .run_dashboard import write_run_dashboard
 from .models import (
     HumanChoice,
     LiteratureReviewReport,
@@ -195,13 +196,16 @@ def orchestrate_run(
         write_yaml(run_dir / "run_manifest.yaml", manifest)
         validate_run(run_dir)
         _set_state(run_dir, "WAITING_LLM_AGENT_HUMAN_GATE")
+        write_run_dashboard(run_dir)
 
     final_manifest = read_yaml(run_dir / "run_manifest.yaml")
     agent_run = read_yaml(run_dir / "llm_agent_run.yaml")
+    dashboard = write_run_dashboard(run_dir)
     return {
         "run_dir": run_dir,
         "state": final_manifest.get("current_state"),
         "human_gate": agent_run.get("human_gate", {}),
+        "dashboard": dashboard,
     }
 
 
@@ -256,6 +260,7 @@ def resume_run(
     state = manifest.get("current_state", "")
     if state == "COMPLETED_MEMO":
         # idempotent: do not re-resolve / re-append rounds.
+        write_run_dashboard(run_dir)
         return build_concise_memo(run_dir)
     if _state_index(state) < _state_index("WAITING_LLM_AGENT_HUMAN_GATE"):
         raise ValueError(
@@ -337,6 +342,7 @@ def resume_run(
 
     _set_state(run_dir, "COMPLETED_MEMO")
     memo = build_concise_memo(run_dir)
+    write_run_dashboard(run_dir)
     if loop_summary is not None:
         # Controlled enum+integer line only (no model free text; no scrub needed).
         memo += f"\n\nLoop: ran {loop_summary[0]} round(s); stopped: {loop_summary[1]}"
