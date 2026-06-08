@@ -61,6 +61,7 @@ from .models import (
 )
 from .strategy_rules import validate_strategy_rules
 from .validation.errors import KernelValidationError
+from .validation.front_half import validate_front_half_run
 from .validation.evidence import (
     _validate_computation_verification,
     _validate_example_evidence,
@@ -114,6 +115,10 @@ def validate_run(run_dir: Path) -> None:
     _load_optional_literature_candidates(run_dir, manifest)
     _load_optional_retrieval_resolution(run_dir, manifest)
     _load_optional_memory_context(run_dir, manifest)
+    # Phase 03: content-validate the durable front_half_run audit artifact when
+    # present (claim/run ids, stage names, no error-as-ok, path confinement). A
+    # run without it still validates (old-run compatible).
+    validate_front_half_run(run_dir)
     theorem_applicability = _load_optional_theorem_applicability(run_dir, manifest)
     llm_agent_run = _load_optional_llm_agent_run(run_dir, manifest)
     prover_loop = _load_optional_prover_loop(run_dir, manifest)

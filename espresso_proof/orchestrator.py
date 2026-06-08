@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .front_half_agents import run_front_half_agent_pass
+from .front_half_agents import run_front_half_agent_pass, write_front_half_run
+from .validation.front_half import validate_front_half_run
 from .io import read_text, read_yaml, write_yaml
 from .literature_discovery import discover_literature as run_literature_discovery
 from .llm_agents import (
@@ -30,6 +31,7 @@ from .llm_agents import (
 from .mock_pipeline import run_mock_critique
 from .prover_loop_driver import continue_prover_loop
 from .run_dashboard import write_run_dashboard
+from .stage_runner import StageRunner
 from .models import (
     HumanChoice,
     LiteratureReviewReport,
@@ -69,21 +71,28 @@ def _reached(run_dir: Path, state: str) -> bool:
 
 
 def _preflight_provider(
-    provider: str, *, model: str, api_key_env: str, command_env: str
-) -> None:
-    """Fail early (with a clear message) if a live provider is not configured."""
+    provider: str, *, model: str, api_key_env: str, command_env: str, network_check: bool = False
+) -> dict | None:
+    """Fail early (with a clear message) if a live provider is not configured.
+
+    Returns the provider diagnostic report (or ``None`` for the stub provider) so
+    a caller can thread it into the agent pass. With ``network_check=True`` the
+    diagnostic performs a real provider call and the run fails closed BEFORE any
+    artifact is written if it is unreachable.
+    """
 
     if provider == "stub":
-        return
+        return None
     if provider == "openai":
-        report = openai_agent_diagnostic(model=model, api_key_env=api_key_env, network_check=False)
+        report = openai_agent_diagnostic(model=model, api_key_env=api_key_env, network_check=network_check)
     elif provider == "external":
-        report = external_agent_diagnostic(model=model, command_env=command_env, network_check=False)
+        report = external_agent_diagnostic(model=model, command_env=command_env, network_check=network_check)
     else:
         raise RuntimeError(f"unsupported provider: {provider}")
     if report["status"] not in {"configured", "ready"}:
         message = report.get("error") or report.get("message") or f"{provider} provider is not ready."
         raise RuntimeError(str(message))
+    return report
 
 
 def orchestrate_run(
@@ -100,6 +109,7 @@ def orchestrate_run(
     literature_mode: str = "local",
     literature_providers: list[str] | None = None,
     max_references: int = 8,
+    agent_network_preflight: bool = False,
     run_dir: Path | None = None,
     front_half_client=None,
 ) -> dict:
@@ -108,38 +118,75 @@ def orchestrate_run(
     Returns a dict with the run_dir, the final lifecycle state, and the human
     gate status. Resumable: pass an existing ``run_dir`` to continue from its
     recorded state (completed stages are skipped).
+
+    This is the single canonical runtime path. ``agent_network_preflight=True``
+    performs a real provider call before scaffolding (so an unreachable live
+    provider fails closed before any artifact is written) and threads the
+    resulting diagnostic into the agent pass.
     """
 
-    # Fail early if a live provider is requested but not configured (parity with
-    # run-flow; avoids scaffolding a run that cannot complete its agent pass).
+    # Fail early if a live provider is requested but not configured (avoids
+    # scaffolding a run that cannot complete its agent pass). The front-half
+    # provider is only configuration-checked; the prover provider honours the
+    # network-preflight flag and its diagnostic is reused by the agent pass.
     if front_half != "mock":
         _preflight_provider(
             front_half, model=model, api_key_env=api_key_env, command_env=external_agent_command_env
         )
-    _preflight_provider(
-        provider, model=model, api_key_env=api_key_env, command_env=external_agent_command_env
+    provider_diagnostic = _preflight_provider(
+        provider,
+        model=model,
+        api_key_env=api_key_env,
+        command_env=external_agent_command_env,
+        network_check=agent_network_preflight,
     )
 
     # Stage 0 — scaffold a kernel-valid "unclear/needs_human" run for any claim.
+    # The genesis stage creates the run; from here every stage advances lifecycle
+    # state ONLY through the transactional StageRunner (snapshot -> mutate ->
+    # validate -> advance, with rollback on failure).
     if run_dir is None:
         run_dir = run_mock_critique(project, input_path, output_root)
-        validate_run(run_dir)
-        _set_state(run_dir, "SCAFFOLDED")
+        runner = StageRunner(run_dir)
+        runner.run(
+            name="scaffold",
+            mutate=lambda: None,
+            validate=lambda: validate_run(run_dir),
+            state_after="SCAFFOLDED",
+            snapshot_paths=[],
+        )
+    else:
+        runner = StageRunner(run_dir)
 
     # Stage 1 — front-half agents (S1–S8). Skipped when front_half == "mock".
     if not _reached(run_dir, "FRONT_HALF_DONE"):
-        if front_half != "mock" or front_half_client is not None:
-            client = front_half_client or build_client(
-                provider=front_half,
-                model=model,
-                api_key_env=api_key_env,
-                external_agent_command_env=external_agent_command_env,
+        def _front_half() -> None:
+            pass_report = None
+            if front_half != "mock" or front_half_client is not None:
+                client = front_half_client or build_client(
+                    provider=front_half,
+                    model=model,
+                    api_key_env=api_key_env,
+                    external_agent_command_env=external_agent_command_env,
+                )
+                pass_report = run_front_half_agent_pass(run_dir=run_dir, client=client)
+            # Persist the durable audit-only front_half_run.yaml inside the
+            # transaction (rolled back with the stage if validation fails).
+            write_front_half_run(
+                run_dir, pass_report=pass_report, provider=front_half, model=model
             )
-            run_front_half_agent_pass(run_dir=run_dir, client=client)
-        # Always validate before advancing — a corrupt scaffold must fail closed
-        # here rather than reaching a downstream stage.
-        validate_run(run_dir)
-        _set_state(run_dir, "FRONT_HALF_DONE")
+
+        def _validate_front_half() -> None:
+            validate_run(run_dir)
+            validate_front_half_run(run_dir)
+
+        # Whole-run snapshot: the front-half pass may rewrite many artifacts.
+        runner.run(
+            name="front_half",
+            mutate=_front_half,
+            validate=_validate_front_half,
+            state_after="FRONT_HALF_DONE",
+        )
 
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     artifacts = manifest["artifacts"]
@@ -147,56 +194,67 @@ def orchestrate_run(
 
     # Stage 2 — literature discovery (candidate references only; validated).
     if not _reached(run_dir, "LITERATURE_DONE"):
-        literature = run_literature_discovery(
-            project_dir=project_dir,
-            locked_claim_path=run_dir / artifacts["locked_claim"],
-            hypothesis_ledger_path=run_dir / artifacts["hypothesis_ledger"],
-            max_references=max_references,
-            query=read_text(run_dir / "input.md"),
-            mode=literature_mode,
-            providers=literature_providers,
+        def _literature() -> None:
+            literature = run_literature_discovery(
+                project_dir=project_dir,
+                locked_claim_path=run_dir / artifacts["locked_claim"],
+                hypothesis_ledger_path=run_dir / artifacts["hypothesis_ledger"],
+                max_references=max_references,
+                query=read_text(run_dir / "input.md"),
+                mode=literature_mode,
+                providers=literature_providers,
+            )
+            LiteratureReviewReport.model_validate(literature)
+            write_yaml(run_dir / artifacts["literature_review"], literature)
+
+        runner.run(
+            name="literature",
+            mutate=_literature,
+            validate=lambda: validate_run(run_dir),
+            state_after="LITERATURE_DONE",
+            snapshot_paths=[artifacts["literature_review"]],
         )
-        LiteratureReviewReport.model_validate(literature)
-        write_yaml(run_dir / artifacts["literature_review"], literature)
-        validate_run(run_dir)
-        _set_state(run_dir, "LITERATURE_DONE")
 
     # Stage 3 — live Prover + Reviewers; stop at the human gate.
     if not _reached(run_dir, "WAITING_LLM_AGENT_HUMAN_GATE"):
-        provider_diagnostic = None
-        agent_report = run_llm_agent_pass(
-            run_dir=run_dir,
-            provider=provider,
-            model=model,
-            api_key_env=api_key_env,
-            external_agent_command_env=external_agent_command_env,
-            reviewer_set=reviewer_set,
-            provider_diagnostic=provider_diagnostic,
+        def _llm_prover_reviewers() -> None:
+            agent_report = run_llm_agent_pass(
+                run_dir=run_dir,
+                provider=provider,
+                model=model,
+                api_key_env=api_key_env,
+                external_agent_command_env=external_agent_command_env,
+                reviewer_set=reviewer_set,
+                provider_diagnostic=provider_diagnostic,
+            )
+            LLMAgentRunReport.model_validate(agent_report)
+            loop_report = build_prover_loop_report(
+                agent_report=agent_report,
+                strategy_brief=read_yaml(run_dir / artifacts["strategy_brief"]),
+                human_choice=read_yaml(run_dir / artifacts["human_choice"]),
+            )
+            ProverLoopReport.model_validate(loop_report)
+            stage_manifest = read_yaml(run_dir / "run_manifest.yaml")
+            stage_manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
+            stage_manifest["optional_artifacts"]["prover_loop"] = "prover_loop.yaml"
+            stage_manifest["optional_artifacts"]["prover_round_index"] = "prover_rounds/index.yaml"
+            write_yaml(run_dir / "llm_agent_run.yaml", agent_report)
+            write_yaml(run_dir / "prover_loop.yaml", loop_report)
+            write_initial_prover_round_artifacts(
+                run_dir=run_dir,
+                agent_report=agent_report,
+                loop_report=loop_report,
+            )
+            write_yaml(run_dir / "run_manifest.yaml", stage_manifest)
+
+        # Whole-run snapshot: this stage creates the llm/prover artifacts and the
+        # prover_rounds/ directory, all of which must be dropped on rollback.
+        runner.run(
+            name="llm_prover_reviewers",
+            mutate=_llm_prover_reviewers,
+            validate=lambda: validate_run(run_dir),
+            state_after="WAITING_LLM_AGENT_HUMAN_GATE",
         )
-        LLMAgentRunReport.model_validate(agent_report)
-        loop_report = build_prover_loop_report(
-            agent_report=agent_report,
-            strategy_brief=read_yaml(run_dir / artifacts["strategy_brief"]),
-            human_choice=read_yaml(run_dir / artifacts["human_choice"]),
-        )
-        ProverLoopReport.model_validate(loop_report)
-        manifest = read_yaml(run_dir / "run_manifest.yaml")
-        manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
-        manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"
-        manifest.setdefault("optional_artifacts", {})["prover_round_index"] = (
-            "prover_rounds/index.yaml"
-        )
-        write_yaml(run_dir / "llm_agent_run.yaml", agent_report)
-        write_yaml(run_dir / "prover_loop.yaml", loop_report)
-        write_initial_prover_round_artifacts(
-            run_dir=run_dir,
-            agent_report=agent_report,
-            loop_report=loop_report,
-        )
-        write_yaml(run_dir / "run_manifest.yaml", manifest)
-        validate_run(run_dir)
-        _set_state(run_dir, "WAITING_LLM_AGENT_HUMAN_GATE")
-        write_run_dashboard(run_dir)
 
     final_manifest = read_yaml(run_dir / "run_manifest.yaml")
     agent_run = read_yaml(run_dir / "llm_agent_run.yaml")
