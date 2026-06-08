@@ -1,27 +1,29 @@
-"""espresso_proof.front_half — front-half agent package (Phase 04 split).
+"""espresso_proof.front_half — front-half agent package (Phase 04 physical split).
 
-The implementation was moved verbatim from the former
-``espresso_proof/front_half_agents.py`` module into this package; that module is
-now a thin compatibility shim. Public API is re-exported here and from the shim.
+registry.py = stage registry + order; safety.py = shared vocab/guards;
+stages/<name>.py = one module per stage normalizer; runner.py = the pass runner +
+durable audit artifact. front_half_agents.py remains a compatibility shim.
 """
 
 from __future__ import annotations
 
-from ._agents import (  # noqa: F401
-    FRONT_HALF_RUN_FILENAME,
+from .registry import (  # noqa: F401
     FRONT_HALF_STAGES,
     StageNormalizer,
-    build_front_half_run_report,
     register_stage,
     registered_stages,
+)
+from .runner import (  # noqa: F401
+    FRONT_HALF_RUN_FILENAME,
+    build_front_half_run_report,
     run_front_half_agent_pass,
     write_front_half_run,
 )
 from . import stages  # noqa: F401 - ensure stage registration
 
 __all__ = [
-    "FRONT_HALF_RUN_FILENAME",
     "FRONT_HALF_STAGES",
+    "FRONT_HALF_RUN_FILENAME",
     "StageNormalizer",
     "build_front_half_run_report",
     "register_stage",

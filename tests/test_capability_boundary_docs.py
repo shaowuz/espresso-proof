@@ -54,7 +54,9 @@ def test_implemented_modules_referenced_exist() -> None:
     for rel in (
         "espresso_proof/stage_runner.py",
         "espresso_proof/source_grounding_stage.py",
-        "espresso_proof/front_half/_agents.py",
+        "espresso_proof/front_half/registry.py",
+        "espresso_proof/front_half/runner.py",
+        "espresso_proof/front_half/stages/understanding.py",
         "espresso_proof/validation/front_half.py",
         "espresso_proof/memory_context.py",
     ):

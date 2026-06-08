@@ -1,9 +1,10 @@
 """Compatibility shim — front-half agents.
 
-The implementation was split into the ``espresso_proof.front_half`` package in
-Phase 04 (Front-Half Module Split). This module is kept so existing imports
-``from espresso_proof.front_half_agents import ...`` keep working unchanged; it
-re-exports the public API and preserves stage registration and runtime behavior.
+The implementation lives in the ``espresso_proof.front_half`` package (Phase 04
+module split; stages physically split into ``front_half/stages/<name>.py``).
+This module keeps ``from espresso_proof.front_half_agents import ...`` working
+unchanged: it re-exports the public API and preserves stage registration and
+runtime behavior.
 
 New code should import from ``espresso_proof.front_half`` (or its ``registry`` /
 ``safety`` / ``runner`` / ``stages`` submodules).
@@ -11,8 +12,7 @@ New code should import from ``espresso_proof.front_half`` (or its ``registry`` /
 
 from __future__ import annotations
 
-from .front_half._agents import *  # noqa: F401,F403 - preserve full public surface
-from .front_half._agents import (  # explicit, stable public re-exports
+from .front_half import (  # noqa: F401
     FRONT_HALF_RUN_FILENAME,
     FRONT_HALF_STAGES,
     StageNormalizer,
