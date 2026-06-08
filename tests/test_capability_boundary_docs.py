@@ -56,6 +56,6 @@ def test_implemented_modules_referenced_exist() -> None:
         "espresso_proof/source_grounding_stage.py",
         "espresso_proof/front_half/_agents.py",
         "espresso_proof/validation/front_half.py",
-        "espresso_proof/validation/memory_context.py",
+        "espresso_proof/memory_context.py",
     ):
         assert (REPO / rel).is_file(), f"capability table implies {rel} exists"
