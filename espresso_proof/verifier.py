@@ -43,6 +43,7 @@ class VerifierError(Exception):
 _MAX_EXPR_LEN = 1000          # input length (also bounds parse/recursion depth)
 _MAX_EXPONENT = 1000          # exponent magnitude for **
 _MAX_RESULT_BITS = 100_000    # estimated bit-length of a ** result
+_MAX_MATRIX_DIM = 12          # max rows/cols for a matrix backend (bounds O(n^3) cost)
 
 
 def _eval_arith(expr: str) -> Fraction:
@@ -116,6 +117,85 @@ def _permutation_order(expr: str) -> int:
     return order
 
 
+def _parse_matrix(expr: str) -> list[list[Fraction]]:
+    """Parse a matrix literal like ``[[1, 2], [3, 4]]`` into exact Fractions.
+
+    Entries may be integers or rationals written as ``a/b`` (any expression the
+    safe arithmetic evaluator accepts). Fails closed on anything malformed,
+    non-rectangular, or larger than the dimension bound.
+    """
+    if len(expr) > _MAX_EXPR_LEN:
+        raise VerifierError("matrix expression too long for safe verification")
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError as exc:
+        raise VerifierError(f"could not parse matrix: {exc}") from exc
+    body = tree.body
+    if not isinstance(body, ast.List) or not body.elts:
+        raise VerifierError("expected a non-empty matrix like [[1, 2], [3, 4]]")
+    if len(body.elts) > _MAX_MATRIX_DIM:
+        raise VerifierError(f"matrix too large for safe verification (max {_MAX_MATRIX_DIM} rows)")
+    rows: list[list[Fraction]] = []
+    width: int | None = None
+    for row_node in body.elts:
+        if not isinstance(row_node, ast.List) or not row_node.elts:
+            raise VerifierError("each matrix row must be a non-empty list")
+        if width is None:
+            width = len(row_node.elts)
+            if width > _MAX_MATRIX_DIM:
+                raise VerifierError(f"matrix too large for safe verification (max {_MAX_MATRIX_DIM} cols)")
+        elif len(row_node.elts) != width:
+            raise VerifierError("matrix rows must all have the same length")
+        rows.append([_eval_node(entry) for entry in row_node.elts])
+    return rows
+
+
+def _matrix_rank(rows: list[list[Fraction]]) -> int:
+    """Exact rank over the rationals via fraction Gaussian elimination."""
+    m = [row[:] for row in rows]
+    nrows = len(m)
+    ncols = len(m[0])
+    rank = 0
+    for col in range(ncols):
+        pivot = next((r for r in range(rank, nrows) if m[r][col] != 0), None)
+        if pivot is None:
+            continue
+        m[rank], m[pivot] = m[pivot], m[rank]
+        pivot_value = m[rank][col]
+        m[rank] = [value / pivot_value for value in m[rank]]
+        for r in range(nrows):
+            if r != rank and m[r][col] != 0:
+                factor = m[r][col]
+                m[r] = [a - factor * b for a, b in zip(m[r], m[rank])]
+        rank += 1
+        if rank == nrows:
+            break
+    return rank
+
+
+def _matrix_determinant(rows: list[list[Fraction]]) -> Fraction:
+    """Exact determinant over the rationals (square matrices only)."""
+    n = len(rows)
+    if any(len(row) != n for row in rows):
+        raise VerifierError("determinant requires a square matrix")
+    m = [row[:] for row in rows]
+    det = Fraction(1)
+    for col in range(n):
+        pivot = next((r for r in range(col, n) if m[r][col] != 0), None)
+        if pivot is None:
+            return Fraction(0)
+        if pivot != col:
+            m[col], m[pivot] = m[pivot], m[col]
+            det = -det
+        det *= m[col][col]
+        pivot_value = m[col][col]
+        for r in range(col + 1, n):
+            if m[r][col] != 0:
+                factor = m[r][col] / pivot_value
+                m[r] = [a - factor * b for a, b in zip(m[r], m[col])]
+    return det
+
+
 def verify_check(check: dict) -> dict | None:
     """Verify one computation check. Returns a result dict, or None if it has no machine spec."""
     spec = check.get("machine_check")
@@ -145,6 +225,20 @@ def verify_check(check: dict) -> dict | None:
             computed_str = str(computed_value)
             verdict = "confirmed" if computed_value == int(expected_value) else "refuted"
             backend = "stdlib_permutation"
+        elif kind == "matrix_rank":
+            computed_value = _matrix_rank(_parse_matrix(expression))
+            expected_value = _eval_arith(expected)
+            if expected_value.denominator != 1:
+                raise VerifierError("matrix_rank expected must be an integer")
+            computed_str = str(computed_value)
+            verdict = "confirmed" if computed_value == int(expected_value) else "refuted"
+            backend = "stdlib_linalg_rank"
+        elif kind == "matrix_determinant":
+            computed = _matrix_determinant(_parse_matrix(expression))
+            expected_value = _eval_arith(expected)
+            computed_str = _frac_str(computed)
+            verdict = "confirmed" if computed == expected_value else "refuted"
+            backend = "stdlib_linalg_det"
         else:
             return {
                 **base,
