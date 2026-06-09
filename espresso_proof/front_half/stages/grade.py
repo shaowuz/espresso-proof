@@ -196,8 +196,9 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
         )
         status = "likely_false" if serious >= 2 else "fragile"
         # Precise claim: relax the placeholder failed review so meaningful routes
-        # can activate (real reviewers still run later).
-        new_review = _neutralize_review_if_failed(review)
+        # can activate (real reviewers still run later), and scrub stale
+        # "too vague to test" placeholder text that no longer applies.
+        new_review = _neutralize_review_if_failed(review, precise_claim=True)
         if new_review is not None:
             write_yaml(run_dir / artifacts["review"], new_review)
             review_note = "neutralized placeholder failed review (front-half pending)"

@@ -113,14 +113,39 @@ def _default_investigation_route(idea_grade: dict) -> dict:
 
 
 
-def _neutralize_review_if_failed(review: dict) -> dict | None:
-    """For a precise claim, relax a placeholder 'failed' review to neutral.
+# Neutral note used when a precise claim's placeholder failed review is relaxed.
+_PENDING_REVIEW_NOTE = (
+    "Front-half review pending; real reviewers run in the Prover/Reviewers pass."
+)
+
+# Stale scaffold "vagueness" language that must NOT survive for a precise claim
+# (the placeholder review pre-dates the precision grade). Substring, lowercased.
+# Anchored to the placeholder phrases ("too vague ...", "not precise enough ...")
+# so a genuine reason that merely uses the word "vague" is not over-scrubbed.
+_VAGUENESS_MARKERS = ("too vague", "not precise enough")
+
+
+def _is_vagueness_text(text: object) -> bool:
+    """True if ``text`` is stale claim-vagueness placeholder language."""
+    lowered = str(text or "").lower()
+    return any(marker in lowered for marker in _VAGUENESS_MARKERS)
+
+
+def _neutralize_review_if_failed(review: dict, *, precise_claim: bool = False) -> dict | None:
+    """Relax a placeholder 'failed' review to neutral when appropriate.
 
     The front half has NOT run the real reviewers yet (those run in the
     Prover/Reviewers pass), so a scaffolded ``failed`` verdict is not an honest
-    signal for a precise claim and would wrongly block meaningful routes. This
-    sets the reviewers to ``unclear`` (pending real review) without asserting any
-    pass/proof. Returns the new review dict, or None if nothing needed changing.
+    signal and would wrongly block meaningful routes. This sets the reviewers to
+    ``unclear`` (pending real review) without asserting any pass/proof.
+
+    When ``precise_claim`` is true, the claim has already been graded precise, so
+    the stale "too vague to test" / "not precise enough" placeholder text is also
+    scrubbed from ``strongest_objection`` and ``downgrade_reasons`` and replaced
+    with a neutral pending-review note. This is display hygiene only: it never
+    upgrades proof/source/evidence/grade/claim status and never asserts a pass.
+    For an imprecise claim the existing behavior (and any "too vague" language) is
+    preserved. Returns the new review dict, or None if nothing needed changing.
     """
 
     reviewers = review.get("reviewers", [])
@@ -137,8 +162,18 @@ def _neutralize_review_if_failed(review: dict) -> dict | None:
     new_review["reviewers"] = new_reviewers
     new_review["attempt_status"] = "unclear"
     new_review["verdict"] = "unclear"
-    note = "Front-half review pending; real reviewers run in the Prover/Reviewers pass."
-    new_review["downgrade_reasons"] = list(review.get("downgrade_reasons") or []) + [note]
+
+    reasons = list(review.get("downgrade_reasons") or [])
+    if precise_claim:
+        # Drop stale vagueness reasons; a precise claim is precise regardless of
+        # truth value. Replace the strongest objection with the neutral note.
+        reasons = [r for r in reasons if not _is_vagueness_text(r)]
+        new_review["strongest_objection"] = _PENDING_REVIEW_NOTE
+    # Add the neutral pending-review note exactly once (idempotent within a call).
+    if _PENDING_REVIEW_NOTE not in reasons:
+        reasons.append(_PENDING_REVIEW_NOTE)
+    new_review["downgrade_reasons"] = reasons
+
     Review.model_validate(new_review)
     return new_review
 

@@ -741,3 +741,102 @@ def test_full_front_half_pass_on_seeded_hodge_scenario_stays_valid(tmp_path: Pat
     for stage in report["stages"]:
         assert stage["status"] in {"ok", "skipped"}, stage
     validate_run(run_dir)
+
+
+# ---------------------------------------------------------------------------
+# Goal 19: stale "Too vague to test" placeholder objection is scrubbed for a
+# precise claim (display hygiene; never upgrades any status).
+# ---------------------------------------------------------------------------
+from espresso_proof.io import write_yaml  # noqa: E402
+from espresso_proof.memo import build_concise_memo  # noqa: E402
+
+_PENDING_NOTE = "Front-half review pending; real reviewers run in the Prover/Reviewers pass."
+
+
+def _seed_failed_vague_review(run_dir: Path, *, precise: bool) -> dict:
+    """Set claim precision and seed a placeholder FAILED review carrying stale
+    'too vague' text plus one genuine (non-vagueness) downgrade reason."""
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    ledger = read_yaml(run_dir / artifacts["hypothesis_ledger"])
+    ledger["claim_precision"] = "precise" if precise else "unclear"
+    write_yaml(run_dir / artifacts["hypothesis_ledger"], ledger)
+    review = read_yaml(run_dir / artifacts["review"])
+    review["reviewers"][0]["verdict"] = "fail"
+    review["strongest_objection"] = "The claim is not precise enough to test."
+    review["downgrade_reasons"] = ["Too vague to test.", "No source-backed theorem yet."]
+    write_yaml(run_dir / artifacts["review"], review)
+    return artifacts
+
+
+def _precise_run_with_failed_vague_review(tmp_path: Path) -> tuple[Path, dict]:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("g19", claim_path, tmp_path)
+    artifacts = _seed_failed_vague_review(run_dir, precise=True)
+    run_front_half_agent_pass(run_dir=run_dir, client=StubLLMClient(), stages=["regrade"])
+    validate_run(run_dir)
+    return run_dir, artifacts
+
+
+def test_precise_claim_scrubs_stale_vague_objection(tmp_path: Path) -> None:
+    run_dir, artifacts = _precise_run_with_failed_vague_review(tmp_path)
+    review = read_yaml(run_dir / artifacts["review"])
+    assert review["verdict"] == "unclear"
+    assert all(r["verdict"] == "unclear" for r in review["reviewers"])  # not "pass"
+    assert "vague" not in (review.get("strongest_objection") or "").lower()
+    assert review["strongest_objection"] == _PENDING_NOTE
+    assert not any("vague" in r.lower() or "not precise enough" in r.lower()
+                   for r in review["downgrade_reasons"])
+    # the genuine non-vagueness reason is preserved
+    assert "No source-backed theorem yet." in review["downgrade_reasons"]
+    # neutral pending-review note appears exactly once
+    assert review["downgrade_reasons"].count(_PENDING_NOTE) == 1
+    # severity conservative, no reruns demanded
+    assert all(r["severity"] == "medium" and r["required_reruns"] == []
+               for r in review["reviewers"])
+    # display hygiene only: the grade is not upgraded to a proof
+    grade = read_yaml(run_dir / artifacts["idea_grade"])
+    assert grade["proof_language_status"] == "idea_sketch"
+
+
+def test_imprecise_claim_still_uses_claim_lock_and_keeps_vague_language(tmp_path: Path) -> None:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("g19", claim_path, tmp_path)
+    artifacts = _seed_failed_vague_review(run_dir, precise=False)
+    run_front_half_agent_pass(run_dir=run_dir, client=StubLLMClient(), stages=["regrade"])
+    validate_run(run_dir)
+    # imprecise claim is held at claim-locking, and "too vague" language is allowed
+    grade = read_yaml(run_dir / artifacts["idea_grade"])
+    assert grade["status"] == "unclear"
+    review = read_yaml(run_dir / artifacts["review"])
+    vague_anywhere = "vague" in (review.get("strongest_objection") or "").lower() or any(
+        "vague" in r.lower() for r in review.get("downgrade_reasons", [])
+    )
+    assert vague_anywhere, "imprecise claim should keep its claim-vagueness language"
+    # strategy stays the safe lock-claim route for an imprecise claim
+    run_front_half_agent_pass(run_dir=run_dir, client=StubLLMClient(), stages=["strategy"])
+    brief = read_yaml(run_dir / artifacts["strategy_brief"])
+    assert any("lock" in (s.get("id", "") + s.get("title", "")).lower()
+               for s in brief.get("top_strategies", []))
+
+
+def test_neutralize_vague_objection_is_idempotent(tmp_path: Path) -> None:
+    run_dir, artifacts = _precise_run_with_failed_vague_review(tmp_path)
+    first = read_yaml(run_dir / artifacts["review"])
+    # running the regrade again must not duplicate the neutral note or re-add vagueness
+    run_front_half_agent_pass(run_dir=run_dir, client=StubLLMClient(), stages=["regrade"])
+    validate_run(run_dir)
+    second = read_yaml(run_dir / artifacts["review"])
+    assert second["downgrade_reasons"].count(_PENDING_NOTE) == 1
+    assert second["downgrade_reasons"] == first["downgrade_reasons"]
+    assert second["strongest_objection"] == first["strongest_objection"]
+
+
+def test_precise_claim_memo_has_no_stale_vague_language(tmp_path: Path) -> None:
+    run_dir, _ = _precise_run_with_failed_vague_review(tmp_path)
+    memo = build_concise_memo(run_dir).lower()
+    assert "vague" not in memo
+    assert "not precise enough to test" not in memo
+    for banned in ("proof-close", "proof complete", "we proved", "this establishes the theorem"):
+        assert banned not in memo
