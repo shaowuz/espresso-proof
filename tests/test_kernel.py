@@ -1580,6 +1580,46 @@ def test_counterexample_dropped_hypothesis_cannot_refute_claim() -> None:
         CounterexampleTest.model_validate(data)
 
 
+def test_counterexample_not_tested_cannot_refute_claim() -> None:
+    # An asserted-but-UNCHECKED counterexample (result=not_tested) cannot carry a
+    # refutation, even when it satisfies all claim hypotheses. refutes_claim
+    # requires a checked 'failed' result. (Dogfood: order-6 "abelian" run, where a
+    # genuine S_3 counterexample is asserted from background math but not machine-
+    # checked; the kernel must enforce non-refutation, not rely on agent behavior.)
+    data = _counterexample_test(
+        satisfies_all_claim_hypotheses=True,
+        result="not_tested",
+        refutes_claim=True,
+    )
+    with pytest.raises(ValueError, match="can refute the claim only with a checked"):
+        CounterexampleTest.model_validate(data)
+
+
+def test_counterexample_inconclusive_cannot_refute_claim() -> None:
+    # An inconclusive test is likewise not a refutation.
+    data = _counterexample_test(
+        satisfies_all_claim_hypotheses=True,
+        result="inconclusive",
+        refutes_claim=True,
+    )
+    with pytest.raises(ValueError, match="can refute the claim only with a checked"):
+        CounterexampleTest.model_validate(data)
+
+
+def test_counterexample_failed_all_hypotheses_may_refute() -> None:
+    # The positive case still works: a checked 'failed' all-hypotheses
+    # counterexample is allowed to refute (this is the only honest refutation).
+    test = CounterexampleTest.model_validate(
+        _counterexample_test(
+            satisfies_all_claim_hypotheses=True,
+            result="failed",
+            refutes_claim=True,
+        )
+    )
+    assert test.refutes_claim is True
+    assert test.result.value == "failed"
+
+
 def test_counterexample_accepts_optional_support_fields() -> None:
     # The optional missing_hypothesis / support fields are additive and accepted.
     test = CounterexampleTest.model_validate(
