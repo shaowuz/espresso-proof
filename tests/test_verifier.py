@@ -10,6 +10,9 @@ from espresso_proof.validators import (
 from espresso_proof.verifier import (
     VerifierError,
     _eval_arith,
+    _matrix_determinant,
+    _matrix_rank,
+    _parse_matrix,
     _permutation_order,
     build_verification_report,
     verify_check,
@@ -152,3 +155,77 @@ def test_build_report_skips_specless_checks():
     plain.pop("machine_check")
     report = build_verification_report({"claim_id": "claim_1", "checks": [spec_check, plain]})
     assert [r["check_id"] for r in report["results"]] == ["c1"]
+
+
+# --- linear algebra over Q backends -------------------------------------
+
+
+def test_parse_matrix_exact_fractions():
+    matrix = _parse_matrix("[[1, 1/2], [-3, 4]]")
+    assert matrix == [[_eval_arith("1"), _eval_arith("1/2")], [_eval_arith("-3"), _eval_arith("4")]]
+
+
+def test_parse_matrix_rejects_ragged_and_oversize():
+    with pytest.raises(VerifierError):
+        _parse_matrix("[[1, 2], [3]]")  # ragged
+    with pytest.raises(VerifierError):
+        _parse_matrix("[" + ",".join("[0]" for _ in range(13)) + "]")  # too many rows
+
+
+def test_matrix_rank_exact():
+    assert _matrix_rank([[_eval_arith("1"), _eval_arith("0")], [_eval_arith("0"), _eval_arith("1")]]) == 2
+    # singular: second row is twice the first -> rank 1
+    assert _matrix_rank([[_eval_arith("1"), _eval_arith("2")], [_eval_arith("2"), _eval_arith("4")]]) == 1
+    # rectangular, full row rank
+    assert _matrix_rank([[_eval_arith("1"), _eval_arith("2"), _eval_arith("3")]]) == 1
+
+
+def test_matrix_determinant_exact_including_rational_entries():
+    assert _matrix_determinant([[_eval_arith("1"), _eval_arith("2")], [_eval_arith("3"), _eval_arith("4")]]) == _eval_arith("-2")
+    # rational entries, exact result
+    assert _matrix_determinant([[_eval_arith("1/2"), _eval_arith("0")], [_eval_arith("0"), _eval_arith("1/3")]]) == _eval_arith("1/6")
+    # singular -> 0
+    assert _matrix_determinant([[_eval_arith("1"), _eval_arith("2")], [_eval_arith("2"), _eval_arith("4")]]) == 0
+
+
+def test_matrix_determinant_requires_square():
+    with pytest.raises(VerifierError):
+        _matrix_determinant([[_eval_arith("1"), _eval_arith("2"), _eval_arith("3")]])
+
+
+def test_verify_check_matrix_rank_confirmed_and_refuted():
+    confirmed = verify_check(_check("r1", "checked", "matrix_rank", "[[1, 2], [2, 4]]", "1"))
+    assert confirmed["verdict"] == "confirmed"
+    assert confirmed["executed"] is True
+    assert confirmed["backend"] == "stdlib_linalg_rank"
+
+    refuted = verify_check(_check("r2", "checked", "matrix_rank", "[[1, 2], [2, 4]]", "2"))
+    assert refuted["verdict"] == "refuted"
+    assert refuted["computed"] == "1"
+
+
+def test_verify_check_matrix_determinant_confirmed_and_refuted():
+    confirmed = verify_check(_check("d1", "checked", "matrix_determinant", "[[1, 2], [3, 4]]", "-2"))
+    assert confirmed["verdict"] == "confirmed"
+    assert confirmed["backend"] == "stdlib_linalg_det"
+
+    refuted = verify_check(_check("d2", "checked", "matrix_determinant", "[[1, 2], [3, 4]]", "-3"))
+    assert refuted["verdict"] == "refuted"
+    assert refuted["computed"] == "-2"
+
+
+def test_verify_check_matrix_malformed_is_error_not_executed():
+    # non-square determinant fails closed to error, never confirmed
+    result = verify_check(_check("d3", "inconclusive", "matrix_determinant", "[[1, 2, 3]]", "0"))
+    assert result["verdict"] == "error"
+    assert result["executed"] is False
+
+
+def test_validator_accepts_confirmed_matrix_and_blocks_refuted():
+    # a real machine-confirmed determinant earns "checked"
+    ok = _checks([_check("c1", "checked", "matrix_determinant", "[[1, 2], [3, 4]]", "-2")])
+    _validate_computation_verification(ok, _report([verify_check(ok.checks[0].model_dump())]))  # no raise
+    # a refuted determinant cannot support "checked"
+    bad = _checks([_check("c1", "checked", "matrix_determinant", "[[1, 2], [3, 4]]", "-3")])
+    with pytest.raises(KernelValidationError, match="refuted"):
+        _validate_computation_verification(bad, _report([verify_check(bad.checks[0].model_dump())]))

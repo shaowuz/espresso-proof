@@ -311,7 +311,7 @@ class MachineCheckSpec(StrictBaseModel):
     actually evaluate and compare against ``expected``.
     """
 
-    kind: Literal["exact_arithmetic", "permutation_order"]
+    kind: Literal["exact_arithmetic", "permutation_order", "matrix_rank", "matrix_determinant"]
     expression: str
     expected: str
     notes: str = ""
