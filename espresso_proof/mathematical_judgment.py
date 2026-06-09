@@ -25,6 +25,11 @@ Risk kinds (all advisory):
   computation_checked evidence, so confidence must stay conservative.
 - ``reviewer_objection_decisiveness``: a reviewer objected; route to repair (never
   a claim refutation).
+- ``grade_route_conflict``: the heuristic grade is strongly negative
+  (likely_false / refuted) yet NO checked counterexample refutes the claim and a
+  candidate proof route exists -- i.e. the claim may be merely unsupported / not
+  yet grounded rather than false. Advisory: it asks for human judgment and never
+  changes the stored grade or any status.
 """
 
 from __future__ import annotations
@@ -58,6 +63,7 @@ def build_mathematical_judgment(run_dir: Path) -> dict:
     review = artifact("review")
     source_grounding = artifact("source_grounding")
     computations = artifact("computation_checks")
+    counterexamples = artifact("counterexamples") if "counterexamples" in artifacts else {}
     strategy_brief = artifact("strategy_brief") if "strategy_brief" in artifacts else {}
 
     findings: list[dict] = []
@@ -200,6 +206,33 @@ def build_mathematical_judgment(run_dir: Path) -> dict:
             "request_human_review",
             "Reviewer approval is not proof verification: no trusted source or checker "
             "supports this yet, so the approval must not be read as proof.",
+        )
+
+    # --- grade / route conflict ----------------------------------------------
+    # A strongly-negative heuristic grade (likely_false / refuted) is only honest
+    # as "probably false" when something actually refutes the claim. If NO checked
+    # counterexample refutes it (every counterexample has refutes_claim=False) yet
+    # a candidate proof route exists, the negative grade more likely reflects
+    # "unsupported / not yet grounded" than "false". Surface that conflict for
+    # human judgment. This NEVER changes the stored grade or any status -- it is a
+    # structured, advisory note (no keyword/prose matching).
+    grade_status = idea_grade.get("status")
+    has_refuting_counterexample = any(
+        test.get("refutes_claim") is True for test in counterexamples.get("tests", [])
+    )
+    has_route = bool(strategy_brief.get("top_strategies"))
+    if grade_status in {"likely_false", "refuted"} and not has_refuting_counterexample and has_route:
+        add(
+            "grade_route_conflict",
+            "warn",
+            idea_grade.get("claim_id", claim.get("id", "claim")),
+            f"idea_grade.status={grade_status}; no counterexample has refutes_claim=true; "
+            f"{len(strategy_brief.get('top_strategies') or [])} candidate route(s) present",
+            "request_human_review",
+            "The claim is graded as likely false, but no checked counterexample refutes it "
+            "and a candidate proof route exists. The grade is a heuristic, not a refutation: "
+            "this may be an unsupported / not-yet-grounded claim rather than a false one. "
+            "Needs human judgment; nothing here changes the grade or any status.",
         )
 
     report = {

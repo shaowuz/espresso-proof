@@ -461,6 +461,7 @@ class JudgmentRiskKind(str, Enum):
     unsupported_confidence = "unsupported_confidence"
     reviewer_objection_decisiveness = "reviewer_objection_decisiveness"
     reviewer_approval_without_verifier = "reviewer_approval_without_verifier"
+    grade_route_conflict = "grade_route_conflict"
 
 
 class JudgmentRiskTier(str, Enum):

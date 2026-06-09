@@ -229,3 +229,50 @@ def test_reviewer_approval_without_verifier_is_flagged_not_proof(tmp_path: Path)
     # the run earned nothing: no source_backed, no checked computation.
     sg = _artifact(run_dir, "source_grounding")
     assert all(s.get("status") != "source_backed" for s in sg.get("steps", []))
+
+
+# ---------------------------------------------------------------------------
+# grade_route_conflict: a strongly-negative grade with no refuting counterexample
+# and a candidate route -> advisory "needs human judgment" (never changes status)
+# ---------------------------------------------------------------------------
+def test_grade_route_conflict_fires_when_likely_false_but_nothing_refutes(tmp_path: Path) -> None:
+    run_dir = _build(tmp_path, "likely_false_multiple_pressures")
+    grade_before = _grade(run_dir)
+    assert grade_before["status"] == "likely_false"
+    ce = _artifact(run_dir, "counterexamples").get("tests", [])
+    assert not any(c.get("refutes_claim") is True for c in ce)  # nothing actually refutes
+
+    report = build_mathematical_judgment(run_dir)
+    conflict = [f for f in report["findings"] if f["kind"] == "grade_route_conflict"]
+    assert len(conflict) == 1
+    assert conflict[0]["tier"] == "warn"
+    assert conflict[0]["recommended_action"] == "request_human_review"
+
+    # advisory only: judgment validates, and the stored grade is NOT changed.
+    judge_run(run_dir)
+    validate_run(run_dir)
+    after = _grade(run_dir)
+    assert after["status"] == "likely_false"
+    assert after["proof_language_status"] == grade_before["proof_language_status"]
+    # the warning surfaces in the user-facing memo, with no proof-complete language.
+    memo = build_concise_memo(run_dir)
+    assert "needs human judgment" in memo.lower() or "heuristic, not a refutation" in memo.lower()
+    assert not any(p in memo.lower() for p in _FORBIDDEN_PROOF_LANGUAGE)
+
+
+def test_grade_route_conflict_silent_when_a_counterexample_truly_refutes(tmp_path: Path) -> None:
+    # If a checked counterexample actually refutes the claim, the negative grade is
+    # justified -> no conflict warning.
+    run_dir = _build(tmp_path, "refuted_by_all_hypotheses_counterexample")
+    ce = _artifact(run_dir, "counterexamples").get("tests", [])
+    assert any(c.get("refutes_claim") is True for c in ce)
+    report = build_mathematical_judgment(run_dir)
+    assert not any(f["kind"] == "grade_route_conflict" for f in report["findings"])
+
+
+def test_grade_route_conflict_silent_when_grade_not_strongly_negative(tmp_path: Path) -> None:
+    # A non-negative grade (e.g. promising) is not in conflict with having a route.
+    run_dir = _build(tmp_path, "promising_but_unproved")
+    assert _grade(run_dir)["status"] not in {"likely_false", "refuted"}
+    report = build_mathematical_judgment(run_dir)
+    assert not any(f["kind"] == "grade_route_conflict" for f in report["findings"])
