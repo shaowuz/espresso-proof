@@ -1195,6 +1195,17 @@ class CounterexampleTest(StrictBaseModel):
 
     @model_validator(mode="after")
     def validate_refutation_scope(self) -> CounterexampleTest:
+        # A counterexample can refute the claim only with a checked 'failed'
+        # result: refutes_claim is honest only once the example was actually
+        # tested against the claim and the claim FAILED on it. not_tested /
+        # inconclusive / survived can never carry a refutation (mirrors the
+        # dropped-hypothesis / proof-step guards below; the kernel must enforce
+        # this, not rely on agent good behavior).
+        if self.refutes_claim and self.result != ExampleStatus.failed:
+            raise ValueError(
+                "a counterexample can refute the claim only with a checked 'failed' "
+                "result; an untested / survived / inconclusive result cannot refute"
+            )
         if self.satisfies_all_claim_hypotheses is False and self.refutes_claim:
             raise ValueError("dropped-hypothesis tests cannot refute the original claim")
         if self.refutes_step_only and self.refutes_claim:

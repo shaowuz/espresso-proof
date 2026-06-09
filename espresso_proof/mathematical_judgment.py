@@ -27,9 +27,10 @@ Risk kinds (all advisory):
   a claim refutation).
 - ``grade_route_conflict``: the heuristic grade is strongly negative
   (likely_false / refuted) yet NO checked counterexample refutes the claim and a
-  candidate proof route exists -- i.e. the claim may be merely unsupported / not
-  yet grounded rather than false. Advisory: it asks for human judgment and never
-  changes the stored grade or any status.
+  candidate route is on record -- an unresolved state. The claim may be merely
+  unsupported / not-yet-grounded, OR false with a counterexample that has not
+  been machine-checked. Advisory: it asks for human judgment and never changes
+  the stored grade or any status.
 """
 
 from __future__ import annotations
@@ -230,8 +231,9 @@ def build_mathematical_judgment(run_dir: Path) -> dict:
             f"{len(strategy_brief.get('top_strategies') or [])} candidate route(s) present",
             "request_human_review",
             "The claim is graded as likely false, but no checked counterexample refutes it "
-            "and a candidate proof route exists. The grade is a heuristic, not a refutation: "
-            "this may be an unsupported / not-yet-grounded claim rather than a false one. "
+            "yet and a candidate route is on record. The grade is a heuristic -- neither a "
+            "refutation nor a proof. This is unresolved: the claim may be merely unsupported / "
+            "not-yet-grounded, OR false with a counterexample that has not been machine-checked. "
             "Needs human judgment; nothing here changes the grade or any status.",
         )
 
