@@ -196,6 +196,128 @@ def _matrix_determinant(rows: list[list[Fraction]]) -> Fraction:
     return det
 
 
+# A multivariate polynomial over Q is a dict mapping a canonical monomial key
+# (a sorted tuple of ``(variable, exponent)`` pairs, ``()`` for the constant
+# term) to a nonzero Fraction coefficient. This gives an exact normal form, so
+# two expressions are equal as polynomials iff their dicts are equal.
+_MAX_POLY_TERMS = 5000        # bound the normal-form size
+_MAX_POLY_EXPONENT = 100      # bound ** exponent
+
+
+def _poly_normalize(poly: dict[tuple, Fraction]) -> dict[tuple, Fraction]:
+    return {mono: coeff for mono, coeff in poly.items() if coeff != 0}
+
+
+def _poly_mul(a: dict[tuple, Fraction], b: dict[tuple, Fraction]) -> dict[tuple, Fraction]:
+    out: dict[tuple, Fraction] = {}
+    for amono, acoeff in a.items():
+        for bmono, bcoeff in b.items():
+            exps: dict[str, int] = {}
+            for var, exp in amono:
+                exps[var] = exps.get(var, 0) + exp
+            for var, exp in bmono:
+                exps[var] = exps.get(var, 0) + exp
+            mono = tuple(sorted((v, e) for v, e in exps.items() if e != 0))
+            out[mono] = out.get(mono, Fraction(0)) + acoeff * bcoeff
+            if len(out) > _MAX_POLY_TERMS:
+                raise VerifierError("polynomial too large for safe verification")
+    return _poly_normalize(out)
+
+
+def _poly_pow(base: dict[tuple, Fraction], exp: int) -> dict[tuple, Fraction]:
+    result: dict[tuple, Fraction] = {(): Fraction(1)}
+    for _ in range(exp):
+        result = _poly_mul(result, base)
+    return result
+
+
+def _poly_eval_node(node: ast.AST) -> dict[tuple, Fraction]:
+    if isinstance(node, ast.BinOp) and isinstance(node.op, _ARITH_BINOPS):
+        if isinstance(node.op, ast.Add):
+            return _poly_add(_poly_eval_node(node.left), _poly_eval_node(node.right), 1)
+        if isinstance(node.op, ast.Sub):
+            return _poly_add(_poly_eval_node(node.left), _poly_eval_node(node.right), -1)
+        if isinstance(node.op, ast.Mult):
+            return _poly_mul(_poly_eval_node(node.left), _poly_eval_node(node.right))
+        if isinstance(node.op, ast.Div):
+            divisor = _poly_eval_node(node.right)
+            const = _poly_as_constant(divisor)
+            if const is None:
+                raise VerifierError("polynomial division is only supported by a nonzero constant")
+            if const == 0:
+                raise VerifierError("division by zero")
+            return _poly_normalize({mono: coeff / const for mono, coeff in _poly_eval_node(node.left).items()})
+        # Pow
+        exp_poly = _poly_eval_node(node.right)
+        exp_const = _poly_as_constant(exp_poly)
+        if exp_const is None or exp_const.denominator != 1 or exp_const < 0:
+            raise VerifierError("polynomial exponent must be a non-negative integer")
+        exp = int(exp_const)
+        if exp > _MAX_POLY_EXPONENT:
+            raise VerifierError("polynomial exponent too large for safe verification")
+        return _poly_pow(_poly_eval_node(node.left), exp)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, _ARITH_UNARY):
+        operand = _poly_eval_node(node.operand)
+        if isinstance(node.op, ast.UAdd):
+            return operand
+        return _poly_normalize({mono: -coeff for mono, coeff in operand.items()})
+    if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool):
+        return _poly_normalize({(): Fraction(node.value)})
+    if isinstance(node, ast.Name):
+        return {((node.id, 1),): Fraction(1)}
+    raise VerifierError(
+        "unsupported polynomial element; allow only variables, integers, and + - * / ** "
+        "(division only by a nonzero constant)"
+    )
+
+
+def _poly_add(a: dict[tuple, Fraction], b: dict[tuple, Fraction], sign: int) -> dict[tuple, Fraction]:
+    out = dict(a)
+    for mono, coeff in b.items():
+        out[mono] = out.get(mono, Fraction(0)) + sign * coeff
+    return _poly_normalize(out)
+
+
+def _poly_as_constant(poly: dict[tuple, Fraction]) -> Fraction | None:
+    poly = _poly_normalize(poly)
+    if not poly:
+        return Fraction(0)
+    if set(poly) == {()}:
+        return poly[()]
+    return None
+
+
+def _parse_polynomial(expr: str) -> dict[tuple, Fraction]:
+    if len(expr) > _MAX_EXPR_LEN:
+        raise VerifierError("polynomial expression too long for safe verification")
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError as exc:
+        raise VerifierError(f"could not parse polynomial: {exc}") from exc
+    except RecursionError as exc:  # pragma: no cover - defensive
+        raise VerifierError("polynomial nested too deeply") from exc
+    return _poly_eval_node(tree.body)
+
+
+def _poly_str(poly: dict[tuple, Fraction]) -> str:
+    poly = _poly_normalize(poly)
+    if not poly:
+        return "0"
+    parts = []
+    for mono in sorted(poly):
+        coeff = poly[mono]
+        factors = "*".join(f"{v}^{e}" if e != 1 else v for v, e in mono)
+        if not factors:
+            parts.append(_frac_str(coeff))
+        elif coeff == 1:
+            parts.append(factors)
+        elif coeff == -1:
+            parts.append(f"-{factors}")
+        else:
+            parts.append(f"{_frac_str(coeff)}*{factors}")
+    return " + ".join(parts)
+
+
 def verify_check(check: dict) -> dict | None:
     """Verify one computation check. Returns a result dict, or None if it has no machine spec."""
     spec = check.get("machine_check")
@@ -239,6 +361,12 @@ def verify_check(check: dict) -> dict | None:
             computed_str = _frac_str(computed)
             verdict = "confirmed" if computed == expected_value else "refuted"
             backend = "stdlib_linalg_det"
+        elif kind == "polynomial_identity":
+            lhs = _parse_polynomial(expression)
+            rhs = _parse_polynomial(expected)
+            computed_str = _poly_str(lhs)
+            verdict = "confirmed" if lhs == rhs else "refuted"
+            backend = "stdlib_polynomial"
         else:
             return {
                 **base,

@@ -13,7 +13,9 @@ from espresso_proof.verifier import (
     _matrix_determinant,
     _matrix_rank,
     _parse_matrix,
+    _parse_polynomial,
     _permutation_order,
+    _poly_str,
     build_verification_report,
     verify_check,
 )
@@ -227,5 +229,57 @@ def test_validator_accepts_confirmed_matrix_and_blocks_refuted():
     _validate_computation_verification(ok, _report([verify_check(ok.checks[0].model_dump())]))  # no raise
     # a refuted determinant cannot support "checked"
     bad = _checks([_check("c1", "checked", "matrix_determinant", "[[1, 2], [3, 4]]", "-3")])
+    with pytest.raises(KernelValidationError, match="refuted"):
+        _validate_computation_verification(bad, _report([verify_check(bad.checks[0].model_dump())]))
+
+
+# --- polynomial identity over Q backend ---------------------------------
+
+
+def test_parse_polynomial_normal_form_is_canonical():
+    # (x+1)^2 and x^2 + 2x + 1 normalize to the same polynomial
+    assert _parse_polynomial("(x + 1)**2") == _parse_polynomial("x**2 + 2*x + 1")
+    # order and grouping do not matter
+    assert _parse_polynomial("1 + x") == _parse_polynomial("x + 1")
+
+
+def test_parse_polynomial_multivariate_and_constant_division():
+    assert _parse_polynomial("(x + y)**2") == _parse_polynomial("x**2 + 2*x*y + y**2")
+    # division by a nonzero constant is exact over Q
+    assert _parse_polynomial("(2*x + 2)/2") == _parse_polynomial("x + 1")
+
+
+def test_parse_polynomial_rejects_nonconstant_division():
+    with pytest.raises(VerifierError):
+        _parse_polynomial("x**2 / x")  # division by a non-constant polynomial
+    with pytest.raises(VerifierError):
+        _parse_polynomial("1/0")  # division by zero
+
+
+def test_poly_str_is_stable():
+    assert _poly_str(_parse_polynomial("x + 1")) == _poly_str(_parse_polynomial("1 + x"))
+
+
+def test_verify_check_polynomial_identity_confirmed_and_refuted():
+    confirmed = verify_check(_check("p1", "checked", "polynomial_identity", "(x + 1)**2", "x**2 + 2*x + 1"))
+    assert confirmed["verdict"] == "confirmed"
+    assert confirmed["executed"] is True
+    assert confirmed["backend"] == "stdlib_polynomial"
+
+    refuted = verify_check(_check("p2", "checked", "polynomial_identity", "(x + 1)**2", "x**2 + 1"))
+    assert refuted["verdict"] == "refuted"
+
+
+def test_verify_check_polynomial_malformed_is_error_not_executed():
+    result = verify_check(_check("p3", "inconclusive", "polynomial_identity", "x**2 / x", "x"))
+    assert result["verdict"] == "error"
+    assert result["executed"] is False
+
+
+def test_validator_accepts_confirmed_polynomial_and_blocks_refuted():
+    # divisibility is expressible as an identity f == g*q; a confirmed factorization earns "checked"
+    ok = _checks([_check("c1", "checked", "polynomial_identity", "x**2 - 1", "(x - 1)*(x + 1)")])
+    _validate_computation_verification(ok, _report([verify_check(ok.checks[0].model_dump())]))  # no raise
+    bad = _checks([_check("c1", "checked", "polynomial_identity", "x**2 - 1", "(x - 1)*(x - 1)")])
     with pytest.raises(KernelValidationError, match="refuted"):
         _validate_computation_verification(bad, _report([verify_check(bad.checks[0].model_dump())]))
