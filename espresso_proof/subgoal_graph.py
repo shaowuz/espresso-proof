@@ -425,6 +425,18 @@ def state_words(state: str) -> str:
     return STATE_WORDING.get(state, "In progress")
 
 
+def graph_notes(graph: dict | None) -> list[str]:
+    """Return the graph's display notes (non-empty, stripped strings).
+
+    Notes are advisory display text that tell the reader how to interpret the
+    shown subgoals — e.g. that a blocked list was capped, or that no route is
+    selected yet. They are NEVER proof/status; they only prevent a shortened
+    view from being misread as the complete proof-search state.
+    """
+    notes = (graph or {}).get("notes") or []
+    return [str(n).strip() for n in notes if str(n).strip()]
+
+
 def group_subgoals(graph: dict | None) -> dict[str, Any]:
     """Split a graph dict into the render groups shared by the dashboard + memo.
 
@@ -500,6 +512,15 @@ def render_proof_search_lines(graph: dict | None, *, statement_limit: int = 200)
     nxt = groups["next"]
     if nxt is not None:
         lines.append(f"  Next subgoal to attack: {short(nxt.get('statement'))}")
+
+    # Display notes (how to read the list above) — shown only when present, and
+    # never truncated so a "list was capped" caveat is fully visible.
+    notes = graph_notes(graph)
+    if notes:
+        lines.append("  About this proof-search view:")
+        for note in notes:
+            lines.append(f"    - {note}")
+
     lines.append(f"  Note: {PROOF_SEARCH_NOTE}")
     return lines
 
@@ -527,6 +548,7 @@ __all__ = [
     "PROOF_SEARCH_NOTE",
     "assemble_subgoal_graph",
     "build_subgoal_graph",
+    "graph_notes",
     "group_subgoals",
     "render_proof_search_lines",
     "state_words",

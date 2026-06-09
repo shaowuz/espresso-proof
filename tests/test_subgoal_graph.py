@@ -610,3 +610,100 @@ def test_dashboard_and_memo_share_one_wording_source() -> None:
     assert run_dashboard._state_words is subgoal_graph.state_words
     assert run_dashboard._PROOF_SEARCH_NOTE is subgoal_graph.PROOF_SEARCH_NOTE
     assert run_dashboard._group_subgoals is subgoal_graph.group_subgoals
+
+
+# ---------------------------------------------------------------------------
+# Goal 15: surface proof_goal_graph.notes in memo + dashboard (display only)
+# ---------------------------------------------------------------------------
+def test_graph_notes_helper_filters_blank_and_strips() -> None:
+    from espresso_proof.subgoal_graph import graph_notes
+
+    assert graph_notes(None) == []
+    assert graph_notes({}) == []
+    assert graph_notes({"notes": []}) == []
+    assert graph_notes({"notes": ["  ", ""]}) == []
+    assert graph_notes({"notes": ["  keep me  ", "", "second"]}) == ["keep me", "second"]
+
+
+def test_render_proof_search_lines_shows_notes_when_present() -> None:
+    from espresso_proof.subgoal_graph import render_proof_search_lines
+
+    graph = {
+        "nodes": [{"role": "main_goal", "statement": "Show the claim.", "state": "open"}],
+        "notes": ["Some prover blockers are not shown (subgoal display is capped)."],
+    }
+    text = "\n".join(render_proof_search_lines(graph))
+    assert "About this proof-search view:" in text
+    assert "subgoal display is capped" in text
+    # the cap caveat must be shown in full, never truncated
+    assert "Some prover blockers are not shown (subgoal display is capped)." in text
+
+
+def test_render_proof_search_lines_omits_notes_block_when_absent() -> None:
+    from espresso_proof.subgoal_graph import render_proof_search_lines
+
+    graph = {"nodes": [{"role": "main_goal", "statement": "Show the claim.", "state": "open"}]}
+    text = "\n".join(render_proof_search_lines(graph))
+    assert "About this proof-search view" not in text
+
+
+def test_memo_shows_graph_notes_when_present(tmp_path: Path) -> None:
+    # A gate-run graph (no route selected yet) records a human-readable note.
+    from espresso_proof.memo import build_concise_memo
+
+    run_dir = _gate_run(tmp_path)
+    build_subgoal_graph(run_dir)
+    notes = read_yaml(run_dir / "proof_goal_graph.yaml").get("notes") or []
+    assert notes, "expected the gate-run graph to record at least one note"
+    memo = build_concise_memo(run_dir)
+    assert "About this proof-search view:" in memo
+    assert notes[0] in memo
+    for token in ("proof complete", "proof-complete", "proof-close", "proved", "verified theorem"):
+        assert token not in memo.lower()
+
+
+def test_dashboard_shows_graph_notes_when_present(tmp_path: Path) -> None:
+    from espresso_proof.run_dashboard import render_run_dashboard
+
+    run_dir = _gate_run(tmp_path)
+    build_subgoal_graph(run_dir)
+    notes = read_yaml(run_dir / "proof_goal_graph.yaml").get("notes") or []
+    assert notes
+    html = render_run_dashboard(run_dir)
+    assert "About this proof-search view" in html
+    assert notes[0] in html
+
+
+def test_dashboard_notes_are_html_escaped() -> None:
+    from espresso_proof.run_dashboard import _proof_state_section
+
+    graph = {
+        "nodes": [{"role": "main_goal", "statement": "Show the claim.", "state": "open"}],
+        "notes": ['<script>alert("x")</script> & more'],
+    }
+    section = _proof_state_section({"graph": graph})
+    assert "&lt;script&gt;" in section
+    assert "<script>" not in section
+    assert "&amp; more" in section
+
+
+def test_dashboard_omits_notes_block_when_absent() -> None:
+    from espresso_proof.run_dashboard import _proof_state_section
+
+    graph = {"nodes": [{"role": "main_goal", "statement": "Show the claim.", "state": "open"}]}
+    section = _proof_state_section({"graph": graph})
+    assert "sg-notes" not in section
+    assert "About this proof-search view" not in section
+
+
+def test_rendering_notes_does_not_mutate_graph_artifact(tmp_path: Path) -> None:
+    from espresso_proof.memo import build_concise_memo
+    from espresso_proof.run_dashboard import render_run_dashboard
+
+    run_dir = _gate_run(tmp_path)
+    build_subgoal_graph(run_dir)
+    before = (run_dir / "proof_goal_graph.yaml").read_bytes()
+    build_concise_memo(run_dir)
+    render_run_dashboard(run_dir)
+    after = (run_dir / "proof_goal_graph.yaml").read_bytes()
+    assert before == after
