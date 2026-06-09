@@ -317,7 +317,21 @@ def resume_run(
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     state = manifest.get("current_state", "")
     if state == "COMPLETED_MEMO":
-        # idempotent: do not re-resolve / re-append rounds.
+        # idempotent: do not re-resolve / re-append rounds. But a pre-loop step on
+        # this resume (e.g. --auto-wire-verifications / --audit-evidence) may have
+        # appended scoped evidence before the early return, so refresh the derived
+        # proof-search graph (fail closed) before the dashboard/memo so all three
+        # surfaces stay coherent. This never upgrades status: the graph
+        # re-validates through the kernel and only reflects already-earned evidence.
+        if (run_dir / "proof_goal_graph.yaml").exists():
+            from .subgoal_graph import build_subgoal_graph, remove_subgoal_graph
+
+            try:
+                build_subgoal_graph(run_dir)
+                validate_run(run_dir)
+            except Exception:  # noqa: BLE001 - advisory view must fail closed
+                remove_subgoal_graph(run_dir)
+                validate_run(run_dir)
         write_run_dashboard(run_dir)
         return build_concise_memo(run_dir)
     if _state_index(state) < _state_index("WAITING_LLM_AGENT_HUMAN_GATE"):

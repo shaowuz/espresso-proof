@@ -674,6 +674,29 @@ def run_dashboard_command(
     typer.echo(f"Wrote run dashboard -> {out}")
 
 
+def _refresh_derived_views(run: Path) -> None:
+    """Rebuild the proof-search graph + dashboard after a command appends scoped
+    evidence, so the memo, graph, and dashboard stay coherent for one run.
+
+    Only refreshes views that ALREADY exist (never fabricates new artifacts), and
+    fails closed on the graph: if the rebuilt graph cannot pass validation, drop it
+    and keep the run valid. This never upgrades any status -- the graph re-validates
+    through the same kernel gate and only reflects evidence the kernel already
+    earned.
+    """
+    from .subgoal_graph import build_subgoal_graph, remove_subgoal_graph
+
+    if (run / "proof_goal_graph.yaml").exists():
+        try:
+            build_subgoal_graph(run)
+            validate_run(run)
+        except Exception:  # noqa: BLE001 - advisory view must fail closed, not block
+            remove_subgoal_graph(run)
+            validate_run(run)
+    if (run / "research_dashboard.html").exists():
+        write_run_dashboard(run)
+
+
 @app.command("verify-finite-groups")
 def verify_finite_groups_command(
     run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
@@ -689,6 +712,7 @@ def verify_finite_groups_command(
     primes = prime or [2, 3]
     report = verify_finite_groups(run, primes=primes)
     validate_run(run)
+    _refresh_derived_views(run)
     checked = sum(1 for e in report["entries"] if e["earned_status"] == "instance_checked")
     typer.echo(
         f"Verified {checked}/{len(report['entries'])} finite group(s) abelian "
@@ -734,6 +758,7 @@ def verify_identity_in_run_command(
     data = read_yaml(table)
     entry = verify_identity_table_in_run(run, table=data, identity=identity, entry_id=entry_id, target=target)
     validate_run(run)
+    _refresh_derived_views(run)
     typer.echo(
         f"Entry {entry['id']}: {entry['earned_status']} -- {entry['result']} "
         f"(checked in this finite case only; NOT a universal proof)."
@@ -757,6 +782,7 @@ def verify_ring_identity_in_run_command(
     """
     entry = verify_ring_identity_in_run(run, identity=identity, modulus=modulus, entry_id=entry_id, target=target)
     validate_run(run)
+    _refresh_derived_views(run)
     typer.echo(
         f"Entry {entry['id']}: {entry['earned_status']} -- {entry['result']} "
         f"(checked over Z/{modulus} only; NOT a universal proof)."
@@ -790,6 +816,7 @@ def verify_matrix_rank_in_run_command(
         expected_rank=expected_rank, expected_determinant=expected_determinant, target=target,
     )
     validate_run(run)
+    _refresh_derived_views(run)
     typer.echo(
         f"Entry {entry['id']}: {entry['earned_status']} -- {entry['result']} "
         "(checked for this specific matrix only; NOT a universal proof)."
@@ -816,6 +843,7 @@ def auto_wire_verifications_command(
         "unverified": "not established (no checked status)",
     }
     summary = auto_wire_scoped_verifications(run)
+    _refresh_derived_views(run)
     for item in summary["appended"]:
         phrase = _earned_phrase.get(item["earned_status"], item["earned_status"])
         typer.echo(f"[run] {item['id']}: {phrase} [{item['earned_status']}]")

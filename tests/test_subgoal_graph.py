@@ -448,6 +448,71 @@ def test_cli_build_subgoal_graph(tmp_path: Path) -> None:
     validate_run(run_dir)
 
 
+def test_verify_finite_groups_refreshes_subgoal_graph_and_dashboard(tmp_path: Path) -> None:
+    # Regression for the stale-derived-views bug: after a scoped finite check
+    # appends proof_verification.yaml, the existing proof-search graph + dashboard
+    # must be refreshed so the memo, graph, and dashboard agree (no surface shows
+    # "0 checked" while another shows the checked instances). Display-only refresh:
+    # it re-validates and never upgrades any status.
+    run_dir = _resumed_run(tmp_path)  # resume builds the graph + dashboard
+    graph_before = _graph(run_dir)
+    assert graph_before["summary"]["finite_or_computation_checked"] == 0
+    assert (run_dir / "research_dashboard.html").exists()
+
+    result = CliRunner().invoke(
+        app, ["verify-finite-groups", "--run", str(run_dir), "--prime", "2"]
+    )
+    assert result.exit_code == 0, result.stdout
+
+    confirmed = [
+        e
+        for e in read_yaml(run_dir / "proof_verification.yaml")["entries"]
+        if e["earned_status"] == "instance_checked"
+    ]
+    assert confirmed, "expected at least one instance_checked entry"
+
+    graph_after = _graph(run_dir)
+    assert graph_after["summary"]["finite_or_computation_checked"] == len(confirmed)
+    scoped = [n for n in graph_after["nodes"] if n.get("state") == "scoped_checked"]
+    assert len(scoped) == len(confirmed)
+    # the refreshed dashboard now shows the finite/computational-scope wording
+    html = (run_dir / "research_dashboard.html").read_text(encoding="utf-8")
+    assert "finite/computational scope" in html
+    # display-only: the run still validates and the claim grade is not upgraded
+    validate_run(run_dir)
+    grade = read_yaml(run_dir / "idea_grade.yaml")
+    assert grade["proof_language_status"] == "idea_sketch"
+
+
+def test_resume_completed_memo_refreshes_stale_graph(tmp_path: Path) -> None:
+    # Regression: a re-resume on an already-COMPLETED_MEMO run (e.g. with a pre-loop
+    # --auto-wire-verifications / --audit-evidence step) appends scoped evidence
+    # before the idempotent early return. That early return must refresh the
+    # proof-search graph so it does not stay stale relative to proof_verification.
+    from espresso_proof.orchestrator import resume_run
+    from espresso_proof.proof_verification import verify_finite_groups
+
+    run_dir = _resumed_run(tmp_path)  # COMPLETED_MEMO; graph built
+    sid = read_yaml(run_dir / "strategy_brief.yaml")["top_strategies"][0]["id"]
+    assert _graph(run_dir)["summary"]["finite_or_computation_checked"] == 0
+
+    # Append scoped evidence out-of-band (library writer; no derived-view refresh).
+    verify_finite_groups(run_dir, primes=[2])
+    assert _graph(run_dir)["summary"]["finite_or_computation_checked"] == 0  # stale
+
+    # Re-resume: the COMPLETED_MEMO early return must refresh the graph.
+    resume_run(run_dir=run_dir, selected_strategy=sid, effort="quick_test")
+    confirmed = [
+        e
+        for e in read_yaml(run_dir / "proof_verification.yaml")["entries"]
+        if e["earned_status"] == "instance_checked"
+    ]
+    assert confirmed
+    assert _graph(run_dir)["summary"]["finite_or_computation_checked"] == len(confirmed)
+    validate_run(run_dir)
+    assert read_yaml(run_dir / "idea_grade.yaml")["proof_language_status"] == "idea_sketch"
+
+
 # ---------------------------------------------------------------------------
 # "Negative Tests Required" — closure can never be earned by prose / preference
 # / memory / finite examples / dropped-hypothesis counterexamples.
