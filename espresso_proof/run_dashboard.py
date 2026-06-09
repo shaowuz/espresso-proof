@@ -16,6 +16,7 @@ from typing import Any
 from .io import read_yaml
 from .subgoal_graph import (
     PROOF_SEARCH_NOTE as _PROOF_SEARCH_NOTE,
+    graph_notes as _graph_notes,
     group_subgoals as _group_subgoals,
     state_words as _state_words,
 )
@@ -113,12 +114,22 @@ def _proof_state_section(state: dict[str, Any]) -> str:
             f"{_h(next_node.get('statement', ''))}</p>"
         )
     groups = "".join(rows) or "<p class=\"muted\">No open subgoals recorded.</p>"
+    # Display notes (how to read the list) — shown only when present; HTML-escaped.
+    notes_html = ""
+    notes = _graph_notes(graph)
+    if notes:
+        items = "".join(f"<li>{_h(n)}</li>" for n in notes)
+        notes_html = (
+            f"<div class=\"sg-notes\"><b>About this proof-search view</b>"
+            f"<ul class=\"sg-list\">{items}</ul></div>"
+        )
     note = _PROOF_SEARCH_NOTE
     return f"""<section>
   <h2>Proof State</h2>
   {main_html}
   <div class="sg-groups">{groups}</div>
   {next_html}
+  {notes_html}
   <div class="note">{_h(note)}</div>
 </section>"""
 
@@ -583,7 +594,7 @@ p{margin:0;max-width:690px}p+p{margin-top:10px}.muted{color:var(--muted)}
 .selection{background:var(--green-soft)}.selection-row{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}.selection-row strong{display:block;font-size:21px;margin-bottom:4px}.effort{flex:0 0 auto;padding:7px 10px;border:1px solid var(--green-line);border-radius:999px;color:var(--green);background:rgba(255,255,255,.55);font-size:13px;font-weight:650}
 .detail-list{margin:14px 0 0;padding:0;list-style:none;display:grid;gap:8px}.detail-list li{padding-left:18px;position:relative;color:var(--muted)}.detail-list li:before{content:"";position:absolute;left:2px;top:.72em;width:6px;height:6px;border-radius:50%;background:var(--green)}
 pre{margin:14px 0 0;padding:16px;background:#171917;color:#eef5ec;border-radius:8px;overflow-wrap:anywhere;white-space:pre-wrap;font:13px/1.55 "SFMono-Regular",Consolas,monospace}.actions{display:flex;gap:10px;align-items:center;margin-top:12px}.copy{border:1px solid var(--line);border-radius:8px;background:white;color:var(--ink);padding:9px 12px;font:inherit;cursor:pointer}.copy:hover{border-color:var(--green)}.copy-status{color:var(--muted);font-size:14px}.note{margin-top:12px;padding:12px 14px;border:1px solid #ead7b7;border-radius:8px;background:var(--amber-soft);color:#593b12;font-size:14px}
-.sg-main{margin-bottom:14px}.sg-groups{display:grid;gap:14px}.sg-group b{display:block;margin-bottom:6px}.sg-list{margin:0;padding:0;list-style:none;display:grid;gap:6px}.sg-list li{padding-left:18px;position:relative;color:var(--ink)}.sg-list li:before{content:"";position:absolute;left:2px;top:.72em;width:6px;height:6px;border-radius:50%;background:var(--green)}.sg-state{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:var(--soft);color:var(--muted);font-size:12px}.sg-next{margin-top:14px;padding:12px 14px;border:1px solid var(--green-line);border-radius:8px;background:var(--green-soft)}
+.sg-main{margin-bottom:14px}.sg-groups{display:grid;gap:14px}.sg-group b{display:block;margin-bottom:6px}.sg-list{margin:0;padding:0;list-style:none;display:grid;gap:6px}.sg-list li{padding-left:18px;position:relative;color:var(--ink)}.sg-list li:before{content:"";position:absolute;left:2px;top:.72em;width:6px;height:6px;border-radius:50%;background:var(--green)}.sg-state{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:var(--soft);color:var(--muted);font-size:12px}.sg-next{margin-top:14px;padding:12px 14px;border:1px solid var(--green-line);border-radius:8px;background:var(--green-soft)}.sg-notes{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--soft)}.sg-notes b{display:block;margin-bottom:6px}
 @media (max-width:780px){main{padding:18px}header,section{padding:24px 20px}.status,.route-grid,.review-grid{grid-template-columns:1fr}.judgment-icons{grid-template-columns:1fr}.status div{border-right:0;border-bottom:1px solid var(--line)}.status div:last-child{border-bottom:0}.selection-row{display:block}.effort{display:inline-block;margin-top:12px}}
 """.strip()
 
