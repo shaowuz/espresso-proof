@@ -25,6 +25,7 @@ from .descriptions import (
 )
 from .failure_pattern_bank import failure_pattern_allocation_hints
 from .io import read_yaml
+from .subgoal_graph import render_proof_search_lines
 
 
 # Conservative defaults for a proof-route field that has no specific artifact
@@ -267,9 +268,22 @@ def build_concise_memo(run_dir: Path) -> str:
     lines.append("")
     lines.append(f"Next cheapest test: {next_test}")
 
+    optional = manifest.get("optional_artifacts", {})
+
+    # Proof-search state (advisory): the durable subgoal graph, when one was
+    # built. It is a map of the search (open / sketched / blocked / next), never
+    # proof evidence; the renderer cannot emit proof-complete language. Rendered
+    # from the SAME helper as the dashboard so both surfaces stay in sync.
+    _pgg_rel = optional.get("proof_goal_graph")
+    if _pgg_rel and (run_dir / _pgg_rel).exists():
+        graph = read_yaml(run_dir / _pgg_rel)
+        graph_lines = render_proof_search_lines(graph)
+        if graph_lines:
+            lines.append("")
+            lines.extend(graph_lines)
+
     # Mathematical judgment (advisory): risks / next checks only. Never a status
     # upgrade and never proof-complete language.
-    optional = manifest.get("optional_artifacts", {})
     if "mathematical_judgment" in optional:
         judgment = read_yaml(run_dir / optional["mathematical_judgment"])
         findings = judgment.get("findings", [])

@@ -522,3 +522,91 @@ def test_graph_does_not_upgrade_grade_or_status(tmp_path: Path) -> None:
     grade_after = read_yaml(run_dir / "idea_grade.yaml")
     assert grade_after == grade_before
     assert grade_after["proof_language_status"] == lang_before
+
+
+# ---------------------------------------------------------------------------
+# memo proof-search section + single-source rendering (dashboard <-> memo)
+# ---------------------------------------------------------------------------
+def test_render_proof_search_lines_uses_human_wording_and_disclaimer() -> None:
+    from espresso_proof.subgoal_graph import render_proof_search_lines
+
+    graph = {
+        "nodes": [
+            {"role": "main_goal", "statement": "Show the claim.", "state": "open"},
+            {"role": "reduction", "statement": "Lock the claim.", "state": "sketched"},
+            {"role": "lemma", "statement": "Find the source.", "state": "blocked_missing_source"},
+        ]
+    }
+    lines = render_proof_search_lines(graph)
+    text = "\n".join(lines)
+    assert "Proof-search state (a map of the search, not a proof):" in text
+    assert "Main goal [Open]:" in text
+    assert "Only sketched:" in text
+    assert "Blocked by a missing source" in text
+    assert "Next subgoal to attack:" in text
+    assert "proof-search map, not a proof" in text
+    # human wording only — no raw internal enum names leak into the memo text
+    for raw in ("blocked_missing_source", "main_goal", "scoped_checked", "source_supported"):
+        assert raw not in text
+    # never proof-complete language
+    for token in ("proof complete", "proof-close", "proved", "proven", "verified"):
+        assert token not in text.lower()
+
+
+def test_render_proof_search_lines_empty_graph_returns_nothing() -> None:
+    from espresso_proof.subgoal_graph import render_proof_search_lines
+
+    assert render_proof_search_lines({}) == []
+    assert render_proof_search_lines({"nodes": []}) == []
+    assert render_proof_search_lines(None) == []
+
+
+def test_render_proof_search_lines_truncates_long_statements() -> None:
+    from espresso_proof.subgoal_graph import render_proof_search_lines
+
+    graph = {"nodes": [{"role": "main_goal", "statement": "x" * 500, "state": "open"}]}
+    line = next(l for l in render_proof_search_lines(graph) if l.startswith("  Main goal"))
+    assert line.endswith("…")
+    assert len(line) < 260  # capped, not the full 500-char blob
+
+
+def test_memo_includes_proof_search_section_when_graph_present(tmp_path: Path) -> None:
+    from espresso_proof.memo import build_concise_memo
+
+    run_dir = _resumed_run(tmp_path)  # resume auto-builds the subgoal graph
+    assert (run_dir / "proof_goal_graph.yaml").exists()
+    memo = build_concise_memo(run_dir)
+    assert "Proof-search state (a map of the search, not a proof):" in memo
+    assert "Next subgoal to attack:" in memo
+    # no proof-complete language anywhere in the memo
+    for token in ("proof complete", "proof-complete", "proof-close", "proved", "proven", "verified theorem"):
+        assert token not in memo.lower()
+
+
+def test_memo_omits_proof_search_section_without_graph(tmp_path: Path) -> None:
+    from espresso_proof.memo import build_concise_memo
+
+    run_dir = _gate_run(tmp_path)  # at the gate: no proof_goal_graph.yaml yet
+    assert not (run_dir / "proof_goal_graph.yaml").exists()
+    memo = build_concise_memo(run_dir)
+    assert "Proof-search state" not in memo
+
+
+def test_memo_render_is_read_only_for_yaml(tmp_path: Path) -> None:
+    from espresso_proof.memo import build_concise_memo
+
+    run_dir = _resumed_run(tmp_path)
+    before = {p.name: p.read_bytes() for p in run_dir.glob("*.yaml")}
+    build_concise_memo(run_dir)
+    after = {p.name: p.read_bytes() for p in run_dir.glob("*.yaml")}
+    assert before == after
+
+
+def test_dashboard_and_memo_share_one_wording_source() -> None:
+    # The dashboard must render the proof-search state from the same wording
+    # source as the memo (no second enum->wording map to drift out of sync).
+    from espresso_proof import run_dashboard, subgoal_graph
+
+    assert run_dashboard._state_words is subgoal_graph.state_words
+    assert run_dashboard._PROOF_SEARCH_NOTE is subgoal_graph.PROOF_SEARCH_NOTE
+    assert run_dashboard._group_subgoals is subgoal_graph.group_subgoals

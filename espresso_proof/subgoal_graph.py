@@ -386,6 +386,124 @@ def build_subgoal_graph(run_dir: Path) -> dict:
     return graph
 
 
+# ---------------------------------------------------------------------------
+# Human-readable rendering (single source of truth for the dashboard + memo).
+#
+# These map internal subgoal-state enums to plain mathematician-facing wording.
+# Raw enum names must never reach a user-facing surface. The renderer is
+# read-only and advisory: it describes a proof SEARCH, never claims a proof.
+# ---------------------------------------------------------------------------
+
+# Human wording for each internal subgoal state.
+STATE_WORDING: dict[str, str] = {
+    "open": "Open",
+    "sketched": "Only sketched",
+    "source_supported": "Supported by a cited reference",
+    "scoped_checked": "Checked only in a finite/computational scope",
+    "blocked_missing_source": "Blocked by a missing source",
+    "blocked_reviewer_objection": "Blocked by a reviewer objection",
+    "contradicted": "Contradicted under the current hypotheses",
+}
+
+# Order in which to look for the next subgoal to attack (most actionable first).
+NEXT_SUBGOAL_PRIORITY = (
+    "open",
+    "blocked_missing_source",
+    "blocked_reviewer_objection",
+    "sketched",
+)
+
+# The advisory disclaimer shown on every proof-search rendering.
+PROOF_SEARCH_NOTE = (
+    "This is a proof-search map, not a proof. It does not claim the theorem is "
+    "checked, and references support only their own step."
+)
+
+
+def state_words(state: str) -> str:
+    """Plain wording for an internal subgoal state (fail-safe default)."""
+    return STATE_WORDING.get(state, "In progress")
+
+
+def group_subgoals(graph: dict | None) -> dict[str, Any]:
+    """Split a graph dict into the render groups shared by the dashboard + memo.
+
+    Returns ``{"main", "open", "sketched", "blocked", "reference", "scoped",
+    "next"}``. ``main`` / ``next`` are single nodes (or ``None``); the rest are
+    lists. Pure and read-only; never mutates the graph.
+    """
+    nodes = (graph or {}).get("nodes") or []
+    main = next((n for n in nodes if n.get("role") == "main_goal"), None)
+    subgoals = [n for n in nodes if n.get("role") != "main_goal"]
+
+    def by_state(*states: str) -> list[dict[str, Any]]:
+        return [n for n in subgoals if n.get("state") in states]
+
+    next_node = None
+    for wanted in NEXT_SUBGOAL_PRIORITY:
+        match = [n for n in subgoals if n.get("state") == wanted]
+        if match:
+            next_node = match[0]
+            break
+
+    return {
+        "main": main,
+        "open": by_state("open"),
+        "sketched": by_state("sketched"),
+        "blocked": by_state("blocked_missing_source", "blocked_reviewer_objection"),
+        "reference": by_state("source_supported"),
+        "scoped": by_state("scoped_checked"),
+        "next": next_node,
+    }
+
+
+def render_proof_search_lines(graph: dict | None, *, statement_limit: int = 200) -> list[str]:
+    """Render the proof-search state as plain memo text lines.
+
+    Returns ``[]`` when the graph has no nodes, so callers can simply skip an
+    empty section. Read-only and advisory: it only describes the search map and
+    never emits proof-complete language.
+    """
+    if not (graph or {}).get("nodes"):
+        return []
+    groups = group_subgoals(graph)
+
+    def short(text: Any) -> str:
+        text = " ".join(str(text or "").split())
+        if len(text) > statement_limit:
+            return text[: statement_limit - 1].rstrip() + "…"
+        return text
+
+    lines = ["Proof-search state (a map of the search, not a proof):"]
+    main = groups["main"]
+    if main is not None:
+        lines.append(
+            f"  Main goal [{state_words(main.get('state', ''))}]: {short(main.get('statement'))}"
+        )
+
+    for label, key in (
+        ("Open subgoals", "open"),
+        ("Only sketched", "sketched"),
+        ("Blocked subgoals", "blocked"),
+        ("Supported by reference (not a proof of the claim)", "reference"),
+        ("Checked only in a finite/computational scope", "scoped"),
+    ):
+        rows = groups[key]
+        if not rows:
+            continue
+        lines.append(f"  {label}:")
+        for node in rows:
+            lines.append(
+                f"    - {short(node.get('statement'))} [{state_words(node.get('state', ''))}]"
+            )
+
+    nxt = groups["next"]
+    if nxt is not None:
+        lines.append(f"  Next subgoal to attack: {short(nxt.get('statement'))}")
+    lines.append(f"  Note: {PROOF_SEARCH_NOTE}")
+    return lines
+
+
 def remove_subgoal_graph(run_dir: Path) -> None:
     """Drop the graph artifact + its manifest registration (used to fail closed
     if a freshly built graph fails the full run validation)."""
@@ -404,7 +522,13 @@ def remove_subgoal_graph(run_dir: Path) -> None:
 
 __all__ = [
     "GRAPH_FILENAME",
+    "STATE_WORDING",
+    "NEXT_SUBGOAL_PRIORITY",
+    "PROOF_SEARCH_NOTE",
     "assemble_subgoal_graph",
     "build_subgoal_graph",
+    "group_subgoals",
+    "render_proof_search_lines",
+    "state_words",
     "remove_subgoal_graph",
 ]

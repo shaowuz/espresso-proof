@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import Any
 
 from .io import read_yaml
+from .subgoal_graph import (
+    PROOF_SEARCH_NOTE as _PROOF_SEARCH_NOTE,
+    group_subgoals as _group_subgoals,
+    state_words as _state_words,
+)
 
 
 DASHBOARD_FILENAME = "research_dashboard.html"
@@ -56,28 +61,9 @@ def render_run_dashboard(run_dir: Path) -> str:
     )
 
 
-# Human wording for each internal subgoal state. Raw enum names never reach the UI.
-_STATE_WORDING: dict[str, str] = {
-    "open": "Open",
-    "sketched": "Only sketched",
-    "source_supported": "Supported by a cited reference",
-    "scoped_checked": "Checked only in a finite/computational scope",
-    "blocked_missing_source": "Blocked by a missing source",
-    "blocked_reviewer_objection": "Blocked by a reviewer objection",
-    "contradicted": "Contradicted under the current hypotheses",
-}
-
-# Order in which to look for the next subgoal to attack (most actionable first).
-_NEXT_SUBGOAL_PRIORITY = (
-    "open",
-    "blocked_missing_source",
-    "blocked_reviewer_objection",
-    "sketched",
-)
-
-
-def _state_words(state: str) -> str:
-    return _STATE_WORDING.get(state, "In progress")
+# Human wording, next-subgoal priority, and grouping are imported from
+# ``subgoal_graph`` so the dashboard and the memo render the proof-search state
+# from a single source of truth (no duplicated enum->wording maps).
 
 
 def _proof_state_section(state: dict[str, Any]) -> str:
@@ -86,24 +72,14 @@ def _proof_state_section(state: dict[str, Any]) -> str:
     if not nodes:
         return ""
 
-    main = next((node for node in nodes if node.get("role") == "main_goal"), None)
-    subgoals = [node for node in nodes if node.get("role") != "main_goal"]
-
-    def by_state(*states: str) -> list[dict[str, Any]]:
-        return [node for node in subgoals if node.get("state") in states]
-
-    open_nodes = by_state("open")
-    blocked_nodes = by_state("blocked_missing_source", "blocked_reviewer_objection")
-    sketched_nodes = by_state("sketched")
-    reference_nodes = by_state("source_supported")
-    scoped_nodes = by_state("scoped_checked")
-
-    next_node = None
-    for wanted in _NEXT_SUBGOAL_PRIORITY:
-        match = [node for node in subgoals if node.get("state") == wanted]
-        if match:
-            next_node = match[0]
-            break
+    grouped = _group_subgoals(graph)
+    main = grouped["main"]
+    open_nodes = grouped["open"]
+    blocked_nodes = grouped["blocked"]
+    sketched_nodes = grouped["sketched"]
+    reference_nodes = grouped["reference"]
+    scoped_nodes = grouped["scoped"]
+    next_node = grouped["next"]
 
     rows: list[str] = []
 
@@ -137,10 +113,7 @@ def _proof_state_section(state: dict[str, Any]) -> str:
             f"{_h(next_node.get('statement', ''))}</p>"
         )
     groups = "".join(rows) or "<p class=\"muted\">No open subgoals recorded.</p>"
-    note = (
-        "This is a proof-search map, not a proof. It does not claim the theorem is "
-        "checked, and references support only their own step."
-    )
+    note = _PROOF_SEARCH_NOTE
     return f"""<section>
   <h2>Proof State</h2>
   {main_html}
