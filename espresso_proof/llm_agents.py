@@ -315,6 +315,14 @@ class ExternalCommandClient:
             raise RuntimeError(
                 f"external agent command did not return JSON: {completed.stdout[:500]}"
             ) from exc
+        # A well-formed agent must return a JSON OBJECT. Valid-but-non-dict JSON
+        # (a list / string / number / null) fails the same clean, classifiable
+        # way as the other adapter errors instead of an opaque AttributeError on
+        # .get below.
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"external agent command did not return a JSON object: {completed.stdout[:500]}"
+            )
         if isinstance(data.get("output"), dict):
             return data["output"]
         return data
