@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from espresso_proof.agent_skill_catalog import select_agent_skills
 from espresso_proof.llm_agents import ExternalCommandClient
 
@@ -210,6 +212,38 @@ def test_external_client_records_codex_model_when_command_is_codex_adapter(
     assert client.model == "gpt-5.5-xhigh"
     assert client.timeout == 360
     assert client.complete_json(system="Return JSON only.", prompt="{}")["verdict"] == "needs_sources"
+
+
+@pytest.mark.parametrize("payload", ["[1, 2, 3]", '"a string"', "42", "null"])
+def test_external_client_non_dict_json_fails_with_clean_runtimeerror(
+    tmp_path: Path, monkeypatch, payload: str
+) -> None:
+    # A well-formed agent must return a JSON OBJECT. Valid-but-non-dict JSON
+    # (list / string / number / null) must fail closed with a clear RuntimeError,
+    # NOT an opaque AttributeError on data.get(...). (Dogfood: Case 2/4 adapter
+    # robustness finding.)
+    adapter = tmp_path / "agent.py"
+    adapter.write_text(
+        "import sys\n" f"sys.stdout.write({payload!r})\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_COMMAND", f"{sys.executable} {adapter}")
+    client = ExternalCommandClient(model="gpt-4.1")
+    with pytest.raises(RuntimeError, match="did not return a JSON object"):
+        client.complete_json(system="Return JSON only.", prompt="{}")
+
+
+def test_external_client_valid_json_object_still_works(tmp_path: Path, monkeypatch) -> None:
+    # The guard must not regress the normal dict path: a JSON object with no
+    # "output" wrapper is returned verbatim.
+    adapter = tmp_path / "agent.py"
+    adapter.write_text(
+        "import sys\n" 'sys.stdout.write(\'{"verdict": "needs_sources"}\')\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_COMMAND", f"{sys.executable} {adapter}")
+    client = ExternalCommandClient(model="gpt-4.1")
+    assert client.complete_json(system="x", prompt="{}")["verdict"] == "needs_sources"
 
 
 def test_external_client_timeout_defaults_and_env_override(
