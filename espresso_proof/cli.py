@@ -82,6 +82,7 @@ from .external_tool_runner import (
     run_and_record_external_tool,
     run_completed_cleanly,
 )
+from .external_tool_adapters import run_exact_modexp_adapter
 from .theorem_applicability import audit_theorem_applicability
 from .verifier import audit_evidence, verify_computation_checks
 from .models import (
@@ -743,6 +744,40 @@ def run_external_tool_command(
         f"Ran {tool} [{ 'completed' if clean else 'did not complete cleanly' }]: {outcome} "
         f"(raw evidence only; not a proof; earns no status)."
     )
+    typer.echo(f"-> {run / 'external_tool_runs.yaml'}")
+
+
+@app.command("verify-exact-modexp")
+def verify_exact_modexp_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    base: int = typer.Option(..., "--base"),
+    exp: int = typer.Option(..., "--exp"),
+    mod: int = typer.Option(..., "--mod"),
+    expected: int = typer.Option(..., "--expected"),
+    entry_id: str = typer.Option(..., "--id", help="Unique id for this tool-run record."),
+) -> None:
+    """Allowlisted deterministic adapter: run the exact modular-exponentiation tool
+    in the sandbox and, IF it confirms base^exp mod m == expected, earn a SCOPED
+    computation_checked proof-verification entry THROUGH the kernel bridge (this
+    one computation only; never a universal proof). A non-confirming or failed run
+    earns nothing.
+    """
+    try:
+        result = run_exact_modexp_adapter(
+            run, base=base, exp=exp, mod=mod, expected=expected, entry_id=entry_id
+        )
+    except ValueError as exc:
+        typer.echo(f"Refused: {exc}")
+        raise typer.Exit(code=2) from exc
+    _refresh_derived_views(run)
+    if result["earned"]:
+        typer.echo(
+            f"Confirmed {base}^{exp} mod {mod} == {expected}: earned a SCOPED "
+            "computation_checked entry (this computation only; NOT a universal proof)."
+        )
+        typer.echo(f"-> {run / 'proof_verification.yaml'}")
+    else:
+        typer.echo(f"Not confirmed: earned no status (fail-closed). {result['detail']}")
     typer.echo(f"-> {run / 'external_tool_runs.yaml'}")
 
 
