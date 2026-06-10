@@ -19,6 +19,8 @@ from .models import (
     ComputationChecks,
     ComputationVerificationReport,
     CounterexampleReport,
+    ExternalToolCandidatesReport,
+    ExternalToolRunsReport,
     FailureClassificationReport,
     FailurePatternAudit,
     LiteratureCandidates,
@@ -98,6 +100,8 @@ def validate_run(run_dir: Path) -> None:
     failure_pattern_audit = _load_optional_failure_pattern_audit(run_dir, manifest)
     literature_retrieval = _load_optional_literature_retrieval(run_dir, manifest)
     proof_verification = _load_optional_proof_verification(run_dir, manifest)
+    external_tool_candidates = _load_optional_external_tool_candidates(run_dir, manifest)
+    external_tool_runs = _load_optional_external_tool_runs(run_dir, manifest)
     counterexamples = load_counterexamples_artifact(run_dir / artifacts["counterexamples"])
     tests = validate_yaml_model(run_dir / artifacts["tests"], TestReport)
     source_grounding = validate_yaml_model(run_dir / artifacts["source_grounding"], SourceGroundingReport)
@@ -155,6 +159,9 @@ def validate_run(run_dir: Path) -> None:
     _validate_proof_verification(proof_verification, claim, manifest, idea_grade)
     _validate_grade_proof_language_backed(
         idea_grade, computation_verification, proof_verification
+    )
+    _validate_external_tool_artifacts(
+        external_tool_candidates, external_tool_runs, claim, manifest
     )
     _validate_subgoal_graph(
         proof_goal_graph,
@@ -570,6 +577,84 @@ def _load_optional_proof_verification(
         run_dir / optional["proof_verification"],
         ProofVerificationReport,
     )
+
+
+def _load_optional_external_tool_candidates(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> ExternalToolCandidatesReport | None:
+    optional = manifest.optional_artifacts
+    if "external_tool_candidates" not in optional:
+        return None
+    # The model has no source/evidence/proof status field, so loading it is the
+    # candidate-only guard: a discovered tool can never earn a trusted status.
+    return validate_yaml_model(
+        run_dir / optional["external_tool_candidates"],
+        ExternalToolCandidatesReport,
+    )
+
+
+def _load_optional_external_tool_runs(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> ExternalToolRunsReport | None:
+    optional = manifest.optional_artifacts
+    if "external_tool_runs" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["external_tool_runs"],
+        ExternalToolRunsReport,
+    )
+
+
+def _validate_external_tool_artifacts(
+    candidates: ExternalToolCandidatesReport | None,
+    runs: ExternalToolRunsReport | None,
+    claim: Claim,
+    manifest: RunManifest,
+) -> None:
+    """External-tool discovery + run records are RAW evidence, never a status.
+
+    Both report models carry no source/evidence/proof/grade field (StrictBaseModel
+    forbids extras), so an external tool cannot write a trusted status by
+    construction -- only the kernel-gated proof-verification bridge (a trusted
+    deterministic backend with a confirming result) may earn a SCOPED status.
+    Here we bind claim_id / run_id and confine every recorded path to the run
+    directory (no absolute path, no ``..``); a tool run is always scoped
+    (``not_universal_proof`` is pinned True at the model level). Fail closed.
+    """
+
+    def _confine(paths: list[str], where: str) -> None:
+        for raw in paths:
+            p = Path(str(raw))
+            if p.is_absolute() or str(raw).startswith("/") or ".." in p.parts:
+                raise KernelValidationError(
+                    f"external_tool_runs {where} path must be relative to the run "
+                    f"directory (no absolute path, no '..'): {raw!r}"
+                )
+
+    if candidates is not None:
+        if candidates.claim_id != claim.id:
+            raise KernelValidationError(
+                "external_tool_candidates claim_id does not match locked claim"
+            )
+        if candidates.run_id != manifest.run_id:
+            raise KernelValidationError(
+                "external_tool_candidates run_id does not match the run manifest"
+            )
+    if runs is not None:
+        if runs.claim_id != claim.id:
+            raise KernelValidationError(
+                "external_tool_runs claim_id does not match locked claim"
+            )
+        if runs.run_id != manifest.run_id:
+            raise KernelValidationError(
+                "external_tool_runs run_id does not match the run manifest"
+            )
+        for run in runs.runs:
+            _confine([run.working_dir], "working_dir")
+            _confine(run.input_files, "input_files")
+            _confine(run.output_files, "output_files")
 
 
 # verifier_type -> the only checked status it may earn (with a confirming result).

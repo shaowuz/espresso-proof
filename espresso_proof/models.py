@@ -800,6 +800,79 @@ class ProofVerificationReport(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class ExternalToolCandidate(StrictBaseModel):
+    """A discovered external tool proposed for a scoped check (Goal 25, slice 1).
+
+    Discovery is candidate-only: ``status`` is an allowlisting decision, NOT an
+    evidence status. The model carries no source/evidence/proof status field (and
+    StrictBaseModel forbids extras), so proposing a tool can never earn anything.
+    Only an allowlisted deterministic adapter + the existing proof-verification
+    bridge can earn scoped evidence; an unknown tool stays ``candidate``.
+    """
+
+    name: str
+    source_url: str = ""
+    version: str = ""
+    why_relevant: str = ""
+    status: Literal["candidate", "allowlisted", "rejected"] = "candidate"
+
+
+class ExternalToolCandidatesReport(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    candidates: list[ExternalToolCandidate] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class ExternalToolRun(StrictBaseModel):
+    """One audited external-tool execution record (Goal 25, slice 1).
+
+    This is RAW evidence with full provenance, NOT an earned status: the model has
+    no proof/source/evidence/grade field, so an external tool can never write a
+    trusted status here. Only a kernel-gated bridge (proof_verification, a trusted
+    deterministic backend) may later earn a SCOPED instance/computation status
+    from a confirming run. ``trusted`` records only whether the producing adapter
+    is allowlisted; it does not by itself earn anything. Paths are relative to the
+    run directory (absolute / ``..`` are rejected by the validator). No secrets or
+    full environment are recorded.
+    """
+
+    id: str
+    tool_name: str
+    source_url: str = ""
+    version: str = ""
+    install_command: str = ""
+    argv: list[str] = Field(default_factory=list)
+    working_dir: str = "."
+    input_files: list[str] = Field(default_factory=list)
+    output_files: list[str] = Field(default_factory=list)
+    stdout_excerpt: str = ""
+    stderr_excerpt: str = ""
+    exit_code: int | None = None
+    duration_seconds: float | None = None
+    timeout_seconds: float | None = None
+    timed_out: bool = False
+    parsed_result: str = ""
+    ai_interpretation: str = ""
+    conclusion: str = ""
+    statement_checked: str = ""
+    scope_note: str
+    not_universal_proof: Literal[True] = True
+    network_used: bool = False
+    trusted: bool = False
+
+
+class ExternalToolRunsReport(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    runs: list[ExternalToolRun] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class ScopedVerificationRequest(StrictBaseModel):
     """A CONCRETE, machine-runnable scoped-verification request proposed by the
     strategy/prover stage so a finite/computational check can be auto-wired into a
@@ -2273,6 +2346,8 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "literature_search_plan": LiteratureSearchPlan,
     "autonomous_literature_retrieval": AutonomousLiteratureRetrievalReport,
     "proof_verification": ProofVerificationReport,
+    "external_tool_candidates": ExternalToolCandidatesReport,
+    "external_tool_runs": ExternalToolRunsReport,
     "scoped_verification_request": ScopedVerificationRequest,
     "scoped_verification_requests": ScopedVerificationRequests,
     "literature_candidate": LiteratureCandidate,
