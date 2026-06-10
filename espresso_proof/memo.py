@@ -373,6 +373,37 @@ def build_concise_memo(run_dir: Path) -> str:
                     lines.append(f"      Scope: {e.get('scope_note')}")
             lines.append("  (these finite/computational checks do NOT prove the universal claim)")
 
+    # External tool runs (Goal 25): raw, audited evidence records. They are NOT a
+    # proof and NEVER an earned status by themselves -- only the kernel-gated
+    # proof-verification bridge can earn a scoped status from a confirming run.
+    if "external_tool_runs" in optional:
+        etr = read_yaml(run_dir / optional["external_tool_runs"])
+        runs = etr.get("runs", [])
+        if runs:
+            lines.append("")
+            lines.append("External tool runs (raw audited evidence; scoped, not a proof):")
+            for r in runs:
+                trust = "allowlisted tool" if r.get("trusted") else "unallowlisted tool (candidate only)"
+                clean = not (r.get("timed_out") or (r.get("exit_code") not in (0, None)))
+                # Fail-closed: a run that did not complete cleanly shows NO
+                # self-reported conclusion (a positive-sounding "conclusion" must
+                # never appear above the fail-closed note); it is simply no evidence.
+                outcome = (
+                    (r.get("conclusion") or r.get("parsed_result") or "ran")
+                    if clean
+                    else "did not complete cleanly: treated as no evidence (fail-closed)"
+                )
+                lines.append(
+                    f"  - {r.get('tool_name', 'tool')}"
+                    + (f" v{r.get('version')}" if r.get("version") else "")
+                    + f": {outcome} [{trust}]"
+                )
+                if r.get("statement_checked"):
+                    lines.append(f"      Statement checked: {r.get('statement_checked')}")
+                if clean and r.get("scope_note"):
+                    lines.append(f"      Scope: {r.get('scope_note')}")
+            lines.append("  (external tool runs are raw evidence; they do NOT prove the claim or set any status)")
+
     lines.append("")
     lines.append(
         "Note: artifact-backed memo; an assessment is not a proof. "
