@@ -34,14 +34,24 @@ IDEA_STATUS_DESCRIPTIONS: dict[str, str] = {
     ),
 }
 
-# A proof may be described as "checked" ONLY when a trusted verifier actually
-# checked it: a machine verifier (computation / Lean) or an explicit human
-# confirmation. A merely source-checked argument is NOT a checked proof.
+# The ONLY statuses that may render the unqualified, GLOBAL "a proof has been
+# checked by a trusted verifier" sentence. computation_checked is deliberately
+# NOT here: a computation is checked for a stated finite/computational SCOPE and
+# is never a proof of the full claim, so it gets its own scoped sentence in
+# describe_grade. lean_checked / human_confirmed are global-proof statuses that
+# are not earnable in V0 (the kernel rejects them), so this sentence does not
+# currently appear -- the set is kept for when an audited global lane exists.
 VERIFIED_PROOF_STATUSES: frozenset[str] = frozenset(
-    {"computation_checked", "lean_checked", "human_confirmed"}
+    {"lean_checked", "human_confirmed"}
 )
 
 PROOF_CHECKED_DESCRIPTION = "A proof has been checked by a trusted verifier."
+
+# computation_checked is scoped evidence, never a global proof.
+COMPUTATION_CHECKED_DESCRIPTION = (
+    "A computation was checked for a stated finite/computational scope; "
+    "this is not a proof of the full claim."
+)
 
 # ProofLanguageStatus enum value -> concrete English (never the word "proved").
 PROOF_LANGUAGE_DESCRIPTIONS: dict[str, str] = {
@@ -50,7 +60,10 @@ PROOF_LANGUAGE_DESCRIPTIONS: dict[str, str] = {
     "source_checked_argument": (
         "an argument with source-checked steps (not a full verified proof)"
     ),
-    "computation_checked": "a computation-checked result",
+    "computation_checked": (
+        "a computation checked for a stated finite/computational scope "
+        "(not a proof of the full claim)"
+    ),
     "lean_checked": "a Lean-checked proof",
     "human_confirmed": "a human-confirmed proof",
 }
@@ -82,7 +95,12 @@ def describe_grade(
     description reflects the IdeaStatus, none of which assert a proof.
     """
 
-    if str(proof_language_status) in VERIFIED_PROOF_STATUSES:
+    pls = str(proof_language_status)
+    # A scoped computation check is NOT a global proof: it gets a scoped sentence,
+    # never the unqualified "a proof has been checked by a trusted verifier".
+    if pls == "computation_checked":
+        return COMPUTATION_CHECKED_DESCRIPTION
+    if pls in VERIFIED_PROOF_STATUSES:
         return PROOF_CHECKED_DESCRIPTION
     return describe_idea_status(status)
 

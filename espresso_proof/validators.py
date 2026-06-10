@@ -49,6 +49,7 @@ from .models import (
     ProverRoundIndex,
     ProverRoundReport,
     Review,
+    VerificationVerdict,
     ReviewerVerdict,
     RunManifest,
     SourceGroundingReport,
@@ -152,6 +153,9 @@ def validate_run(run_dir: Path) -> None:
     _validate_failure_pattern_audit(failure_pattern_audit, claim, manifest)
     _validate_literature_retrieval(literature_retrieval, claim, manifest)
     _validate_proof_verification(proof_verification, claim, manifest, idea_grade)
+    _validate_grade_proof_language_backed(
+        idea_grade, computation_verification, proof_verification
+    )
     _validate_subgoal_graph(
         proof_goal_graph,
         claim,
@@ -642,6 +646,66 @@ def _validate_proof_verification(
             raise KernelValidationError(
                 f"proof_verification entry {entry.id!r}: lean_bridge cannot earn {earned!r} in V0"
             )
+
+
+def _validate_grade_proof_language_backed(
+    idea_grade: IdeaGrade,
+    computation_verification: ComputationVerificationReport | None,
+    proof_verification: ProofVerificationReport | None,
+) -> None:
+    """A "verified-proof" grade status must be backed by a real trusted result.
+
+    ``idea_grade.proof_language_status`` renders as "A proof has been checked by a
+    trusted verifier", so the VERIFIED statuses cannot be asserted from prose or a
+    forged grade:
+
+    - ``computation_checked`` requires an actual confirming MACHINE result -- a
+      trusted+confirming proof-verification entry (computation/instance checked)
+      or a confirmed computation-verification result. A scoped/finite computation
+      that genuinely backs the grade therefore stays scoped (it earned its entry);
+      a grade that merely *claims* computation_checked with no machine result is
+      rejected. This is the "no global proof status from scoped computation" gate.
+    - ``lean_checked`` / ``human_confirmed`` are NOT earnable in V0: Espresso has
+      no Lean/global-proof lane and no human-proof-attestation artifact (and human
+      feedback may never upgrade proof status). Fail closed.
+    """
+    status = idea_grade.proof_language_status
+    if status == ProofLanguageStatus.computation_checked:
+        machine_confirmed = bool(
+            proof_verification
+            and any(
+                entry.trusted
+                and entry.confirmed
+                and entry.earned_status
+                in {
+                    ProofVerificationStatus.computation_checked,
+                    ProofVerificationStatus.instance_checked,
+                }
+                for entry in proof_verification.entries
+            )
+        ) or bool(
+            computation_verification
+            and any(
+                result.executed and result.verdict == VerificationVerdict.confirmed
+                for result in computation_verification.results
+            )
+        )
+        if not machine_confirmed:
+            raise KernelValidationError(
+                "idea_grade.proof_language_status=computation_checked requires a confirming "
+                "trusted machine result (a proof-verification or computation-verification "
+                "entry); a scoped/finite computation cannot upgrade the grade to a global "
+                "checked proof without one"
+            )
+    elif status in {
+        ProofLanguageStatus.lean_checked,
+        ProofLanguageStatus.human_confirmed,
+    }:
+        raise KernelValidationError(
+            f"idea_grade.proof_language_status={status.value} is not earnable in V0: "
+            "Espresso has no Lean/global-proof lane and no human-proof-attestation "
+            "artifact (human feedback cannot upgrade proof status)"
+        )
 
 
 def _load_optional_theorem_extraction(
