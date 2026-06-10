@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .io import read_yaml, write_yaml
 from .models import MemoryEntry, MemoryIndex, MemoryIndexEntry
+from .proof_language import scrub_proof_language
 from .research_bank import bankable_artifact_path, load_bankable_dict
 
 
@@ -83,7 +84,9 @@ def summarize_memory(project_dir: Path | str, claim_text: str | None = None) -> 
         if lines:
             sections.append(f"{title}:\n" + "\n".join(lines))
 
-    return "\n\n".join(sections)
+    # Display-layer safety: memory summaries echo prior-run free text (lessons,
+    # objections); redact any global proof-complete overclaim. Advisory text only.
+    return scrub_proof_language("\n\n".join(sections))
 
 
 def write_memory_entry(

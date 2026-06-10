@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .io import read_yaml
+from .proof_language import scrub_proof_language
 from .subgoal_graph import (
     PROOF_SEARCH_NOTE as _PROOF_SEARCH_NOTE,
     graph_notes as _graph_notes,
@@ -45,20 +46,26 @@ def render_run_dashboard(run_dir: Path) -> str:
     command = _command_for(run_dir, selected_route, initial["effort"], completed=state["completed"])
     review = _review_result(state)
 
-    return _template(
-        statement=state["statement"],
-        state_label=state["state_label"],
-        selected_label=initial["label"],
-        proof_label=state["proof_label"],
-        judgment_cards=_judgment_cards(state),
-        proof_state_html=_proof_state_section(state),
-        routes=list(route_data.values()),
-        initial=initial,
-        route_json=json.dumps(route_data, ensure_ascii=False),
-        run_path=str(run_dir),
-        command=command,
-        review=review,
-        completed=state["completed"],
+    # Display-layer safety: redact any global proof-complete overclaim that an
+    # echoed free-text artifact field might carry into the rendered HTML. Typed
+    # labels/CSS are unaffected (only global "the theorem is proved" language is
+    # matched). Never upgrades status.
+    return scrub_proof_language(
+        _template(
+            statement=state["statement"],
+            state_label=state["state_label"],
+            selected_label=initial["label"],
+            proof_label=state["proof_label"],
+            judgment_cards=_judgment_cards(state),
+            proof_state_html=_proof_state_section(state),
+            routes=list(route_data.values()),
+            initial=initial,
+            route_json=json.dumps(route_data, ensure_ascii=False),
+            run_path=str(run_dir),
+            command=command,
+            review=review,
+            completed=state["completed"],
+        )
     )
 
 
