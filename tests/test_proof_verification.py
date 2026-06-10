@@ -159,3 +159,64 @@ def test_lean_bridge_must_stay_unverified(tmp_path: Path) -> None:
     _write_pv(run_dir, [_entry(run_dir, verifier_type="lean_bridge", earned_status="instance_checked")])
     with pytest.raises(KernelValidationError):
         validate_run(run_dir)
+
+
+# ---------------------------------------------------------------------------
+# Goal 23: a scoped computation cannot upgrade the grade to a global checked proof
+# ---------------------------------------------------------------------------
+def _set_grade_proof_status(run_dir: Path, value: str) -> None:
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    grade = read_yaml(run_dir / artifacts["idea_grade"])
+    grade["proof_language_status"] = value
+    write_yaml(run_dir / artifacts["idea_grade"], grade)
+
+
+def test_grade_computation_checked_requires_confirming_machine_result(tmp_path: Path) -> None:
+    # Forging proof_language_status=computation_checked with NO confirming machine
+    # result is rejected (it would otherwise render "A proof has been checked by a
+    # trusted verifier").
+    run_dir = _build(tmp_path)
+    _set_grade_proof_status(run_dir, "computation_checked")
+    with pytest.raises(KernelValidationError, match="confirming trusted machine result"):
+        validate_run(run_dir)
+
+
+def test_grade_computation_checked_valid_with_confirming_entry(tmp_path: Path) -> None:
+    # A scoped finite check that genuinely earned a trusted+confirmed entry DOES
+    # back computation_checked (e.g. the claim is exactly the enumerated scope).
+    # Use a fixture without failed reviewers so only the Goal-23 gate is exercised.
+    run_dir = run_mock_critique("pv", FIXTURES / "promising_but_unproved" / "input.md", tmp_path)
+    verify_finite_groups(run_dir, primes=[2])  # trusted+confirmed instance_checked entries
+    _set_grade_proof_status(run_dir, "computation_checked")
+    validate_run(run_dir)
+
+
+def test_grade_lean_checked_not_earnable_in_v0(tmp_path: Path) -> None:
+    run_dir = _build(tmp_path)
+    verify_finite_groups(run_dir, primes=[2])  # even with a real scoped check...
+    _set_grade_proof_status(run_dir, "lean_checked")  # ...lean_checked is still not earnable
+    with pytest.raises(KernelValidationError, match="not earnable in V0"):
+        validate_run(run_dir)
+
+
+def test_grade_human_confirmed_not_earnable_in_v0(tmp_path: Path) -> None:
+    run_dir = _build(tmp_path)
+    _set_grade_proof_status(run_dir, "human_confirmed")
+    with pytest.raises(KernelValidationError, match="not earnable in V0"):
+        validate_run(run_dir)
+
+
+def test_computation_checked_grade_renders_scoped_not_universal_proof(tmp_path: Path) -> None:
+    # A universal claim whose grade is computation_checked (backed by finite
+    # p=2,3 checks) must NOT render the global "a proof has been checked by a
+    # trusted verifier" sentence -- a finite computation is scoped, not a proof
+    # of the universal claim.
+    run_dir = run_mock_critique("pv", FIXTURES / "promising_but_unproved" / "input.md", tmp_path)
+    verify_finite_groups(run_dir, primes=[2, 3])
+    _set_grade_proof_status(run_dir, "computation_checked")
+    validate_run(run_dir)
+    memo = build_concise_memo(run_dir)
+    assert "A proof has been checked by a trusted verifier" not in memo
+    verdict = next(line for line in memo.splitlines() if line.startswith("Verdict:"))
+    assert "finite/computational scope" in verdict
+    assert "not a proof of the full claim" in verdict
