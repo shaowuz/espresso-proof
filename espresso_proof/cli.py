@@ -75,6 +75,13 @@ from .pdf_ingestion import (
 )
 from .source_verification import ground_run
 from .source_grounding_stage import prepare_source_grounding
+from .external_tool_runner import (
+    DEFAULT_TIMEOUT_SECONDS,
+    FAKE_TOOLS,
+    UnknownToolError,
+    run_and_record_external_tool,
+    run_completed_cleanly,
+)
 from .theorem_applicability import audit_theorem_applicability
 from .verifier import audit_evidence, verify_computation_checks
 from .models import (
@@ -696,6 +703,47 @@ def _refresh_derived_views(run: Path) -> None:
             validate_run(run)
     if (run / "research_dashboard.html").exists():
         write_run_dashboard(run)
+
+
+@app.command("run-external-tool")
+def run_external_tool_command(
+    run: Path | None = typer.Option(None, "--run", exists=True, file_okay=False),
+    tool: str = typer.Option("", "--tool", help="Allowlisted fake tool name (see --list-tools)."),
+    entry_id: str = typer.Option("", "--id", help="Unique id for this tool-run record."),
+    statement: str = typer.Option("", "--statement", help="The local statement this run checks."),
+    timeout: float = typer.Option(DEFAULT_TIMEOUT_SECONDS, "--timeout", help="Hard timeout (seconds)."),
+    list_tools: bool = typer.Option(False, "--list-tools", help="List allowlisted fake tools and exit."),
+) -> None:
+    """Run an allowlisted DETERMINISTIC FAKE external tool in the sandbox executor
+    and record an audited run (raw evidence only -- never a proof/source/grade
+    status). Unknown tools are refused. Timeout / nonzero exit / malformed output
+    fail closed (no parsed result). Slice 2: records only; earns nothing.
+    """
+    if list_tools:
+        for name, spec in FAKE_TOOLS.items():
+            typer.echo(f"{name}: {spec['scope_note']}")
+        return
+    if run is None or not tool or not entry_id:
+        typer.echo("Provide --run, --tool, and --id (or use --list-tools).")
+        raise typer.Exit(code=2)
+    try:
+        record = run_and_record_external_tool(
+            run, tool, entry_id=entry_id, statement_checked=statement, timeout_seconds=timeout
+        )
+    except UnknownToolError as exc:
+        typer.echo(f"Refused: {exc}")
+        raise typer.Exit(code=2) from exc
+    except ValueError as exc:  # duplicate id / non-confined path -> clean message, not a traceback
+        typer.echo(f"Refused: {exc}")
+        raise typer.Exit(code=2) from exc
+    _refresh_derived_views(run)
+    clean = run_completed_cleanly(record.timed_out, record.exit_code)
+    outcome = record.parsed_result if clean and record.parsed_result else "no evidence (fail-closed)"
+    typer.echo(
+        f"Ran {tool} [{ 'completed' if clean else 'did not complete cleanly' }]: {outcome} "
+        f"(raw evidence only; not a proof; earns no status)."
+    )
+    typer.echo(f"-> {run / 'external_tool_runs.yaml'}")
 
 
 @app.command("verify-finite-groups")

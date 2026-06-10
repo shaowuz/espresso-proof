@@ -23,6 +23,7 @@ from .descriptions import (
     judgment_tier_phrase,
     objection_phrase,
 )
+from .external_tool_runner import run_completed_cleanly
 from .failure_pattern_bank import failure_pattern_allocation_hints
 from .io import read_yaml
 from .proof_language import scrub_proof_language
@@ -384,7 +385,7 @@ def build_concise_memo(run_dir: Path) -> str:
             lines.append("External tool runs (raw audited evidence; scoped, not a proof):")
             for r in runs:
                 trust = "allowlisted tool" if r.get("trusted") else "unallowlisted tool (candidate only)"
-                clean = not (r.get("timed_out") or (r.get("exit_code") not in (0, None)))
+                clean = run_completed_cleanly(r.get("timed_out", False), r.get("exit_code"))
                 # Fail-closed: a run that did not complete cleanly shows NO
                 # self-reported conclusion (a positive-sounding "conclusion" must
                 # never appear above the fail-closed note); it is simply no evidence.
