@@ -189,6 +189,12 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
         main["remaining_risk"] = (
             "The kernel's refutation logic rejected the claim under the current hypotheses."
         )
+        # Goal 26: explain why no "next subgoal" is offered on a refuted claim, so a
+        # reader is not left with leftover subgoal lists and no next action.
+        notes.append(
+            "The claim is refuted by an admissible checked counterexample, so there is "
+            "no next subgoal to work on; any subgoals below are historical context."
+        )
     elif selected is None:
         main["remaining_risk"] = "Choose a route first before deeper proof search."
         notes.append(
@@ -437,12 +443,39 @@ def graph_notes(graph: dict | None) -> list[str]:
     return [str(n).strip() for n in notes if str(n).strip()]
 
 
+def select_next_subgoal(graph: dict | None) -> dict[str, Any] | None:
+    """Deterministically pick the single highest-value OPEN subgoal to work on next
+    (Goal 26: the graph is the scheduling center). Pure, read-only scheduling: it
+    NEVER sets or upgrades any status -- it only chooses where to spend effort.
+
+    Priority is the fixed ``NEXT_SUBGOAL_PRIORITY`` order (open > blocked-missing-
+    source > blocked-reviewer-objection > sketched); within a state, the first
+    node in graph order wins, so selection is stable/deterministic.
+
+    Refutation dominates: if the main goal is already ``contradicted`` (the claim
+    was refuted by an admissible checked counterexample, the Goal-21 hard gate),
+    there is nothing to "prove", so no subgoal is selected -- stale route optimism
+    cannot override a claim-level checked refutation.
+    """
+    nodes = (graph or {}).get("nodes") or []
+    main = next((n for n in nodes if n.get("role") == "main_goal"), None)
+    if main is not None and main.get("state") == "contradicted":
+        return None
+    subgoals = [n for n in nodes if n.get("role") != "main_goal"]
+    for wanted in NEXT_SUBGOAL_PRIORITY:
+        for node in subgoals:
+            if node.get("state") == wanted:
+                return node
+    return None
+
+
 def group_subgoals(graph: dict | None) -> dict[str, Any]:
     """Split a graph dict into the render groups shared by the dashboard + memo.
 
     Returns ``{"main", "open", "sketched", "blocked", "reference", "scoped",
     "next"}``. ``main`` / ``next`` are single nodes (or ``None``); the rest are
-    lists. Pure and read-only; never mutates the graph.
+    lists. ``next`` is ``select_next_subgoal`` (single source of truth). Pure and
+    read-only; never mutates the graph.
     """
     nodes = (graph or {}).get("nodes") or []
     main = next((n for n in nodes if n.get("role") == "main_goal"), None)
@@ -451,13 +484,6 @@ def group_subgoals(graph: dict | None) -> dict[str, Any]:
     def by_state(*states: str) -> list[dict[str, Any]]:
         return [n for n in subgoals if n.get("state") in states]
 
-    next_node = None
-    for wanted in NEXT_SUBGOAL_PRIORITY:
-        match = [n for n in subgoals if n.get("state") == wanted]
-        if match:
-            next_node = match[0]
-            break
-
     return {
         "main": main,
         "open": by_state("open"),
@@ -465,7 +491,7 @@ def group_subgoals(graph: dict | None) -> dict[str, Any]:
         "blocked": by_state("blocked_missing_source", "blocked_reviewer_objection"),
         "reference": by_state("source_supported"),
         "scoped": by_state("scoped_checked"),
-        "next": next_node,
+        "next": select_next_subgoal(graph),
     }
 
 
@@ -511,7 +537,10 @@ def render_proof_search_lines(graph: dict | None, *, statement_limit: int = 200)
 
     nxt = groups["next"]
     if nxt is not None:
-        lines.append(f"  Next subgoal to attack: {short(nxt.get('statement'))}")
+        lines.append(
+            f"  Next subgoal to work on [{nxt.get('id', 'subgoal')}]: "
+            f"{short(nxt.get('statement'))} ({state_words(nxt.get('state', ''))})"
+        )
 
     # Display notes (how to read the list above) — shown only when present, and
     # never truncated so a "list was capped" caveat is fully visible.
