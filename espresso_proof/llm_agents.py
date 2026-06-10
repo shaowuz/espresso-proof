@@ -934,12 +934,43 @@ def append_prover_loop_round(
         external_agent_command_env=external_agent_command_env,
     )
     context = load_agent_context(run_dir)
+    # Goal 26: the subgoal graph is the scheduling center. Pick the highest-value
+    # OPEN subgoal and NAME it to the prover so the round works on that specific
+    # subgoal id + local claim (not the whole claim). This is scheduling only: it
+    # never sets/upgrades any status, and a contradicted (refuted) main goal
+    # yields no target (stale optimism cannot override a checked refutation).
+    from .subgoal_graph import assemble_subgoal_graph, select_next_subgoal
+
+    target_node = select_next_subgoal(assemble_subgoal_graph(run_dir))
+    target_subgoal = (
+        {
+            "id": target_node.get("id"),
+            "local_claim": target_node.get("statement"),
+            "state": target_node.get("state"),
+            "instruction": (
+                "Work on THIS subgoal only; cite its id in your steps. Produce "
+                "candidate work for this local claim. Do not claim the whole claim "
+                "is proved. Status upgrades require the kernel's hard gates."
+            ),
+        }
+        if target_node is not None
+        else {
+            "id": None,
+            "local_claim": None,
+            "state": None,
+            "instruction": (
+                "No open subgoal is selectable (the claim may be refuted or every "
+                "subgoal is already resolved/blocked). Do not invent progress."
+            ),
+        }
+    )
     round_context = {
         **context,
         "previous_prover_loop_attempt": parent_attempt,
         "reviewer_blockers_to_repair": parent_attempt.get("blockers", []),
         "loop_decision": loop_report.get("loop_decision"),
         "time_allocation": parent_attempt.get("time_allocation"),
+        "target_subgoal": target_subgoal,
     }
     created_at = datetime.now(UTC).isoformat()
     prover_raw = client.complete_json(

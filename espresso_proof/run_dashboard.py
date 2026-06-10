@@ -119,8 +119,10 @@ def _proof_state_section(state: dict[str, Any]) -> str:
     next_html = ""
     if next_node is not None:
         next_html = (
-            f"<p class=\"sg-next\"><span class=\"muted\">Next subgoal to attack</span> "
-            f"{_h(next_node.get('statement', ''))}</p>"
+            f"<p class=\"sg-next\"><span class=\"muted\">Next subgoal to work on "
+            f"[{_h(next_node.get('id', 'subgoal'))}]</span> "
+            f"{_h(next_node.get('statement', ''))} "
+            f"<span class=\"sg-state\">{_h(_state_words(next_node.get('state', '')))}</span></p>"
         )
     groups = "".join(rows) or "<p class=\"muted\">No open subgoals recorded.</p>"
     # Display notes (how to read the list) — shown only when present; HTML-escaped.

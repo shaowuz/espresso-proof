@@ -386,7 +386,7 @@ def test_dashboard_renders_proof_state_section(tmp_path: Path) -> None:
     html = render_run_dashboard(run_dir)
     assert "Proof State" in html
     assert "Main goal" in html
-    assert "Next subgoal to attack" in html
+    assert "Next subgoal to work on" in html
     # human wording, not raw internal enum names
     for raw in (
         "blocked_missing_source",
@@ -608,7 +608,7 @@ def test_render_proof_search_lines_uses_human_wording_and_disclaimer() -> None:
     assert "Main goal [Open]:" in text
     assert "Only sketched:" in text
     assert "Blocked by a missing source" in text
-    assert "Next subgoal to attack:" in text
+    assert "Next subgoal to work on" in text
     assert "proof-search map, not a proof" in text
     # human wording only — no raw internal enum names leak into the memo text
     for raw in ("blocked_missing_source", "main_goal", "scoped_checked", "source_supported"):
@@ -642,7 +642,7 @@ def test_memo_includes_proof_search_section_when_graph_present(tmp_path: Path) -
     assert (run_dir / "proof_goal_graph.yaml").exists()
     memo = build_concise_memo(run_dir)
     assert "Proof-search state (a map of the search, not a proof):" in memo
-    assert "Next subgoal to attack:" in memo
+    assert "Next subgoal to work on" in memo
     # no proof-complete language anywhere in the memo
     for token in ("proof complete", "proof-complete", "proof-close", "proved", "proven", "verified theorem"):
         assert token not in memo.lower()
