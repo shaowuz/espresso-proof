@@ -63,6 +63,7 @@ from .symbolic_identity import SUPPORTED_RING_IDENTITIES
 from .benchmark import run_benchmark
 from .calibration import run_calibration
 from .memo import build_concise_memo
+from .proof_language import scrub_proof_language
 from .reviewer_checklist import review_checklist
 from .memory import summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
@@ -906,10 +907,17 @@ def review_checklist_command(
 def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)) -> None:
     """Validate and print a human-readable run summary."""
     validate_run(run)
+
+    def _echo(message: object = "") -> None:
+        # Display-layer safety: redact any global proof-complete overclaim that an
+        # echoed free-text artifact field might carry. Typed status phrases are
+        # unaffected; never upgrades status.
+        typer.echo(scrub_proof_language(str(message)))
+
     manifest = read_yaml(run / "run_manifest.yaml")
     optional_artifacts = manifest.get("optional_artifacts", {})
     artifacts = manifest.get("artifacts", {})
-    typer.echo(f"Run is valid: {run}")
+    _echo(f"Run is valid: {run}")
 
     def _artifact(key: str) -> dict:
         # Resolve through the run manifest (source of truth), not hardcoded names.
@@ -949,35 +957,35 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
         }
     )
 
-    typer.echo("")
-    typer.echo("Claim")
-    typer.echo(f"- {claim.get('normalized_statement', '').strip()}")
+    _echo("")
+    _echo("Claim")
+    _echo(f"- {claim.get('normalized_statement', '').strip()}")
     claim_state = "locked" if claim.get("locked") else "unlocked"
     if claim.get("human_confirmed"):
         claim_state += ", human_confirmed"
     if claim.get("repaired_from"):
         claim_state += f", repaired_from {claim.get('repaired_from')}"
-    typer.echo(f"- status: {claim_state}")
-    typer.echo("")
-    typer.echo("Grade")
-    typer.echo(
+    _echo(f"- status: {claim_state}")
+    _echo("")
+    _echo("Grade")
+    _echo(
         f"- {describe_grade(status=grade.get('status'), proof_language_status=grade.get('proof_language_status'))}"
     )
-    typer.echo(
+    _echo(
         f"- confidence score {grade.get('score')} (internal heuristic); "
         f"proof state: {describe_proof_language(grade.get('proof_language_status'))}"
     )
-    typer.echo("")
-    typer.echo("Strongest Objection")
-    typer.echo(f"- {review.get('strongest_objection')}")
-    typer.echo("")
-    typer.echo("Failed Reviewers")
-    typer.echo(f"- {', '.join(failed_reviewers) if failed_reviewers else 'none'}")
-    typer.echo("")
-    typer.echo("Source Gaps")
-    typer.echo(f"- {', '.join(source_gaps) if source_gaps else 'none'}")
+    _echo("")
+    _echo("Strongest Objection")
+    _echo(f"- {review.get('strongest_objection')}")
+    _echo("")
+    _echo("Failed Reviewers")
+    _echo(f"- {', '.join(failed_reviewers) if failed_reviewers else 'none'}")
+    _echo("")
+    _echo("Source Gaps")
+    _echo(f"- {', '.join(source_gaps) if source_gaps else 'none'}")
     _evidence_summary = sorted({evidence_phrase(s) for s in source_statuses})
-    typer.echo(
+    _echo(
         "- evidence so far: "
         + ("; ".join(_evidence_summary) if _evidence_summary else "none recorded")
     )
@@ -991,7 +999,7 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
                 continue
             loc = ref.get("locator", {})
             authors = ", ".join(ref.get("authors", [])) or "unknown author"
-            typer.echo(
+            _echo(
                 f"- grounded in {authors}, {ref.get('title', 'untitled')} "
                 f"[{loc.get('kind')}:{loc.get('value')}] (cited support, not a proof)"
             )
@@ -1001,32 +1009,32 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
         mc = check.get("machine_check") or {}
         if not mc:
             continue
-        typer.echo(
+        _echo(
             f"- machine-checked {check.get('id')} [{mc.get('kind')}] "
             f"{mc.get('expression')} = {mc.get('expected')} "
             "(machine-checked computation, not a proof)"
         )
-    typer.echo("")
-    typer.echo("Examples / Counterexamples")
+    _echo("")
+    _echo("Examples / Counterexamples")
     example_items = examples.get("examples", [])
     if example_items:
         for example in example_items[:3]:
-            typer.echo(
+            _echo(
                 f"- example {example.get('id')}: {example.get('name')} "
                 f"-> {example.get('result_for_current_idea')}"
             )
     else:
-        typer.echo("- examples: none")
+        _echo("- examples: none")
     cx_items = counterexamples.get("tests", [])
     if cx_items:
         for cx in cx_items[:3]:
-            typer.echo(
+            _echo(
                 f"- counterexample {cx.get('id')}: {cx.get('result')} "
                 f"(refutes_claim={cx.get('refutes_claim')}, "
                 f"refutes_step_only={cx.get('refutes_step_only')})"
             )
     else:
-        typer.echo("- counterexamples: none")
+        _echo("- counterexamples: none")
     theorem_applicability_path = _optional_artifact_path(
         run, optional_artifacts, "theorem_applicability"
     )
@@ -1045,15 +1053,15 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
             for condition in usage.get("conditions", [])
             if condition.get("status") != "satisfied"
         ]
-        typer.echo("")
-        typer.echo("Theorem Applicability")
-        typer.echo(
+        _echo("")
+        _echo("Theorem Applicability")
+        _echo(
             f"- {theorem_applicability.get('overall_status')} / "
             f"{len(blocking_usages)} blocking usage(s), "
             f"{len(unclear_conditions)} unresolved condition(s)"
         )
         for usage in blocking_usages[:3]:
-            typer.echo(
+            _echo(
                 f"- {usage.get('proof_step_id')}: "
                 f"{usage.get('applicability_status')} "
                 f"({usage.get('theorem_label') or usage.get('source_ref_id')})"
@@ -1069,28 +1077,28 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
                     if locator.get("value")
                     else ""
                 )
-                typer.echo(
+                _echo(
                     f"  condition {condition.get('status')} "
                     f"[{condition.get('condition_type')}]: "
                     f"{condition.get('text')}"
                     f"{locator_text}"
                 )
                 if condition.get("evidence"):
-                    typer.echo(f"  evidence: {condition.get('evidence')}")
+                    _echo(f"  evidence: {condition.get('evidence')}")
         if not blocking_usages:
-            typer.echo("- no theorem-condition blockers found")
-        typer.echo("- applicability audit is not proof status")
-    typer.echo("")
-    typer.echo("Top Strategies")
+            _echo("- no theorem-condition blockers found")
+        _echo("- applicability audit is not proof status")
+    _echo("")
+    _echo("Top Strategies")
     for index, strategy in enumerate(strategy_brief.get("top_strategies", [])[:3], start=1):
-        typer.echo(
+        _echo(
             f"{index}. {strategy.get('title')} "
             f"[score {strategy.get('score')}, effort {strategy.get('estimated_effort')}]"
         )
-        typer.echo(f"   risk: {strategy.get('main_risk')}")
-    typer.echo("")
-    typer.echo("Human Choice")
-    typer.echo(
+        _echo(f"   risk: {strategy.get('main_risk')}")
+    _echo("")
+    _echo("Human Choice")
+    _echo(
         f"- {human_choice.get('status')} / {human_choice.get('selected_strategy') or 'none'}"
     )
     prover_loop_path = _optional_artifact_path(run, optional_artifacts, "prover_loop")
@@ -1101,40 +1109,40 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
         budget = prover_loop.get("budget", {})
         latest_attempt = _focused_prover_loop_attempt(prover_loop)
         blockers = latest_attempt.get("blockers", [])
-        typer.echo("")
-        typer.echo("Prover Loop")
-        typer.echo(
+        _echo("")
+        _echo("Prover Loop")
+        _echo(
             f"- decision {prover_loop.get('loop_decision')} / "
             f"strategy {prover_loop.get('selected_strategy_id') or 'none'} / "
             f"rounds {budget.get('rounds_used')}/{budget.get('max_rounds')}"
         )
-        typer.echo(
+        _echo(
             f"- human gate {prover_loop.get('human_gate_status')} / "
             f"effort {budget.get('approved_effort')} / "
             f"agent calls {budget.get('agent_calls_used')}/{budget.get('max_agent_calls')}"
         )
-        typer.echo(
+        _echo(
             f"- latest attempt: {latest_attempt.get('status', 'none')} / "
             f"attempt strategy {latest_attempt.get('strategy_id', 'none')} / "
             f"time allocation {latest_attempt.get('time_allocation', 'none')}"
         )
         if prover_loop.get("decision_reason"):
-            typer.echo(f"- decision reason: {prover_loop.get('decision_reason')}")
+            _echo(f"- decision reason: {prover_loop.get('decision_reason')}")
         for review in latest_attempt.get("reviewer_objections", [])[:3]:
-            typer.echo(
+            _echo(
                 f"- reviewer {review.get('verifier_id')}: "
                 f"{review.get('verdict')} / "
                 f"{review.get('objection_count')} objection(s), "
                 f"action {review.get('recommended_human_action')}"
             )
-        typer.echo(f"- blockers: {', '.join(blockers[:3]) if blockers else 'none'}")
+        _echo(f"- blockers: {', '.join(blockers[:3]) if blockers else 'none'}")
         if round_index is not None:
             rounds = round_index.get("rounds", [])
-            typer.echo(f"- durable round artifacts: {len(rounds)}")
+            _echo(f"- durable round artifacts: {len(rounds)}")
             if len(rounds) > 3:
-                typer.echo(f"  showing latest 3 of {len(rounds)}")
+                _echo(f"  showing latest 3 of {len(rounds)}")
             for item in rounds[-3:]:
-                typer.echo(
+                _echo(
                     f"  {item.get('loop_attempt_id')}: {item.get('artifact_path')} "
                     f"({item.get('status')}, {item.get('time_allocation')})"
                 )
@@ -1142,36 +1150,36 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     if judgment_path is not None:
         judgment = read_yaml(judgment_path)
         findings = judgment.get("findings", [])
-        typer.echo("")
-        typer.echo("Mathematical Judgment (advisory risks / next checks; not proof)")
+        _echo("")
+        _echo("Mathematical Judgment (advisory risks / next checks; not proof)")
         if findings:
             for finding in findings[:6]:
-                typer.echo(
+                _echo(
                     f"- {judgment_tier_phrase(finding.get('tier'))}: {finding.get('kind')} "
                     f"({finding.get('subject')}) -> {finding.get('recommended_action')}: "
                     f"{finding.get('explanation')}"
                 )
         else:
-            typer.echo("- no risks flagged")
-        typer.echo("- judgment is advisory only; it never upgrades proof/source/evidence status")
+            _echo("- no risks flagged")
+        _echo("- judgment is advisory only; it never upgrades proof/source/evidence status")
 
     pattern_audit_path = _optional_artifact_path(run, optional_artifacts, "failure_pattern_audit")
     if pattern_audit_path is not None:
         audit = read_yaml(pattern_audit_path)
         pmatches = audit.get("matches", [])
-        typer.echo("")
-        typer.echo("Failure Pattern Audit (advisory; not a refutation, not a proof)")
+        _echo("")
+        _echo("Failure Pattern Audit (advisory; not a refutation, not a proof)")
         if pmatches:
             for match in pmatches[:8]:
                 suffix = f" [enforced by {match.get('enforced_by')}]" if match.get("enforced_by") else ""
-                typer.echo(
+                _echo(
                     f"- {objection_phrase(match.get('tier'))} "
                     f"({match.get('pattern_id')}, {match.get('family')}): "
                     f"{match.get('explanation')}{suffix}"
                 )
         else:
-            typer.echo("- no patterns matched")
-        typer.echo(
+            _echo("- no patterns matched")
+        _echo(
             "- objections are advisory: a match is a warning or a ranking/time hint, "
             "never a refutation and never a status change"
         )
@@ -1180,18 +1188,18 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     if retrieval_path is not None:
         retrieval = read_yaml(retrieval_path)
         rhits = retrieval.get("hits", [])
-        typer.echo("")
-        typer.echo("Literature Retrieval (proposed sources only; not yet reference-backed)")
+        _echo("")
+        _echo("Literature Retrieval (proposed sources only; not yet reference-backed)")
         if rhits:
             for hit in rhits[:5]:
                 loc = hit.get("locator", {})
-                typer.echo(
+                _echo(
                     f"- {hit.get('id')} ({evidence_phrase(hit.get('status'))}) {hit.get('title')} "
                     f"[{loc.get('kind')}:{loc.get('value')}] via {hit.get('provider')}"
                 )
         else:
-            typer.echo("- no proposed sources retrieved (fail closed)")
-        typer.echo(
+            _echo("- no proposed sources retrieved (fail closed)")
+        _echo(
             "- retrieval only proposes sources; a reference earns support only after "
             "exact locator, hypothesis match, and attribution in source grounding"
         )
@@ -1200,35 +1208,35 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     if proof_verification_path is not None:
         pv = read_yaml(proof_verification_path)
         entries = pv.get("entries", [])
-        typer.echo("")
-        typer.echo("Proof Verification Bridge (scoped machine checks; no universal proof)")
+        _echo("")
+        _echo("Proof Verification Bridge (scoped machine checks; no universal proof)")
         if entries:
             for entry in entries[:8]:
-                typer.echo(
+                _echo(
                     f"- {entry.get('target')}: {entry.get('result')} "
                     f"({entry.get('verifier_type')}: {evidence_phrase(entry.get('earned_status'))})"
                 )
         else:
-            typer.echo("- no verifier runs")
-        typer.echo(
+            _echo("- no verifier runs")
+        _echo(
             "- these checks cover only the enumerated finite instances; "
             "the universal claim is NOT proved"
         )
 
     memory_summary = summarize_memory(run.parents[1], claim_text=claim.get("normalized_statement", ""))
     if memory_summary:
-        typer.echo("")
-        typer.echo("Memory")
+        _echo("")
+        _echo("Memory")
         for line in memory_summary.splitlines()[:10]:
-            typer.echo(line)
-    typer.echo("")
-    typer.echo("Artifacts")
+            _echo(line)
+    _echo("")
+    _echo("Artifacts")
     for key, rel_path in manifest.get("artifacts", {}).items():
-        typer.echo(f"- {key}: {run / rel_path}")
+        _echo(f"- {key}: {run / rel_path}")
     for key, rel_path in optional_artifacts.items():
-        typer.echo(f"- {key} (optional): {run / rel_path}")
-    typer.echo("")
-    typer.echo(f"Final report: {run / 'final_report.md'}")
+        _echo(f"- {key} (optional): {run / rel_path}")
+    _echo("")
+    _echo(f"Final report: {run / 'final_report.md'}")
 
 
 def _optional_artifact_path(run_dir: Path, optional_artifacts: dict, key: str) -> Path | None:

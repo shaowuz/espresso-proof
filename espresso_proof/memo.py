@@ -25,6 +25,7 @@ from .descriptions import (
 )
 from .failure_pattern_bank import failure_pattern_allocation_hints
 from .io import read_yaml
+from .proof_language import scrub_proof_language
 from .subgoal_graph import render_proof_search_lines
 
 
@@ -360,4 +361,8 @@ def build_concise_memo(run_dir: Path) -> str:
         "Note: artifact-backed memo; an assessment is not a proof. "
         "Full detail: `espresso inspect --run <dir>`."
     )
-    return "\n".join(lines)
+    # Display-layer safety: redact any global proof-complete overclaim that an
+    # echoed free-text artifact field (objection / risk / explanation / summary)
+    # might carry. Typed status descriptions are unaffected (the sanitizer only
+    # matches global "the whole theorem is proved" language). Never upgrades status.
+    return scrub_proof_language("\n".join(lines))
