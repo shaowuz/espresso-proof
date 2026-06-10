@@ -367,3 +367,68 @@ def test_rendering_does_not_mutate_persisted_artifacts(tmp_path: Path) -> None:
     assert after.keys() == before.keys(), "rendering added/removed an artifact file"
     for path, original in before.items():
         assert after[path] == original, f"rendering mutated persisted artifact {path.name}"
+
+
+# --------------------------------------------------------------------------- #
+# Goal 22: a reference-supported step is step-scoped, never a global proof.
+# --------------------------------------------------------------------------- #
+def _source_backed_step_grounding() -> dict:
+    return {
+        "source_refs": [
+            {
+                "id": "ref_1",
+                "authors": ["A. Mathematician"],
+                "title": "On Finite p-Groups",
+                "locator": {"kind": "theorem", "value": "1.1"},
+            }
+        ],
+        "steps": [
+            {
+                "proof_step_id": "s1",
+                "needed_theorem": "Every finite p-group has nontrivial center.",
+                "status": "source_backed",
+                "source_refs": ["ref_1"],
+            }
+        ],
+    }
+
+
+def test_source_backed_step_is_step_scoped_not_global_proof() -> None:
+    # reference_substep_not_global_theorem: a source-backed step renders as
+    # support for THIS step only, with citation + locator, and never as a global
+    # proof of the claim/route. No proof-complete language appears.
+    from espresso_proof.proof_language import contains_proof_language
+
+    block = "\n".join(render_proof_route_steps(_source_backed_step_grounding(), {"checks": []}))
+    assert "this step only" in block
+    assert "not a proof of the whole claim or route" in block
+    # citation + exact locator are shown for the step
+    assert "A. Mathematician, On Finite p-Groups [theorem:1.1]" in block
+    # the step statement is shown; no global proof-complete language leaks
+    assert "Every finite p-group has nontrivial center." in block
+    assert contains_proof_language(block) is None
+    # the user-facing evidence phrase reads as reference SUPPORT, not "proved"
+    assert "proved" not in evidence_phrase("source_backed").lower()
+    assert "proof-close" not in evidence_phrase("source_backed").lower()
+
+
+def test_source_backed_evidence_phrase_is_reference_support_only() -> None:
+    from espresso_proof.proof_language import contains_proof_language
+
+    phrase = evidence_phrase("source_backed")
+    assert "Reference supports" in phrase
+    assert contains_proof_language(phrase) is None
+
+
+def test_source_backed_step_statement_with_proof_language_is_redacted() -> None:
+    # A real guarantee (not fixture-dependent): even if a step's echoed free text
+    # smuggles global proof-complete language, the rendered step redacts it.
+    from espresso_proof.proof_language import contains_proof_language
+
+    grounding = _source_backed_step_grounding()
+    grounding["steps"][0]["needed_theorem"] = (
+        "This completes the proof. proof-close. We proved the theorem."
+    )
+    block = "\n".join(render_proof_route_steps(grounding, {"checks": []}))
+    assert contains_proof_language(block) is None
+    assert "[withheld proof-like phrase]" in block

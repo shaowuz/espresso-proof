@@ -109,8 +109,8 @@ def render_proof_route_steps(
             + ("; ".join(details) if details else "cited reference")
         )
         lines.append(
-            "Scope of check or source: cited reference support "
-            "(a cited result, not a proof of the claim)"
+            "Scope of check or source: this step only — cited reference support "
+            "(a cited result for this step, not a proof of the whole claim or route)"
         )
         lines.append(
             "Why it applies: "
@@ -142,7 +142,10 @@ def render_proof_route_steps(
         lines.append(f"Reviewer objections: {_NO_REVIEWER_OBJECTIONS}")
         lines.append(f"Remaining risk: {_DEFAULT_REMAINING_RISK}")
         lines.append("-")
-    return lines
+    # Self-safe: a step's echoed free text (e.g. needed_theorem) can never render
+    # global proof-complete language, regardless of caller. Idempotent with the
+    # whole-memo scrub in build_concise_memo. Never upgrades status.
+    return [scrub_proof_language(line) for line in lines]
 
 
 def build_concise_memo(run_dir: Path) -> str:
