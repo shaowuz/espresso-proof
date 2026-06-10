@@ -72,6 +72,13 @@ _OK_SCRIPT = "print('RESULT: ok deterministic-check'); "
 _MALFORMED_SCRIPT = "print('no parseable result here')"
 _FAIL_SCRIPT = "import sys; print('RESULT: partial'); sys.exit(3)"
 _TIMEOUT_SCRIPT = "import time; time.sleep(3600)"
+# Real deterministic adapter tool (slice 3): exact modular exponentiation. Reads
+# three INTEGER operands from argv (data, never code) and prints the exact result.
+# A non-integer operand raises -> nonzero exit -> fail closed. No network, no I/O.
+_EXACT_MODEXP_SCRIPT = (
+    "import sys; b, e, m = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]); "
+    "print(f'RESULT: {pow(b, e, m)}')"
+)
 
 FAKE_TOOLS: dict[str, dict] = {
     "fake_deterministic_check": {
@@ -94,6 +101,18 @@ FAKE_TOOLS: dict[str, dict] = {
         "parse": _parse_result_line,
         "scope_note": "Deterministic fake tool that hangs (timeout fail-closed demo).",
     },
+    # Real, stable, deterministic adapter tool: exact integer modular exponentiation.
+    # Operands arrive as argv DATA (parsed as int; never interpolated as code).
+    # trusted=True marks it as an allowlisted deterministic backend (the RUNNER sets
+    # this from the allowlist; it is never read from the artifact author).
+    "exact_modexp": {
+        "argv": [sys.executable, "-I", "-c", _EXACT_MODEXP_SCRIPT],
+        "parse": _parse_result_line,
+        "scope_note": "Exact integer modular exponentiation for the given operands only.",
+        "trusted": True,
+        "version": "python-int-pow",
+        "real": True,
+    },
 }
 
 
@@ -107,13 +126,19 @@ def run_external_tool(
     *,
     entry_id: str,
     statement_checked: str = "",
+    extra_args: list[str] | None = None,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> ExternalToolRun:
-    """Execute one allowlisted deterministic fake tool and return its run record.
+    """Execute one allowlisted deterministic tool and return its run record.
 
     Pure executor: does not persist anything. Refuses any tool not in
     ``FAKE_TOOLS``. Fails closed (no parsed result) on timeout / nonzero exit /
-    malformed output. Always records ``trusted=False`` (earning is slice 3).
+    malformed output. Always records ``trusted=False`` -- a RUN record is raw
+    evidence; earning a scoped status is the adapter's job via the kernel bridge.
+
+    ``extra_args`` are appended to the fixed allowlisted argv as DATA only (each is
+    coerced to ``str``); they are never interpreted as code (the tool script reads
+    them via ``sys.argv`` and validates them), so they cannot inject a command.
     """
     run_dir = Path(run_dir)
     if tool_name not in FAKE_TOOLS:
@@ -122,7 +147,7 @@ def run_external_tool(
             "and stay candidate-only"
         )
     spec = FAKE_TOOLS[tool_name]
-    argv: list[str] = list(spec["argv"])
+    argv: list[str] = list(spec["argv"]) + [str(a) for a in (extra_args or [])]
     parse: Callable[[str], str] = spec["parse"]
     # Minimal environment (PATH for the interpreter + LC_ALL for stable output):
     # no secrets, no full os.environ handed to the tool.
@@ -158,7 +183,8 @@ def run_external_tool(
     if clean:
         try:
             parsed_result = parse(stdout)
-            conclusion = f"deterministic fake check produced: {parsed_result}"
+            kind = "deterministic check" if spec.get("real") else "deterministic fake check"
+            conclusion = f"{kind} produced: {parsed_result}"
         except Exception:  # noqa: BLE001 - any parse failure is malformed -> fail closed
             clean = False
     if not clean:
@@ -168,7 +194,7 @@ def run_external_tool(
         id=entry_id,
         tool_name=tool_name,
         source_url="",
-        version="fake-1",
+        version=str(spec.get("version", "fake-1")),
         install_command="",
         argv=argv,
         working_dir=".",
@@ -187,9 +213,12 @@ def run_external_tool(
         scope_note=spec["scope_note"],
         not_universal_proof=True,
         network_used=False,
-        # Slice 2 records only; a fake tool is never a trusted backend, so it can
-        # never earn a status. Slice 3's allowlisted adapter + bridge does earning.
-        trusted=False,
+        # The RUNNER sets trusted from the allowlist spec (never from artifact
+        # input): an allowlisted deterministic backend is trusted-as-PROVENANCE.
+        # This is display only -- a RUN record still earns no status; only the
+        # adapter, on a confirming result, earns a SCOPED proof-verification entry
+        # through the kernel bridge.
+        trusted=bool(spec.get("trusted", False)),
     )
 
 
@@ -250,15 +279,17 @@ def run_and_record_external_tool(
     *,
     entry_id: str,
     statement_checked: str = "",
+    extra_args: list[str] | None = None,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> ExternalToolRun:
-    """Execute an allowlisted fake tool and persist its record. Convenience for
-    the CLI. Earns nothing (records only)."""
+    """Execute an allowlisted tool and persist its record. Convenience for the
+    CLI. Earns nothing (records only)."""
     run = run_external_tool(
         run_dir,
         tool_name,
         entry_id=entry_id,
         statement_checked=statement_checked,
+        extra_args=extra_args,
         timeout_seconds=timeout_seconds,
     )
     append_external_tool_run(run_dir, run)
