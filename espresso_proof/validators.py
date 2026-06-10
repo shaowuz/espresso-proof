@@ -147,6 +147,7 @@ def validate_run(run_dir: Path) -> None:
     _validate_test_report_evidence(computations, examples, counterexamples, tests)
     _validate_computation_verification(computations, computation_verification)
     _validate_failure_classification(failure_classification, counterexamples, claim)
+    _validate_refuted_grade_admissible(idea_grade, counterexamples)
     _validate_mathematical_judgment(mathematical_judgment, claim, manifest)
     _validate_failure_pattern_audit(failure_pattern_audit, claim, manifest)
     _validate_literature_retrieval(literature_retrieval, claim, manifest)
@@ -253,6 +254,23 @@ def _load_optional_failure_classification(
     )
 
 
+def _has_admissible_counterexample(counterexamples: CounterexampleReport) -> bool:
+    """Single source of truth for "what counts as a real refutation".
+
+    True iff some counterexample is an admissible CHECKED refutation: it satisfies
+    every claim hypothesis (``satisfies_all_claim_hypotheses is True``) AND refutes
+    the claim. ``refutes_claim`` already requires a checked ``failed`` result and
+    forbids dropped-hypothesis / proof-step-only cases at the model level
+    (``CounterexampleTest.validate_refutation_scope``). Both the failure-
+    classification gate and the idea-grade ``refuted`` gate use this, so the
+    refutation definition cannot drift between them.
+    """
+    return any(
+        test.satisfies_all_claim_hypotheses is True and test.refutes_claim
+        for test in counterexamples.tests
+    )
+
+
 def _validate_failure_classification(
     failure_classification: FailureClassificationReport | None,
     counterexamples: CounterexampleReport,
@@ -281,16 +299,35 @@ def _validate_failure_classification(
         item.category.value == "claim_refuted"
         for item in failure_classification.classifications
     )
-    if claims_refuted:
-        admissible = any(
-            test.satisfies_all_claim_hypotheses is True and test.refutes_claim
-            for test in counterexamples.tests
+    if claims_refuted and not _has_admissible_counterexample(counterexamples):
+        raise KernelValidationError(
+            "failure_classification marks claim_refuted without an admissible "
+            "all-hypotheses counterexample"
         )
-        if not admissible:
-            raise KernelValidationError(
-                "failure_classification marks claim_refuted without an admissible "
-                "all-hypotheses counterexample"
-            )
+
+
+def _validate_refuted_grade_admissible(
+    idea_grade: IdeaGrade,
+    counterexamples: CounterexampleReport,
+) -> None:
+    """A claim may be graded ``refuted`` ONLY when an admissible checked
+    counterexample exists: a counterexample that satisfies every claim hypothesis
+    AND refutes the claim (``refutes_claim`` already requires a checked ``failed``
+    result and forbids dropped-hypothesis / proof-step-only cases at the model
+    level). This makes ``refuted`` a kernel-earned status, not something model
+    prose, a reviewer objection, memory, or a forged grade can assert -- and it
+    retroactively hardens the subgoal-graph ``contradicted`` gate, which trusts
+    ``idea_grade.status == refuted``.
+    """
+    if idea_grade.status != IdeaStatus.refuted:
+        return
+    if not _has_admissible_counterexample(counterexamples):
+        raise KernelValidationError(
+            "idea_grade.status=refuted requires an admissible checked counterexample "
+            "(satisfies every claim hypothesis and refutes the claim); a route attack, "
+            "reviewer objection, dropped-hypothesis example, or unchecked counterexample "
+            "cannot refute the claim"
+        )
 
 
 def _load_optional_mathematical_judgment(

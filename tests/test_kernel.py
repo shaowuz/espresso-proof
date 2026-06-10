@@ -10,7 +10,7 @@ import yaml
 from typer.testing import CliRunner
 
 from espresso_proof.cli import _assert_fixture_expectations, app
-from espresso_proof.io import read_yaml
+from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.kernel import KernelError, require_inside, safe_run_path, snapshot
 from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.memory import (
@@ -1920,3 +1920,58 @@ def test_classify_failures_emits_no_progress(tmp_path: Path) -> None:
     report = build_failure_classification(run_dir)
     categories = {item["category"] for item in report["classifications"]}
     assert "no_progress" in categories
+
+
+# ---------------------------------------------------------------------------
+# Goal 21: refuted is a kernel-earned status (admissible checked counterexample)
+# ---------------------------------------------------------------------------
+def _refuted_run(tmp_path: Path) -> Path:
+    return run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "refuted_by_all_hypotheses_counterexample" / "input.md",
+        tmp_path,
+    )
+
+
+def test_refuted_grade_with_admissible_counterexample_is_valid(tmp_path: Path) -> None:
+    run_dir = _refuted_run(tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    assert read_yaml(run_dir / artifacts["idea_grade"])["status"] == "refuted"
+    tests = read_yaml(run_dir / artifacts["counterexamples"])["tests"]
+    assert any(t["satisfies_all_claim_hypotheses"] is True and t["refutes_claim"] for t in tests)
+    validate_run(run_dir)  # honest refutation validates
+
+
+def test_refuted_grade_without_admissible_counterexample_rejected(tmp_path: Path) -> None:
+    # Strip admissibility from every counterexample (now non-refuting / survived),
+    # leaving idea_grade.status=refuted. The kernel must reject: refuted requires
+    # an admissible checked counterexample, not just a negative grade.
+    run_dir = _refuted_run(tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    ce = read_yaml(run_dir / artifacts["counterexamples"])
+    for test in ce["tests"]:
+        test["refutes_claim"] = False
+        test["result"] = "survived"
+    write_yaml(run_dir / artifacts["counterexamples"], ce)
+    with pytest.raises(KernelValidationError, match="admissible checked counterexample"):
+        validate_run(run_dir)
+
+
+def test_subgoal_contradicted_cannot_stand_on_unbacked_refuted_grade(tmp_path: Path) -> None:
+    # The subgoal-graph `contradicted` gate trusts idea_grade.status==refuted; with
+    # the grade itself now requiring an admissible checked counterexample, a
+    # refuted grade cannot be sustained once the refutation is removed -- so a
+    # contradicted subgoal can never stand on a forged/unbacked refuted grade.
+    from espresso_proof.subgoal_graph import build_subgoal_graph
+
+    run_dir = _refuted_run(tmp_path)
+    build_subgoal_graph(run_dir)  # builds + re-validates while the refutation is real
+    validate_run(run_dir)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    ce = read_yaml(run_dir / artifacts["counterexamples"])
+    for test in ce["tests"]:
+        test["refutes_claim"] = False
+        test["result"] = "survived"
+    write_yaml(run_dir / artifacts["counterexamples"], ce)
+    with pytest.raises(KernelValidationError, match="admissible checked counterexample"):
+        validate_run(run_dir)
