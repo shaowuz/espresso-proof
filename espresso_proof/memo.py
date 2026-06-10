@@ -26,6 +26,7 @@ from .descriptions import (
 from .failure_pattern_bank import failure_pattern_allocation_hints
 from .io import read_yaml
 from .proof_language import scrub_proof_language
+from .route_table import build_route_step_rows, render_route_step_table_lines
 from .subgoal_graph import render_proof_search_lines
 
 
@@ -224,7 +225,20 @@ def build_concise_memo(run_dir: Path) -> str:
         + "; evidence so far: "
         + ("; ".join(evidence_summary) if evidence_summary else "none recorded")
     )
-    # Proof-route steps in the human-readable evidence shape.
+    # Proof-route step table (Goal 24): one row per local step, separating local
+    # step evidence from the whole-claim/route status above. Built from validated
+    # artifacts (source grounding + confirmed scoped computations), using the
+    # Goal 20-23 display vocabulary; never asserts the whole claim is proved.
+    _pv_rel = optional_artifacts.get("proof_verification")
+    proof_verification_doc: dict = {}
+    if _pv_rel and (run_dir / _pv_rel).exists():
+        proof_verification_doc = read_yaml(run_dir / _pv_rel)
+    route_rows = build_route_step_rows(source_grounding, proof_verification_doc)
+    table_lines = render_route_step_table_lines(route_rows)
+    if table_lines:
+        lines.append("")
+        lines.extend(table_lines)
+    # Detailed per-step evidence shape for earned (reference/computation) steps.
     route_steps = render_proof_route_steps(
         source_grounding, computations, theorem_applicability
     )

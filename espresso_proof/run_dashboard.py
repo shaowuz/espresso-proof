@@ -15,6 +15,7 @@ from typing import Any
 
 from .io import read_yaml
 from .proof_language import scrub_proof_language
+from .route_table import ROUTE_TABLE_COLUMNS, build_route_step_rows
 from .subgoal_graph import (
     PROOF_SEARCH_NOTE as _PROOF_SEARCH_NOTE,
     graph_notes as _graph_notes,
@@ -58,6 +59,7 @@ def render_run_dashboard(run_dir: Path) -> str:
             proof_label=state["proof_label"],
             judgment_cards=_judgment_cards(state),
             proof_state_html=_proof_state_section(state),
+            route_table_html=_route_table_section(state),
             routes=list(route_data.values()),
             initial=initial,
             route_json=json.dumps(route_data, ensure_ascii=False),
@@ -141,6 +143,41 @@ def _proof_state_section(state: dict[str, Any]) -> str:
 </section>"""
 
 
+def _route_table_section(state: dict[str, Any]) -> str:
+    """Goal 24: per-step route table. Local step evidence only -- a row never
+    asserts the whole claim/route is proved. Built from validated artifacts."""
+    rows = build_route_step_rows(state.get("source_grounding"), state.get("proof_verification"))
+    if not rows:
+        return ""
+    header = "".join(f"<th>{_h(col)}</th>" for col in ROUTE_TABLE_COLUMNS)
+    body_rows = "".join(
+        "<tr>"
+        + "".join(
+            f"<td>{_h(cell)}</td>"
+            for cell in (
+                row["step"],
+                row["local_claim"],
+                row["intended_support"],
+                row["evidence_status"],
+                row["locator_scope"],
+                row["gaps"],
+                row["next_check"],
+            )
+        )
+        + "</tr>"
+        for row in rows
+    )
+    note = (
+        "Each row is LOCAL step evidence. A reference-supported or scoped-checked "
+        "step is not a proof of the whole claim or route."
+    )
+    return f"""<section>
+  <h2>Proof-Route Steps</h2>
+  <table class="route-table"><thead><tr>{header}</tr></thead><tbody>{body_rows}</tbody></table>
+  <div class="note">{_h(note)}</div>
+</section>"""
+
+
 def _load_run_state(run_dir: Path) -> dict[str, Any]:
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     artifacts = manifest.get("artifacts", {})
@@ -162,6 +199,7 @@ def _load_run_state(run_dir: Path) -> dict[str, Any]:
     loop = optional_artifact("prover_loop")
     graph = optional_artifact("proof_goal_graph")
     judgment = optional_artifact("mathematical_judgment")
+    proof_verification = optional_artifact("proof_verification")
     failure_audit = optional_artifact("failure_pattern_audit")
     memory_context = optional_artifact("memory_context")
     llm_agent_run = optional_artifact("llm_agent_run")
@@ -183,6 +221,7 @@ def _load_run_state(run_dir: Path) -> dict[str, Any]:
         "brief": brief,
         "human_choice": human_choice,
         "source_grounding": source_grounding,
+        "proof_verification": proof_verification,
         "loop": loop,
         "graph": graph,
         "latest_attempt": latest_attempt,
@@ -417,6 +456,7 @@ def _template(
     proof_label: str,
     judgment_cards: list[dict[str, str]],
     proof_state_html: str,
+    route_table_html: str,
     routes: list[dict[str, Any]],
     initial: dict[str, Any],
     route_json: str,
@@ -462,6 +502,8 @@ def _template(
     </section>
 
     {proof_state_html}
+
+    {route_table_html}
 
     {review_html}
 
@@ -601,7 +643,7 @@ p{margin:0;max-width:690px}p+p{margin-top:10px}.muted{color:var(--muted)}
 .selection{background:var(--green-soft)}.selection-row{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}.selection-row strong{display:block;font-size:21px;margin-bottom:4px}.effort{flex:0 0 auto;padding:7px 10px;border:1px solid var(--green-line);border-radius:999px;color:var(--green);background:rgba(255,255,255,.55);font-size:13px;font-weight:650}
 .detail-list{margin:14px 0 0;padding:0;list-style:none;display:grid;gap:8px}.detail-list li{padding-left:18px;position:relative;color:var(--muted)}.detail-list li:before{content:"";position:absolute;left:2px;top:.72em;width:6px;height:6px;border-radius:50%;background:var(--green)}
 pre{margin:14px 0 0;padding:16px;background:#171917;color:#eef5ec;border-radius:8px;overflow-wrap:anywhere;white-space:pre-wrap;font:13px/1.55 "SFMono-Regular",Consolas,monospace}.actions{display:flex;gap:10px;align-items:center;margin-top:12px}.copy{border:1px solid var(--line);border-radius:8px;background:white;color:var(--ink);padding:9px 12px;font:inherit;cursor:pointer}.copy:hover{border-color:var(--green)}.copy-status{color:var(--muted);font-size:14px}.note{margin-top:12px;padding:12px 14px;border:1px solid #ead7b7;border-radius:8px;background:var(--amber-soft);color:#593b12;font-size:14px}
-.sg-main{margin-bottom:14px}.sg-groups{display:grid;gap:14px}.sg-group b{display:block;margin-bottom:6px}.sg-list{margin:0;padding:0;list-style:none;display:grid;gap:6px}.sg-list li{padding-left:18px;position:relative;color:var(--ink)}.sg-list li:before{content:"";position:absolute;left:2px;top:.72em;width:6px;height:6px;border-radius:50%;background:var(--green)}.sg-state{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:var(--soft);color:var(--muted);font-size:12px}.sg-next{margin-top:14px;padding:12px 14px;border:1px solid var(--green-line);border-radius:8px;background:var(--green-soft)}.sg-notes{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--soft)}.sg-notes b{display:block;margin-bottom:6px}
+.sg-main{margin-bottom:14px}.sg-groups{display:grid;gap:14px}.sg-group b{display:block;margin-bottom:6px}.sg-list{margin:0;padding:0;list-style:none;display:grid;gap:6px}.sg-list li{padding-left:18px;position:relative;color:var(--ink)}.sg-list li:before{content:"";position:absolute;left:2px;top:.72em;width:6px;height:6px;border-radius:50%;background:var(--green)}.sg-state{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:var(--soft);color:var(--muted);font-size:12px}.sg-next{margin-top:14px;padding:12px 14px;border:1px solid var(--green-line);border-radius:8px;background:var(--green-soft)}.sg-notes{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--soft)}.sg-notes b{display:block;margin-bottom:6px}.route-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}.route-table th,.route-table td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}.route-table th{background:var(--soft);color:var(--muted);font-weight:600}
 @media (max-width:780px){main{padding:18px}header,section{padding:24px 20px}.status,.route-grid,.review-grid{grid-template-columns:1fr}.judgment-icons{grid-template-columns:1fr}.status div{border-right:0;border-bottom:1px solid var(--line)}.status div:last-child{border-bottom:0}.selection-row{display:block}.effort{display:inline-block;margin-top:12px}}
 """.strip()
 
