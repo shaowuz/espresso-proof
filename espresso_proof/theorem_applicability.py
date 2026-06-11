@@ -15,9 +15,17 @@ def audit_theorem_applicability(run_dir: Path) -> dict:
         read_yaml(run_dir / artifacts["source_grounding"])
     )
     literature_report = _load_literature_report(run_dir, optional)
+    # Goal 37 de-circularization: the audit keeps its OWN condition ledger,
+    # recomputed from the primary inputs (claim hypotheses vs cited statement),
+    # so a stored hypothesis_match=True can never become satisfied conditions
+    # by itself in the fallback path.
+    claim = read_yaml(run_dir / artifacts["locked_claim"])
+    claim_hypotheses = claim.get("hypotheses", [])
     usages = []
     for step in source_grounding.steps:
-        usages.append(_usage_for_step(step, source_grounding, literature_report))
+        usages.append(
+            _usage_for_step(step, source_grounding, literature_report, claim_hypotheses)
+        )
     overall = _overall_status(usages)
     report = {
         "schema_version": 1,
@@ -45,7 +53,7 @@ def _load_literature_report(run_dir: Path, optional: dict) -> LiteratureReviewAg
     return LiteratureReviewAgentReport.model_validate(read_yaml(run_dir / name))
 
 
-def _usage_for_step(step, source_grounding: SourceGroundingReport, literature_report):
+def _usage_for_step(step, source_grounding: SourceGroundingReport, literature_report, claim_hypotheses):
     comparison = _best_comparison(step, literature_report)
     ref_id = step.source_refs[0] if step.source_refs else "missing_source_ref"
     source_ref = next((ref for ref in source_grounding.source_refs if ref.id == ref_id), None)
@@ -59,16 +67,14 @@ def _usage_for_step(step, source_grounding: SourceGroundingReport, literature_re
         if comparison is not None
         else step.needed_theorem
     )
-    conditions = (
-        _conditions_from_comparison(comparison)
-        if comparison is not None
-        else _conditions_from_step(step)
-    )
-    conclusion_status = (
-        _conclusion_status(comparison)
-        if comparison is not None
-        else _fallback_conclusion_status(step)
-    )
+    if comparison is not None:
+        conditions = _conditions_from_comparison(comparison)
+        conclusion_status = _conclusion_status(comparison)
+    else:
+        conditions, independent_matches = _conditions_from_step(
+            step, source_ref, claim_hypotheses
+        )
+        conclusion_status = _fallback_conclusion_status(step, independent_matches)
     applicability_status = _applicability_status(conditions, conclusion_status, step.status.value)
     return {
         "proof_step_id": step.proof_step_id,
@@ -154,23 +160,71 @@ def _conditions_from_comparison(comparison) -> list[dict]:
     return conditions
 
 
-def _conditions_from_step(step) -> list[dict]:
+def _conditions_from_step(step, source_ref, claim_hypotheses) -> tuple[list[dict], object]:
+    """Fallback condition ledger (no Literature Review Agent comparison).
+
+    Goal 37 de-circularization: when the grounding recorded ``matches is True``,
+    the audit does NOT convert that verdict into satisfied conditions. It
+    recomputes hypothesis coverage from the primary inputs — the claim
+    hypotheses against the cited statement (``statement_or_summary``) — using
+    the same conservative checker the grounding itself uses. A hand-edited
+    ``matches=True`` over a non-covering statement therefore fails closed.
+
+    Returns ``(conditions, independent_matches)`` where ``independent_matches``
+    is the audit's own verdict (True / "unclear" / False).
+    """
+
     mismatches = list(step.hypothesis_match.mismatches)
     if step.hypothesis_match.matches is True:
-        reasons = list(step.hypothesis_match.matched) or [
-            "Source grounding hypothesis_match reports matching hypotheses."
-        ]
-        return [
-            {
-                "id": f"cond_{index:03d}",
-                "text": reason,
-                "condition_type": _condition_type(reason),
-                "status": "satisfied",
-                "evidence": step.note,
-                "definition_locator": None,
-            }
-            for index, reason in enumerate(reasons, start=1)
-        ]
+        from .source_verification import check_hypothesis_applicability
+
+        statement = source_ref.statement_or_summary if source_ref is not None else ""
+        recheck = check_hypothesis_applicability(statement, claim_hypotheses, [])
+        conditions: list[dict] = []
+        index = 1
+        for reason in recheck["matched"]:
+            conditions.append(
+                {
+                    "id": f"cond_{index:03d}",
+                    "text": reason,
+                    "condition_type": _condition_type(reason),
+                    "status": "satisfied",
+                    "evidence": (
+                        "Independent audit recheck: the cited statement covers this "
+                        "claim hypothesis."
+                    ),
+                    "definition_locator": None,
+                }
+            )
+            index += 1
+        for mismatch in recheck["mismatches"]:
+            conditions.append(
+                {
+                    "id": f"cond_{index:03d}",
+                    "text": mismatch,
+                    "condition_type": _condition_type(mismatch),
+                    "status": "unclear",
+                    "evidence": (
+                        "Independent audit recheck could NOT confirm this hypothesis "
+                        "in the cited statement, despite the grounding's stored "
+                        "hypothesis_match; the audit does not trust prior grounding."
+                    ),
+                    "definition_locator": None,
+                }
+            )
+            index += 1
+        if not conditions:
+            conditions.append(
+                {
+                    "id": "cond_001",
+                    "text": "No explicit claim hypotheses required checking.",
+                    "condition_type": "other",
+                    "status": "satisfied" if recheck["matches"] is True else "not_checked",
+                    "evidence": "Independent audit recheck found no explicit/inferred claim hypotheses.",
+                    "definition_locator": None,
+                }
+            )
+        return conditions, recheck["matches"]
     return [
         {
             "id": f"cond_{index:03d}",
@@ -181,7 +235,7 @@ def _conditions_from_step(step) -> list[dict]:
             "definition_locator": None,
         }
         for index, mismatch in enumerate(mismatches or ["hypothesis match was not checked"], start=1)
-    ]
+    ], step.hypothesis_match.matches
 
 
 def _condition_status_from_relation(relation: str) -> str:
@@ -230,8 +284,10 @@ def _conclusion_status(comparison) -> str:
     }[comparison.conclusion_match.relation]
 
 
-def _fallback_conclusion_status(step) -> str:
-    if step.status.value == "source_backed" and step.hypothesis_match.matches is True:
+def _fallback_conclusion_status(step, independent_matches) -> str:
+    # Goal 37: "compatible" requires the audit's OWN recheck to confirm the
+    # hypotheses — the stored source_backed status alone is not trusted.
+    if step.status.value == "source_backed" and independent_matches is True:
         return "compatible"
     return "unclear"
 
