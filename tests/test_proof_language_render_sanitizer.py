@@ -161,3 +161,59 @@ def test_memo_verdict_uses_human_phrase_not_raw_enum(tmp_path: Path) -> None:
     # the verdict is a human sentence, not a bare internal enum token
     for raw in ("likely_false", "idea_sketch", "source_backed", "proof_candidate"):
         assert raw not in verdict_line
+
+
+# --- Goal 36: Chinese proof-complete coverage --------------------------------
+def test_scrub_redacts_chinese_global_overclaims() -> None:
+    overclaims = [
+        "证毕",
+        "证明完毕",
+        "证明完成",
+        "定理得证",
+        "该定理得证",
+        "命题得证",
+        "猜想得证",
+        "定理已证明",
+        "该定理已被证明",
+        "我们证明了该定理",
+        "证明了这个定理",
+        "至此定理得证。",
+    ]
+    for text in overclaims:
+        assert contains_proof_language(text), f"missed Chinese overclaim: {text}"
+        out = scrub_proof_language(text)
+        assert contains_proof_language(out) is None, f"scrub left overclaim in: {out}"
+
+
+def test_scrub_preserves_scoped_chinese_prose() -> None:
+    # Scoped / negated honest Chinese phrasing must survive, exactly like the
+    # English curation (bare 已证明/得证/证明了 are not matched).
+    preserved = [
+        "该引理已证明",          # scoped to a lemma
+        "引理2.1得证",           # scoped to a lemma
+        "我们证明了引理2.1",      # scoped first-person
+        "该特殊情形已证明",       # scoped to a special case
+        "尚未证明该定理",         # honest negation (not yet proved)
+        "这不是一个已验证的证明",  # honest disclaimer
+    ]
+    for text in preserved:
+        assert contains_proof_language(text) is None, f"over-redacted: {text}"
+        assert scrub_proof_language(text) == text
+
+
+def test_reviewer_chinese_overclaim_never_reaches_memo(tmp_path: Path) -> None:
+    # Negative test from the Goal 36 spec: reviewer/model text saying 已证明该
+    # 定理 / 证毕 is scrubbed from every user-facing render.
+    run = run_mock_critique("g36zh", FIXTURES / "promising_but_unproved" / "input.md", tmp_path)
+    artifacts = read_yaml(run / "run_manifest.yaml")["artifacts"]
+    review_path = run / artifacts["review"]
+    review = read_yaml(review_path)
+    review["reviewers"][0]["objections"].append("评审意见：定理得证，证毕。")
+    review["strongest_objection"] = "评审认为定理得证，证毕。"
+    write_yaml(review_path, review)
+    validate_run(run)  # objection free text does not invalidate the run
+    memo = build_concise_memo(run)
+    dashboard = render_run_dashboard(run)
+    for surface in (memo, dashboard):
+        assert "证毕" not in surface
+        assert "定理得证" not in surface

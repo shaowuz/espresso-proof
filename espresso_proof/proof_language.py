@@ -50,6 +50,24 @@ _FIRST_PERSON_ASSERTIONS = tuple(
     f"{s} {v} {o}" for s in _SUBJECTS for v in _VERBS for o in _OBJECTS
 )
 
+# Chinese global proof-completion phrases (Goal 36), curated by the SAME two
+# safe families. Self-contained completion markers: 证毕 (= proof-close), 证明完毕 /
+# 证明完成 (proof finished). Global assertions: 定理/命题/猜想 + 得证/已证明,
+# and the completed-aspect 证明了 + global object. Because the boundary
+# lookarounds only block ASCII word characters, a phrase also matches inside
+# prefixed forms ("该定理得证", "此定理已证明"). Deliberately EXCLUDED: bare
+# 已证明 / 得证 / 证明了 — they collide with honest SCOPED prose (该引理已证明,
+# 引理2.1得证, 我们证明了引理2.1), exactly like bare "proved" in English.
+_CHINESE_COMPLETION_MARKERS = ("证毕", "证明完毕", "证明完成")
+_CHINESE_GLOBAL_OBJECTS = ("定理", "命题", "猜想")
+_CHINESE_GLOBAL_ASSERTIONS = tuple(
+    f"{o}{suffix}" for o in _CHINESE_GLOBAL_OBJECTS for suffix in ("得证", "已证明", "已被证明")
+) + tuple(
+    f"证明了该{o}" for o in _CHINESE_GLOBAL_OBJECTS
+) + tuple(
+    f"证明了这个{o}" for o in _CHINESE_GLOBAL_OBJECTS
+)
+
 PROOF_COMPLETE_PHRASES: tuple[str, ...] = (
     "[proof-close]",
     "[proof-close]",
@@ -60,6 +78,8 @@ PROOF_COMPLETE_PHRASES: tuple[str, ...] = (
     "this completes the proof",
     "no gaps remain",
     *_FIRST_PERSON_ASSERTIONS,
+    *_CHINESE_COMPLETION_MARKERS,
+    *_CHINESE_GLOBAL_ASSERTIONS,
 )
 
 # Neutral redaction marker (reuses the existing convention in llm_agents).
