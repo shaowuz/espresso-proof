@@ -121,7 +121,9 @@ def run_exact_modexp_adapter(
             "output_hash": _sha256(str(authoritative)),
             "replay_command": (
                 f"espresso verify-exact-modexp --run <run_dir> --base {base} "
-                f"--exp {exp} --mod {mod} --expected {expected} --id {entry_id}"
+                f"--exp {exp} --mod {mod} --expected {expected} --id {entry_id} "
+                "(replaying into the same run needs a fresh --id; identical "
+                "input/output hashes confirm the reproduction)"
             ),
         }
         # Earn ONLY through the bridge: append_verification_entries persists the
