@@ -172,7 +172,11 @@ def status_summary(run_dir: Path) -> dict[str, Any]:
             "tokens": "not_tracked",
         },
         "agents": [
-            {"agent": r["agent"], "title": r["title"], "status": r["status"], "status_word": r["status_word"]}
+            {
+                "agent": r["agent"], "title": r["title"], "status": r["status"],
+                "status_word": r["status_word"], "last_updated": r.get("last_updated"),
+                "duration_seconds": r.get("duration_seconds"),
+            }
             for r in _agent_display_rows(run_dir)
         ],
     }
@@ -996,7 +1000,9 @@ def _agent_commands(run_dir: Path, agent: str, status: str, *, interactive: bool
             )
         drawer = (
             f'<details class="debug"><summary>command</summary>'
-            f'<code>{_h(run_cmd)}</code></details>'
+            f'<code>{_h(run_cmd)}</code>'
+            f'<a class="debug-link" href="/api/runs/{_h(run_dir.name)}/debug" target="_blank" rel="noopener">technical details</a>'
+            f'</details>'
         )
         return f'<div class="acts">{buttons}</div>{drawer}'
     if status in ("running", "queued"):
@@ -1273,6 +1279,23 @@ def _evidence_panel(run_dir: Path, state: dict[str, Any]) -> str:
         )
         attempts = row.get("attempts") or 0
         attempts_html = f'<span class="aruns">{int(attempts)} run(s)</span>' if attempts > 1 else ""
+        # Goal 33: last-updated time (and duration once finished) — process
+        # timing only; a timing can never imply proof progress. Shown ONLY for
+        # agents that actually did something (never on not-run/skipped cards),
+        # and rendered in the viewer's LOCAL time by the page JS (data-utc);
+        # the no-JS fallback is explicitly UTC-suffixed, never a bare clock.
+        updated = str(row.get("last_updated") or "")
+        clock = updated.split("T", 1)[1][:5] if "T" in updated else ""
+        dur = row.get("duration_seconds")
+        show_timing = status in ("done", "running", "failed") and clock
+        dur_bit = (
+            f" · {dur}s" if isinstance(dur, (int, float)) and status == "done" and dur >= 0.1 else ""
+        )
+        timing_html = (
+            f'<span class="aupdated" data-utc="{_h(updated)}">updated {_h(clock)} UTC{_h(dur_bit)}</span>'
+            if show_timing
+            else ""
+        )
         note = _agent_status_note(row) if status != "no_board" else ""
         note_html = f'<p class="side-note" style="padding:0">{_h(note)}</p>' if note else ""
         open_attr = " open" if agent in ("claim_understanding", "literature") else ""
@@ -1282,7 +1305,7 @@ def _evidence_panel(run_dir: Path, state: dict[str, Any]) -> str:
             f"""<details class="agent" data-agent="{_h(agent)}"{open_attr}>
   <summary><span class="adot {dot}"></span>
     <span class="t"><b>{_h(row['title'])}</b><span>{_agent_summary_line(agent, state)}</span></span>
-    {word_html}{attempts_html}<span class="caret">&#9654;</span></summary>
+    {word_html}{attempts_html}{timing_html}<span class="caret">&#9654;</span></summary>
   <div class="abody">{note_html}{body_for[agent](status)}</div>
 </details>"""
         )
@@ -1488,6 +1511,19 @@ function humanEffort(effort) {
   return String(effort || "").replace(/_/g, " ");
 }
 
+function localizeTimes(rootEl) {
+  (rootEl || document).querySelectorAll(".aupdated[data-utc]").forEach(el => {
+    try {
+      const d = new Date(el.dataset.utc);
+      if (isNaN(d)) return;
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      el.textContent = el.textContent.replace(/updated \d{2}:\d{2} UTC/, "updated " + hh + ":" + mm);
+    } catch {}
+  });
+}
+document.addEventListener("DOMContentLoaded", () => localizeTimes());
+
 async function refreshPanels() {
   // State-preserving refresh: remember which evidence cards the reader had
   // open and the scroll position, swap the panel, then restore both — a
@@ -1510,6 +1546,7 @@ async function refreshPanels() {
         if (openAgents.includes(det.dataset.agent)) det.setAttribute("open", "");
         else det.removeAttribute("open");
       });
+      localizeTimes(ev);
       window.scrollTo({top: scrollY, behavior: "instant"});
     }
     if (tb && d.topbar_html) tb.innerHTML = d.topbar_html;
@@ -1753,6 +1790,7 @@ table.route-table{width:100%;border-collapse:collapse;font-size:12.8px;margin-to
 .aword.notrun,.aword.skipped{background:var(--gray-soft);color:var(--muted)}
 .aword.failed{background:#f7e4df;color:#9c3f2d}
 .aruns{color:var(--muted);font-size:11px;white-space:nowrap}
+.aupdated{color:var(--muted);font-size:10.5px;white-space:nowrap}
 .caret{color:var(--muted);transition:transform .15s;font-size:11px}
 .agent[open] .caret{transform:rotate(90deg)}
 .abody{border-top:1px dashed var(--line);padding:13px 16px 15px;display:grid;gap:10px}
@@ -1798,6 +1836,7 @@ a.loc:hover{border-color:var(--esp-line);background:var(--esp-soft)}
 .effort-pick select{font:inherit;font-size:13px;padding:6px 9px;border:1px solid var(--esp-line);border-radius:8px;background:var(--card);color:var(--ink)}
 .act-status{font-size:13px}.act-status.ok{color:var(--green)}.act-status.err{color:#9c3f2d}.act-status.info{color:var(--muted)}
 details.debug{margin-top:12px}details.debug>summary{cursor:pointer;color:var(--muted);font-size:12px;list-style:none}details.debug>summary::-webkit-details-marker{display:none}
+.debug-link{display:inline-block;margin-top:7px;font-size:11.5px;color:var(--muted)}
 details.debug code{display:block;margin-top:8px;padding:10px 12px;background:#221a12;color:#f3ead9;border-radius:8px;font-size:11.5px;overflow-wrap:anywhere;white-space:pre-wrap}
 .tb-status{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .tb-refresh{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--ink);width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:16px;line-height:1}

@@ -209,6 +209,16 @@ def display_rows(run_dir: Path) -> list[dict]:
     for agent in AGENT_KINDS:
         entry = by_agent.get(agent, {})
         status = str(entry.get("status") or "not_run")
+        duration = None
+        started, finished = entry.get("started_at"), entry.get("finished_at")
+        if started and finished:
+            try:
+                from datetime import datetime
+                duration = round(
+                    (datetime.fromisoformat(finished) - datetime.fromisoformat(started)).total_seconds(), 1
+                )
+            except ValueError:
+                duration = None
         rows.append(
             {
                 "agent": agent,
@@ -218,6 +228,8 @@ def display_rows(run_dir: Path) -> list[dict]:
                 "evidence_ready": status == EVIDENCE_READY_STATUS,
                 "attempts": int(entry.get("attempts") or 0),
                 "error_summary": entry.get("error_summary"),
+                "last_updated": entry.get("last_updated"),
+                "duration_seconds": duration,
             }
         )
     return rows
