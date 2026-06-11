@@ -503,7 +503,18 @@ def _index_page(workbench: Workbench) -> str:
       <label class="mode"><input type="radio" name="mode" value="demo"><b>Demo mode</b><span>A known-good example case.</span></label>
     </div>
     <div class="go-row"><button id="go" type="button" class="go">Run Espresso</button>
-      <span class="status" id="status"></span></div>
+    <div class="jobrow" id="jobrow" hidden>
+      <div class="jr-head"><span class="jr-spin"></span><b id="jr-stage">Starting run…</b><span class="jr-elapsed" id="jr-elapsed"></span></div>
+      <div class="jr-bar"><i></i></div>
+      <p class="jr-note" id="jr-note">Espresso is creating the run. This page stays usable while it works.</p>
+      <div class="jr-fail" id="jr-fail" hidden>
+        <p class="err" id="jr-err"></p>
+        <div class="jr-actions">
+          <button type="button" class="go small" id="jr-retry">Retry</button>
+          <button type="button" class="ghost small" id="jr-fast" hidden>Switch to Fast preview</button>
+        </div>
+      </div>
+    </div>
     <p class="err" id="err"></p>
   </section>
   <aside class="side">
@@ -521,7 +532,7 @@ def _index_page(workbench: Workbench) -> str:
   </aside>
 </main>
 <script>
-const go=document.getElementById("go"),err=document.getElementById("err"),statusEl=document.getElementById("status");
+const go=document.getElementById("go"),err=document.getElementById("err");
 const textEl=document.getElementById("text");
 function selectedMode(){{const r=document.querySelector('input[name=mode]:checked');return r?r.value:"fast";}}
 document.querySelectorAll(".demo").forEach(b=>b.addEventListener("click",()=>{{
@@ -529,30 +540,53 @@ document.querySelectorAll(".demo").forEach(b=>b.addEventListener("click",()=>{{
   const m=document.querySelector('input[name=mode][value="'+b.dataset.mode+'"]');if(m)m.checked=true;
   textEl.focus();
 }}));
-go.addEventListener("click",async()=>{{
+// Durable job row: the click is acknowledged immediately, the row stays visible
+// while the background job works (stage + elapsed + alive bar), and a failure
+// offers Retry / Switch to Fast preview — never a frozen page or raw fetch error.
+const jobrow=document.getElementById("jobrow"),jrStage=document.getElementById("jr-stage"),
+  jrElapsed=document.getElementById("jr-elapsed"),jrNote=document.getElementById("jr-note"),
+  jrFail=document.getElementById("jr-fail"),jrErr=document.getElementById("jr-err"),
+  jrRetry=document.getElementById("jr-retry"),jrFast=document.getElementById("jr-fast");
+function jobFailed(msg,wasCodex){{
+  jrStage.textContent="Run failed";jobrow.classList.add("failed");
+  jrNote.textContent="";jrFail.hidden=false;jrErr.textContent=msg;
+  jrFast.hidden=!wasCodex;
+  go.disabled=false;go.textContent="Run Espresso";
+}}
+async function startRun(){{
   const text=textEl.value.trim();
   if(!text){{err.textContent="Enter a claim first.";return;}}
-  go.disabled=true;go.textContent="Starting run…";err.textContent="";statusEl.textContent="";
+  const mode=selectedMode(),slow=mode==="codex";
+  go.disabled=true;go.textContent="Starting run…";err.textContent="";
+  jobrow.hidden=false;jobrow.classList.remove("failed");jrFail.hidden=true;
+  jrStage.textContent=slow?"Starting Codex deep run…":"Starting run…";
+  jrNote.textContent="Espresso is creating the run. This page stays usable while it works.";
+  jrElapsed.textContent="";
   const t0=Date.now();
   try{{
-    // Returns a job_id immediately; the run happens in the background so we never
-    // block on model latency. Poll the job, then open the run when it is ready.
-    const r=await fetch("/api/runs",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{text,mode:selectedMode()}})}});
+    const r=await fetch("/api/runs",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{text,mode}})}});
     const d=await r.json();
     if(!r.ok)throw new Error(d.error||"failed");
-    const jobId=d.job_id;const slow=selectedMode()==="codex";
+    const jobId=d.job_id;
     for(let i=0;i<2000;i++){{
       await new Promise(res=>setTimeout(res,800));
       let j;
       try{{j=await (await fetch("/api/jobs/"+encodeURIComponent(jobId))).json();}}
-      catch{{statusEl.textContent="The local server did not answer. Check that Espresso is still running.";continue;}}
+      catch{{jrNote.textContent="The local server did not answer. Check that Espresso is still running, then retry.";continue;}}
       const secs=Math.round((Date.now()-t0)/1000);
-      statusEl.textContent=(slow?"Codex is still working":"Working")+" — "+secs+"s";
-      if(j.state==="done"&&j.result&&j.result.run_id){{location.href="/run/"+encodeURIComponent(j.result.run_id);return;}}
-      if(j.state==="failed")throw new Error(j.error||"run failed");
+      jrElapsed.textContent=secs+"s";
+      jrStage.textContent=slow?(secs>=30?"Codex is still working — deep runs take a while":"Codex is working…"):"Working…";
+      if(j.state==="done"&&j.result&&j.result.run_id){{jrStage.textContent="Run ready — opening…";location.href="/run/"+encodeURIComponent(j.result.run_id);return;}}
+      if(j.state==="failed"){{jobFailed(j.error||"The run could not be created.",slow);return;}}
     }}
-    throw new Error("timed out starting the run");
-  }}catch(e){{err.textContent=e.message;statusEl.textContent="";go.disabled=false;go.textContent="Run Espresso";}}
+    jobFailed("Timed out starting the run.",slow);
+  }}catch(e){{jobFailed(e.message,slow);}}
+}}
+go.addEventListener("click",startRun);
+jrRetry.addEventListener("click",startRun);
+jrFast.addEventListener("click",()=>{{
+  const m=document.querySelector('input[name=mode][value="fast"]');if(m)m.checked=true;
+  startRun();
 }});
 </script></body></html>"""
 
@@ -565,7 +599,7 @@ body{margin:0;background:linear-gradient(180deg,#fbfaf6,var(--paper) 320px);colo
 .brand{display:flex;align-items:center;gap:9px;font-weight:700}
 .bean{width:14px;height:14px;border-radius:50% 50% 50% 50%/60% 60% 40% 40%;background:radial-gradient(circle at 35% 30%,#9a6f4b,#5a3d24)}
 .tagline{color:var(--muted);font-style:italic;font-family:Georgia,serif}
-.grid{max-width:1180px;margin:0 auto;padding:38px 40px 80px;display:grid;grid-template-columns:1.5fr 1fr;gap:26px;align-items:start}
+.grid{max-width:min(1380px,92vw);margin:0 auto;padding:38px 40px 80px;display:grid;grid-template-columns:1.5fr 1fr;gap:26px;align-items:start}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px rgba(43,33,21,.05),0 12px 32px rgba(43,33,21,.06)}
 .enter{padding:30px 32px}
 .enter h1{font-family:Georgia,serif;font-weight:500;font-size:32px;margin:0 0 8px}
@@ -582,6 +616,23 @@ textarea{width:100%;min-height:130px;padding:15px 17px;border:1px solid var(--es
 .go:hover{background:var(--esp-deep)}.go:disabled{opacity:.6;cursor:progress}
 .status{color:var(--muted);font-size:14px}
 .err{color:#9c3f2d;font-size:14px;margin:10px 0 0;min-height:1.2em}
+.jobrow{margin-top:16px;border:1px solid var(--esp-line);border-radius:11px;background:var(--esp-soft);padding:14px 16px;transition:border-color .2s ease,background .2s ease}
+.jobrow.failed{border-color:#dcb4a8;background:#faf0ec}
+.jr-head{display:flex;align-items:center;gap:10px}
+.jr-head b{font-size:14.5px}
+.jr-elapsed{margin-left:auto;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.jr-spin{width:13px;height:13px;border:2px solid rgba(107,74,47,.25);border-top-color:var(--esp);border-radius:50%;animation:jrspin .8s linear infinite;flex:0 0 auto}
+.jobrow.failed .jr-spin{display:none}
+@keyframes jrspin{to{transform:rotate(360deg)}}
+.jr-bar{height:4px;border-radius:99px;background:rgba(107,74,47,.12);overflow:hidden;margin:10px 0 8px}
+.jr-bar i{display:block;height:100%;width:34%;border-radius:99px;background:var(--esp);animation:jrslide 1.5s ease-in-out infinite}
+.jobrow.failed .jr-bar{display:none}
+@keyframes jrslide{0%{transform:translateX(-110%)}100%{transform:translateX(320%)}}
+.jr-note{color:var(--muted);font-size:13px;margin:0}
+.jr-actions{display:flex;gap:10px;margin-top:8px}
+.go.small{padding:8px 16px;font-size:14px}
+.ghost.small{appearance:none;border:1px solid var(--esp-line);background:transparent;color:var(--esp);font:inherit;font-size:14px;font-weight:650;padding:8px 16px;border-radius:10px;cursor:pointer}
+.ghost.small:hover{background:var(--esp-soft)}
 .side{display:grid;gap:18px}
 .card.how,.card.demos,.card.runs{padding:20px 22px}
 .side h2{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:0 0 12px}
