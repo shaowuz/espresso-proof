@@ -66,9 +66,12 @@ def _await_job(call, job_id: str, timeout: float = 20.0) -> dict:
 
 
 def _create(call) -> str:
+    # Create is async: POST returns a job_id immediately; poll for the run_id.
     status, d = call("POST", "/api/runs", {"text": CLAIM})
-    assert status == 201, d
-    return d["run_id"]
+    assert status == 202, d
+    job = _await_job(call, d["job_id"])
+    assert job["state"] == "done", job
+    return job["result"]["run_id"]
 
 
 # --------------------------------------------------------------------------- #
@@ -105,6 +108,41 @@ def test_create_run_reaches_gate(client) -> None:
     assert agents["claim_understanding"] == "done"
     assert agents["examples"] == "not_run"
     assert d["evidence_html"] and d["topbar_html"]
+
+
+def test_create_run_returns_immediately_with_slow_provider(client, monkeypatch) -> None:
+    """POST /api/runs must NOT block on model latency. With a deliberately slow
+    orchestrate (simulating a real external Claude/Codex provider), the request
+    returns a job_id in well under a second while the run continues in the
+    background, then completes with a run_id."""
+    import espresso_proof.server as server_mod
+
+    real = server_mod.orchestrate_run
+
+    def slow_orchestrate(*args, **kwargs):
+        time.sleep(2.0)  # simulate front-half + prover model latency
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(server_mod, "orchestrate_run", slow_orchestrate)
+
+    _, call, _ = client
+    t0 = time.time()
+    status, d = call("POST", "/api/runs", {"text": CLAIM})
+    elapsed = time.time() - t0
+    assert status == 202, d
+    assert "job_id" in d
+    assert elapsed < 1.0, f"POST blocked for {elapsed:.2f}s (should be immediate)"
+
+    # the job is still running while the slow provider works...
+    _, j = call("GET", f"/api/jobs/{d['job_id']}")
+    assert j["state"] in ("queued", "running")
+
+    # ...and eventually finishes with a usable run_id.
+    job = _await_job(call, d["job_id"], timeout=30.0)
+    assert job["state"] == "done", job
+    run_id = job["result"]["run_id"]
+    _, st = call("GET", f"/api/runs/{run_id}/status")
+    assert st["state"]
 
 
 def test_create_run_rejects_empty(client) -> None:
