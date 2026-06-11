@@ -627,7 +627,7 @@ def _plan_section(
       <strong id="selected-title">{_h(initial['title'])}</strong>
       <p class="sub" id="selected-summary" style="margin-bottom:0">{_h(initial['summary'])}</p>
     </div>
-    <div class="effort" id="selected-effort">{_h(initial['effort'])}</div>
+    <div class="effort" id="selected-effort">{_h(str(initial['effort']).replace('_', ' '))}</div>
   </div>
   <ul class="detail-list" id="selected-detail">{selected_items}</ul>
   <p class="sub" style="margin:12px 0 0">{evidence_line}</p>
@@ -1102,8 +1102,10 @@ def _evidence_panel(run_dir: Path, state: dict[str, Any]) -> str:
         note = _agent_status_note(row) if status != "no_board" else ""
         note_html = f'<p class="side-note" style="padding:0">{_h(note)}</p>' if note else ""
         open_attr = " open" if agent in ("claim_understanding", "literature") else ""
+        # data-agent gives the refresh JS a stable identity so a panel swap can
+        # restore which cards the reader had open (no lost place / layout jump).
         cards.append(
-            f"""<details class="agent"{open_attr}>
+            f"""<details class="agent" data-agent="{_h(agent)}"{open_attr}>
   <summary><span class="adot {dot}"></span>
     <span class="t"><b>{_h(row['title'])}</b><span>{_agent_summary_line(agent, state)}</span></span>
     {word_html}{attempts_html}<span class="caret">&#9654;</span></summary>
@@ -1245,7 +1247,7 @@ function selectRoute(routeId) {{
       return item;
     }})
   );
-  document.getElementById("selected-effort").textContent = route.effort;
+  document.getElementById("selected-effort").textContent = humanEffort(route.effort);
   document.getElementById("command").textContent = commandFor(routeId);
   document.getElementById("copy-status").textContent = "";
 }}
@@ -1298,30 +1300,55 @@ _INTERACTIVE_JS = r"""
 const RUN_ID = __RUN_ID__;
 const API = "/api/runs/" + encodeURIComponent(RUN_ID);
 
-function flash(el, msg, ok) {
+function flash(el, msg, tone) {
+  // tone: "ok" only for a genuinely completed action; "info" (neutral) for
+  // in-progress copy — the earned-evidence green is never used while waiting.
   if (!el) return;
   el.textContent = msg;
-  el.className = "act-status " + (ok ? "ok" : "err");
+  el.className = "act-status " + (tone === true ? "ok" : tone === false ? "err" : tone);
+}
+
+function humanEffort(effort) {
+  return String(effort || "").replace(/_/g, " ");
 }
 
 async function refreshPanels() {
+  // State-preserving refresh: remember which evidence cards the reader had
+  // open and the scroll position, swap the panel, then restore both — a
+  // background update must never make the user lose their place.
+  const ev = document.getElementById("evidence-panel");
+  const tb = document.getElementById("topbar-status");
+  const openAgents = ev
+    ? [...ev.querySelectorAll("details.agent[open]")].map(d => d.dataset.agent)
+    : [];
+  const scrollY = window.scrollY;
+  if (ev) ev.classList.add("refreshing");
   try {
     const r = await fetch(API + "/status");
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || "status failed");
-    const ev = document.getElementById("evidence-panel");
-    const tb = document.getElementById("topbar-status");
-    if (ev && d.evidence_html) ev.innerHTML = d.evidence_html;
+    if (ev && d.evidence_html) {
+      ev.innerHTML = d.evidence_html;
+      ev.querySelectorAll("details.agent").forEach(det => {
+        // restore the reader's exact open set — including "all closed"
+        if (openAgents.includes(det.dataset.agent)) det.setAttribute("open", "");
+        else det.removeAttribute("open");
+      });
+      window.scrollTo({top: scrollY, behavior: "instant"});
+    }
     if (tb && d.topbar_html) tb.innerHTML = d.topbar_html;
   } catch (e) { /* leave the page as-is on a transient error */ }
+  finally { if (ev) ev.classList.remove("refreshing"); }
 }
 
-async function pollJob(jobId, onDone) {
+async function pollJob(jobId, onDone, onTick) {
+  const t0 = Date.now();
   for (let i = 0; i < 600; i++) {
     await new Promise(r => setTimeout(r, 800));
     let d;
     try { d = await (await fetch("/api/jobs/" + encodeURIComponent(jobId))).json(); }
-    catch { continue; }
+    catch { if (onTick) onTick(Math.round((Date.now() - t0) / 1000)); continue; }
+    if (onTick) onTick(Math.round((Date.now() - t0) / 1000));
     if (d.state === "done") { onDone(null); return; }
     if (d.state === "failed") { onDone(d.error || "action failed"); return; }
   }
@@ -1344,8 +1371,10 @@ document.addEventListener("click", async (e) => {
     const agent = btn.dataset.agent;
     const sib = btn.parentElement;
     btn.disabled = true;
+    btn.classList.add("busy");
     const orig = btn.textContent;
     btn.textContent = action === "skip-agent" ? "Skipping…" : "Running…";
+    const reset = () => { btn.disabled = false; btn.classList.remove("busy"); btn.textContent = orig; };
     try {
       if (action === "skip-agent") {
         const r = await fetch(API + "/skip-agent", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({agent})});
@@ -1358,11 +1387,12 @@ document.addEventListener("click", async (e) => {
         if (!r.ok) throw new Error(d.error || "run failed");
         await new Promise((res) => pollJob(d.job_id, async (err) => {
           if (err && sib) { const s=document.createElement("span"); s.className="act-status err"; s.textContent=err; sib.appendChild(s); }
+          reset();  // never leave a stale busy spinner if the refresh fetch fails
           await refreshPanels(); res();
-        }));
+        }, (secs) => { if (secs >= 5) btn.textContent = "Running… " + secs + "s"; }));
       }
     } catch (err) {
-      btn.disabled = false; btn.textContent = orig;
+      reset();
       if (sib) { const s=document.createElement("span"); s.className="act-status err"; s.textContent=err.message; sib.appendChild(s); }
     }
     return;
@@ -1374,17 +1404,21 @@ document.addEventListener("click", async (e) => {
     const effort = effortSel ? effortSel.value : "quick_test";
     const st = document.getElementById("continue-status");
     if (!strategy) { flash(st, "Pick a route first.", false); return; }
-    btn.disabled = true; btn.textContent = "Working…"; flash(st, "Continuing…", true);
+    btn.disabled = true; btn.classList.add("busy"); btn.textContent = "Working…";
+    flash(st, "Continuing…", "info");
+    const reset = () => { btn.disabled = false; btn.classList.remove("busy"); btn.textContent = "Continue this route"; };
     try {
       const r = await fetch(API + "/continue", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({strategy, effort})});
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "continue failed");
       pollJob(d.job_id, (err) => {
-        if (err) { btn.disabled=false; btn.textContent="Continue this route"; flash(st, err, false); }
+        if (err) { reset(); flash(st, err, false); }
         else { location.reload(); }
+      }, (secs) => {
+        flash(st, (secs >= 30 ? "Still working — the prover loop can take a while. " : "Continuing… ") + secs + "s", "info");
       });
     } catch (err) {
-      btn.disabled = false; btn.textContent = "Continue this route"; flash(st, err.message, false);
+      reset(); flash(st, err.message, false);
     }
     return;
   }
@@ -1437,7 +1471,7 @@ code,pre,.mono{font-family:"SF Mono",SFMono-Regular,Consolas,monospace}
 .music .bars i{width:3px;background:var(--esp);border-radius:1px;animation:eq .9s ease-in-out infinite}
 .music .bars i:nth-child(2){animation-delay:.2s}.music .bars i:nth-child(3){animation-delay:.45s}
 @keyframes eq{0%,100%{height:4px}50%{height:11px}}
-.wrap{max-width:1280px;margin:0 auto;padding:26px 26px 90px;
+.wrap{max-width:min(1460px,94vw);margin:0 auto;padding:26px 26px 90px;
   display:grid;grid-template-columns:minmax(0,1.65fr) minmax(320px,1fr);gap:22px;align-items:start}
 .maincol{display:grid;gap:22px;min-width:0}
 .sidecol{display:grid;gap:14px;position:sticky;top:64px}
@@ -1545,16 +1579,32 @@ a.loc:hover{border-color:var(--esp-line);background:var(--esp-soft)}
   font-size:11px;overflow-wrap:anywhere;cursor:pointer}
 .acmds code:hover{outline:2px solid var(--esp-line)}
 .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
-.act{appearance:none;border:1px solid var(--esp);background:var(--esp);color:#fff;font:inherit;font-size:12.5px;font-weight:650;padding:7px 14px;border-radius:8px;cursor:pointer}
+.act{appearance:none;border:1px solid var(--esp);background:var(--esp);color:#fff;font:inherit;font-size:12.5px;font-weight:650;padding:7px 14px;border-radius:8px;cursor:pointer;
+  transition:background .15s ease,border-color .15s ease,opacity .15s ease,transform .08s ease}
 .act:hover{background:var(--esp-deep);border-color:var(--esp-deep)}
+.act:active{transform:scale(.97)}
 .act:disabled{opacity:.55;cursor:progress}
 .act.ghost{background:transparent;color:var(--esp);}
 .act.ghost:hover{background:var(--esp-soft)}
 .act.primary{padding:9px 18px;font-size:14px}
+.act.busy{padding-left:30px;position:relative}
+.act.busy:before{content:"";position:absolute;left:11px;top:50%;width:11px;height:11px;margin-top:-6px;
+  border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+.act.ghost.busy:before{border-color:rgba(107,74,47,.3);border-top-color:var(--esp)}
+@keyframes spin{to{transform:rotate(360deg)}}
+#evidence-panel{transition:opacity .18s ease}
+#evidence-panel.refreshing{opacity:.55;pointer-events:none}
+.agent,.card{transition:box-shadow .15s ease}
+/* skeleton blocks: neutral grey shimmer only — a skeleton never previews
+   evidence status and never uses the earned-green tone */
+.skel{position:relative;overflow:hidden;background:var(--gray-soft);border-radius:8px;min-height:14px}
+.skel:after{content:"";position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);animation:shimmer 1.2s infinite}
+@keyframes shimmer{to{transform:translateX(100%)}}
 .plan-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
 .effort-pick{font-size:13px;color:var(--muted);display:inline-flex;gap:7px;align-items:center}
 .effort-pick select{font:inherit;font-size:13px;padding:6px 9px;border:1px solid var(--esp-line);border-radius:8px;background:var(--card);color:var(--ink)}
-.act-status{font-size:13px}.act-status.ok{color:var(--green)}.act-status.err{color:#9c3f2d}
+.act-status{font-size:13px}.act-status.ok{color:var(--green)}.act-status.err{color:#9c3f2d}.act-status.info{color:var(--muted)}
 details.debug{margin-top:12px}details.debug>summary{cursor:pointer;color:var(--muted);font-size:12px;list-style:none}details.debug>summary::-webkit-details-marker{display:none}
 details.debug code{display:block;margin-top:8px;padding:10px 12px;background:#221a12;color:#f3ead9;border-radius:8px;font-size:11.5px;overflow-wrap:anywhere;white-space:pre-wrap}
 .tb-status{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
