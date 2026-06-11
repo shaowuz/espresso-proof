@@ -272,8 +272,39 @@ def build_concise_memo(run_dir: Path) -> str:
             )
         else:
             lines.append(f"  No candidate earned reference support yet: {evidence_phrase('not_found')}.")
+    # Evidence-agent status board (Goal 27): show, honestly, which evidence agents
+    # have run / are running / were skipped / failed / not run. A running / failed
+    # / skipped / not-run / missing agent contributes NO evidence; only a 'Done'
+    # agent's artifact (already validated above) is real evidence. When core
+    # evidence is incomplete, route scores below are marked PRELIMINARY.
+    from .agent_run_status import display_rows, evidence_incomplete
+
+    agent_rows = display_rows(run_dir)
+    routes_preliminary = evidence_incomplete(run_dir)
+    if agent_rows:
+        lines.append("")
+        lines.append("Evidence agents:")
+        for row in agent_rows:
+            note = ""
+            if row["status"] == "failed" and row["error_summary"]:
+                note = f" — {str(row['error_summary'])[:80]}"
+            elif row["status"] == "not_run":
+                note = " — has not run; not counted as evidence"
+            elif row["status"] == "skipped":
+                note = " — skipped by request; contributes no evidence"
+            elif row["status"] == "running":
+                note = " — in progress; not yet evidence"
+            lines.append(f"  - {row['title']}: {row['status_word']}{note}")
+        lines.append(
+            "  (Only a 'Done' agent's artifact counts as evidence; the kernel still "
+            "validates it. Missing/running/skipped/failed agents are not evidence.)"
+        )
+
     lines.append("")
-    lines.append("Top routes:")
+    if routes_preliminary:
+        lines.append("Top routes (PRELIMINARY — evidence agents incomplete):")
+    else:
+        lines.append("Top routes:")
     if top:
         for index, route in enumerate(top[:3], start=1):
             lines.append(

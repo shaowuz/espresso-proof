@@ -13,6 +13,7 @@ from .research_bank import (
 )
 from .models import (
     AgentContracts,
+    AgentRunStatusReport,
     AttemptStatus,
     AutonomousLiteratureRetrievalReport,
     Claim,
@@ -129,6 +130,7 @@ def validate_run(run_dir: Path) -> None:
     prover_loop = _load_optional_prover_loop(run_dir, manifest)
     prover_round_index = _load_optional_prover_round_index(run_dir, manifest)
     proof_goal_graph = _load_optional_proof_goal_graph(run_dir, manifest)
+    agent_run_status = _load_optional_agent_run_status(run_dir, manifest)
     human_feedback, feedback_summary = _load_optional_human_feedback(run_dir, manifest)
 
     _validate_claim_id_consistency(
@@ -216,7 +218,70 @@ def validate_run(run_dir: Path) -> None:
         prover_round_index,
         strategy_brief,
     )
+    _validate_agent_run_status(agent_run_status, claim, manifest, run_dir)
     _validate_final_report_language(run_dir / artifacts["final_report"], idea_grade)
+
+
+def _load_optional_agent_run_status(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> AgentRunStatusReport | None:
+    optional = manifest.optional_artifacts
+    if "agent_run_status" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["agent_run_status"],
+        AgentRunStatusReport,
+    )
+
+
+def _validate_agent_run_status(
+    agent_run_status: AgentRunStatusReport | None,
+    claim: Claim,
+    manifest: RunManifest,
+    run_dir: Path,
+) -> None:
+    """The per-agent run-status board (Goal 27) is advisory process state.
+
+    Only runs when the optional artifact is present. The report model carries no
+    source/evidence/proof/grade status field and StrictBaseModel forbids extras,
+    so a board that smuggles in ``source_backed`` / checked evidence / a proof or
+    grade status is already rejected at load (validate_yaml_model). Here we bind
+    the board to THIS run and harden the evidence-gate flag:
+
+    - claim_id must match the locked claim and run_id must match the manifest;
+    - every recorded ``artifact_path`` must resolve inside the run directory;
+    - ``safe_to_use_as_evidence`` (already gated to status='done' at the model)
+      additionally requires the recorded artifact to exist on disk -- a board
+      can never mark an absent/rolled-back artifact as usable evidence.
+
+    The board cannot upgrade any status by construction; this binding just keeps
+    the dashboard's "this agent is done" claim honest against the real artifacts.
+    """
+    if agent_run_status is None:
+        return
+    if agent_run_status.claim_id != claim.id:
+        raise KernelValidationError(
+            "agent_run_status claim_id does not match locked claim"
+        )
+    if agent_run_status.run_id != manifest.run_id:
+        raise KernelValidationError(
+            "agent_run_status run_id does not match run manifest"
+        )
+    run_root = run_dir.resolve()
+    for entry in agent_run_status.agents:
+        if entry.artifact_path is not None:
+            resolved = (run_dir / entry.artifact_path).resolve()
+            if resolved != run_root and run_root not in resolved.parents:
+                raise KernelValidationError(
+                    f"agent_run_status artifact_path escapes run directory: "
+                    f"{entry.artifact_path!r}"
+                )
+            if entry.safe_to_use_as_evidence and not resolved.exists():
+                raise KernelValidationError(
+                    f"agent_run_status marks {entry.agent!r} safe_to_use_as_evidence "
+                    "but its artifact is missing"
+                )
 
 
 def _load_optional_human_feedback(
