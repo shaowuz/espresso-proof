@@ -40,6 +40,7 @@ from .agent_run_status import (
 from .descriptions import evidence_phrase, objection_phrase
 from .io import read_yaml
 from .proof_language import scrub_proof_language
+from .research_timeline import build_timeline
 from .route_table import ROUTE_TABLE_COLUMNS, build_route_step_rows
 from .subgoal_graph import (
     PROOF_SEARCH_NOTE as _PROOF_SEARCH_NOTE,
@@ -759,6 +760,31 @@ def _review_section(review: dict[str, Any]) -> str:
 </div></section>"""
 
 
+def _timeline_section(run_dir: Path) -> str:
+    """Goal 28: a display-only research timeline derived from validated artifacts
+    and the per-agent status board. Never sets or upgrades any status; a skipped/
+    failed/running agent is shown as skipped/failed/running, never as done."""
+
+    try:
+        events = build_timeline(run_dir)
+    except Exception:  # noqa: BLE001 - a display panel must never break the page
+        return ""
+    if not events:
+        return ""
+    rows = "".join(
+        f'<li class="tl {_h(ev.get("tone", "info"))}">'
+        f'<span class="tl-time">{_h(ev.get("time", ""))}</span>'
+        f'<span class="tl-text">{_h(ev.get("text", ""))}</span></li>'
+        for ev in events
+    )
+    note = "A display log of what happened, in order. It does not change any evidence or proof status."
+    return f"""<section class="card"><div class="pad">
+  <h2>Research Timeline</h2>
+  <ul class="timeline">{rows}</ul>
+  <div class="note">{_h(note)}</div>
+</div></section>"""
+
+
 # --------------------------------------------------------------------------- #
 # evidence panel (right column)
 # --------------------------------------------------------------------------- #
@@ -1184,6 +1210,7 @@ def _template(
   {_proof_state_section(state, route_shown=_route_actually_selected(state))}
   {_route_table_section(state)}
   {review_html}
+  {_timeline_section(run_dir)}
 </main>
 <aside class="sidecol" id="evidence-panel">
   {_evidence_panel(run_dir, state)}
@@ -1373,6 +1400,7 @@ _STYLE = r"""
   --green:#2e7d54; --green-soft:#e9f3ec; --green-line:#b9d8c6;
   --amber:#9a6b1d; --amber-soft:#faf0dc; --amber-line:#e9d3a8;
   --gray-soft:#f0ede7;
+  --done-blue:#3f6184; --done-blue-soft:#e8eef4; --done-blue-line:#c2d2e2;
   --shadow:0 1px 2px rgba(43,33,21,.05),0 10px 30px rgba(43,33,21,.07);
 }
 *{box-sizing:border-box}
@@ -1485,7 +1513,7 @@ table.route-table{width:100%;border-collapse:collapse;font-size:12.8px;margin-to
 .agent summary::-webkit-details-marker{display:none}
 .agent summary:hover{background:#fbf8f2}
 .adot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
-.adot.done{background:var(--green)}
+.adot.done{background:var(--done-blue)}
 .adot.running{background:var(--amber);animation:breathe 1.4s ease-in-out infinite}
 .adot.notrun,.adot.skipped{background:#c9c2b6}
 .adot.failed{background:#b3503e}
@@ -1494,7 +1522,7 @@ table.route-table{width:100%;border-collapse:collapse;font-size:12.8px;margin-to
 .agent .t span{display:block;color:var(--muted);font-size:12px;margin-top:1px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .aword{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
-.aword.done{background:var(--green-soft);color:var(--green)}
+.aword.done{background:var(--done-blue-soft);color:var(--done-blue)}
 .aword.running{background:var(--amber-soft);color:var(--amber)}
 .aword.notrun,.aword.skipped{background:var(--gray-soft);color:var(--muted)}
 .aword.failed{background:#f7e4df;color:#9c3f2d}
@@ -1541,6 +1569,15 @@ details.debug code{display:block;margin-top:8px;padding:10px 12px;background:#22
 .review-card p{font-size:13px}
 .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
 .chip.warn{background:var(--amber-soft);border-color:var(--amber-line);color:#65430f;font-weight:550}
+.timeline{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:0}
+.tl{display:flex;gap:12px;align-items:baseline;padding:8px 0 8px 14px;position:relative;font-size:13.5px;border-left:2px solid var(--line);margin-left:4px}
+.tl:before{content:"";position:absolute;left:-5px;top:13px;width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.tl-time{color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px;min-width:38px}
+.tl-text{color:var(--ink)}
+.tl.earned:before{background:var(--green)}
+.tl.warn:before{background:var(--amber)}
+.tl.skip:before{background:#c9c2b6}
+.tl.fail:before{background:#b3503e}.tl.fail .tl-text{color:#9c3f2d}
 @media (max-width:1020px){.wrap{grid-template-columns:1fr}.sidecol{position:static}}
 @media (max-width:760px){
   .wrap{padding:16px 14px 60px}.card>.pad{padding:17px 16px}

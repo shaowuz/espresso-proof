@@ -43,6 +43,26 @@ _PROJECT_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 # CLI ``--agent`` spelling -> internal agent key.
 _AGENT_ALIASES = {"failure-patterns": "failure_patterns"}
 
+# Human-facing run modes -> internal provider. Users never see provider words.
+# "Demo mode" reuses the deterministic fast path with a seeded prompt.
+_MODE_PROVIDER = {"fast": "stub", "codex": "external", "demo": "stub"}
+
+# Stable demo cases for the entry page (prompt + a one-line "what it shows").
+_DEMO_CASES = [
+    {"label": "p² group theorem", "mode": "fast",
+     "text": "Every group of order p^2, where p is prime, is abelian.",
+     "note": "A true classical theorem."},
+    {"label": "order-6 abelian (false)", "mode": "fast",
+     "text": "Every group of order 6 is abelian.",
+     "note": "A false finite-group claim (S3 is a counterexample)."},
+    {"label": "EVT without compactness", "mode": "fast",
+     "text": "Every continuous real function on an open interval attains a maximum.",
+     "note": "A missing-hypothesis claim (no compactness)."},
+    {"label": "matrix rank check", "mode": "fast",
+     "text": "The 3x3 integer matrix [[1,2,3],[4,5,6],[7,8,9]] has rank 2.",
+     "note": "A scoped finite/computational check."},
+]
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -151,13 +171,28 @@ class Workbench:
             )
 
     # -- actions -------------------------------------------------------------
-    def start_create_run(self, text: str, *, project: str | None = None) -> dict[str, Any]:
+    def _provider_for_mode(self, mode: str | None) -> str:
+        """Map a human-facing UI mode to an internal provider.
+
+        Users pick a mode, never a provider word. An unknown mode falls back to
+        the server's configured provider. A "Codex deep run" requests the real
+        external path; if it is not configured, the orchestrate preflight fails
+        closed and the background job records a friendly error.
+        """
+
+        if not mode:
+            return self.provider
+        return _MODE_PROVIDER.get(str(mode), self.provider)
+
+    def start_create_run(
+        self, text: str, *, project: str | None = None, mode: str | None = None
+    ) -> dict[str, Any]:
         """Validate input synchronously, then create the run on a BACKGROUND job.
 
         The HTTP request returns immediately with a ``job_id`` — it never waits on
-        model latency (critical for ``--provider external``, where the front-half
-        + prover agents call a real model). The UI polls ``GET /api/jobs/{id}``
-        and redirects to the run when the job result carries a ``run_id``.
+        model latency (critical for the Codex deep run, where the front-half +
+        prover agents call a real model). The UI polls ``GET /api/jobs/{id}`` and
+        redirects to the run when the job result carries a ``run_id``.
         """
 
         text = (text or "").strip()
@@ -168,17 +203,21 @@ class Workbench:
         project = (project or "workbench").strip() or "workbench"
         if not _PROJECT_RE.match(project):
             raise WorkbenchError(400, "invalid project name")
+        if mode is not None and str(mode) not in _MODE_PROVIDER:
+            raise WorkbenchError(400, "invalid mode")
+        provider = self._provider_for_mode(mode)
         job_id = self._new_job(run_id=None, action="create", agent=None)
 
         def work() -> dict[str, Any]:
-            return self._do_create_run(text, project)
+            return self._do_create_run(text, project, provider)
 
         threading.Thread(target=self._run_job, args=(job_id, work), daemon=True).start()
         return {"job_id": job_id}
 
-    def _do_create_run(self, text: str, project: str) -> dict[str, Any]:
+    def _do_create_run(self, text: str, project: str, provider: str | None = None) -> dict[str, Any]:
         """The actual fast-core run (runs inside the background job)."""
 
+        provider = provider or self.provider
         inbox = self.root / "_inbox"
         inbox.mkdir(parents=True, exist_ok=True)
         input_path = inbox / f"{uuid.uuid4().hex}.md"
@@ -188,8 +227,8 @@ class Workbench:
                 project=project,
                 input_path=input_path,
                 output_root=self.root,
-                provider=self.provider,
-                front_half=self.provider if self.provider != "stub" else "stub",
+                provider=provider,
+                front_half=provider if provider != "stub" else "stub",
                 fast=True,
             )
         finally:
@@ -393,7 +432,11 @@ def _make_handler(workbench: Workbench):
                     # Returns a job_id immediately; the run happens on a background
                     # thread so the request never waits on model latency.
                     self._send_json(
-                        workbench.start_create_run(body.get("text", ""), project=body.get("project")),
+                        workbench.start_create_run(
+                            body.get("text", ""),
+                            project=body.get("project"),
+                            mode=body.get("mode"),
+                        ),
                         status=202,
                     )
                     return
@@ -432,61 +475,128 @@ _STATE_WORDS = {
 def _index_page(workbench: Workbench) -> str:
     import html as _html
 
+    runs = list(reversed(workbench.list_runs()))
     rows = "".join(
         f'<li><a href="/run/{_html.escape(r["run_id"])}">{_html.escape(r["statement"] or r["run_id"])}</a>'
         f'<span class="st">{_html.escape(_STATE_WORDS.get(r["state"], r["state"].replace("_", " ").title()))}</span></li>'
-        for r in reversed(workbench.list_runs())
+        for r in runs
+    )
+    demo_buttons = "".join(
+        f'<button type="button" class="demo" data-text="{_html.escape(c["text"])}" data-mode="{_html.escape(c["mode"])}">'
+        f'<b>{_html.escape(c["label"])}</b><span>{_html.escape(c["note"])}</span></button>'
+        for c in _DEMO_CASES
     )
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Espresso Proof — Workbench</title>
-<style>
-body{{margin:0;background:#faf7f1;color:#211d16;font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
-.wrap{{max-width:760px;margin:0 auto;padding:60px 24px}}
-h1{{font-family:Georgia,serif;font-weight:500;font-size:34px;margin:0 0 6px}}
-.bean{{display:inline-block;width:14px;height:14px;border-radius:50% 50% 50% 50%/60% 60% 40% 40%;background:radial-gradient(circle at 35% 30%,#9a6f4b,#5a3d24);vertical-align:-1px;margin-right:8px}}
-p.sub{{color:#7a7367;margin:0 0 26px}}
-textarea{{width:100%;min-height:96px;padding:14px 16px;border:1px solid #d9c9b8;border-radius:12px;font:inherit;background:#fffdf9;resize:vertical}}
-.row{{display:flex;gap:12px;align-items:center;margin-top:14px}}
-button{{appearance:none;border:0;background:#6b4a2f;color:#fff;font:inherit;font-weight:650;padding:11px 20px;border-radius:10px;cursor:pointer}}
-button:hover{{background:#553a25}}button:disabled{{opacity:.6;cursor:progress}}
-.err{{color:#9c3f2d;font-size:14px}}
-.runs{{margin-top:40px}}.runs h2{{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:#7a7367}}
-ul{{list-style:none;padding:0;margin:0}}
-.runs li{{display:flex;justify-content:space-between;gap:12px;padding:11px 14px;border:1px solid #e6dfd2;border-radius:10px;background:#fffdf9;margin-bottom:8px}}
-.runs a{{color:#211d16;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
-.runs a:hover{{color:#6b4a2f}}
-.st{{color:#7a7367;font-size:13px;white-space:nowrap}}
-</style></head><body><div class="wrap">
-<h1><span class="bean"></span>Espresso Proof</h1>
-<p class="sub">Type a mathematical claim. You get a quick initial read and proof routes; then run evidence agents and continue a route — all in the browser.</p>
-<textarea id="text" placeholder="e.g. Every group of order p^2, where p is prime, is abelian."></textarea>
-<div class="row"><button id="go" type="button">Run Espresso</button><span class="err" id="err"></span></div>
-<div class="runs"><h2>Recent runs</h2><ul>{rows or '<li class="st">No runs yet.</li>'}</ul></div>
-</div><script>
-const go=document.getElementById("go"),err=document.getElementById("err");
+<style>{_INDEX_STYLE}</style></head><body>
+<header class="top"><div class="brand"><span class="bean"></span>Espresso Proof</div>
+<div class="tagline">Local mathematical research workbench</div></header>
+<main class="grid">
+  <section class="enter card">
+    <h1>Study a claim</h1>
+    <p class="lead">Type a mathematical claim. You get a quick initial read and 2-3 proof routes, then run evidence agents and continue a route — all in the browser, no terminal.</p>
+    <textarea id="text" placeholder="e.g. Every group of order p^2, where p is prime, is abelian."></textarea>
+    <div class="modes" role="radiogroup" aria-label="Run mode">
+      <label class="mode"><input type="radio" name="mode" value="fast" checked><b>Fast preview</b><span>Quick deterministic read of the flow.</span></label>
+      <label class="mode"><input type="radio" name="mode" value="codex"><b>Codex deep run</b><span>Uses the real model. Slower, more meaningful.</span></label>
+      <label class="mode"><input type="radio" name="mode" value="demo"><b>Demo mode</b><span>A known-good example case.</span></label>
+    </div>
+    <div class="go-row"><button id="go" type="button" class="go">Run Espresso</button>
+      <span class="status" id="status"></span></div>
+    <p class="err" id="err"></p>
+  </section>
+  <aside class="side">
+    <div class="card how">
+      <h2>How it works</h2>
+      <ol>
+        <li><b>Quick read</b> — claim understanding + preliminary routes.</li>
+        <li><b>Choose a route</b> — your call steers ranking and time, never evidence.</li>
+        <li><b>Run evidence</b> — examples, counterexamples, literature, on demand.</li>
+        <li><b>Continue the proof search</b> — read what is checked, cited, or still missing.</li>
+      </ol>
+    </div>
+    <div class="card demos"><h2>Try an example</h2><div class="demo-grid">{demo_buttons}</div></div>
+    <div class="card runs"><h2>Recent runs</h2><ul>{rows or '<li class="st">No runs yet.</li>'}</ul></div>
+  </aside>
+</main>
+<script>
+const go=document.getElementById("go"),err=document.getElementById("err"),statusEl=document.getElementById("status");
+const textEl=document.getElementById("text");
+function selectedMode(){{const r=document.querySelector('input[name=mode]:checked');return r?r.value:"fast";}}
+document.querySelectorAll(".demo").forEach(b=>b.addEventListener("click",()=>{{
+  textEl.value=b.dataset.text;
+  const m=document.querySelector('input[name=mode][value="'+b.dataset.mode+'"]');if(m)m.checked=true;
+  textEl.focus();
+}}));
 go.addEventListener("click",async()=>{{
-  const text=document.getElementById("text").value.trim();
+  const text=textEl.value.trim();
   if(!text){{err.textContent="Enter a claim first.";return;}}
-  go.disabled=true;go.textContent="Starting run…";err.textContent="";
+  go.disabled=true;go.textContent="Starting run…";err.textContent="";statusEl.textContent="";
+  const t0=Date.now();
   try{{
     // Returns a job_id immediately; the run happens in the background so we never
     // block on model latency. Poll the job, then open the run when it is ready.
-    const r=await fetch("/api/runs",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{text}})}});
+    const r=await fetch("/api/runs",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{text,mode:selectedMode()}})}});
     const d=await r.json();
     if(!r.ok)throw new Error(d.error||"failed");
-    const jobId=d.job_id;
-    for(let i=0;i<900;i++){{
+    const jobId=d.job_id;const slow=selectedMode()==="codex";
+    for(let i=0;i<2000;i++){{
       await new Promise(res=>setTimeout(res,800));
       let j;
-      try{{j=await (await fetch("/api/jobs/"+encodeURIComponent(jobId))).json();}}catch{{continue;}}
+      try{{j=await (await fetch("/api/jobs/"+encodeURIComponent(jobId))).json();}}
+      catch{{statusEl.textContent="The local server did not answer. Check that Espresso is still running.";continue;}}
+      const secs=Math.round((Date.now()-t0)/1000);
+      statusEl.textContent=(slow?"Codex is still working":"Working")+" — "+secs+"s";
       if(j.state==="done"&&j.result&&j.result.run_id){{location.href="/run/"+encodeURIComponent(j.result.run_id);return;}}
       if(j.state==="failed")throw new Error(j.error||"run failed");
     }}
     throw new Error("timed out starting the run");
-  }}catch(e){{err.textContent=e.message;go.disabled=false;go.textContent="Run Espresso";}}
+  }}catch(e){{err.textContent=e.message;statusEl.textContent="";go.disabled=false;go.textContent="Run Espresso";}}
 }});
 </script></body></html>"""
+
+
+_INDEX_STYLE = """
+:root{--paper:#faf7f1;--card:#fffdf9;--ink:#211d16;--muted:#7a7367;--line:#e6dfd2;--esp:#6b4a2f;--esp-deep:#4d3521;--esp-soft:#f3ebe2;--esp-line:#d9c9b8;--green:#2e7d54}
+*{box-sizing:border-box}
+body{margin:0;background:linear-gradient(180deg,#fbfaf6,var(--paper) 320px);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.top{display:flex;align-items:baseline;gap:16px;padding:20px 40px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:9px;font-weight:700}
+.bean{width:14px;height:14px;border-radius:50% 50% 50% 50%/60% 60% 40% 40%;background:radial-gradient(circle at 35% 30%,#9a6f4b,#5a3d24)}
+.tagline{color:var(--muted);font-style:italic;font-family:Georgia,serif}
+.grid{max-width:1180px;margin:0 auto;padding:38px 40px 80px;display:grid;grid-template-columns:1.5fr 1fr;gap:26px;align-items:start}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px rgba(43,33,21,.05),0 12px 32px rgba(43,33,21,.06)}
+.enter{padding:30px 32px}
+.enter h1{font-family:Georgia,serif;font-weight:500;font-size:32px;margin:0 0 8px}
+.lead{color:var(--muted);margin:0 0 18px;max-width:60ch}
+textarea{width:100%;min-height:130px;padding:15px 17px;border:1px solid var(--esp-line);border-radius:12px;font:inherit;font-size:17px;background:#fffefb;resize:vertical}
+.modes{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}
+.mode{border:1px solid var(--line);border-radius:11px;padding:12px 13px;cursor:pointer;background:#fffefb;display:block}
+.mode:hover{border-color:var(--esp-line)}
+.mode input{margin-right:7px}
+.mode b{font-size:14px}.mode span{display:block;color:var(--muted);font-size:12.5px;margin-top:3px;padding-left:21px}
+.mode:has(input:checked){background:var(--esp-soft);border-color:var(--esp)}
+.go-row{display:flex;align-items:center;gap:14px;margin-top:6px}
+.go{appearance:none;border:0;background:var(--esp);color:#fff;font:inherit;font-weight:700;font-size:16px;padding:13px 26px;border-radius:11px;cursor:pointer}
+.go:hover{background:var(--esp-deep)}.go:disabled{opacity:.6;cursor:progress}
+.status{color:var(--muted);font-size:14px}
+.err{color:#9c3f2d;font-size:14px;margin:10px 0 0;min-height:1.2em}
+.side{display:grid;gap:18px}
+.card.how,.card.demos,.card.runs{padding:20px 22px}
+.side h2{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:0 0 12px}
+.how ol{margin:0;padding-left:20px;display:grid;gap:7px}.how li{font-size:14px}.how b{color:var(--esp-deep)}
+.demo-grid{display:grid;gap:9px}
+.demo{appearance:none;text-align:left;border:1px solid var(--line);background:#fffefb;border-radius:10px;padding:11px 13px;cursor:pointer;font:inherit}
+.demo:hover{border-color:var(--esp-line);background:var(--esp-soft)}
+.demo b{display:block;font-size:14px}.demo span{display:block;color:var(--muted);font-size:12.5px;margin-top:2px}
+.runs ul{list-style:none;padding:0;margin:0;display:grid;gap:7px}
+.runs li{display:flex;justify-content:space-between;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:#fffefb}
+.runs a{color:var(--ink);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.runs a:hover{color:var(--esp)}
+.st{color:var(--muted);font-size:12.5px;white-space:nowrap}
+@media (max-width:900px){.grid{grid-template-columns:1fr;padding:22px 18px 60px}.top{padding:16px 18px}.modes{grid-template-columns:1fr}}
+""".strip()
 
 
 def serve(runs_root: Path, *, host: str = "127.0.0.1", port: int = 8765, provider: str = "stub") -> None:
