@@ -491,6 +491,145 @@ def _locator_chip(locator: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 
 
+def _next_action(
+    state: dict[str, Any],
+    agent_rows: list[dict],
+    *,
+    routes_preliminary: bool,
+    has_routes: bool,
+) -> tuple[str, str]:
+    """One honest, derived 'what to click next' suggestion -> (text, tone).
+
+    Advisory ranking/time guidance only — it reads validated artifacts and the
+    process board and never asserts or upgrades any status. Priority order:
+    admissible refutation > completed memo > wait for in-flight agents > run
+    missing evidence agents > choose a route > continue the route. Evidence
+    comes before route choice on purpose: route ranking stays preliminary until
+    the core evidence agents have run, and an early refutation preempts every
+    route. The suggestion must never contradict the unfinished-agents chip
+    rendered beside it (anything not 'done' is unfinished).
+    """
+
+    tests = state["counterexamples"].get("tests") or []
+    if any(
+        t.get("refutes_claim") and t.get("satisfies_all_claim_hypotheses") is True
+        for t in tests
+    ):
+        return (
+            "Read the counterexample below — an admissible checked counterexample "
+            "refutes the claim.",
+            "blocker",
+        )
+    if state["completed"]:
+        if state["repair_needed"]:
+            return (
+                "Read the review result and repair next: pin exact sources or replace "
+                "cited lemmas with a local derivation.",
+                "info",
+            )
+        return ("Read the memo — this run is complete; no blocking reviewer repair was recorded.", "info")
+
+    # Partition unfinished evidence agents by what the honest suggestion is.
+    # ANYTHING not 'done' is unfinished (mirrors the strip's missing chip — the
+    # suggestion must never contradict the count shown directly above it).
+    in_flight = [
+        r["title"] for r in agent_rows
+        if r["agent"] != "claim_understanding" and r["status"] in ("running", "queued")
+    ]
+    runnable = [
+        r["title"] for r in agent_rows
+        if r["agent"] != "claim_understanding" and r["status"] in ("not_run", "failed")
+    ]
+    skipped = sum(
+        1 for r in agent_rows
+        if r["agent"] != "claim_understanding" and r["status"] == "skipped"
+    )
+    if in_flight:
+        listed = ", ".join(in_flight[:3])
+        return (
+            f"Wait — {listed} {'are' if len(in_flight) > 1 else 'is'} still running; "
+            "the result can change the route ranking.",
+            "info",
+        )
+    if runnable:
+        listed = ", ".join(runnable[:3])
+        return (
+            f"Run the evidence agents in the Evidence Agents panel — {listed} "
+            f"{'have' if len(runnable) > 1 else 'has'} not run yet.",
+            "info",
+        )
+    # Every evidence agent is done or explicitly skipped from here on.
+    skipped_note = (
+        f" ({skipped} agent{'s' if skipped > 1 else ''} skipped — contributing no evidence)"
+        if skipped
+        else ""
+    )
+    if not _route_actually_selected(state):
+        if has_routes:
+            return (
+                "Choose a route below — your call steers ranking and time, never evidence."
+                + skipped_note,
+                "info",
+            )
+        return ("Sharpen the claim — no proof route is available yet." + skipped_note, "info")
+    done_phrase = (
+        "the evidence agents are done or explicitly skipped" if skipped else "the evidence agents are done"
+    )
+    return (
+        f"Continue the selected route below — {done_phrase}{skipped_note}.",
+        "info",
+    )
+
+
+def _now_strip(
+    state: dict[str, Any],
+    agent_rows: list[dict],
+    *,
+    routes_preliminary: bool,
+    has_routes: bool,
+) -> str:
+    """Goal 30: the 5-second comprehension strip under the claim.
+
+    One line of trust-grouped evidence counts (single canonical summary, colours
+    via the evidence_trust discipline — green only when something is genuinely
+    earned) plus one derived 'suggested next step'. Display-only; counts come
+    from validated artifacts and the process board, never from UI state.
+    """
+
+    checked = state["machine_checks"]
+    cited = state["cited_steps"]
+    candidates = len(state["literature"].get("candidate_references") or [])
+    missing = sum(
+        1 for r in agent_rows
+        if r["agent"] != "claim_understanding"
+        and r["status"] in ("not_run", "queued", "running", "failed", "skipped")
+    )
+
+    def chip(count: int, label: str, earned: bool, *, amber: bool = False) -> str:
+        if count > 0 and earned:
+            tone = "now-green"
+        elif count > 0 and amber:
+            tone = "now-amber"
+        else:
+            tone = "now-grey"
+        return f'<span class="now-chip {tone}"><b>{count}</b> {label}</span>'
+
+    chips = (
+        chip(checked, "checked in finite/computational scope", True)
+        + chip(cited, "reference-supported", True)
+        + chip(candidates, "candidate source(s)", False, amber=True)
+        + chip(missing, "evidence agent(s) not finished", False)
+    )
+    action, tone = _next_action(
+        state, agent_rows, routes_preliminary=routes_preliminary, has_routes=has_routes
+    )
+    return f"""<section class="card now"><div class="pad now-pad">
+  <div class="now-evidence"><span class="now-label">Evidence</span>{chips}</div>
+  <div class="now-action {_h(tone)}"><span class="now-label">Suggested next step</span>
+    <span class="now-text">{_h(action)}</span></div>
+</div></section>"""
+
+
 def _claim_section(state: dict[str, Any]) -> str:
     claim = state["claim"]
     locked = "locked" if claim.get("locked") else "unlocked"
@@ -560,15 +699,8 @@ def _plan_section(
 ) -> str:
     completed = state["completed"]
     selected_items = "".join(f"<li>{_h(item)}</li>" for item in initial["details"])
-    cited = state["cited_steps"]
-    checks = state["machine_checks"]
-    if cited or checks:
-        evidence_line = (
-            f"Run evidence so far: {cited} reference-supported step(s) &middot; "
-            f"{checks} machine check(s) &mdash; local evidence, not a proof of the claim."
-        )
-    else:
-        evidence_line = "Run evidence so far: none earned yet."
+    # Goal 30: the canonical evidence summary lives in the Now strip directly
+    # under the claim (single source — no duplicated/contradictory summaries).
     gaps = state["grade"].get("source_gaps") or []
     gaps_html = ""
     if gaps:
@@ -630,7 +762,6 @@ def _plan_section(
     <div class="effort" id="selected-effort">{_h(str(initial['effort']).replace('_', ' '))}</div>
   </div>
   <ul class="detail-list" id="selected-detail">{selected_items}</ul>
-  <p class="sub" style="margin:12px 0 0">{evidence_line}</p>
   {gaps_html}
   {action_html}
   {continue_note}
@@ -685,11 +816,17 @@ def _proof_state_section(state: dict[str, Any], *, route_shown: bool = False) ->
     next_node = grouped["next"]
     next_html = ""
     if next_node is not None:
+        # Goal 30: connect the next target to the route action the user has.
+        link = (
+            " <span class=\"muted\">&mdash; continuing the selected route works toward this.</span>"
+            if route_shown
+            else ""
+        )
         next_html = (
             f"<div class=\"sg-next\"><span class=\"muted\">Next subgoal to work on "
             f"[{_h(next_node.get('id', 'subgoal'))}]</span> "
             f"{_h(next_node.get('statement', ''))} "
-            f"<span class=\"sg-state\">{_h(_state_words(next_node.get('state', '')))}</span></div>"
+            f"<span class=\"sg-state\">{_h(_state_words(next_node.get('state', '')))}</span>{link}</div>"
         )
     groups = "".join(rows) or "<p class=\"muted\">No open subgoals recorded.</p>"
     notes_html = ""
@@ -1207,6 +1344,7 @@ def _template(
 <div class="wrap">
 <main class="maincol">
   {_claim_section(state)}
+  {_now_strip(state, agent_rows, routes_preliminary=routes_preliminary, has_routes=initial["id"] != "none")}
   {_routes_section(state, route_data, initial, routes_preliminary=routes_preliminary, cx_pressure=cx_pressure)}
   {_plan_section(state, initial, command, routes_preliminary=routes_preliminary)}
   {_proof_state_section(state, route_shown=_route_actually_selected(state))}
@@ -1483,6 +1621,16 @@ h2{margin:0 0 4px;font-size:12.5px;text-transform:uppercase;letter-spacing:.1em;
 p{margin:0}
 .note{margin-top:14px;padding:11px 14px;border:1px solid var(--amber-line);border-radius:9px;
   background:var(--amber-soft);color:#5c4310;font-size:13px}
+.now-pad{padding:14px 26px !important;display:grid;gap:10px}
+.now-evidence,.now-action{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.now-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;min-width:86px}
+.now-chip{display:inline-flex;gap:5px;align-items:baseline;padding:3px 11px;border-radius:999px;font-size:12.5px;border:1px solid var(--line)}
+.now-chip b{font-variant-numeric:tabular-nums}
+.now-chip.now-green{background:var(--green-soft);border-color:var(--green-line);color:var(--green)}
+.now-chip.now-amber{background:var(--amber-soft);border-color:var(--amber-line);color:var(--amber)}
+.now-chip.now-grey{background:var(--gray-soft);color:var(--muted)}
+.now-action .now-text{font-size:14px;font-weight:600;color:var(--esp-deep)}
+.now-action.blocker .now-text{color:#9c3f2d}
 .claim h1{margin:6px 0 14px;font-family:Georgia,"Times New Roman",serif;font-weight:500;
   font-size:clamp(26px,3.2vw,36px);line-height:1.22}
 .hyp-row{display:flex;flex-wrap:wrap;gap:8px}
