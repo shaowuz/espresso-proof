@@ -213,3 +213,60 @@ def test_orchestrate_ground_source_cli_earns_source_backed(tmp_path: Path) -> No
     sg = read_yaml(run_dir / "source_grounding.yaml")
     assert any(s["status"] == "source_backed" for s in sg["steps"]), sg
     assert "Reference supports this stated claim" in resumed.output
+
+
+def test_tampered_hypothesis_match_blocked_by_independent_audit(tmp_path: Path) -> None:
+    # Goal 37 de-circularization: the applicability audit recomputes hypothesis
+    # coverage from the claim hypotheses and the CITED STATEMENT itself. A
+    # hand-edited hypothesis_match=True over a statement that does not cover
+    # the claim hypotheses must fail closed: the audit blocks and the run no
+    # longer validates with the step still source_backed.
+    from espresso_proof.theorem_applicability import audit_theorem_applicability
+    from espresso_proof.validators import KernelValidationError
+
+    run_dir = _hodge_run(tmp_path)
+    ext = _ingest(run_dir, THM, authors=["J.-P. Serre"], title="Topics in Galois Theory")
+    ground_run(run_dir=run_dir, theorem_extraction_path=ext)
+    validate_run(run_dir)
+    sg = read_yaml(run_dir / "source_grounding.yaml")
+    backed_ref_ids = {
+        ref["id"] for ref in sg["source_refs"] if ref["status"] == "source_backed"
+    }
+    assert backed_ref_ids, "precondition: grounding earned source_backed"
+
+    # Tamper: keep matches=True but swap the cited statement for unrelated text.
+    for ref in sg["source_refs"]:
+        if ref["id"] in backed_ref_ids:
+            ref["statement_or_summary"] = (
+                "Theorem 9.9. Every elliptic curve over Q is modular."
+            )
+    write_yaml(run_dir / "source_grounding.yaml", sg)
+
+    audit_theorem_applicability(run_dir)
+    report = read_yaml(run_dir / "theorem_applicability.yaml")
+    backed_usages = [u for u in report["usages"] if u["source_status"] == "source_backed"]
+    assert backed_usages
+    for usage in backed_usages:
+        assert usage["blocks_source_backed"] is True
+        assert usage["applicability_status"] != "applicable"
+    with pytest.raises(KernelValidationError):
+        validate_run(run_dir)
+
+
+def test_independent_audit_confirms_honest_grounding(tmp_path: Path) -> None:
+    # The de-circularized audit must NOT break honest grounding: recomputing
+    # coverage from the real cited statement reproduces the applicable verdict.
+    from espresso_proof.theorem_applicability import audit_theorem_applicability
+
+    run_dir = _hodge_run(tmp_path)
+    ext = _ingest(run_dir, THM, authors=["J.-P. Serre"], title="Topics in Galois Theory")
+    ground_run(run_dir=run_dir, theorem_extraction_path=ext)
+    audit_theorem_applicability(run_dir)  # re-run audit standalone
+    validate_run(run_dir)
+    report = read_yaml(run_dir / "theorem_applicability.yaml")
+    backed = [u for u in report["usages"] if u["source_status"] == "source_backed"]
+    assert backed
+    for usage in backed:
+        assert usage["applicability_status"] == "applicable"
+        assert all(c["status"] == "satisfied" for c in usage["conditions"])
+        assert any("Independent audit recheck" in (c["evidence"] or "") for c in usage["conditions"])

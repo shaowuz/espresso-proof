@@ -237,3 +237,28 @@ def test_p2_demo_runs_without_manual_source(tmp_path: Path) -> None:
     # idea_grade is NOT upgraded by retrieval (no proof/grade change).
     grade = read_yaml(run_dir / "idea_grade.yaml")
     assert grade["proof_language_status"] == "idea_sketch"
+
+
+def test_retrieval_with_empty_corpus_is_a_validated_no_op(tmp_path: Path) -> None:
+    # Goal 37: retrieval that finds nothing (empty/absent corpus) must be a
+    # no-op that fails closed — no candidates, no grounding attempt, no status
+    # change anywhere, and the run still validates.
+    from espresso_proof.autonomous_retrieval import run_autonomous_retrieval
+    from espresso_proof.validators import validate_run
+
+    run_dir = _p2_run(tmp_path)
+    sg_before = read_yaml(run_dir / "source_grounding.yaml")
+    empty_corpus = tmp_path / "empty_corpus"
+    empty_corpus.mkdir()
+    report = run_autonomous_retrieval(
+        run_dir,
+        client=_FakeClient({"queries": ["group of order p^2 abelian"]}),
+        corpus_dir=empty_corpus,
+        providers=["local_corpus"],
+    )
+    assert report["candidates"] == []
+    assert report.get("grounding") in (None, {}, {"attempted": False}) or not report["grounding"].get("attempted", False)
+    validate_run(run_dir)
+    sg_after = read_yaml(run_dir / "source_grounding.yaml")
+    assert sg_after["steps"][0]["status"] == sg_before["steps"][0]["status"] == "candidate"
+    assert all(ref.get("status") != "source_backed" for ref in sg_after.get("source_refs", []))

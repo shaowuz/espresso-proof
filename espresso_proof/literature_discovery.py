@@ -152,8 +152,13 @@ def live_responses_to_literature_items(responses: list[LiveSearchResponse]) -> l
                     },
                     "relevance": result.relevance,
                     "status": result.status,
-                    "why_relevant": result.why_relevant,
-                    "found_by": f"live_{response.provider}",
+                    # Goal 37: record the provider WITHOUT violating the
+                    # LiteratureItem.found_by Literal (live_<provider> is not an
+                    # allowed value and made every positive live hit fail
+                    # validation). All live providers are web searches; the
+                    # specific provider stays auditable in the item id and here.
+                    "why_relevant": f"[live {response.provider}] {result.why_relevant}",
+                    "found_by": "web_search",
                 }
             )
             index += 1

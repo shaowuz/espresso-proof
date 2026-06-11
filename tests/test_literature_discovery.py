@@ -850,3 +850,118 @@ def test_source_backed_step_applicability_usage_must_match_step_source_ref(tmp_p
         assert "not used by proof step" in str(exc)
     else:
         raise AssertionError("validate_run should reject applicability usage for a different source ref")
+
+
+# --- Goal 37: live positive hits must validate (found_by schema fix) ---------
+def test_live_positive_hits_validate_in_literature_report() -> None:
+    from espresso_proof.literature_discovery import live_responses_to_literature_items
+    from espresso_proof.live_search import LiveSearchResponse, LiveSearchResult
+    from espresso_proof.models import LiteratureItem
+
+    responses = [
+        LiveSearchResponse(
+            provider="arxiv",
+            results=[
+                LiveSearchResult(
+                    title="Hodge atoms on cubic fourfolds",
+                    authors=["A. Author"],
+                    locator_kind="arxiv_id",
+                    locator_value="2401.01234",
+                    relevance="possible_theorem_source",
+                    status="candidate",
+                    why_relevant="Matches the claim's Hodge-theoretic terms.",
+                    provider="arxiv",
+                )
+            ],
+            notes=[],
+        ),
+        LiveSearchResponse(
+            provider="crossref",
+            results=[
+                LiveSearchResult(
+                    title="Irrationality of very general cubic fourfolds",
+                    authors=["B. Author"],
+                    locator_kind="url",
+                    locator_value="https://doi.org/10.1000/xyz",
+                    relevance="core",
+                    status="candidate",
+                    why_relevant="Survey of the obstruction.",
+                    provider="crossref",
+                )
+            ],
+            notes=[],
+        ),
+    ]
+    items = live_responses_to_literature_items(responses)
+    assert len(items) == 2
+    for item in items:
+        validated = LiteratureItem.model_validate(item)  # was a ValidationError before the fix
+        assert validated.found_by == "web_search"
+        assert validated.status.value == "candidate"
+    # the specific provider stays auditable (id + why_relevant prefix).
+    assert items[0]["id"].startswith("live_arxiv_")
+    assert "[live arxiv]" in items[0]["why_relevant"]
+    assert items[1]["id"].startswith("live_crossref_")
+
+
+# --- Goal 37: typed near-miss source discipline ------------------------------
+def test_smooth_hypothesis_not_covered_by_singular_statement() -> None:
+    from espresso_proof.source_verification import check_hypothesis_applicability
+
+    hypotheses = [{"name": "X is smooth", "status": "explicit", "source": "agent"}]
+    result = check_hypothesis_applicability(
+        "Theorem 2.1. Every singular cubic threefold X admits a resolution.",
+        hypotheses,
+        [],
+    )
+    assert result["matches"] == "unclear"
+    assert any("smooth" in m for m in result["mismatches"])
+
+
+def test_projective_hypothesis_needs_proper_and_ample_not_proper_alone() -> None:
+    from espresso_proof.source_verification import check_hypothesis_applicability
+
+    hypotheses = [{"name": "X is projective", "status": "explicit", "source": "agent"}]
+    proper_only = check_hypothesis_applicability(
+        "Theorem 3.2. Let X be a proper variety over a field.", hypotheses, []
+    )
+    assert proper_only["matches"] == "unclear"  # proper alone is NOT projective
+    proper_ample = check_hypothesis_applicability(
+        "Theorem 3.3. Let X be a proper variety carrying an ample line bundle.",
+        hypotheses,
+        [],
+    )
+    assert proper_ample["matches"] is True
+
+
+def test_characteristic_zero_not_covered_by_positive_characteristic() -> None:
+    from espresso_proof.source_verification import check_hypothesis_applicability
+
+    hypotheses = [{"name": "characteristic zero", "status": "explicit", "source": "agent"}]
+    result = check_hypothesis_applicability(
+        "Theorem 4.1. Over fields of positive characteristic the statement holds.",
+        hypotheses,
+        [],
+    )
+    assert result["matches"] == "unclear"
+
+
+def test_extra_theorem_hypothesis_blocks_applicability() -> None:
+    from espresso_proof.theorem_applicability import (
+        _applicability_status,
+        _condition_status_from_relation,
+    )
+
+    # A theorem hypothesis the claim does not have (extra_in_theorem) must
+    # surface as a missing condition and block applicability.
+    status = _condition_status_from_relation("extra_in_theorem")
+    assert status == "missing"
+    condition = {
+        "id": "cond_001",
+        "text": "theorem additionally requires X to be smooth",
+        "condition_type": "smoothness",
+        "status": status,
+        "evidence": "claim does not state smoothness",
+        "definition_locator": None,
+    }
+    assert _applicability_status([condition], "compatible", "candidate") == "blocked"
