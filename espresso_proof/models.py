@@ -1854,6 +1854,20 @@ class ProverLoopReviewPointer(StrictBaseModel):
     verdict: Literal["plausible_direction", "needs_revision", "needs_sources", "blocked"]
     objection_count: int = Field(ge=0)
     recommended_human_action: Literal["continue", "revise", "stop"]
+    # Goal 39: a reviewer pointer DECLARES its scope; "route" is the honest
+    # default for unscoped reviewer output. subgoal_id is allowed only for
+    # subgoal-scoped pointers. Like target_subgoal_id, it is UNVERIFIED
+    # historical provenance: deliberately not reconciled against the live graph
+    # (blocker-derived node ids renumber across rebuilds), and a pointer can
+    # never change subgoal state (graph states require earned evidence).
+    scope: Literal["subgoal", "route", "global"] = "route"
+    subgoal_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_pointer_scope(self) -> ProverLoopReviewPointer:
+        if self.subgoal_id is not None and self.scope != "subgoal":
+            raise ValueError("subgoal_id requires scope='subgoal'")
+        return self
 
 
 class ProverLoopAttempt(StrictBaseModel):
@@ -1870,6 +1884,12 @@ class ProverLoopAttempt(StrictBaseModel):
     status: Literal["candidate", "needs_repair", "blocked", "waiting_human", "stopped"]
     blockers: list[str] = Field(default_factory=list)
     next_action: str
+    # Goal 39: which named subgoal this round targeted (the scheduler's pick at
+    # round time). Optional/additive: rounds appended before a graph exists (or
+    # when no subgoal is selectable) record None. Search-management state only;
+    # carrying a subgoal id never earns or upgrades any status.
+    target_subgoal_id: str | None = None
+    target_local_claim: str = ""
 
     @model_validator(mode="after")
     def validate_attempt_reviewers(self) -> ProverLoopAttempt:
