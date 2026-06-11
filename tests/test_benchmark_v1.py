@@ -123,3 +123,36 @@ def test_benchmark_cli_passes_and_reports(tmp_path: Path) -> None:
 
 def test_benchmark_v1_covers_required_categories() -> None:
     assert {c["category"] for c in BENCHMARK_V1} == _CATEGORIES
+
+
+def test_benchmark_cli_fails_on_planted_regression(tmp_path: Path, monkeypatch) -> None:
+    # Goal 40A: the CI-gated command must EXIT NON-ZERO when a benchmark case
+    # regresses. Plant one failing case through the real reporting path.
+    import espresso_proof.cli as cli_mod
+
+    real = cli_mod.run_benchmark
+
+    def planted(output_root):
+        report = real(output_root)
+        bad = dict(report[0])
+        bad["passed"] = False
+        bad["problems"] = ["planted regression: unauthorized source_backed"]
+        return [bad] + report[1:]
+
+    monkeypatch.setattr(cli_mod, "run_benchmark", planted)
+    res = CliRunner().invoke(app, ["benchmark", "--out-root", str(tmp_path)])
+    assert res.exit_code == 1, res.output
+    assert "planted regression" in res.output
+
+
+def test_benchmark_cli_writes_machine_readable_json(tmp_path: Path) -> None:
+    import json
+
+    json_path = tmp_path / "out" / "benchmark.json"
+    res = CliRunner().invoke(
+        app, ["benchmark", "--out-root", str(tmp_path / "runs"), "--json-out", str(json_path)]
+    )
+    assert res.exit_code == 0, res.output
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["passed"] == payload["total"] == len(payload["cases"])
+    assert all(case["passed"] for case in payload["cases"])

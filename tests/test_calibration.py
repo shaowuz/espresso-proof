@@ -81,3 +81,38 @@ def test_calibration_cli(tmp_path: Path) -> None:
     assert res.exit_code == 0, res.output
     assert "calibration:" in res.output
     assert "source-support false positives=0" in res.output
+
+
+def test_calibration_cli_fails_on_planted_regression(tmp_path: Path, monkeypatch) -> None:
+    # Goal 40A: the CI-gated command must EXIT NON-ZERO when any safety metric
+    # regresses. Simulate one planted source-support false positive flowing
+    # through the real aggregation (the detector itself is proven against a
+    # real planted run by test_source_support_false_positive_detector_flags_
+    # planted_regression above).
+    import espresso_proof.calibration as calibration_mod
+
+    real = calibration_mod._source_support_false_positives
+    flagged = {"count": 0}
+
+    def planted(run_dir: Path) -> int:
+        flagged["count"] += 1
+        return 1 if flagged["count"] == 1 else real(run_dir)
+
+    monkeypatch.setattr(calibration_mod, "_source_support_false_positives", planted)
+    res = CliRunner().invoke(app, ["calibration", "--out-root", str(tmp_path)])
+    assert res.exit_code == 1, res.output
+    assert "source-support false positives=1" in res.output
+
+
+def test_calibration_cli_writes_machine_readable_json(tmp_path: Path) -> None:
+    import json
+
+    json_path = tmp_path / "out" / "calibration.json"
+    res = CliRunner().invoke(
+        app, ["calibration", "--out-root", str(tmp_path / "runs"), "--json-out", str(json_path)]
+    )
+    assert res.exit_code == 0, res.output
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["metrics"]["clean"] is True
+    assert payload["metrics"]["source_support_false_positives"] == 0
+    assert len(payload["rows"]) == payload["metrics"]["fixtures_total"]
