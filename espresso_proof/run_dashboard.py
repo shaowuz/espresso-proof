@@ -605,20 +605,35 @@ def _now_strip(
         and r["status"] in ("not_run", "queued", "running", "failed", "skipped")
     )
 
-    def chip(count: int, label: str, earned: bool, *, amber: bool = False) -> str:
+    def chip(count: int, label: str, earned: bool, *, amber: bool = False, tip: str = "") -> str:
         if count > 0 and earned:
             tone = "now-green"
         elif count > 0 and amber:
             tone = "now-amber"
         else:
             tone = "now-grey"
-        return f'<span class="now-chip {tone}"><b>{count}</b> {label}</span>'
+        title = f' title="{_h(tip)}"' if tip else ""
+        return f'<span class="now-chip {tone}"{title}><b>{count}</b> {label}</span>'
 
+    # Tooltips (Goal 31): one plain sentence per trust level — explain, never
+    # upgrade. Same framing as the shared copy inventory.
     chips = (
-        chip(checked, "checked in finite/computational scope", True)
-        + chip(cited, "reference-supported", True)
-        + chip(candidates, "candidate source(s)", False, amber=True)
-        + chip(missing, "evidence agent(s) not finished", False)
+        chip(
+            checked, "checked in finite/computational scope", True,
+            tip="A deterministic machine check confirmed this specific finite/computational instance. Not a proof of the universal claim.",
+        )
+        + chip(
+            cited, "reference-supported", True,
+            tip="A cited result supports one proof step, with an exact locator and matching hypotheses. Not a proof of the whole claim.",
+        )
+        + chip(
+            candidates, "candidate source(s)", False, amber=True,
+            tip="Proposed reading material. A candidate supports nothing until grounding earns it.",
+        )
+        + chip(
+            missing, "evidence agent(s) not finished", False,
+            tip="Agents that have not finished contribute no evidence — absence of counterexamples is not support.",
+        )
     )
     action, tone = _next_action(
         state, agent_rows, routes_preliminary=routes_preliminary, has_routes=has_routes
@@ -977,7 +992,7 @@ def _agent_commands(run_dir: Path, agent: str, status: str, *, interactive: bool
 
 def _agent_status_note(row: dict) -> str:
     note = {
-        "done": "Finished; results recorded (the kernel validated the artifact — not a proof).",
+        "done": "Finished; results recorded (the kernel checked them — not a proof).",
         "running": "In progress; not yet evidence.",
         "queued": "Queued to run.",
         "not_run": "Has not run; not counted as evidence.",
@@ -1021,7 +1036,7 @@ def _literature_body(state: dict[str, Any], status: str, run_dir: Path) -> str:
 </div>"""
         )
     more = len(items) - 8
-    more_html = f'<p class="side-note">+{more} more in literature_review.yaml</p>' if more > 0 else ""
+    more_html = f'<p class="side-note">+{more} more candidate source(s) recorded</p>' if more > 0 else ""
     return head + f'<div class="artifact">{"".join(cards)}{more_html}</div>' + _agent_commands(
         run_dir, "literature", status
     )
@@ -1251,7 +1266,7 @@ def _evidence_panel(run_dir: Path, state: dict[str, Any]) -> str:
         )
     budget = _budget_card(state)
     return f"""<h2 style="padding:0 6px">Evidence Agents</h2>
-<p class="side-note" style="margin:-4px 0 2px">Agents run on demand, in any order. Only a <b>Done</b> agent&rsquo;s artifact counts as evidence &mdash; and the kernel still validates it (validation is not a proof). Read anything below while the rest are running.</p>
+<p class="side-note" style="margin:-4px 0 2px">Agents run on demand, in any order. Only a <b>Done</b> agent&rsquo;s results count as evidence &mdash; and the kernel still checks them (validation is not a proof). Read anything below while the rest are running.</p>
 {"".join(cards)}
 {budget}"""
 

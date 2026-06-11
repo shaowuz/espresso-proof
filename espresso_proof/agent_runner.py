@@ -139,12 +139,9 @@ def run_single_agent(
     if not has_status(run_dir):
         init_agent_run_status(run_dir)
 
-    # Mark running BEFORE the snapshot so the attempt count + start time survive a
-    # rollback (retries are recorded even when the run fails).
-    started_at = _now()
-    set_agent_status(run_dir, agent, "running", started_at=started_at, increment_attempt=True)
-    validate_run(run_dir)
-
+    # Build the client BEFORE marking the agent running: a misconfigured provider
+    # then fails with the board untouched (no permanently-"running" card and the
+    # "no mathematical results were written" error copy stays literally true).
     needs_client = agent in ("examples", "counterexamples")
     if needs_client and client is None:
         client = build_client(
@@ -153,6 +150,12 @@ def run_single_agent(
             api_key_env=api_key_env,
             external_agent_command_env=external_agent_command_env,
         )
+
+    # Mark running BEFORE the snapshot so the attempt count + start time survive a
+    # rollback (retries are recorded even when the run fails).
+    started_at = _now()
+    set_agent_status(run_dir, agent, "running", started_at=started_at, increment_attempt=True)
+    validate_run(run_dir)
 
     snapshot_paths = AGENT_SNAPSHOT_PATHS[agent] + ["agent_run_status.yaml"]
     runner = StageRunner(run_dir)

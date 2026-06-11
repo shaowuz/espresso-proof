@@ -68,6 +68,45 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _friendly_error(raw: str) -> str:
+    """Translate a kernel/runtime error into product copy (Goal 31).
+
+    Every message answers: what happened, is the math state still safe, and
+    what to do next. The raw text is preserved separately as ``error_detail``
+    for the advanced/debug path — never shown as the headline.
+    """
+
+    lowered = (raw or "").strip().lower()
+    if "espresso_external_agent_command" in lowered or "openai_api_key" in lowered:
+        return (
+            "The Codex deep run is not set up on this machine. Your math state is "
+            "unchanged — no mathematical results were written. Switch to Fast "
+            "preview, or set up the Codex agent and retry."
+        )
+    if "rolled back" in lowered:
+        # ONLY the StageRunner's own message guarantees an actual rollback —
+        # never claim one from a bare validation failure.
+        return (
+            "The result did not pass Espresso's safety validation, so it was rolled "
+            "back. Your previous valid run is preserved. Retry, or skip this agent."
+        )
+    if "validation" in lowered:
+        return (
+            "This action did not pass Espresso's safety validation, so it stopped "
+            "without going further. Existing results are untouched. Retry, or "
+            "switch to Fast preview."
+        )
+    if "timed out" in lowered or "timeout" in lowered:
+        return (
+            "The step took too long and stopped safely. Existing results are "
+            "untouched. Retry, or switch to Fast preview."
+        )
+    return (
+        "Something went wrong, so this step stopped safely. Existing results are "
+        "untouched. Retry, or switch to Fast preview."
+    )
+
+
 class WorkbenchError(Exception):
     """A request-level error carrying an HTTP status code (fails closed)."""
 
@@ -163,11 +202,15 @@ class Workbench:
                 result = work()
             self._set_job(job_id, state="done", finished_at=_now(), result=result)
         except Exception as exc:  # noqa: BLE001 - surface a friendly error
+            raw = str(exc)[:400] or "action failed"
             self._set_job(
                 job_id,
                 state="failed",
                 finished_at=_now(),
-                error=str(exc)[:400] or "action failed",
+                # headline = product copy (what happened / math state safe / next
+                # step); the raw cause stays available as error_detail only.
+                error=_friendly_error(raw),
+                error_detail=raw,
             )
 
     # -- actions -------------------------------------------------------------

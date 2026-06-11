@@ -189,3 +189,60 @@ def judgment_tier_phrase(tier: str | None) -> str:
     """Readable severity word for a mathematical-judgment risk tier."""
 
     return JUDGMENT_TIER_PHRASES.get(str(tier), "Note")
+
+
+# --------------------------------------------------------------------------- #
+# Goal 31 — product copy inventory (single language map for user-facing labels)
+# --------------------------------------------------------------------------- #
+
+# Prover-loop stop reason -> plain product wording (never the raw token).
+LOOP_STOP_PHRASES: dict[str, str] = {
+    "budget_rounds": "the round budget was used up",
+    "budget_agent_calls": "the agent-call budget was used up",
+    "no_progress": "no new progress was being made",
+    "clean": "no blocking reviewer objection remained in the latest round (not a verification)",
+    "validation_error": "a validation problem stopped the loop safely",
+    "loop_decision_ask_human": "the loop asked for your decision",
+    "loop_decision_stop": "the loop chose to stop",
+}
+
+
+def loop_stop_phrase(reason: str | None) -> str:
+    """Plain wording for a prover-loop stop reason (falls back conservatively)."""
+
+    return LOOP_STOP_PHRASES.get(str(reason), "the loop stopped")
+
+
+def effort_phrase(effort: str | None) -> str:
+    """Human wording for an exploration-effort tier ('quick test', never quick_test)."""
+
+    return str(effort or "").replace("_", " ")
+
+
+# The Goal 31 copy inventory: one consistent product sentence per state. These
+# are DISPLAY phrases (never statuses); each pairs what-happened wording with
+# the safety framing the workbench repeats: process state is not evidence, and
+# nothing here upgrades a proof/source/evidence/grade/claim status.
+PRODUCT_COPY: dict[str, str] = {
+    "waiting": "Queued to run.",
+    "running": "In progress; not yet evidence.",
+    "partial_result": "Preliminary — evidence agents incomplete.",
+    "failed_job": "This step failed safely. Your math state is unchanged — the previous valid run is preserved. Retry, or skip this agent.",
+    "retrying": "Retrying — the previous valid run is preserved.",
+    "skipped_agent": "Skipped by request; contributes no evidence.",
+    "missing_source": "Needs a source.",
+    "needs_locator": "Needs an exact locator.",
+    "needs_hypothesis_match": "Needs a hypothesis match.",
+    "route_attack": "Attacks a proof step — not a claim refutation.",
+    "dropped_hypothesis": "Drops a hypothesis — cannot refute the original claim.",
+    "admissible_refutation": "An admissible checked counterexample refutes the claim.",
+    "scoped_computation": "Checked in this finite/computational scope — not a proof of the universal claim.",
+    "smoke_checked": "Smoke-checked — plausible model reasoning, not verified.",
+    "reference_supported": "Reference-supported step — a cited result for this step, not a proof of the whole claim.",
+}
+
+
+def product_copy(state: str) -> str:
+    """The product sentence for a copy-inventory state (conservative fallback)."""
+
+    return PRODUCT_COPY.get(state, "Needs a check.")
