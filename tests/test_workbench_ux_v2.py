@@ -41,11 +41,14 @@ def test_entry_page_is_a_wide_product_page(tmp_path: Path) -> None:
     assert "grid-template-columns:1.5fr 1fr" in html
     assert "max-width:760px" not in html
     # mode selector with human labels (no provider words on the surface)
-    assert "Fast preview" in html and "Codex deep run" in html and "Demo mode" in html
+    assert "Fast preview" in html and "Codex deep run" in html
+    # Goal 32: demos are NOT a mode — the mode selector has exactly two modes
+    # and the demos live in a separate "Open demo" section.
+    assert "Demo mode" not in html
+    assert "Open demo" in html
     assert ">stub<" not in html and ">external<" not in html
     # workflow guidance + demos + recent runs
     assert "How it works" in html
-    assert "Try an example" in html
     assert "Recent runs" in html
     assert "p² group theorem" in html
 
@@ -66,7 +69,8 @@ def test_mode_maps_to_provider(tmp_path: Path) -> None:
     wb = Workbench(tmp_path / "root", provider="stub")
     assert wb._provider_for_mode("fast") == "stub"
     assert wb._provider_for_mode("codex") == "external"
-    assert wb._provider_for_mode("demo") == "stub"
+    # Goal 32: "demo" is not a mode; unknown modes fall back to the server default
+    assert wb._provider_for_mode("demo") == "stub"  # fallback, not a mode mapping
     assert wb._provider_for_mode(None) == "stub"  # falls back to server default
 
 
