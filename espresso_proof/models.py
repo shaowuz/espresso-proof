@@ -1856,8 +1856,9 @@ class ProverLoopReviewPointer(StrictBaseModel):
     recommended_human_action: Literal["continue", "revise", "stop"]
     # Goal 39: a reviewer pointer DECLARES its scope; "route" is the honest
     # default for unscoped reviewer output. subgoal_id is allowed only for
-    # subgoal-scoped pointers and (when a proof_goal_graph exists) must name a
-    # real node — checked by the run validator. Advisory only: a pointer can
+    # subgoal-scoped pointers. Like target_subgoal_id, it is UNVERIFIED
+    # historical provenance: deliberately not reconciled against the live graph
+    # (blocker-derived node ids renumber across rebuilds), and a pointer can
     # never change subgoal state (graph states require earned evidence).
     scope: Literal["subgoal", "route", "global"] = "route"
     subgoal_id: str | None = None
