@@ -1,0 +1,273 @@
+"""Product Workbench V1 — local interactive server tests.
+
+Every browser action must go through the existing kernel path and fail closed;
+the server must confine run ids, isolate agent writes, and never let a click
+upgrade mathematical status. The interactive UI must use native buttons (no
+command blocks on the main path) and the static dashboard must keep working.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import threading
+import time
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+
+import pytest
+
+from espresso_proof.io import read_yaml
+from espresso_proof.run_dashboard import render_run_dashboard
+from espresso_proof.server import Workbench, WorkbenchError, _make_handler
+from espresso_proof.validators import validate_run
+
+CLAIM = "Every group of order p^2, where p is prime, is abelian."
+
+
+@pytest.fixture()
+def client(tmp_path: Path):
+    wb = Workbench(tmp_path / "root", provider="stub")
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(wb))
+    port = httpd.server_address[1]
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    base = f"http://127.0.0.1:{port}"
+
+    def call(method: str, path: str, body=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(
+            base + path, data=data, method=method, headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    def get_text(path: str) -> str:
+        with urllib.request.urlopen(base + path) as resp:
+            return resp.read().decode()
+
+    yield wb, call, get_text
+    httpd.shutdown()
+
+
+def _await_job(call, job_id: str, timeout: float = 20.0) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        _, jd = call("GET", f"/api/jobs/{job_id}")
+        if jd.get("state") in ("done", "failed"):
+            return jd
+        time.sleep(0.2)
+    raise AssertionError("job did not finish")
+
+
+def _create(call) -> str:
+    status, d = call("POST", "/api/runs", {"text": CLAIM})
+    assert status == 201, d
+    return d["run_id"]
+
+
+# --------------------------------------------------------------------------- #
+# path safety
+# --------------------------------------------------------------------------- #
+
+
+def test_resolve_run_rejects_traversal(tmp_path: Path) -> None:
+    wb = Workbench(tmp_path / "root", provider="stub")
+    for bad in ("..", "../etc", "a/b", "/etc/passwd", "....//", ""):
+        with pytest.raises(WorkbenchError):
+            wb.resolve_run(bad)
+
+
+def test_status_endpoint_rejects_bad_run_id(client) -> None:
+    _, call, _ = client
+    status, d = call("GET", "/api/runs/..%2f..%2fetc/status")
+    assert status in (400, 404)
+    assert "error" in d
+
+
+# --------------------------------------------------------------------------- #
+# create + status
+# --------------------------------------------------------------------------- #
+
+
+def test_create_run_reaches_gate(client) -> None:
+    _, call, _ = client
+    run_id = _create(call)
+    status, d = call("GET", f"/api/runs/{run_id}/status")
+    assert status == 200
+    assert d["state"]
+    agents = {a["agent"]: a["status"] for a in d["agents"]}
+    assert agents["claim_understanding"] == "done"
+    assert agents["examples"] == "not_run"
+    assert d["evidence_html"] and d["topbar_html"]
+
+
+def test_create_run_rejects_empty(client) -> None:
+    _, call, _ = client
+    status, d = call("POST", "/api/runs", {"text": "   "})
+    assert status == 400
+
+
+# --------------------------------------------------------------------------- #
+# agent actions: isolation + fail closed
+# --------------------------------------------------------------------------- #
+
+
+def _sha(p: Path) -> str:
+    return hashlib.sha1(p.read_bytes()).hexdigest() if p.exists() else "MISSING"
+
+
+def test_run_examples_writes_only_examples(client) -> None:
+    wb, call, _ = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    ce0 = _sha(run_dir / "counterexamples.yaml")
+    lit0 = _sha(run_dir / "literature_review.yaml")
+    status, d = call("POST", f"/api/runs/{run_id}/agents/examples")
+    assert status == 202
+    job = _await_job(call, d["job_id"])
+    assert job["state"] == "done"
+    _, st = call("GET", f"/api/runs/{run_id}/status")
+    agents = {a["agent"]: a["status"] for a in st["agents"]}
+    assert agents["examples"] == "done"
+    assert agents["counterexamples"] == "not_run"
+    assert agents["literature"] == "not_run"
+    assert _sha(run_dir / "counterexamples.yaml") == ce0
+    assert _sha(run_dir / "literature_review.yaml") == lit0
+    validate_run(run_dir)
+
+
+def test_run_counterexamples_writes_only_counterexamples(client) -> None:
+    wb, call, _ = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    ex0 = _sha(run_dir / "examples.yaml")
+    lit0 = _sha(run_dir / "literature_review.yaml")
+    _, d = call("POST", f"/api/runs/{run_id}/agents/counterexamples")
+    assert _await_job(call, d["job_id"])["state"] == "done"
+    _, st = call("GET", f"/api/runs/{run_id}/status")
+    agents = {a["agent"]: a["status"] for a in st["agents"]}
+    assert agents["counterexamples"] == "done"
+    assert _sha(run_dir / "examples.yaml") == ex0
+    assert _sha(run_dir / "literature_review.yaml") == lit0
+
+
+def test_run_literature_grants_no_reference_support(client) -> None:
+    wb, call, _ = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    _, d = call("POST", f"/api/runs/{run_id}/agents/literature")
+    assert _await_job(call, d["job_id"])["state"] == "done"
+    sg = read_yaml(run_dir / "source_grounding.yaml")
+    assert "source_backed" not in {s.get("status") for s in sg.get("steps", [])}
+
+
+def test_failed_agent_records_failed_and_preserves_run(client, monkeypatch) -> None:
+    wb, call, _ = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    # run examples once successfully
+    _, d = call("POST", f"/api/runs/{run_id}/agents/examples")
+    assert _await_job(call, d["job_id"])["state"] == "done"
+    good = _sha(run_dir / "examples.yaml")
+    # force the next examples run to crash mid-way
+    import espresso_proof.agent_runner as ar
+
+    def boom(run_dir, agent, *, client):  # noqa: ANN001
+        from espresso_proof.io import write_yaml
+
+        write_yaml(Path(run_dir) / "examples.yaml", {"claim_id": "X", "examples": []})
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(ar, "_run_agent_body", boom)
+    _, d = call("POST", f"/api/runs/{run_id}/agents/examples")
+    job = _await_job(call, d["job_id"])
+    assert job["state"] == "failed"
+    # previous valid artifact preserved; run still valid
+    assert _sha(run_dir / "examples.yaml") == good
+    validate_run(run_dir)
+
+
+def test_unknown_agent_rejected(client) -> None:
+    _, call, _ = client
+    run_id = _create(call)
+    status, d = call("POST", f"/api/runs/{run_id}/agents/bogus")
+    assert status == 400
+
+
+def test_skip_agent_contributes_no_evidence(client) -> None:
+    wb, call, _ = client
+    run_id = _create(call)
+    status, d = call("POST", f"/api/runs/{run_id}/skip-agent", {"agent": "counterexamples"})
+    assert status == 200
+    _, st = call("GET", f"/api/runs/{run_id}/status")
+    agents = {a["agent"]: a["status"] for a in st["agents"]}
+    assert agents["counterexamples"] == "skipped"
+
+
+def test_continue_rejects_unknown_route(client) -> None:
+    _, call, _ = client
+    run_id = _create(call)
+    status, d = call("POST", f"/api/runs/{run_id}/continue", {"strategy": "no_such_route", "effort": "quick_test"})
+    assert status == 400
+    assert "route" in d["error"].lower()
+
+
+# --------------------------------------------------------------------------- #
+# UI: native buttons, no command blocks on main path, static still works
+# --------------------------------------------------------------------------- #
+
+
+def test_interactive_dashboard_uses_buttons_not_command_blocks(client) -> None:
+    _, call, get_text = client
+    run_id = _create(call)
+    html = get_text(f"/run/{run_id}")
+    assert 'data-action="run-agent"' in html
+    assert 'data-action="continue"' in html
+    # command text must not appear on the MAIN path (only inside a debug drawer)
+    main_path = html.split('class="debug"')[0]
+    assert "espresso run-agent --run" not in main_path
+    assert '<pre class="cmd"' not in main_path
+
+
+def test_static_dashboard_still_renders(tmp_path: Path) -> None:
+    """Existing static dashboard generation must still work (server unavailable)."""
+    from espresso_proof.orchestrator import orchestrate_run
+
+    claim = tmp_path / "c.md"
+    claim.write_text(CLAIM, encoding="utf-8")
+    rd = orchestrate_run(
+        project="static", input_path=claim, output_root=tmp_path,
+        provider="stub", front_half="stub", fast=True,
+    )["run_dir"]
+    html = render_run_dashboard(rd)  # non-interactive
+    assert "Espresso Proof" in html
+    assert "Choose Route" in html
+    # static page keeps its copy-command affordance
+    assert "Copy command" in html
+    assert 'data-action="run-agent"' not in html
+
+
+def test_claim_card_has_no_foreign_domain_hypotheses(tmp_path: Path) -> None:
+    """A group-theory claim must not render algebraic-geometry hypothesis chips
+    (smooth / projective / base field C) leaked from mock defaults."""
+    from espresso_proof.orchestrator import orchestrate_run
+
+    claim = tmp_path / "c.md"
+    claim.write_text(CLAIM, encoding="utf-8")
+    rd = orchestrate_run(
+        project="chips", input_path=claim, output_root=tmp_path,
+        provider="stub", front_half="stub", fast=True,
+    )["run_dir"]
+    locked = read_yaml(rd / "locked_claim.yaml")
+    names = " ".join(str(h.get("name", "")) for h in locked.get("hypotheses", [])).lower()
+    assert "base field c" not in names
+    assert "projective" not in names
+    html = render_run_dashboard(rd, interactive=True)
+    assert "base field C" not in html
+    assert "Unclear conclusion" not in html or "concl" in html  # conclusion chip allowed, AG terms not

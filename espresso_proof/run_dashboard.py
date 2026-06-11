@@ -19,8 +19,18 @@ from __future__ import annotations
 
 import html
 import json
+import threading
 from pathlib import Path
 from typing import Any
+
+# Per-render-thread flag: True while rendering the interactive (server) page, so
+# the evidence-panel helpers emit native buttons instead of copy commands without
+# threading the flag through every call site. Set/reset by the render entrypoints.
+_render_ctx = threading.local()
+
+
+def _interactive() -> bool:
+    return bool(getattr(_render_ctx, "interactive", False))
 
 from .agent_run_status import (
     AGENT_TITLES as _AGENT_TITLES,
@@ -55,7 +65,12 @@ _RADIO_STREAM = "https://stream.srg-ssr.ch/m/rsc_de/mp3_128"
 
 
 def write_run_dashboard(run_dir: Path, *, filename: str = DASHBOARD_FILENAME) -> Path:
-    """Write the dashboard into ``run_dir`` and return the path."""
+    """Write the STATIC dashboard into ``run_dir`` and return the path.
+
+    The static file is openable directly (no server): controls degrade to copy
+    commands in a debug drawer. The interactive product page is served by
+    ``espresso serve`` via ``render_run_dashboard(..., interactive=True)``.
+    """
 
     run_dir = Path(run_dir)
     out = run_dir / filename
@@ -63,31 +78,103 @@ def write_run_dashboard(run_dir: Path, *, filename: str = DASHBOARD_FILENAME) ->
     return out
 
 
-def render_run_dashboard(run_dir: Path) -> str:
-    """Render the read-only workspace HTML from existing run artifacts."""
+def render_run_dashboard(run_dir: Path, *, interactive: bool = False) -> str:
+    """Render the workspace HTML from existing run artifacts.
+
+    ``interactive=True`` adds native buttons + polling that call the local
+    workbench API (used by ``espresso serve``); ``False`` (default) keeps the
+    self-contained static page used by ``write_run_dashboard`` and every existing
+    test. Either way it is a read-only renderer that never upgrades status.
+    """
+
+    run_dir = Path(run_dir)
+    _render_ctx.interactive = interactive
+    try:
+        state = _load_run_state(run_dir)
+        state["interactive"] = interactive
+        route_data = _route_data(state)
+        selected_route = _selected_route_id(state, route_data)
+        initial = route_data.get(selected_route) or next(iter(route_data.values()), _fallback_route())
+        command = _command_for(run_dir, selected_route, initial["effort"], completed=state["completed"])
+        review = _review_result(state)
+
+        # Display-layer safety: redact any global proof-complete overclaim an
+        # echoed free-text artifact field might carry into the rendered HTML.
+        # Never upgrades status.
+        return scrub_proof_language(
+            _template(
+                state=state,
+                run_dir=run_dir,
+                routes_preliminary=_evidence_incomplete(run_dir),
+                route_data=route_data,
+                initial=initial,
+                command=command,
+                review=review,
+                interactive=interactive,
+            )
+        )
+    finally:
+        _render_ctx.interactive = False
+
+
+# --------------------------------------------------------------------------- #
+# server fragments + JSON status (used by espresso_proof.server)
+# --------------------------------------------------------------------------- #
+
+
+def render_evidence_panel_html(run_dir: Path) -> str:
+    """Inner HTML of the Evidence Agents panel (for live in-place refresh)."""
+
+    run_dir = Path(run_dir)
+    _render_ctx.interactive = True
+    try:
+        state = _load_run_state(run_dir)
+        state["interactive"] = True
+        return scrub_proof_language(_evidence_panel(run_dir, state))
+    finally:
+        _render_ctx.interactive = False
+
+
+def render_topbar_status_html(run_dir: Path) -> str:
+    """Inner HTML of the top-bar status group (state / proof status / budget)."""
+
+    run_dir = Path(run_dir)
+    state = _load_run_state(run_dir)
+    return scrub_proof_language(_topbar_status_inner(state))
+
+
+def status_summary(run_dir: Path) -> dict[str, Any]:
+    """JSON-able status for the polling UI. Process/display state only — it
+    carries no mathematical-status field and never upgrades anything."""
 
     run_dir = Path(run_dir)
     state = _load_run_state(run_dir)
     route_data = _route_data(state)
-    selected_route = _selected_route_id(state, route_data)
-    initial = route_data.get(selected_route) or next(iter(route_data.values()), _fallback_route())
-    command = _command_for(run_dir, selected_route, initial["effort"], completed=state["completed"])
-    review = _review_result(state)
-
-    # Display-layer safety: redact any global proof-complete overclaim an echoed
-    # free-text artifact field might carry into the rendered HTML. Never
-    # upgrades status.
-    return scrub_proof_language(
-        _template(
-            state=state,
-            run_dir=run_dir,
-            routes_preliminary=_evidence_incomplete(run_dir),
-            route_data=route_data,
-            initial=initial,
-            command=command,
-            review=review,
-        )
-    )
+    selected = _selected_route_id(state, route_data)
+    initial = route_data.get(selected) or _fallback_route()
+    budget = (state["loop"] or {}).get("budget") or {}
+    return {
+        "state": state["state_label"],
+        "proof_status": state["proof_label"],
+        "completed": state["completed"],
+        "routes_preliminary": _evidence_incomplete(run_dir),
+        "selected_route": {"id": initial["id"], "title": initial["title"]},
+        "evidence": {
+            "reference_supported_steps": state["cited_steps"],
+            "machine_checks": state["machine_checks"],
+        },
+        "budget": {
+            "rounds_used": budget.get("rounds_used"),
+            "max_rounds": budget.get("max_rounds"),
+            "agent_calls_used": budget.get("agent_calls_used"),
+            "max_agent_calls": budget.get("max_agent_calls"),
+            "tokens": "not_tracked",
+        },
+        "agents": [
+            {"agent": r["agent"], "title": r["title"], "status": r["status"], "status_word": r["status_word"]}
+            for r in _agent_display_rows(run_dir)
+        ],
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -501,11 +588,37 @@ def _plan_section(
         else "This continues the search. It still does not claim the theorem is checked."
     )
     heading_extra = "Repair Next" if completed else "Continue"
-    lead = (
-        "Next useful work: pin exact sources or replace cited lemmas with a local derivation."
-        if completed
-        else "Run this to continue with the selected route:"
-    )
+    interactive = bool(state.get("interactive"))
+    if interactive:
+        cont_label = "Repair next" if completed else "Continue this route"
+        efforts = [("quick_test", "quick test"), ("normal_pass", "normal pass"), ("deep_exploration", "deep exploration")]
+        opts = "".join(
+            f'<option value="{v}"{" selected" if v == initial["effort"] else ""}>{lab}</option>'
+            for v, lab in efforts
+        )
+        action_html = f"""<div class="plan-actions">
+    <button class="act primary" data-action="continue">{_h(cont_label)}</button>
+    <label class="effort-pick">effort
+      <select id="effort-sel">{opts}</select>
+    </label>
+    <span class="act-status" id="continue-status"></span>
+  </div>
+  <details class="debug"><summary>command line (advanced)</summary>
+    <pre class="cmd" id="command">{_h(command)}</pre>
+    <div class="actions"><button class="copy" id="copy">Copy command</button><span class="copy-status" id="copy-status"></span></div>
+  </details>"""
+    else:
+        lead = (
+            "Next useful work: pin exact sources or replace cited lemmas with a local derivation."
+            if completed
+            else "Run this to continue with the selected route:"
+        )
+        action_html = f"""<p class="sub" style="margin:12px 0 0">{_h(lead)}</p>
+  <pre class="cmd" id="command">{_h(command)}</pre>
+  <div class="actions">
+    <button class="copy" id="copy">Copy command</button>
+    <span class="copy-status" id="copy-status"></span>
+  </div>"""
     return f"""<section class="card plan"><div class="pad">
   <h2>Selected Plan &middot; {_h(heading_extra)}</h2>
   <div class="head">
@@ -518,12 +631,7 @@ def _plan_section(
   <ul class="detail-list" id="selected-detail">{selected_items}</ul>
   <p class="sub" style="margin:12px 0 0">{evidence_line}</p>
   {gaps_html}
-  <p class="sub" style="margin:12px 0 0">{_h(lead)}</p>
-  <pre class="cmd" id="command">{_h(command)}</pre>
-  <div class="actions">
-    <button class="copy" id="copy">Copy command</button>
-    <span class="copy-status" id="copy-status"></span>
-  </div>
+  {action_html}
   {continue_note}
   <div class="note">{_h(note)}</div>
 </div></section>"""
@@ -664,14 +772,35 @@ _AGENT_CLI_NAME = {
 }
 
 
-def _agent_commands(run_dir: Path, agent: str, status: str) -> str:
+def _agent_commands(run_dir: Path, agent: str, status: str, *, interactive: bool | None = None) -> str:
+    if interactive is None:
+        interactive = _interactive()
     if agent not in ("literature", "examples", "counterexamples", "failure_patterns"):
         return ""
     cli = _AGENT_CLI_NAME[agent]
     run_cmd = f"espresso run-agent --run {run_dir} --agent {cli}"
     skip_cmd = f"espresso run-agent --run {run_dir} --agent {cli} --skip"
+    if interactive:
+        # Native buttons that drive the local API; the raw command lives only in
+        # a collapsed debug drawer, never on the main product path.
+        if status in ("running", "queued"):
+            buttons = (
+                f'<button class="act" disabled data-agent="{_h(agent)}">Running…</button>'
+                f'<button class="act ghost" data-action="skip-agent" data-agent="{_h(agent)}">Skip</button>'
+            )
+        else:
+            verb = "Retry" if status in ("failed", "done") else "Run"
+            buttons = (
+                f'<button class="act" data-action="run-agent" data-agent="{_h(agent)}">{_h(verb)}</button>'
+                f'<button class="act ghost" data-action="skip-agent" data-agent="{_h(agent)}">Skip</button>'
+            )
+        drawer = (
+            f'<details class="debug"><summary>command</summary>'
+            f'<code>{_h(run_cmd)}</code></details>'
+        )
+        return f'<div class="acts">{buttons}</div>{drawer}'
     if status in ("running", "queued"):
-        # Don't invite a duplicate launch while the agent is in flight.
+        # Static page, agent in flight: don't invite a duplicate launch.
         return f"""<div class="acmds">
   <span class="lab">Already {_h(status)} &mdash; Skip instead?</span>
   <code title="Click to copy">{_h(skip_cmd)}</code>
@@ -986,6 +1115,24 @@ def _budget_card(state: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 
 
+def _topbar_status_inner(state: dict[str, Any]) -> str:
+    """The swappable inner HTML of the top-bar status group."""
+
+    budget = (state["loop"] or {}).get("budget") or {}
+    budget_mini = ""
+    if budget:
+        used = int(budget.get("agent_calls_used") or 0)
+        cap = max(1, int(budget.get("max_agent_calls") or 1))
+        pct = max(0, min(100, round(100 * used / cap)))
+        budget_mini = f"""<div class="budget">
+    <div class="meter"><i style="width:{pct}%"></i></div>
+    <small>Agent calls {used} / {cap} &middot; round {budget.get('rounds_used', 0)} / {budget.get('max_rounds', '—')} &middot; tokens not tracked</small>
+  </div>"""
+    return f"""<span class="chip state"><span class="dot"></span>{_h(state["state_label"])}</span>
+  <span class="chip">Proof status: {_h(state["proof_label"])}</span>
+  {budget_mini}"""
+
+
 def _template(
     *,
     state: dict[str, Any],
@@ -995,21 +1142,18 @@ def _template(
     initial: dict[str, Any],
     command: str,
     review: dict[str, Any],
+    interactive: bool = False,
 ) -> str:
     agent_rows = _agent_display_rows(run_dir)
     cx_pressure = _counterexample_pressure(state, agent_rows)
-    budget = (state["loop"] or {}).get("budget") or {}
-    budget_mini = ""
-    if budget:
-        used = int(budget.get("agent_calls_used") or 0)
-        cap = max(1, int(budget.get("max_agent_calls") or 1))
-        pct = max(0, min(100, round(100 * used / cap)))
-        budget_mini = f"""<div class="budget">
-    <div class="meter"><i style="width:{pct}%"></i></div>
-    <small>Agent calls {used} / {cap} &middot; round {budget.get('rounds_used', 0)} / {budget.get('max_rounds', '—')} &middot; token usage not tracked yet</small>
-  </div>"""
     review_html = _review_section(review) if review.get("show") else ""
     route_json = _js(route_data)
+    refresh_btn = (
+        '<button class="tb-refresh" data-action="refresh" type="button" title="Refresh">&#8635;</button>'
+        if interactive
+        else ""
+    )
+    interactive_js = _INTERACTIVE_JS.replace("__RUN_ID__", _js(run_dir.name)) if interactive else ""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1024,9 +1168,8 @@ def _template(
 <header class="topbar">
   <div class="brand"><span class="bean"></span>Espresso Proof</div>
   <div class="claim-mini">{_h(state["statement"])}</div>
-  <span class="chip state"><span class="dot"></span>{_h(state["state_label"])}</span>
-  <span class="chip">Proof status: {_h(state["proof_label"])}</span>
-  {budget_mini}
+  <div class="tb-status" id="topbar-status">{_topbar_status_inner(state)}</div>
+  {refresh_btn}
   <button class="music" id="music" type="button">
     <span class="note">&#9834;</span><span class="bars"><i></i><i></i><i></i></span> Classical
   </button>
@@ -1042,7 +1185,7 @@ def _template(
   {_route_table_section(state)}
   {review_html}
 </main>
-<aside class="sidecol">
+<aside class="sidecol" id="evidence-panel">
   {_evidence_panel(run_dir, state)}
 </aside>
 </div>
@@ -1112,9 +1255,113 @@ music.addEventListener("click", async () => {{
     radio.pause(); music.classList.remove("playing");
   }}
 }});
+{interactive_js}
 </script>
 </body>
 </html>
+"""
+
+
+# Interactive controller (server mode only): drives the local workbench API,
+# polls jobs, and refreshes panels in place. ``__RUN_ID__`` is replaced with the
+# JSON-encoded run id. It calls only same-origin /api endpoints; no artifact is
+# ever mutated from the browser (the server routes every action through the
+# kernel). Errors fail closed with a friendly inline message.
+_INTERACTIVE_JS = r"""
+const RUN_ID = __RUN_ID__;
+const API = "/api/runs/" + encodeURIComponent(RUN_ID);
+
+function flash(el, msg, ok) {
+  if (!el) return;
+  el.textContent = msg;
+  el.className = "act-status " + (ok ? "ok" : "err");
+}
+
+async function refreshPanels() {
+  try {
+    const r = await fetch(API + "/status");
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "status failed");
+    const ev = document.getElementById("evidence-panel");
+    const tb = document.getElementById("topbar-status");
+    if (ev && d.evidence_html) ev.innerHTML = d.evidence_html;
+    if (tb && d.topbar_html) tb.innerHTML = d.topbar_html;
+  } catch (e) { /* leave the page as-is on a transient error */ }
+}
+
+async function pollJob(jobId, onDone) {
+  for (let i = 0; i < 600; i++) {
+    await new Promise(r => setTimeout(r, 800));
+    let d;
+    try { d = await (await fetch("/api/jobs/" + encodeURIComponent(jobId))).json(); }
+    catch { continue; }
+    if (d.state === "done") { onDone(null); return; }
+    if (d.state === "failed") { onDone(d.error || "action failed"); return; }
+  }
+  onDone("timed out");
+}
+
+function selectedRouteId() {
+  const b = document.querySelector(".route[aria-pressed=true]");
+  return b ? b.dataset.route : null;
+}
+
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+  const action = btn.dataset.action;
+
+  if (action === "refresh") { await refreshPanels(); return; }
+
+  if (action === "run-agent" || action === "skip-agent") {
+    const agent = btn.dataset.agent;
+    const sib = btn.parentElement;
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = action === "skip-agent" ? "Skipping…" : "Running…";
+    try {
+      if (action === "skip-agent") {
+        const r = await fetch(API + "/skip-agent", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({agent})});
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || "skip failed");
+        await refreshPanels();
+      } else {
+        const r = await fetch(API + "/agents/" + encodeURIComponent(agent), {method:"POST"});
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || "run failed");
+        await new Promise((res) => pollJob(d.job_id, async (err) => {
+          if (err && sib) { const s=document.createElement("span"); s.className="act-status err"; s.textContent=err; sib.appendChild(s); }
+          await refreshPanels(); res();
+        }));
+      }
+    } catch (err) {
+      btn.disabled = false; btn.textContent = orig;
+      if (sib) { const s=document.createElement("span"); s.className="act-status err"; s.textContent=err.message; sib.appendChild(s); }
+    }
+    return;
+  }
+
+  if (action === "continue") {
+    const strategy = selectedRouteId();
+    const effortSel = document.getElementById("effort-sel");
+    const effort = effortSel ? effortSel.value : "quick_test";
+    const st = document.getElementById("continue-status");
+    if (!strategy) { flash(st, "Pick a route first.", false); return; }
+    btn.disabled = true; btn.textContent = "Working…"; flash(st, "Continuing…", true);
+    try {
+      const r = await fetch(API + "/continue", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({strategy, effort})});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "continue failed");
+      pollJob(d.job_id, (err) => {
+        if (err) { btn.disabled=false; btn.textContent="Continue this route"; flash(st, err, false); }
+        else { location.reload(); }
+      });
+    } catch (err) {
+      btn.disabled = false; btn.textContent = "Continue this route"; flash(st, err.message, false);
+    }
+    return;
+  }
+});
 """
 
 
@@ -1269,6 +1516,22 @@ a.loc:hover{border-color:var(--esp-line);background:var(--esp-soft)}
 .acmds code{display:block;padding:7px 9px;background:#221a12;color:#f3ead9;border-radius:7px;
   font-size:11px;overflow-wrap:anywhere;cursor:pointer}
 .acmds code:hover{outline:2px solid var(--esp-line)}
+.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.act{appearance:none;border:1px solid var(--esp);background:var(--esp);color:#fff;font:inherit;font-size:12.5px;font-weight:650;padding:7px 14px;border-radius:8px;cursor:pointer}
+.act:hover{background:var(--esp-deep);border-color:var(--esp-deep)}
+.act:disabled{opacity:.55;cursor:progress}
+.act.ghost{background:transparent;color:var(--esp);}
+.act.ghost:hover{background:var(--esp-soft)}
+.act.primary{padding:9px 18px;font-size:14px}
+.plan-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
+.effort-pick{font-size:13px;color:var(--muted);display:inline-flex;gap:7px;align-items:center}
+.effort-pick select{font:inherit;font-size:13px;padding:6px 9px;border:1px solid var(--esp-line);border-radius:8px;background:var(--card);color:var(--ink)}
+.act-status{font-size:13px}.act-status.ok{color:var(--green)}.act-status.err{color:#9c3f2d}
+details.debug{margin-top:12px}details.debug>summary{cursor:pointer;color:var(--muted);font-size:12px;list-style:none}details.debug>summary::-webkit-details-marker{display:none}
+details.debug code{display:block;margin-top:8px;padding:10px 12px;background:#221a12;color:#f3ead9;border-radius:8px;font-size:11.5px;overflow-wrap:anywhere;white-space:pre-wrap}
+.tb-status{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.tb-refresh{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--ink);width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:16px;line-height:1}
+.tb-refresh:hover{border-color:var(--esp-line);background:var(--esp-soft)}
 .side-note{font-size:12px;color:var(--muted);padding:0 6px;line-height:1.55}
 .budget-card .row{display:flex;justify-content:space-between;font-size:13px;padding:4px 0}
 .budget-card .row b{font-variant-numeric:tabular-nums}

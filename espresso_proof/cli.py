@@ -670,6 +670,29 @@ def retrieve_autonomous_command(
     typer.echo(f"-> {run / 'autonomous_literature_retrieval.yaml'}")
 
 
+@app.command("serve")
+def serve_command(
+    runs_root: Path = typer.Option(Path("."), "--runs-root", file_okay=False, help="Project-runs root (where projects/<name>/runs/<id> live or will be created)."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address (localhost by default)."),
+    port: int = typer.Option(8765, "--port", min=1, max=65535),
+    provider: str = typer.Option("stub", "--provider", help="Agent provider for runs created from the UI (stub/openai/external)."),
+) -> None:
+    """Start the local Product Workbench server (interactive browser UI).
+
+    Type a claim in the browser, get a quick initial read + routes, then click
+    Run Examples / Counterexamples / Literature, Continue a route, or Skip an
+    agent — no terminal commands. Every action goes through the existing kernel
+    path (validate_run); the server never upgrades proof/source/evidence status,
+    confines every run id to the runs root, and never runs an arbitrary shell
+    command from browser input.
+    """
+    from .server import serve
+
+    if provider not in {"stub", "openai", "external"}:
+        raise typer.BadParameter("provider must be stub, openai, or external")
+    serve(runs_root, host=host, port=port, provider=provider)
+
+
 @app.command("add-bank-item")
 def add_bank_item_command(
     bank: Path = typer.Option(..., "--bank", exists=True, file_okay=False, help="A research bank directory (with _meta.yaml)."),
