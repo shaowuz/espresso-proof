@@ -118,6 +118,10 @@ class Workbench:
         self._jobs_lock = threading.Lock()
         self._run_locks: dict[str, threading.Lock] = {}
         self._run_locks_guard = threading.Lock()
+        # Display-only fragment cache: run_id -> (artifact-mtime digest, JSON).
+        # Never a truth source; see Workbench.status for the invalidation rules.
+        self._status_cache: dict[str, tuple[str, str]] = {}
+        self._status_cache_lock = threading.Lock()
 
     # -- path safety ---------------------------------------------------------
     def resolve_run(self, run_id: str) -> Path:
@@ -180,20 +184,27 @@ class Workbench:
         transactional action.
         """
 
+        import time as _time
+
         self._set_job(job_id, state="running")
+        t0 = _time.monotonic()
         try:
             if lock is not None:
                 with lock:
                     result = work()
             else:
                 result = work()
-            self._set_job(job_id, state="done", finished_at=_now(), result=result)
+            self._set_job(
+                job_id, state="done", finished_at=_now(), result=result,
+                duration_seconds=round(_time.monotonic() - t0, 2),
+            )
         except Exception as exc:  # noqa: BLE001 - surface a friendly error
             raw = str(exc)[:400] or "action failed"
             self._set_job(
                 job_id,
                 state="failed",
                 finished_at=_now(),
+                duration_seconds=round(_time.monotonic() - t0, 2),
                 # headline = product copy (what happened / math state safe / next
                 # step); the raw cause stays available as error_detail only.
                 error=_friendly_error(raw),
@@ -365,14 +376,120 @@ class Workbench:
         return {str(r.get("id")) for r in (brief.get("top_strategies") or []) if r.get("id")}
 
     # -- read views ----------------------------------------------------------
+    def _run_digest(self, run_dir: Path) -> str:
+        """A display-cache key: mtime+size of EVERY file in the run directory.
+
+        Any artifact write, removal, or addition changes the digest, so a cached
+        fragment can never outlive the validated state it was rendered from. The
+        digest is NEVER a truth source — it only decides whether to re-render.
+        """
+
+        # Every FILE in the run dir (not just *.yaml): validate_run also checks
+        # non-YAML manifest artifacts such as final_report.md (existence +
+        # proof-language), so they must invalidate the cache too. Size is
+        # included alongside mtime_ns to close cheap mtime-restore tampering
+        # and coarse-mtime filesystems.
+        parts: list[str] = []
+        for path in sorted(run_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            try:
+                st = path.stat()
+                parts.append(f"{path.relative_to(run_dir)}:{st.st_mtime_ns}:{st.st_size}")
+            except OSError:
+                parts.append(f"{path.name}:gone")
+        import hashlib
+
+        return hashlib.sha1("|".join(parts).encode()).hexdigest()
+
     def status(self, run_id: str) -> dict[str, Any]:
+        """Validated status + rendered fragments, with a display-only cache.
+
+        Cache rules (Goal 33): keyed by the artifact-mtime digest; a hit is
+        served only when the digest is unchanged since the last VALIDATED
+        render; any validation failure drops the entry and raises (fail closed
+        — stale HTML is never served after the run stops validating).
+        """
+
         run_dir = self.resolve_run(run_id)
-        validate_run(run_dir)
+        digest = self._run_digest(run_dir)
+        with self._status_cache_lock:
+            cached = self._status_cache.get(run_id)
+            if cached is not None and cached[0] == digest:
+                return json.loads(cached[1])  # deep copy via JSON round-trip
+        try:
+            validate_run(run_dir)
+        except Exception as exc:
+            # the run no longer validates: never serve a stale fragment for it,
+            # and surface honest product copy (G31) instead of a generic error.
+            with self._status_cache_lock:
+                self._status_cache.pop(run_id, None)
+            raise WorkbenchError(
+                409,
+                "This run no longer passes Espresso's safety validation, so its "
+                "status cannot be shown. Existing results on disk are untouched.",
+            ) from exc
         summary = status_summary(run_dir)
         summary["run_id"] = run_id
         summary["evidence_html"] = render_evidence_panel_html(run_dir)
         summary["topbar_html"] = render_topbar_status_html(run_dir)
+        with self._status_cache_lock:
+            self._status_cache[run_id] = (digest, json.dumps(summary, ensure_ascii=False))
+            # bound the cache (display-only; eviction is always safe)
+            while len(self._status_cache) > 32:
+                self._status_cache.pop(next(iter(self._status_cache)))
         return summary
+
+    def debug_info(self, run_id: str) -> dict[str, Any]:
+        """Confined technical log for the advanced/debug path (Goal 33 §7).
+
+        Tail-limited and redacted: the last jobs for this run (raw causes
+        truncated), the agent process board, and the front-half stage audit.
+        Path access goes through ``resolve_run`` only; home-directory prefixes
+        are redacted from every string. Display-only — never a truth source.
+        """
+
+        run_dir = self.resolve_run(run_id)
+        home = str(Path.home())
+
+        def _redact(value: Any) -> Any:
+            if isinstance(value, str):
+                return value.replace(home, "~")[:300]
+            if isinstance(value, list):
+                return [_redact(v) for v in value[:20]]
+            if isinstance(value, dict):
+                return {k: _redact(v) for k, v in value.items()}
+            return value
+
+        with self._jobs_lock:
+            jobs = [
+                dict(j) for j in self._jobs.values()
+                if j.get("run_id") == run_id
+                or (j.get("result") or {}).get("run_id") == run_id
+            ]
+        jobs = jobs[-20:]  # tail-limited
+        from .agent_run_status import load_agent_run_status
+        from .io import read_yaml
+
+        board = load_agent_run_status(run_dir) or {}
+        front_half: dict[str, Any] = {}
+        fh_path = run_dir / "front_half_run.yaml"
+        if fh_path.exists():
+            report = read_yaml(fh_path)
+            front_half = {
+                "provider": report.get("provider"),
+                "stages": [
+                    {"stage": s.get("stage"), "status": s.get("status"), "errors": s.get("errors", [])}
+                    for s in report.get("stages", [])[:20]
+                ],
+            }
+        return _redact({
+            "run_id": run_id,
+            "jobs": jobs,
+            "agent_board": board.get("agents", []),
+            "front_half": front_half,
+            "note": "Technical log (advanced). Process records only — never evidence or proof status.",
+        })
 
     def dashboard_html(self, run_id: str) -> str:
         run_dir = self.resolve_run(run_id)
@@ -469,6 +586,9 @@ def _make_handler(workbench: Workbench):
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "status":
                     self._send_json(workbench.status(parts[2]))
+                    return
+                if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "debug":
+                    self._send_json(workbench.debug_info(parts[2]))
                     return
                 if parts == ["api", "runs"]:
                     self._send_json({"runs": workbench.list_runs()})
