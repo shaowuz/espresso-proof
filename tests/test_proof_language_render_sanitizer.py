@@ -174,9 +174,8 @@ def test_scrub_redacts_chinese_global_overclaims() -> None:
         "命题得证",
         "猜想得证",
         "定理已证明",
-        "该定理已被证明",
         "我们证明了该定理",
-        "证明了这个定理",
+        "我们证明了这个定理",
         "至此定理得证。",
     ]
     for text in overclaims:
@@ -195,6 +194,8 @@ def test_scrub_preserves_scoped_chinese_prose() -> None:
         "该特殊情形已证明",       # scoped to a special case
         "尚未证明该定理",         # honest negation (not yet proved)
         "这不是一个已验证的证明",  # honest disclaimer
+        "庞加莱猜想已被证明",     # literature passive citation (third-person)
+        "文献[3]证明了该定理的一个弱形式",  # scoped third-person citation
     ]
     for text in preserved:
         assert contains_proof_language(text) is None, f"over-redacted: {text}"

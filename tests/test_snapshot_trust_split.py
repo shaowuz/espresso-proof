@@ -40,17 +40,15 @@ def test_invalid_run_with_fake_source_backed_is_diagnostic_only(tmp_path: Path) 
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
     sg_path = run_dir / artifacts["source_grounding"]
     sg = read_yaml(sg_path)
-    # Plant an unauthorized source_backed step (no exact locator / attribution):
-    # validate_run must reject the run, and the snapshot must stop trusting it.
-    sg["steps"].append(
-        {
-            "id": "step_fake",
-            "statement": "Fake step claiming reference support.",
-            "status": "source_backed",
-            "source_ids": [],
-            "needs": [],
-        }
-    )
+    # Plant an unauthorized source_backed step: SCHEMA-VALID shape (cloned from
+    # a real step) so the rejection comes from the source-backed authorization
+    # gate (no matching hypotheses / no exact locator behind it), not from
+    # pydantic field validation. validate_run must reject the run, and the
+    # snapshot must stop trusting it.
+    fake = dict(sg["steps"][0])
+    fake["proof_step_id"] = "step_001"
+    fake["status"] = "source_backed"
+    sg["steps"][0] = fake
     write_yaml(sg_path, sg)
 
     snap = load_run_snapshot(tmp_path.resolve(), run_dir)

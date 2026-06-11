@@ -53,19 +53,20 @@ _FIRST_PERSON_ASSERTIONS = tuple(
 # Chinese global proof-completion phrases (Goal 36), curated by the SAME two
 # safe families. Self-contained completion markers: 证毕 (= proof-close), 证明完毕 /
 # 证明完成 (proof finished). Global assertions: 定理/命题/猜想 + 得证/已证明,
-# and the completed-aspect 证明了 + global object. Because the boundary
+# and first-person 我们证明了 + a definite global object. Because the boundary
 # lookarounds only block ASCII word characters, a phrase also matches inside
-# prefixed forms ("该定理得证", "此定理已证明"). Deliberately EXCLUDED: bare
-# 已证明 / 得证 / 证明了 — they collide with honest SCOPED prose (该引理已证明,
-# 引理2.1得证, 我们证明了引理2.1), exactly like bare "proved" in English.
+# prefixed forms ("该定理得证", "此定理已证明"). Deliberately EXCLUDED, exactly
+# like bare "proved" / third-person citations in English: bare 已证明 / 得证 /
+# 证明了 (collide with honest SCOPED prose: 该引理已证明, 引理2.1得证,
+# 我们证明了引理2.1); the literature passive 已被证明 (a citation — 庞加莱猜想
+# 已被证明 — like "the source proves the theorem"); and subject-less 证明了该
+# 定理 (文献[3]证明了该定理的一个弱形式 is an honest scoped citation).
 _CHINESE_COMPLETION_MARKERS = ("证毕", "证明完毕", "证明完成")
 _CHINESE_GLOBAL_OBJECTS = ("定理", "命题", "猜想")
 _CHINESE_GLOBAL_ASSERTIONS = tuple(
-    f"{o}{suffix}" for o in _CHINESE_GLOBAL_OBJECTS for suffix in ("得证", "已证明", "已被证明")
+    f"{o}{suffix}" for o in _CHINESE_GLOBAL_OBJECTS for suffix in ("得证", "已证明")
 ) + tuple(
-    f"证明了该{o}" for o in _CHINESE_GLOBAL_OBJECTS
-) + tuple(
-    f"证明了这个{o}" for o in _CHINESE_GLOBAL_OBJECTS
+    f"我们证明了{d}{o}" for d in ("该", "这个") for o in _CHINESE_GLOBAL_OBJECTS
 )
 
 PROOF_COMPLETE_PHRASES: tuple[str, ...] = (
