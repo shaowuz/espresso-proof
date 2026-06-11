@@ -21,3 +21,4 @@ projects/*/input_*.txt
 /*.txt
 /*_source/
 /*_source.tar.gz
+.scorecard_runs/
