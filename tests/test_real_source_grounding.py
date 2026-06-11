@@ -134,6 +134,43 @@ def test_grounding_run_stays_kernel_valid_and_registers_audit(tmp_path: Path) ->
     assert manifest["optional_artifacts"]["theorem_applicability"] == "theorem_applicability.yaml"
 
 
+def test_ground_source_failure_rolls_back_run(tmp_path: Path, monkeypatch) -> None:
+    # Goal 35A regression: prepare_source_grounding runs inside StageRunner with
+    # a whole-run snapshot. If grounding fails AFTER partial writes (theorem
+    # extraction registered, a partial source_grounding.yaml on disk), the run
+    # directory must be restored byte-for-byte and stay kernel-valid.
+    from espresso_proof import source_grounding_stage
+    from espresso_proof.stage_runner import StageError
+
+    run_dir = _hodge_run(tmp_path)
+    src = tmp_path / "outside_src.txt"  # outside run_dir: not part of the snapshot
+    src.write_text(THM, encoding="utf-8")
+    before = {
+        p.relative_to(run_dir): p.read_bytes() for p in run_dir.rglob("*") if p.is_file()
+    }
+
+    def boom(*, run_dir: Path, theorem_extraction_path: Path) -> None:
+        # Simulate a mid-grounding crash that leaves a partial artifact behind.
+        (run_dir / "source_grounding.yaml").write_text("partial: true\n", encoding="utf-8")
+        raise RuntimeError("injected grounding failure")
+
+    monkeypatch.setattr(source_grounding_stage, "ground_run", boom)
+    with pytest.raises(StageError, match="source_grounding"):
+        source_grounding_stage.prepare_source_grounding(
+            run_dir=run_dir,
+            ground_source=src,
+            title="Injected failure source",
+            authors=["A. Author"],
+        )
+    after = {
+        p.relative_to(run_dir): p.read_bytes() for p in run_dir.rglob("*") if p.is_file()
+    }
+    # Byte-identical restore: no partial source_grounding.yaml, no
+    # theorem_extraction.yaml, no manifest pointer left behind.
+    assert after == before
+    validate_run(run_dir)
+
+
 def test_orchestrate_ground_source_cli_earns_source_backed(tmp_path: Path) -> None:
     # End-to-end CLI: orchestrate (front-half mock keeps the mock source steps) to
     # the gate, then resume with --ground-source against a provided text source.
