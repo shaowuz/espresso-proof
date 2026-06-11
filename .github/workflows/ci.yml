@@ -54,3 +54,8 @@ jobs:
 
       - name: Run safety calibration baseline
         run: espresso calibration --out-root .benchmark_runs --json-out .benchmark_runs/calibration.json
+
+      # Goal 40B: full Autoprover Behavior Scorecard (safety + capability;
+      # seeded-gold-flaw reviewer recall; sanitized fixture dogfood replay).
+      - name: Run autoprover behavior scorecard
+        run: espresso scorecard --out-root .scorecard_runs --json-out .scorecard_runs/scorecard.json --markdown-out .scorecard_runs/scorecard.md

@@ -63,6 +63,7 @@ from .proof_verification import (
 from .symbolic_identity import SUPPORTED_RING_IDENTITIES
 from .benchmark import run_benchmark
 from .calibration import run_calibration
+from .scorecard import render_scorecard_markdown, run_scorecard
 from .memo import build_concise_memo
 from .proof_language import scrub_proof_language
 from .reviewer_checklist import review_checklist
@@ -2112,6 +2113,35 @@ def calibration(
         f"memo honest={m['memo_honest']}/{m['fixtures_total']}"
     )
     if not m["clean"]:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def scorecard(
+    output_root: Path = typer.Option(Path(".benchmark_runs"), "--out-root", help="Where scorecard probe runs are written."),
+    json_out: Path | None = typer.Option(
+        None, "--json-out", help="Write the full scorecard as machine-readable JSON."
+    ),
+    markdown_out: Path | None = typer.Option(
+        None, "--markdown-out", help="Write the trend-friendly Markdown summary."
+    ),
+) -> None:
+    """Autoprover Behavior Scorecard (Goal 40B): deterministic safety AND
+    capability metrics over the mock fixtures — baseline regressions, earning-
+    pipeline wiring, seeded-gold-flaw reviewer recall, and a sanitized dogfood
+    replay. Exits non-zero on any regression. Metrics never earn or upgrade any
+    mathematical status; no claim is ever 'proved' by a scorecard.
+    """
+    report = run_scorecard(output_root)
+    if json_out is not None:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    markdown = render_scorecard_markdown(report)
+    if markdown_out is not None:
+        markdown_out.parent.mkdir(parents=True, exist_ok=True)
+        markdown_out.write_text(markdown, encoding="utf-8")
+    typer.echo(markdown)
+    if not report["clean"]:
         raise typer.Exit(code=1)
 
 
