@@ -94,3 +94,56 @@ def test_earned_entry_is_only_via_bridge_and_admissible(tmp_path: Path) -> None:
     validate_run(run)
     ids = {e["id"] for e in _pv_entries(run)}
     assert ids == {"a_pv", "b_pv"}
+
+
+def test_confirmed_entry_carries_reproducibility_provenance(tmp_path: Path) -> None:
+    # Goal 38: a checked computation records HOW to replay it. Provenance only;
+    # the earning gate (trusted + confirmed via the kernel bridge) is unchanged.
+    import hashlib
+
+    run_dir = _run(tmp_path)
+    result = run_exact_modexp_adapter(
+        run_dir, base=4, exp=1, mod=4, expected=0, entry_id="repro_001"
+    )
+    assert result["earned"] is True
+    report = read_yaml(run_dir / "proof_verification.yaml")
+    entry = next(e for e in report["entries"] if e["id"] == "repro_001_pv")
+    assert entry["adapter_id"] == "exact_modexp"
+    assert entry["code_version"].startswith("espresso-proof ")
+    assert entry["dependency_version"].startswith("python ")
+    expected_input = hashlib.sha256(b"exact_modexp|4|1|4|0").hexdigest()
+    assert entry["input_hash"] == expected_input
+    assert entry["output_hash"] == hashlib.sha256(b"0").hexdigest()
+    assert "--base 4 --exp 1 --mod 4 --expected 0 --id repro_001" in entry["replay_command"]
+    # determinism: replaying the same inputs reproduces identical hashes.
+    again = run_exact_modexp_adapter(
+        run_dir, base=4, exp=1, mod=4, expected=0, entry_id="repro_002"
+    )
+    report2 = read_yaml(run_dir / "proof_verification.yaml")
+    entry2 = next(e for e in report2["entries"] if e["id"] == "repro_002_pv")
+    assert entry2["input_hash"] == entry["input_hash"]
+    assert entry2["output_hash"] == entry["output_hash"]
+    assert again["earned"] is True
+
+
+def test_entries_without_reproducibility_fields_still_validate() -> None:
+    # Additive-only schema change: pre-Goal-38 entries (no provenance fields)
+    # must keep validating.
+    from espresso_proof.models import ProofVerificationEntry
+
+    entry = ProofVerificationEntry.model_validate(
+        {
+            "id": "legacy_001",
+            "verifier_type": "exact_computation",
+            "claim_id": "claim_001",
+            "target": "t",
+            "input_summary": "i",
+            "result": "r",
+            "trusted": True,
+            "confirmed": True,
+            "earned_status": "computation_checked",
+            "scope_note": "scoped",
+        }
+    )
+    assert entry.adapter_id == ""
+    assert entry.replay_command == ""

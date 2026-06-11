@@ -184,7 +184,14 @@ def run_external_tool(
         try:
             parsed_result = parse(stdout)
             kind = "deterministic check" if spec.get("real") else "deterministic fake check"
-            conclusion = f"{kind} produced: {parsed_result}"
+            # Goal 38: the conclusion embeds tool output; scrub it so a tool
+            # printing "proof-close" / "we proved the theorem" cannot smuggle proof-
+            # complete language into the interpretive field (the model validator
+            # rejects unscrubbed text; raw stdout stays auditable in
+            # stdout_excerpt).
+            from .proof_language import scrub_proof_language
+
+            conclusion = scrub_proof_language(f"{kind} produced: {parsed_result}")
         except Exception:  # noqa: BLE001 - any parse failure is malformed -> fail closed
             clean = False
     if not clean:

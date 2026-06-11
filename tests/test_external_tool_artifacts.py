@@ -105,7 +105,14 @@ def test_claim_id_mismatch_rejected(tmp_path: Path) -> None:
 def test_external_tool_run_does_not_upgrade_grade_and_renders_scoped(tmp_path: Path) -> None:
     run, _, _ = _run(tmp_path)
     grade_before = read_yaml(run / read_yaml(run / "run_manifest.yaml")["artifacts"]["idea_grade"])
-    _attach_runs(run, [_base_run(conclusion="We proved the theorem. proof-close.")])  # smuggled proof prose
+    # Goal 38 tightened the gate: an interpretive conclusion carrying proof
+    # prose is now REJECTED at parse time (see the gate tests below), so the
+    # smuggling vector moved to the RAW stdout excerpt, which stays auditable
+    # and must still be sanitized in display.
+    _attach_runs(
+        run,
+        [_base_run(stdout_excerpt="RESULT: ok\nWe proved the theorem. proof-close.")],
+    )
     validate_run(run)
     grade_after = read_yaml(run / read_yaml(run / "run_manifest.yaml")["artifacts"]["idea_grade"])
     assert grade_after == grade_before  # no status upgrade from a tool run
@@ -122,3 +129,43 @@ def test_failed_or_timed_out_run_is_fail_closed_in_display(tmp_path: Path) -> No
     memo = build_concise_memo(run)
     assert "did not complete cleanly" in memo
     assert contains_proof_language(memo) is None
+
+
+# --- Goal 38: proof-complete language gate on interpretive fields ------------
+def test_tool_run_model_rejects_proof_complete_interpretation() -> None:
+    import pytest as _pytest
+
+    from espresso_proof.models import ExternalToolRun
+
+    base = {
+        "id": "t1",
+        "tool_name": "fake_deterministic_check",
+        "scope_note": "scoped check only",
+    }
+    for field, text in (
+        ("ai_interpretation", "This shows we proved the theorem. proof-close."),
+        ("conclusion", "proof-close — the proof is complete."),
+        ("statement_checked", "the theorem is settled: 证毕"),
+        ("scope_note", "no gaps remain"),
+    ):
+        payload = {**base, field: text} if field != "scope_note" else {**base, "scope_note": text}
+        with _pytest.raises(ValueError, match="proof-complete"):
+            ExternalToolRun.model_validate(payload)
+
+
+def test_tool_run_raw_stdout_may_carry_overclaim_but_display_scrubs() -> None:
+    # stdout_excerpt is RAW audited evidence: it may contain the tool's own
+    # overclaim text; the artifact stays valid and the display layer scrubs.
+    from espresso_proof.models import ExternalToolRun
+    from espresso_proof.proof_language import scrub_proof_language
+
+    run = ExternalToolRun.model_validate(
+        {
+            "id": "t2",
+            "tool_name": "fake_deterministic_check",
+            "stdout_excerpt": "RESULT: ok\nproof-close, we proved the theorem!",
+            "scope_note": "scoped check only",
+        }
+    )
+    assert "proof-close" in run.stdout_excerpt  # raw evidence preserved
+    assert "proof-close" not in scrub_proof_language(run.stdout_excerpt)

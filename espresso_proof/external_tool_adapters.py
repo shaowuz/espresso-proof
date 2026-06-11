@@ -24,6 +24,8 @@ Hard guarantees:
 
 from __future__ import annotations
 
+import hashlib
+import platform
 from pathlib import Path
 
 from .external_tool_runner import (
@@ -32,6 +34,19 @@ from .external_tool_runner import (
 )
 from .io import read_yaml
 from .proof_verification import append_verification_entries
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _package_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("espresso-proof")
+    except Exception:  # noqa: BLE001 - provenance only; never block earning
+        return "unknown"
 
 
 def run_exact_modexp_adapter(
@@ -97,6 +112,18 @@ def run_exact_modexp_adapter(
                 f"Exact integer modular exponentiation: {base}^{exp} mod {mod} = "
                 f"{authoritative}. This single arithmetic computation only; NOT a "
                 "universal proof of any claim."
+            ),
+            # Goal 38 reproducibility provenance (never earns/upgrades status):
+            "adapter_id": "exact_modexp",
+            "code_version": f"espresso-proof {_package_version()}",
+            "dependency_version": f"python {platform.python_version()} pow()",
+            "input_hash": _sha256(f"exact_modexp|{base}|{exp}|{mod}|{expected}"),
+            "output_hash": _sha256(str(authoritative)),
+            "replay_command": (
+                f"espresso verify-exact-modexp --run <run_dir> --base {base} "
+                f"--exp {exp} --mod {mod} --expected {expected} --id {entry_id} "
+                "(replaying into the same run needs a fresh --id; identical "
+                "input/output hashes confirm the reproduction)"
             ),
         }
         # Earn ONLY through the bridge: append_verification_entries persists the

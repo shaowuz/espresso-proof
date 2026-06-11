@@ -115,3 +115,31 @@ def test_failed_run_renders_fail_closed_no_proof_language(tmp_path: Path) -> Non
     assert "External tool runs" in memo
     assert "fail-closed" in memo
     assert contains_proof_language(memo) is None
+
+
+def test_overclaiming_tool_output_is_scrubbed_from_conclusion(tmp_path: Path, monkeypatch) -> None:
+    # Goal 38: a tool that PRINTS proof-complete language still gets recorded
+    # (raw stdout preserved as audited evidence), but the interpretive
+    # conclusion is scrubbed so the artifact passes the model's proof-language
+    # gate instead of crashing or persisting an overclaim.
+    import sys as _sys
+
+    from espresso_proof import external_tool_runner as runner_mod
+
+    overclaim_script = 'print("RESULT: we proved the theorem. proof-close.")'
+    monkeypatch.setitem(
+        runner_mod.FAKE_TOOLS,
+        "fake_overclaim",
+        {
+            "argv": [_sys.executable, "-I", "-c", overclaim_script],
+            "parse": runner_mod.FAKE_TOOLS["fake_deterministic_check"]["parse"],
+            "scope_note": "Deterministic fake tool printing an overclaim (scrub demo).",
+        },
+    )
+    run_dir = _run(tmp_path)
+    record = run_and_record_external_tool(run_dir, "fake_overclaim", entry_id="overclaim_001")
+    assert "proof-close" in record.stdout_excerpt  # raw evidence preserved
+    assert "proof-close" not in record.conclusion.lower()
+    assert "proved the theorem" not in record.conclusion.lower()
+    assert "[withheld proof-like phrase]" in record.conclusion
+    validate_run(run_dir)
