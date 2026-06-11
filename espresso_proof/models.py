@@ -767,6 +767,10 @@ class ProofVerificationEntry(StrictBaseModel):
     """One verifier run. ``trusted`` marks a deterministic machine backend; only a
     trusted backend with a confirming result may earn a checked status (enforced by
     the validator). ``scope_note`` must state exactly what was (and was not) shown.
+
+    The reproducibility fields (Goal 38) are provenance only — they record HOW to
+    replay a checked computation (adapter, versions, input/output hashes, exact
+    replay command). They are optional/additive and never earn or upgrade status.
     """
 
     id: str
@@ -779,6 +783,12 @@ class ProofVerificationEntry(StrictBaseModel):
     confirmed: bool
     earned_status: ProofVerificationStatus
     scope_note: str
+    adapter_id: str = ""
+    code_version: str = ""
+    dependency_version: str = ""
+    input_hash: str = ""
+    output_hash: str = ""
+    replay_command: str = ""
 
 
 class ProofVerificationReport(StrictBaseModel):
@@ -862,6 +872,25 @@ class ExternalToolRun(StrictBaseModel):
     not_universal_proof: Literal[True] = True
     network_used: bool = False
     trusted: bool = False
+
+    @model_validator(mode="after")
+    def validate_no_proof_complete_interpretation(self) -> ExternalToolRun:
+        # Goal 38: stdout/stderr excerpts stay RAW audited evidence (the display
+        # layer scrubs them), but the INTERPRETIVE fields are adapter/agent-
+        # authored and must never assert global proof completion. Fail closed at
+        # parse time so "the tool proved the theorem" can never persist as an
+        # interpretation.
+        from .proof_language import contains_proof_language
+
+        for field in ("ai_interpretation", "conclusion", "statement_checked", "scope_note"):
+            phrase = contains_proof_language(getattr(self, field))
+            if phrase:
+                raise ValueError(
+                    f"external tool run field {field!r} contains proof-complete "
+                    f"language ({phrase!r}); tool evidence is scoped and never a "
+                    "universal proof"
+                )
+        return self
 
 
 class ExternalToolRunsReport(StrictBaseModel):
