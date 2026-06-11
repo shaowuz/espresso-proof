@@ -13,6 +13,11 @@ Diagnostic only, by construction:
   exception object's attributes, or arbitrary payloads;
 - event writing must never break the runtime: failures to append are swallowed
   (the run artifacts, not the timeline, are the source of truth).
+
+Deliberate omission: there is no per-file ``artifact_written`` event. Stages
+mutate whole snapshot scopes, so per-artifact granularity is recovered from the
+run manifest + artifacts on disk; the timeline records the stage bracketing
+(``stage_started`` .. ``stage_ok`` / ``validation_failed`` + ``rollback``).
 """
 
 from __future__ import annotations

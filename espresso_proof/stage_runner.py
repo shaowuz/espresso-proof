@@ -25,8 +25,16 @@ from pathlib import Path
 
 from .io import read_yaml, write_yaml
 from .run_events import EVENTS_FILENAME, append_event
+from .run_lock import LOCK_FILENAME
 
 MANIFEST_NAME = "run_manifest.yaml"
+
+# Runtime plumbing files that are never part of a stage transaction: the
+# append-only diagnostic timeline (rolling it back would erase the record of
+# the failed stage it exists to explain) and the writer lock file (unlinking
+# it would silently break a concurrently-held flock by splitting it across
+# inodes).
+_SNAPSHOT_EXCLUDED_NAMES = frozenset({EVENTS_FILENAME, LOCK_FILENAME})
 
 
 @dataclass
@@ -70,10 +78,7 @@ class StageRunner:
             if root.is_dir():
                 covered_dirs.append(root)
                 for f in root.rglob("*"):
-                    # The diagnostic events.jsonl timeline is append-only and is
-                    # never rolled back: rolling it back would erase the record
-                    # of the failed stage it exists to explain.
-                    if f.is_file() and f.name != EVENTS_FILENAME:
+                    if f.is_file() and f.name not in _SNAPSHOT_EXCLUDED_NAMES:
                         files[f] = f.read_bytes()
             else:
                 files[root] = root.read_bytes() if root.exists() else None
@@ -85,7 +90,7 @@ class StageRunner:
         for directory in covered_dirs:
             if directory.exists():
                 for f in directory.rglob("*"):
-                    if f.is_file() and f not in files and f.name != EVENTS_FILENAME:
+                    if f.is_file() and f not in files and f.name not in _SNAPSHOT_EXCLUDED_NAMES:
                         f.unlink()
         # Restore captured file bytes (or remove files that did not exist before).
         for path, data in files.items():

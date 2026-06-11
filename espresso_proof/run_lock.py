@@ -15,6 +15,7 @@ fails closed with a friendly, product-copy error instead of corrupting the run.
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import os
 import threading
@@ -79,7 +80,12 @@ def run_writer_lock(
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
-            except OSError:
+            except OSError as exc:
+                # Only genuine contention is retried; a real flock failure
+                # (e.g. ENOLCK on an NFS mount) must surface, not masquerade
+                # as "another action is updating this run" for 30 seconds.
+                if exc.errno not in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
+                    raise
                 if time.monotonic() >= deadline:
                     append_event(run_dir, "lock_denied", detail=action)
                     raise RunLockedError(action) from None

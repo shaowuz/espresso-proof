@@ -26,6 +26,7 @@ from .llm_agents import build_prover_loop_report
 from .front_half_agents import run_front_half_agent_pass
 from .orchestrator import orchestrate_run, resume_run
 from .prover_loop_driver import continue_prover_loop
+from .run_lock import run_writer_lock
 from .llm_agents import external_agent_diagnostic
 from .llm_agents import openai_agent_diagnostic
 from .llm_agents import run_llm_agent_pass
@@ -1449,32 +1450,35 @@ def choose_strategy(
     if not reason.strip():
         raise typer.BadParameter("reason cannot be empty")
     validate_run(run)
-    manifest_path = run / "run_manifest.yaml"
-    manifest = read_yaml(manifest_path)
-    artifacts = manifest["artifacts"]
-    strategy_brief = read_yaml(run / artifacts["strategy_brief"])
-    original_choice_text = (run / artifacts["human_choice"]).read_text(encoding="utf-8")
-    original_manifest_text = manifest_path.read_text(encoding="utf-8")
+    # Cross-process writer lock (Goal 35B): the human-choice + manifest-state
+    # write pair must not race a concurrent server resume on the same run.
+    with run_writer_lock(run, action="strategy choice"):
+        manifest_path = run / "run_manifest.yaml"
+        manifest = read_yaml(manifest_path)
+        artifacts = manifest["artifacts"]
+        strategy_brief = read_yaml(run / artifacts["strategy_brief"])
+        original_choice_text = (run / artifacts["human_choice"]).read_text(encoding="utf-8")
+        original_manifest_text = manifest_path.read_text(encoding="utf-8")
 
-    choice = {
-        "claim_id": strategy_brief["claim_id"],
-        "status": "selected",
-        "selected_strategy": strategy,
-        "effort": effort.value,
-        "taste_judgment": reason.strip(),
-        "continue_decision": decision.value,
-        "human_confirmed": True,
-    }
-    HumanChoice.model_validate(choice)
-    write_yaml(run / artifacts["human_choice"], choice)
-    manifest["current_state"] = _state_for_human_decision(decision)
-    write_yaml(manifest_path, manifest)
-    try:
-        validate_run(run)
-    except Exception:
-        (run / artifacts["human_choice"]).write_text(original_choice_text, encoding="utf-8")
-        manifest_path.write_text(original_manifest_text, encoding="utf-8")
-        raise
+        choice = {
+            "claim_id": strategy_brief["claim_id"],
+            "status": "selected",
+            "selected_strategy": strategy,
+            "effort": effort.value,
+            "taste_judgment": reason.strip(),
+            "continue_decision": decision.value,
+            "human_confirmed": True,
+        }
+        HumanChoice.model_validate(choice)
+        write_yaml(run / artifacts["human_choice"], choice)
+        manifest["current_state"] = _state_for_human_decision(decision)
+        write_yaml(manifest_path, manifest)
+        try:
+            validate_run(run)
+        except Exception:
+            (run / artifacts["human_choice"]).write_text(original_choice_text, encoding="utf-8")
+            manifest_path.write_text(original_manifest_text, encoding="utf-8")
+            raise
 
     project_dir = run.parents[1]
     run_id = manifest["run_id"]
@@ -1860,26 +1864,29 @@ def resolve_agent_gate(
     if decision not in {"continue", "revise", "stop"}:
         raise typer.BadParameter("decision must be continue, revise, or stop")
     validate_run(run)
-    report = resolve_llm_agent_gate(run_dir=run, decision=decision, reason=reason)
-    LLMAgentRunReport.model_validate(report)
-    manifest = read_yaml(run / "run_manifest.yaml")
-    artifacts = manifest["artifacts"]
-    loop_report = build_prover_loop_report(
-        agent_report=report,
-        strategy_brief=read_yaml(run / artifacts["strategy_brief"]),
-        human_choice=read_yaml(run / artifacts["human_choice"]),
-    )
-    ProverLoopReport.model_validate(loop_report)
-    manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"
-    manifest.setdefault("optional_artifacts", {})["prover_round_index"] = "prover_rounds/index.yaml"
-    write_yaml(run / "prover_loop.yaml", loop_report)
-    write_initial_prover_round_artifacts(
-        run_dir=run,
-        agent_report=report,
-        loop_report=loop_report,
-    )
-    write_yaml(run / "run_manifest.yaml", manifest)
-    validate_run(run)
+    # Cross-process writer lock (Goal 35B): gate resolution writes the loop +
+    # initial round artifacts and must not race a concurrent resume.
+    with run_writer_lock(run, action="gate resolution"):
+        report = resolve_llm_agent_gate(run_dir=run, decision=decision, reason=reason)
+        LLMAgentRunReport.model_validate(report)
+        manifest = read_yaml(run / "run_manifest.yaml")
+        artifacts = manifest["artifacts"]
+        loop_report = build_prover_loop_report(
+            agent_report=report,
+            strategy_brief=read_yaml(run / artifacts["strategy_brief"]),
+            human_choice=read_yaml(run / artifacts["human_choice"]),
+        )
+        ProverLoopReport.model_validate(loop_report)
+        manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"
+        manifest.setdefault("optional_artifacts", {})["prover_round_index"] = "prover_rounds/index.yaml"
+        write_yaml(run / "prover_loop.yaml", loop_report)
+        write_initial_prover_round_artifacts(
+            run_dir=run,
+            agent_report=report,
+            loop_report=loop_report,
+        )
+        write_yaml(run / "run_manifest.yaml", manifest)
+        validate_run(run)
     typer.echo(f"Resolved LLM agent human gate as {decision}")
 
 
