@@ -105,13 +105,30 @@ def load_run_snapshot(root: Path, run_dir: Path) -> dict[str, Any]:
         item["key"] for item in diagnostics if not item["required"] and not item["exists"]
     ]
 
+    # Trust split (Goal 36): parsed artifact content is TRUSTED only when the
+    # full kernel validation passed. An invalid/partial run exposes its content
+    # as diagnostic previews only — a fake source_backed / grade in a broken run
+    # must never reach consumers as peer data of validated runs.
+    trusted = validation["status"] == "valid" and not missing_required
+    if trusted:
+        trusted_artifacts = artifacts
+        diagnostic_previews: dict[str, Any] = {}
+    else:
+        trusted_artifacts = {"run_manifest": manifest}
+        diagnostic_previews = artifacts
+
     return {
         "run_dir": str(run_dir),
         "state": classify_state(validation, artifacts, missing_required),
         "validation": validation,
+        "trusted": trusted,
         "manifest": manifest,
         "artifact_paths": artifact_paths,
-        "artifacts": artifacts,
+        # Back-compat alias of trusted_artifacts: existing consumers that render
+        # snapshot["artifacts"] as truth now see only validated content.
+        "artifacts": trusted_artifacts,
+        "trusted_artifacts": trusted_artifacts,
+        "diagnostic_previews": diagnostic_previews,
         "artifact_previews": previews,
         "artifact_diagnostics": diagnostics,
         "missing_artifacts": missing_required,
