@@ -41,6 +41,7 @@ from .io import read_text
 from .literature_discovery import discover_literature as run_literature_discovery
 from .llm_agents import build_client, load_agent_context
 from .run_dashboard import write_run_dashboard
+from .run_lock import run_writer_lock
 from .stage_runner import StageError, StageRunner
 from .validators import validate_run
 
@@ -102,12 +103,13 @@ def skip_agent(run_dir: Path, agent: str, *, reason: str | None = None) -> dict:
     run_dir = Path(run_dir)
     if agent not in ON_DEMAND_AGENTS:
         raise ValueError(f"cannot skip agent {agent!r}; on-demand agents: {ON_DEMAND_AGENTS}")
-    validate_run(run_dir)
-    if not has_status(run_dir):
-        init_agent_run_status(run_dir)
-    set_agent_status(run_dir, agent, "skipped", error_summary=reason)
-    validate_run(run_dir)
-    _refresh_dashboard(run_dir)
+    with run_writer_lock(run_dir, action="skip"):
+        validate_run(run_dir)
+        if not has_status(run_dir):
+            init_agent_run_status(run_dir)
+        set_agent_status(run_dir, agent, "skipped", error_summary=reason)
+        validate_run(run_dir)
+        _refresh_dashboard(run_dir)
     return {"agent": agent, "status": "skipped"}
 
 
@@ -126,7 +128,7 @@ def run_single_agent(
     Fails closed: a mutation/validation error rolls the run back to its previous
     valid state and records the agent as ``failed`` (the previous valid artifact
     is preserved). Never upgrades any mathematical status -- ``validate_run`` is
-    the gate.
+    the gate. Holds the cross-process run writer lock while mutating (Goal 35B).
     """
 
     run_dir = Path(run_dir)
@@ -134,6 +136,28 @@ def run_single_agent(
         raise ValueError(
             f"cannot run agent {agent!r}; on-demand agents: {ON_DEMAND_AGENTS}"
         )
+    with run_writer_lock(run_dir, action="agent run"):
+        return _run_single_agent_locked(
+            run_dir,
+            agent,
+            provider=provider,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+            client=client,
+        )
+
+
+def _run_single_agent_locked(
+    run_dir: Path,
+    agent: str,
+    *,
+    provider: str,
+    model: str,
+    api_key_env: str,
+    external_agent_command_env: str,
+    client,
+) -> dict:
     # Precondition: the run must already be kernel-valid.
     validate_run(run_dir)
     if not has_status(run_dir):

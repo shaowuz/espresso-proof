@@ -29,6 +29,7 @@ from typing import Any
 
 from .agent_runner import ON_DEMAND_AGENTS, run_single_agent, skip_agent
 from .orchestrator import orchestrate_run, resume_run
+from .run_events import append_event
 from .run_dashboard import (
     render_run_dashboard,
     render_evidence_panel_html,
@@ -198,6 +199,7 @@ class Workbench:
                 job_id, state="done", finished_at=_now(), result=result,
                 duration_seconds=round(_time.monotonic() - t0, 2),
             )
+            self._append_job_event(job_id, "job_done")
         except Exception as exc:  # noqa: BLE001 - surface a friendly error
             raw = str(exc)[:400] or "action failed"
             self._set_job(
@@ -210,6 +212,25 @@ class Workbench:
                 error=_friendly_error(raw),
                 error_detail=raw,
             )
+            self._append_job_event(job_id, "job_failed", detail=raw)
+
+    def _append_job_event(self, job_id: str, kind: str, *, detail: str = "") -> None:
+        """Record job completion on the run's diagnostic events.jsonl timeline
+        (Goal 35B). Best-effort: a job without a resolvable run, or any timeline
+        write problem, never affects the job result."""
+
+        try:
+            job = self.get_job(job_id)
+            run_id = job.get("run_id")
+            if not run_id:
+                return
+            run_dir = self.resolve_run(run_id)
+        except Exception:  # noqa: BLE001 - diagnostics only
+            return
+        stage = job.get("action") or ""
+        if job.get("agent"):
+            stage = f"{stage}:{job['agent']}"
+        append_event(run_dir, kind, stage=stage, detail=detail)
 
     # -- actions -------------------------------------------------------------
     def _provider_for_mode(self, mode: str | None) -> str:

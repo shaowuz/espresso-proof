@@ -142,12 +142,23 @@ def test_ground_source_failure_rolls_back_run(tmp_path: Path, monkeypatch) -> No
     from espresso_proof import source_grounding_stage
     from espresso_proof.stage_runner import StageError
 
+    from espresso_proof.run_events import EVENTS_FILENAME
+
     run_dir = _hodge_run(tmp_path)
     src = tmp_path / "outside_src.txt"  # outside run_dir: not part of the snapshot
     src.write_text(THM, encoding="utf-8")
-    before = {
-        p.relative_to(run_dir): p.read_bytes() for p in run_dir.rglob("*") if p.is_file()
-    }
+
+    # The diagnostic events.jsonl timeline is append-only BY DESIGN (Goal 35B):
+    # it records the failed stage and is intentionally never rolled back, so it
+    # is excluded from the byte-identity comparison.
+    def _files(root: Path) -> dict:
+        return {
+            p.relative_to(root): p.read_bytes()
+            for p in root.rglob("*")
+            if p.is_file() and p.name != EVENTS_FILENAME
+        }
+
+    before = _files(run_dir)
 
     def boom(*, run_dir: Path, theorem_extraction_path: Path) -> None:
         # Simulate a mid-grounding crash that leaves a partial artifact behind.
@@ -162,9 +173,7 @@ def test_ground_source_failure_rolls_back_run(tmp_path: Path, monkeypatch) -> No
             title="Injected failure source",
             authors=["A. Author"],
         )
-    after = {
-        p.relative_to(run_dir): p.read_bytes() for p in run_dir.rglob("*") if p.is_file()
-    }
+    after = _files(run_dir)
     # Byte-identical restore: no partial source_grounding.yaml, no
     # theorem_extraction.yaml, no manifest pointer left behind.
     assert after == before

@@ -29,6 +29,7 @@ from .finite_group_verifier import (
 )
 from .io import read_yaml, write_yaml
 from .models import ProofVerificationReport, ScopedVerificationRequests
+from .run_lock import run_writer_lock
 from .symbolic_identity import verify_ring_identity_mod
 
 # Auto-wiring caps: stricter than the manual CLI caps because auto-wiring runs
@@ -223,9 +224,18 @@ def append_verification_entries(run_dir: Path, entries: list[dict]) -> dict:
 
     Binds claim_id / run_id to the run; duplicate entry ids are rejected so a
     re-run cannot silently double-count a checked instance. Fails closed: the
-    report is validated before writing, so a malformed entry never lands."""
+    report is validated before writing, so a malformed entry never lands.
+
+    Holds the cross-process run writer lock for the whole read-modify-write, so
+    two concurrent appends (CLI verifier commands, tool adapters) cannot lose
+    each other's entries (Goal 35B)."""
 
     run_dir = Path(run_dir)
+    with run_writer_lock(run_dir, action="verification append"):
+        return _append_verification_entries_locked(run_dir, entries)
+
+
+def _append_verification_entries_locked(run_dir: Path, entries: list[dict]) -> dict:
     manifest_path = run_dir / "run_manifest.yaml"
     manifest = read_yaml(manifest_path)
     claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])

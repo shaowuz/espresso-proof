@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .io import read_yaml
 from .llm_agents import LLMClient, append_prover_loop_round
+from .run_lock import run_writer_lock
 from .validators import validate_run
 
 # How many consecutive rounds with an identical blocker set count as no-progress.
@@ -127,9 +128,37 @@ def continue_prover_loop(
     Returns ``{"loop_report", "stop_reason", "rounds_run", "notes"}``. Requires
     the run to already have a resolved human gate + ``prover_loop.yaml`` (the
     orchestrator's resume step or the CLI ``resolve-agent-gate`` builds these).
+
+    Holds the cross-process run writer lock (re-entrant under ``resume_run``),
+    so two concurrent loop continuations cannot interleave or duplicate prover
+    rounds (Goal 35B).
     """
 
     run_dir = Path(run_dir)
+    with run_writer_lock(run_dir, action="prover loop"):
+        return _continue_prover_loop_locked(
+            run_dir=run_dir,
+            provider=provider,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+            reviewer_set=reviewer_set,
+            max_rounds=max_rounds,
+            client=client,
+        )
+
+
+def _continue_prover_loop_locked(
+    *,
+    run_dir: Path,
+    provider: str,
+    model: str,
+    api_key_env: str,
+    external_agent_command_env: str,
+    reviewer_set: str,
+    max_rounds: int | None,
+    client: LLMClient | None,
+) -> dict:
     validate_run(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     loop_path = manifest.get("optional_artifacts", {}).get("prover_loop")

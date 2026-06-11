@@ -32,6 +32,7 @@ from .llm_agents import (
 from .mock_pipeline import run_mock_critique
 from .prover_loop_driver import continue_prover_loop
 from .run_dashboard import write_run_dashboard
+from .run_lock import run_writer_lock
 from .stage_runner import StageRunner
 from .models import (
     HumanChoice,
@@ -336,7 +337,24 @@ def _resolve_and_build_loop(run_dir: Path, *, decision: str, reason: str, human_
     validate_run(run_dir)
 
 
-def resume_run(
+def resume_run(*, run_dir: Path, **kwargs) -> str:
+    """Record a human choice, then run a BOUNDED Prover<->Reviewer loop and memo.
+
+    The human gate may direct ranking / time allocation only — it can NEVER
+    upgrade proof / source / evidence status (the kernel re-validates throughout).
+    Idempotent: a run already at COMPLETED_MEMO is not re-run. Returns the memo.
+
+    Holds the cross-process run writer lock for the whole resume, so a second
+    concurrent resume (CLI or server) serializes or fails with a friendly
+    message instead of interleaving prover rounds (Goal 35B).
+    """
+
+    run_dir = Path(run_dir)
+    with run_writer_lock(run_dir, action="resume"):
+        return _resume_run_locked(run_dir=run_dir, **kwargs)
+
+
+def _resume_run_locked(
     *,
     run_dir: Path,
     selected_strategy: str,
@@ -350,13 +368,6 @@ def resume_run(
     reviewer_set: str = "espresso",
     prover_client=None,
 ) -> str:
-    """Record a human choice, then run a BOUNDED Prover<->Reviewer loop and memo.
-
-    The human gate may direct ranking / time allocation only — it can NEVER
-    upgrade proof / source / evidence status (the kernel re-validates throughout).
-    Idempotent: a run already at COMPLETED_MEMO is not re-run. Returns the memo.
-    """
-
     from .memo import build_concise_memo  # local import to avoid a cycle
 
     run_dir = Path(run_dir)
