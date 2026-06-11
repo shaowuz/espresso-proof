@@ -97,7 +97,7 @@ class Workbench:
             return self._run_locks.setdefault(run_id, threading.Lock())
 
     # -- jobs ----------------------------------------------------------------
-    def _new_job(self, *, run_id: str, action: str, agent: str | None) -> str:
+    def _new_job(self, *, run_id: str | None, action: str, agent: str | None) -> str:
         job_id = uuid.uuid4().hex
         with self._jobs_lock:
             self._jobs[job_id] = {
@@ -124,32 +124,42 @@ class Workbench:
                 raise WorkbenchError(404, "job not found")
             return dict(job)
 
-    def _run_job(self, job_id: str, run_id: str, work) -> None:
-        """Execute one action under the per-run lock, recording job state.
+    def _run_job(self, job_id: str, work, *, lock: threading.Lock | None = None) -> None:
+        """Execute one action on a background thread, recording job state.
 
-        Fails closed: any exception (including a kernel validation error) is
-        captured as a human-readable job error; the run itself is preserved by
-        the underlying transactional action.
+        Holds ``lock`` (a per-run lock) while working when given; create-run has
+        no run yet, so it runs without one. Fails closed: any exception (incl. a
+        kernel validation error or model latency failure) is captured as a
+        human-readable job error; the run itself is preserved by the underlying
+        transactional action.
         """
 
         self._set_job(job_id, state="running")
-        lock = self._run_lock(run_id)
-        with lock:
-            try:
+        try:
+            if lock is not None:
+                with lock:
+                    result = work()
+            else:
                 result = work()
-                self._set_job(
-                    job_id, state="done", finished_at=_now(), result=result
-                )
-            except Exception as exc:  # noqa: BLE001 - surface a friendly error
-                self._set_job(
-                    job_id,
-                    state="failed",
-                    finished_at=_now(),
-                    error=str(exc)[:400] or "action failed",
-                )
+            self._set_job(job_id, state="done", finished_at=_now(), result=result)
+        except Exception as exc:  # noqa: BLE001 - surface a friendly error
+            self._set_job(
+                job_id,
+                state="failed",
+                finished_at=_now(),
+                error=str(exc)[:400] or "action failed",
+            )
 
     # -- actions -------------------------------------------------------------
-    def create_run(self, text: str, *, project: str | None = None) -> dict[str, Any]:
+    def start_create_run(self, text: str, *, project: str | None = None) -> dict[str, Any]:
+        """Validate input synchronously, then create the run on a BACKGROUND job.
+
+        The HTTP request returns immediately with a ``job_id`` — it never waits on
+        model latency (critical for ``--provider external``, where the front-half
+        + prover agents call a real model). The UI polls ``GET /api/jobs/{id}``
+        and redirects to the run when the job result carries a ``run_id``.
+        """
+
         text = (text or "").strip()
         if not text:
             raise WorkbenchError(400, "empty problem text")
@@ -158,7 +168,17 @@ class Workbench:
         project = (project or "workbench").strip() or "workbench"
         if not _PROJECT_RE.match(project):
             raise WorkbenchError(400, "invalid project name")
-        # Write the problem to a confined input file, then run the fast core pass.
+        job_id = self._new_job(run_id=None, action="create", agent=None)
+
+        def work() -> dict[str, Any]:
+            return self._do_create_run(text, project)
+
+        threading.Thread(target=self._run_job, args=(job_id, work), daemon=True).start()
+        return {"job_id": job_id}
+
+    def _do_create_run(self, text: str, project: str) -> dict[str, Any]:
+        """The actual fast-core run (runs inside the background job)."""
+
         inbox = self.root / "_inbox"
         inbox.mkdir(parents=True, exist_ok=True)
         input_path = inbox / f"{uuid.uuid4().hex}.md"
@@ -179,7 +199,6 @@ class Workbench:
             "run_id": run_dir.name,
             "project": run_dir.parents[1].name,
             "state": result["state"],
-            "status": self.status(run_dir.name),
         }
 
     def start_agent(self, run_id: str, agent: str) -> dict[str, Any]:
@@ -200,7 +219,8 @@ class Workbench:
             return result
 
         threading.Thread(
-            target=self._run_job, args=(job_id, run_id, work), daemon=True
+            target=self._run_job, args=(job_id, work),
+            kwargs={"lock": self._run_lock(run_id)}, daemon=True,
         ).start()
         return {"job_id": job_id, "agent": agent}
 
@@ -235,7 +255,8 @@ class Workbench:
             return {"continued": strategy}
 
         threading.Thread(
-            target=self._run_job, args=(job_id, run_id, work), daemon=True
+            target=self._run_job, args=(job_id, work),
+            kwargs={"lock": self._run_lock(run_id)}, daemon=True,
         ).start()
         return {"job_id": job_id, "strategy": strategy}
 
@@ -369,9 +390,11 @@ def _make_handler(workbench: Workbench):
                 parts = self._parts()
                 body = self._read_json()
                 if parts == ["api", "runs"]:
+                    # Returns a job_id immediately; the run happens on a background
+                    # thread so the request never waits on model latency.
                     self._send_json(
-                        workbench.create_run(body.get("text", ""), project=body.get("project")),
-                        status=201,
+                        workbench.start_create_run(body.get("text", ""), project=body.get("project")),
+                        status=202,
                     )
                     return
                 if len(parts) == 5 and parts[:2] == ["api", "runs"] and parts[3] == "agents":
@@ -445,12 +468,22 @@ const go=document.getElementById("go"),err=document.getElementById("err");
 go.addEventListener("click",async()=>{{
   const text=document.getElementById("text").value.trim();
   if(!text){{err.textContent="Enter a claim first.";return;}}
-  go.disabled=true;go.textContent="Working…";err.textContent="";
+  go.disabled=true;go.textContent="Starting run…";err.textContent="";
   try{{
+    // Returns a job_id immediately; the run happens in the background so we never
+    // block on model latency. Poll the job, then open the run when it is ready.
     const r=await fetch("/api/runs",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{text}})}});
     const d=await r.json();
     if(!r.ok)throw new Error(d.error||"failed");
-    location.href="/run/"+encodeURIComponent(d.run_id);
+    const jobId=d.job_id;
+    for(let i=0;i<900;i++){{
+      await new Promise(res=>setTimeout(res,800));
+      let j;
+      try{{j=await (await fetch("/api/jobs/"+encodeURIComponent(jobId))).json();}}catch{{continue;}}
+      if(j.state==="done"&&j.result&&j.result.run_id){{location.href="/run/"+encodeURIComponent(j.result.run_id);return;}}
+      if(j.state==="failed")throw new Error(j.error||"run failed");
+    }}
+    throw new Error("timed out starting the run");
   }}catch(e){{err.textContent=e.message;go.disabled=false;go.textContent="Run Espresso";}}
 }});
 </script></body></html>"""
