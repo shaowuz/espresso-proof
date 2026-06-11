@@ -1426,7 +1426,15 @@ def _human_feedback_scenario(
 
 
 def _vague_claim(text: str, run_id: str) -> dict[str, object]:
-    claim = _base_claim(text, ["does something", "nice", "mirror"])
+    claim = _base_claim(text, [])
+    # An arbitrary / not-yet-understood claim has NO determined hypotheses. Do not
+    # leak the algebraic-geometry placeholder triple (smooth / projective / base
+    # field C) or stale ambiguous-term junk onto a generic claim — the claim card
+    # would otherwise show hypotheses that are not in this problem at all. The
+    # ledger records that the hypotheses are still missing/unclear.
+    claim["objects"] = ["not yet determined"]
+    claim["hypotheses"] = []
+    claim["ambiguous_terms"] = []
     claim["conclusion"] = "Unclear conclusion."
     claim_id = claim["id"]
     return {
