@@ -100,3 +100,59 @@ def test_run_dashboard_is_read_only_for_yaml_artifacts(tmp_path: Path) -> None:
         for path in run_dir.rglob("*.yaml")
     }
     assert after == before
+
+
+# --- review-required regression tests (UI rewrite) --------------------------
+
+
+def test_dashboard_escapes_script_breakout_in_route_text(tmp_path: Path) -> None:
+    """Stored-XSS guard: artifact free text containing </script> must not be able
+    to terminate the inline script block or inject live HTML (reviewer BLOCKER).
+    The embedded JSON escapes <, >, & to \\uXXXX."""
+    from espresso_proof.io import write_yaml
+
+    run_dir = _fresh_run(tmp_path)
+    brief_path = run_dir / "strategy_brief.yaml"
+    brief = read_yaml(brief_path)
+    payload = "</script><img src=x onerror=alert(1)>"
+    for route in brief.get("top_strategies") or []:
+        route["why_this_route"] = f"{payload} plausible idea"
+    write_yaml(brief_path, brief)
+    html = render_run_dashboard(run_dir)
+    assert "</script><img" not in html
+    assert "onerror=alert(1)>" not in html
+    # the payload survives only in escaped form
+    assert "\\u003c/script\\u003e" in html
+
+
+def test_dashboard_unclear_counterexample_never_admissible(tmp_path: Path) -> None:
+    """Display can never be looser than the kernel: a counterexample with
+    satisfies_all_claim_hypotheses == 'unclear' must NOT render as an admissible
+    refutation, even if it carries refutes_claim (reviewer BLOCKER)."""
+    from espresso_proof.io import write_yaml
+
+    run_dir = _fresh_run(tmp_path)
+    ce_path = run_dir / "counterexamples.yaml"
+    ce = read_yaml(ce_path)
+    claim_id = ce.get("claim_id")
+    ce["tests"] = [
+        {
+            "id": "cx_unclear",
+            "operator_id": "op_manual",
+            "example_id": "ex_unclear",
+            "satisfies_all_claim_hypotheses": "unclear",
+            "target": "theorem",
+            "result": "failed",
+            "refutes_claim": True,
+            "refutes_step_only": False,
+            "exposes_missing_hypothesis": False,
+            "explanation": "A candidate counterexample with unclear hypothesis match.",
+        }
+    ]
+    ce["claim_id"] = claim_id
+    write_yaml(ce_path, ce)
+    html = render_run_dashboard(run_dir)
+    assert "admissible checked counterexample" not in html
+    assert "hypothesis match unclear" in html
+    # the route-card pressure line must not claim a refutation either
+    assert "A checked counterexample refutes the claim" not in html
