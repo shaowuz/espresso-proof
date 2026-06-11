@@ -476,6 +476,18 @@ def resume_run(
     memo = build_concise_memo(run_dir)
     write_run_dashboard(run_dir)
     if loop_summary is not None:
-        # Controlled enum+integer line only (no model free text; no scrub needed).
-        memo += f"\n\nLoop: ran {loop_summary[0]} round(s); stopped: {loop_summary[1]}"
+        # Controlled wording only (no model free text; no scrub needed). The stop
+        # reason renders as plain product copy, never the raw token (Goal 31).
+        from .descriptions import loop_stop_phrase
+
+        rounds_run, stop_reason = loop_summary
+        if rounds_run == 0 and str(stop_reason).startswith("budget"):
+            memo += (
+                "\n\nProver loop: the approved budget allowed no further rounds."
+            )
+        else:
+            memo += (
+                f"\n\nProver loop: ran {rounds_run} round(s); "
+                f"stopped because {loop_stop_phrase(stop_reason)}."
+            )
     return memo

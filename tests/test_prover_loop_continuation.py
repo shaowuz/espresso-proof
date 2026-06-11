@@ -273,7 +273,9 @@ def test_resume_runs_multiple_rounds_and_memo_is_honest(tmp_path: Path) -> None:
     validate_run(run_dir)
     loop = read_yaml(run_dir / "prover_loop.yaml")
     assert loop["budget"]["rounds_used"] >= 2  # ran >1 round
-    assert "Loop: ran" in memo
+    assert "Prover loop: ran" in memo
+    assert "stopped because" in memo
+    assert "budget_rounds" not in memo  # stop reason renders as words (Goal 31)
     lower = memo.lower()
     for phrase in _FORBIDDEN + ("progress", "improved", "closer"):
         assert phrase not in lower

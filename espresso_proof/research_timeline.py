@@ -117,11 +117,13 @@ def build_timeline(run_dir: Path) -> list[dict[str, Any]]:
     for agent in ("literature", "examples", "counterexamples", "failure_patterns"):
         agent_events(agent)
 
-    # Route continuation (human choice).
+    # Route continuation (human choice). Effort renders as words (Goal 31).
+    from .descriptions import effort_phrase
+
     selected = human_choice.get("selected_strategy")
     if selected and selected != "none":
         effort = human_choice.get("effort") or "quick_test"
-        add(None, f"Route continued with {effort} effort.", "info")
+        add(None, f"Route continued with {effort_phrase(effort)} effort.", "info")
 
     # Stable order: by timestamp where present, otherwise keep insertion order.
     indexed = list(enumerate(events))

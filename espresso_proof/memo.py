@@ -19,6 +19,7 @@ from pathlib import Path
 from .descriptions import (
     describe_grade,
     describe_proof_language,
+    effort_phrase,
     evidence_phrase,
     judgment_tier_phrase,
     objection_phrase,
@@ -219,12 +220,19 @@ def build_concise_memo(run_dir: Path) -> str:
     )
     lines.append(f"Proof state: {describe_proof_language(proof_status)}")
     # Provenance in plain mathematical-evidence wording (never raw status tokens).
+    # Gap text comes from artifact free text and may carry internal tokens —
+    # translate to the product vocabulary (same rewrite as the dashboard).
     evidence_summary = sorted({evidence_phrase(s) for s in source_statuses})
+    shown_gaps = [
+        str(g).replace("source_backed", "reference-supported").rstrip(".")
+        for g in source_gaps
+    ]
     lines.append(
-        "Source: gaps="
-        + (", ".join(source_gaps) if source_gaps else "none")
-        + "; evidence so far: "
+        "Source gaps: "
+        + (", ".join(shown_gaps) if shown_gaps else "none")
+        + ". Evidence so far: "
         + ("; ".join(evidence_summary) if evidence_summary else "none recorded")
+        + "."
     )
     # Proof-route step table (Goal 24): one row per local step, separating local
     # step evidence from the whole-claim/route status above. Built from validated
@@ -296,8 +304,8 @@ def build_concise_memo(run_dir: Path) -> str:
                 note = " — in progress; not yet evidence"
             lines.append(f"  - {row['title']}: {row['status_word']}{note}")
         lines.append(
-            "  (Only a 'Done' agent's artifact counts as evidence; the kernel still "
-            "validates it. Missing/running/skipped/failed agents are not evidence.)"
+            "  (Only a 'Done' agent's results count as evidence; the kernel still "
+            "checks them. Missing/running/skipped/failed agents are not evidence.)"
         )
 
     lines.append("")
@@ -309,7 +317,7 @@ def build_concise_memo(run_dir: Path) -> str:
         for index, route in enumerate(top[:3], start=1):
             lines.append(
                 f"  {index}. {route.get('title')} "
-                f"[score {route.get('score')}, effort {route.get('estimated_effort')}]"
+                f"[score {route.get('score')} / 100, effort: {effort_phrase(route.get('estimated_effort'))}]"
             )
             if route.get("main_risk"):
                 lines.append(f"     risk: {route.get('main_risk')}")
@@ -341,10 +349,13 @@ def build_concise_memo(run_dir: Path) -> str:
             lines.append("")
             lines.append("Mathematical judgment (advisory risks / next checks — not a proof):")
             for f in findings:
+                # kind / recommended_action are internal tokens; render as words.
+                kind = str(f.get("kind") or "").replace("_", " ")
+                action = str(f.get("recommended_action") or "").replace("_", " ")
                 lines.append(
-                    f"  {judgment_tier_phrase(f.get('tier'))}: {f.get('kind')} "
+                    f"  {judgment_tier_phrase(f.get('tier'))}: {kind} "
                     f"({f.get('subject')}): {f.get('explanation')} "
-                    f"-> {f.get('recommended_action')}"
+                    f"-> {action}"
                 )
 
     # Failure pattern audit (advisory): matched risk shapes. Never a refutation
@@ -356,9 +367,11 @@ def build_concise_memo(run_dir: Path) -> str:
             lines.append("")
             lines.append("Failure patterns matched (advisory; not a refutation, not a proof):")
             for m in pmatches:
+                # pattern ids are internal tokens; render as words (Goal 31).
+                pattern = str(m.get("pattern_id") or "pattern").replace("_", " ")
                 lines.append(
                     f"  {objection_phrase(m.get('tier'))} "
-                    f"({m.get('pattern_id')}): {m.get('explanation')}"
+                    f"({pattern}): {m.get('explanation')}"
                 )
             # Audited-tier effect: ranking / time-allocation guidance (advisory
             # weight only; never changes a score, grade, or status).
@@ -383,9 +396,12 @@ def build_concise_memo(run_dir: Path) -> str:
             lines.append("")
             lines.append("Memory from prior runs (advisory; never changes status):")
             for m in matched:
+                # recommended_use / type are internal tokens; render as words.
+                use = str(m.get("recommended_use") or "").replace("_", " ")
+                kind = str(m.get("type") or "").replace("_", " ")
                 lines.append(
-                    f"  [{m.get('recommended_use')}] {m.get('summary')} "
-                    f"({m.get('type')}; {m.get('relevance_reason')})"
+                    f"  [{use}] {m.get('summary')} "
+                    f"({kind}; {m.get('relevance_reason')})"
                 )
 
     # Proof verification bridge: scoped machine-verified instances only. NEVER a
@@ -438,8 +454,8 @@ def build_concise_memo(run_dir: Path) -> str:
 
     lines.append("")
     lines.append(
-        "Note: artifact-backed memo; an assessment is not a proof. "
-        "Full detail: `espresso inspect --run <dir>`."
+        "Note: this memo reflects the run's recorded results after safety validation; "
+        "an assessment is not a proof. Full detail: `espresso inspect --run <dir>`."
     )
     # Display-layer safety: redact any global proof-complete overclaim that an
     # echoed free-text artifact field (objection / risk / explanation / summary)

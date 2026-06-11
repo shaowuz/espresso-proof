@@ -717,7 +717,7 @@ def test_memo_renders_compact_graded_sections(tmp_path: Path) -> None:
     out = result.output
     assert "ESPRESSO MEMO" in out
     assert "Verdict:" in out
-    assert "Source:" in out
+    assert "Source gaps:" in out
     assert "Top routes:" in out
     assert "Next cheapest test:" in out
     # proof state is rendered in concrete English, not the raw enum.
