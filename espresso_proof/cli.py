@@ -179,6 +179,7 @@ def orchestrate(
     run_auto_wire_verifications: bool = typer.Option(False, "--auto-wire-verifications", help="Run the strategy/prover stage's explicit scoped finite/computational checks (earn instance_checked) before the loop (resume)."),
     run_lit_scout: bool = typer.Option(False, "--literature-scout", help="Run the LLM Literature Scout (candidate sources per proof step) before the loop (resume)."),
     auto_ground: Path | None = typer.Option(None, "--auto-ground", file_okay=False, help="Local corpus directory: auto resolve + ground a source from it before the loop (resume; fail-closed)."),
+    fast: bool = typer.Option(False, "--fast", help="Fast core pass: show an initial claim judgment + preliminary routes quickly; DEFER literature/examples/counterexamples to on-demand 'run-agent' (fresh run only)."),
 ) -> None:
     """Run the Core Flow end-to-end for an arbitrary claim, stopping at the human gate.
 
@@ -282,14 +283,79 @@ def orchestrate(
         external_agent_command_env=external_agent_command_env,
         reviewer_set=reviewer_set,
         literature_mode=literature_mode,
+        fast=fast,
     )
     typer.echo(f"Wrote run artifacts to {result['run_dir']}")
     typer.echo(f"Dashboard: {result['dashboard']}")
     typer.echo(f"State: {result['state']}")
     typer.echo(f"Human gate: {result['human_gate'].get('status', 'unknown')}")
+    if fast:
+        typer.echo(
+            "Fast core pass: routes are PRELIMINARY. Run evidence agents on demand:\n"
+            f"  espresso run-agent --run {result['run_dir']} --agent examples\n"
+            f"  espresso run-agent --run {result['run_dir']} --agent counterexamples\n"
+            f"  espresso run-agent --run {result['run_dir']} --agent literature\n"
+            f"  espresso run-agent --run {result['run_dir']} --agent failure-patterns"
+        )
     typer.echo(
         f"Resume with: espresso orchestrate --resume {result['run_dir']} "
         "--select-strategy <id> [--effort <mode>]"
+    )
+
+
+@app.command("run-agent")
+def run_agent_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    agent: str = typer.Option(..., "--agent", help="examples | counterexamples | literature | failure-patterns"),
+    skip: bool = typer.Option(False, "--skip", help="Mark this agent skipped (contributes no evidence) instead of running it."),
+    reason: str | None = typer.Option(None, "--reason", help="Optional note recorded when skipping."),
+    provider: str = typer.Option("stub", "--provider"),
+    model: str = typer.Option("gpt-4.1", "--model"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND", "--external-agent-command-env"
+    ),
+) -> None:
+    """Run (or skip) ONE evidence agent on demand and update agent_run_status.yaml.
+
+    Writes only that agent's artifact, never rewrites unrelated artifacts, records
+    retries, and fails closed (a failed run keeps the previous valid run intact).
+    The kernel validates the whole run after the agent; nothing here upgrades
+    proof/source/evidence/grade/claim status. Run agents in any order or in
+    parallel processes -- the final valid state is the same.
+    """
+    from .agent_runner import ON_DEMAND_AGENTS, run_single_agent, skip_agent
+
+    # Accept the hyphenated CLI spelling for the failure-pattern audit.
+    agent_key = "failure_patterns" if agent in {"failure-patterns", "failure_patterns"} else agent
+    if agent_key not in ON_DEMAND_AGENTS:
+        raise typer.BadParameter(
+            "--agent must be one of: examples, counterexamples, literature, failure-patterns"
+        )
+    if provider not in {"stub", "openai", "external"}:
+        raise typer.BadParameter("provider must be stub, openai, or external")
+
+    if skip:
+        skip_agent(run, agent_key, reason=reason)
+        typer.echo(f"Agent {agent_key}: skipped (contributes no evidence).")
+        return
+    result = run_single_agent(
+        run,
+        agent_key,
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+    )
+    if result["status"] == "failed":
+        typer.echo(
+            f"Agent {agent_key}: FAILED and rolled back (previous valid run preserved). "
+            f"Recorded as 'failed'. {result.get('error', '')}"
+        )
+        raise typer.Exit(code=1)
+    typer.echo(
+        f"Agent {agent_key}: done. Wrote only its artifact; updated agent_run_status.yaml. "
+        "The kernel re-validated the run (no status upgraded)."
     )
 
 

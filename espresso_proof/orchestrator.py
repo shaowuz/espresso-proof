@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .agent_run_status import init_agent_run_status
 from .front_half_agents import run_front_half_agent_pass, write_front_half_run
 from .validation.front_half import validate_front_half_run
 from .io import read_text, read_yaml, write_yaml
@@ -48,6 +49,18 @@ ORCHESTRATION_STATES: list[str] = [
     "LITERATURE_DONE",
     "WAITING_LLM_AGENT_HUMAN_GATE",
     "COMPLETED_MEMO",
+]
+
+# Goal 27 fast core pass: the minimum front-half stages needed to show an initial
+# claim judgment + preliminary routes + a conservative grade, WITHOUT waiting for
+# the optional evidence agents (literature / examples / counterexamples / failure-
+# pattern audit). Those run later, on demand or in parallel, via ``run-agent``.
+FAST_CORE_STAGES: list[str] = [
+    "understanding_claim",  # S1: locked_claim + hypothesis_ledger (+ claim_precision)
+    "source_theorem",       # S7: candidate source matching (candidate-only)
+    "regrade",              # evidence-aware grade recompute (before strategy)
+    "strategy",             # S5: strategy generator + grader + brief
+    "grade_memory_memo",    # S8: grade refresh + memory + concise answer
 ]
 
 
@@ -112,6 +125,7 @@ def orchestrate_run(
     agent_network_preflight: bool = False,
     run_dir: Path | None = None,
     front_half_client=None,
+    fast: bool = False,
 ) -> dict:
     """Drive a run from a fresh claim to the human gate, validating each stage.
 
@@ -158,6 +172,13 @@ def orchestrate_run(
     else:
         runner = StageRunner(run_dir)
 
+    # Goal 27 fast core pass: run only the FAST_CORE_STAGES in the front half and
+    # DEFER literature discovery + the evidence stages (examples / counterexamples),
+    # so the user sees an initial judgment + preliminary routes quickly. The
+    # deferred agents run later via ``run-agent``.
+    front_half_stages = FAST_CORE_STAGES if fast else None
+    ran_front_half_agents = front_half != "mock" or front_half_client is not None
+
     # Stage 1 — front-half agents (S1–S8). Skipped when front_half == "mock".
     if not _reached(run_dir, "FRONT_HALF_DONE"):
         def _front_half() -> None:
@@ -169,7 +190,9 @@ def orchestrate_run(
                     api_key_env=api_key_env,
                     external_agent_command_env=external_agent_command_env,
                 )
-                pass_report = run_front_half_agent_pass(run_dir=run_dir, client=client)
+                pass_report = run_front_half_agent_pass(
+                    run_dir=run_dir, client=client, stages=front_half_stages
+                )
             # Persist the durable audit-only front_half_run.yaml inside the
             # transaction (rolled back with the stage if validation fails).
             write_front_half_run(
@@ -193,8 +216,15 @@ def orchestrate_run(
     project_dir = run_dir.parents[1]
 
     # Stage 2 — literature discovery (candidate references only; validated).
+    # Goal 27: in the fast core pass literature is a DEFERRED evidence agent --
+    # skip discovery here (the scaffolded candidate-only literature_review stays
+    # valid) and just advance lifecycle state. It is run later via
+    # ``run-agent --agent literature``; until then the board marks it not_run and
+    # the dashboard shows no reference-supported evidence.
     if not _reached(run_dir, "LITERATURE_DONE"):
         def _literature() -> None:
+            if fast:
+                return
             literature = run_literature_discovery(
                 project_dir=project_dir,
                 locked_claim_path=run_dir / artifacts["locked_claim"],
@@ -255,6 +285,22 @@ def orchestrate_run(
             validate=lambda: validate_run(run_dir),
             state_after="WAITING_LLM_AGENT_HUMAN_GATE",
         )
+
+    # Goal 27 — initialize the per-agent run-status board. In the fast core pass
+    # only claim_understanding has run; the evidence agents are not_run (to be run
+    # on demand / in parallel). In a full pass literature + the evidence stages
+    # already ran, so they are recorded done; the failure-pattern audit runs later
+    # (at resume) and stays not_run here. The board never upgrades status -- it is
+    # process audit only and validate_run re-checks it.
+    if not (run_dir / "agent_run_status.yaml").exists():
+        done = {"claim_understanding"}
+        if not fast:
+            done.add("literature")
+            if ran_front_half_agents:
+                done.add("examples")
+                done.add("counterexamples")
+        init_agent_run_status(run_dir, done=done)
+        validate_run(run_dir)
 
     final_manifest = read_yaml(run_dir / "run_manifest.yaml")
     agent_run = read_yaml(run_dir / "llm_agent_run.yaml")

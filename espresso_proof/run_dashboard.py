@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .agent_run_status import display_rows as _agent_display_rows, evidence_incomplete as _evidence_incomplete
 from .io import read_yaml
 from .proof_language import scrub_proof_language
 from .route_table import ROUTE_TABLE_COLUMNS, build_route_step_rows
@@ -46,6 +47,7 @@ def render_run_dashboard(run_dir: Path) -> str:
     initial = route_data.get(selected_route) or next(iter(route_data.values()), _fallback_route())
     command = _command_for(run_dir, selected_route, initial["effort"], completed=state["completed"])
     review = _review_result(state)
+    agents_html = _agent_cards_section(run_dir, state)
 
     # Display-layer safety: redact any global proof-complete overclaim that an
     # echoed free-text artifact field might carry into the rendered HTML. Typed
@@ -60,6 +62,8 @@ def render_run_dashboard(run_dir: Path) -> str:
             judgment_cards=_judgment_cards(state),
             proof_state_html=_proof_state_section(state),
             route_table_html=_route_table_section(state),
+            agents_html=agents_html,
+            routes_preliminary=_evidence_incomplete(run_dir),
             routes=list(route_data.values()),
             initial=initial,
             route_json=json.dumps(route_data, ensure_ascii=False),
@@ -176,6 +180,83 @@ def _route_table_section(state: dict[str, Any]) -> str:
     return f"""<section>
   <h2>Proof-Route Steps</h2>
   <table class="route-table"><thead><tr>{header}</tr></thead><tbody>{body_rows}</tbody></table>
+  <div class="note">{_h(note)}</div>
+</section>"""
+
+
+# Map the internal agent key to its CLI ``--agent`` spelling.
+_AGENT_CLI_NAME = {
+    "claim_understanding": "claim-understanding",
+    "literature": "literature",
+    "examples": "examples",
+    "counterexamples": "counterexamples",
+    "failure_patterns": "failure-patterns",
+}
+# CSS kind per status (reuses existing judgment palette: ok / sketch / repair / unknown).
+_AGENT_STATUS_KIND = {
+    "done": "ok",
+    "running": "sketch",
+    "queued": "unknown",
+    "not_run": "unknown",
+    "skipped": "unknown",
+    "failed": "repair",
+}
+
+
+def _agent_cards_section(run_dir: Path, state: dict[str, Any]) -> str:
+    """Goal 27: evidence-agent cards (Claim Understanding, Literature, Examples,
+    Counterexamples, Failure Pattern Audit). Each card shows status + a short note
+    and Run / Retry / Skip command hints. A running / failed / skipped / not-run
+    agent is shown honestly and never as an empty successful result; it counts as
+    no evidence. Read-only: command hints, no live mutation from the HTML."""
+
+    rows = _agent_display_rows(run_dir)
+    if not rows:
+        return ""
+    cards: list[str] = []
+    for row in rows:
+        agent = row["agent"]
+        cli = _AGENT_CLI_NAME.get(agent, agent)
+        kind = _AGENT_STATUS_KIND.get(row["status"], "unknown")
+        # Honest one-line note per status.
+        note = {
+            "done": "Finished; results recorded (the kernel validated the artifact — not a proof).",
+            "running": "In progress; not yet evidence.",
+            "queued": "Queued to run.",
+            "not_run": "Has not run; not counted as evidence.",
+            "skipped": "Skipped by request; contributes no evidence.",
+            "failed": "Failed and rolled back; previous valid run preserved. Needs check.",
+        }.get(row["status"], "")
+        if row["status"] == "failed" and row.get("error_summary"):
+            note = f"Failed: {str(row['error_summary'])[:120]}"
+        # Controls: claim_understanding is core (no on-demand controls); evidence
+        # agents get Run/Retry + Skip command hints.
+        controls = ""
+        if agent in ("literature", "examples", "counterexamples", "failure_patterns"):
+            verb = "Retry" if row["status"] in ("failed", "done") else "Run"
+            run_cmd = f"espresso run-agent --run {run_dir} --agent {cli}"
+            skip_cmd = f"espresso run-agent --run {run_dir} --agent {cli} --skip"
+            controls = (
+                f"<div class=\"agent-controls\">"
+                f"<span class=\"agent-cmd\"><b>{_h(verb)}</b> <code>{_h(run_cmd)}</code></span>"
+                f"<span class=\"agent-cmd\"><b>Skip</b> <code>{_h(skip_cmd)}</code></span>"
+                f"</div>"
+            )
+        attempts = row.get("attempts") or 0
+        attempts_html = f"<span class=\"agent-attempts\">{int(attempts)} run(s)</span>" if attempts else ""
+        cards.append(
+            f"<div class=\"agent-card {_h(kind)}\">"
+            f"<div class=\"agent-head\"><b>{_h(row['title'])}</b>"
+            f"<span class=\"agent-status\">{_h(row['status_word'])}</span>{attempts_html}</div>"
+            f"<p class=\"muted\">{_h(note)}</p>{controls}</div>"
+        )
+    note = (
+        "Only a 'Done' agent's artifact counts as evidence, and the kernel still "
+        "validates it. Agents run on demand or in parallel, in any order."
+    )
+    return f"""<section>
+  <h2>Evidence Agents</h2>
+  <div class="agent-grid">{''.join(cards)}</div>
   <div class="note">{_h(note)}</div>
 </section>"""
 
@@ -459,6 +540,8 @@ def _template(
     judgment_cards: list[dict[str, str]],
     proof_state_html: str,
     route_table_html: str,
+    agents_html: str,
+    routes_preliminary: bool,
     routes: list[dict[str, Any]],
     initial: dict[str, Any],
     route_json: str,
@@ -468,6 +551,11 @@ def _template(
     completed: bool,
 ) -> str:
     route_buttons = "\n".join(_route_button(route, selected=route["id"] == initial["id"]) for route in routes)
+    route_heading = (
+        "Choose Route (preliminary — run evidence agents to firm up scores)"
+        if routes_preliminary
+        else "Choose Route"
+    )
     cards = "\n".join(_judgment_card(card) for card in judgment_cards)
     review_html = _review_section(review) if review.get("show") else ""
     selected_items = "".join(f"<li>{_h(item)}</li>" for item in initial["details"])
@@ -503,6 +591,8 @@ def _template(
       <div class="judgment-icons">{cards}</div>
     </section>
 
+    {agents_html}
+
     {proof_state_html}
 
     {route_table_html}
@@ -510,7 +600,7 @@ def _template(
     {review_html}
 
     <section>
-      <h2>Choose Route</h2>
+      <h2>{_h(route_heading)}</h2>
       <div class="route-grid">{route_buttons}</div>
     </section>
 
@@ -645,6 +735,7 @@ p{margin:0;max-width:690px}p+p{margin-top:10px}.muted{color:var(--muted)}
 .selection{background:var(--green-soft)}.selection-row{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}.selection-row strong{display:block;font-size:21px;margin-bottom:4px}.effort{flex:0 0 auto;padding:7px 10px;border:1px solid var(--green-line);border-radius:999px;color:var(--green);background:rgba(255,255,255,.55);font-size:13px;font-weight:650}
 .detail-list{margin:14px 0 0;padding:0;list-style:none;display:grid;gap:8px}.detail-list li{padding-left:18px;position:relative;color:var(--muted)}.detail-list li:before{content:"";position:absolute;left:2px;top:.72em;width:6px;height:6px;border-radius:50%;background:var(--green)}
 pre{margin:14px 0 0;padding:16px;background:#171917;color:#eef5ec;border-radius:8px;overflow-wrap:anywhere;white-space:pre-wrap;font:13px/1.55 "SFMono-Regular",Consolas,monospace}.actions{display:flex;gap:10px;align-items:center;margin-top:12px}.copy{border:1px solid var(--line);border-radius:8px;background:white;color:var(--ink);padding:9px 12px;font:inherit;cursor:pointer}.copy:hover{border-color:var(--green)}.copy-status{color:var(--muted);font-size:14px}.note{margin-top:12px;padding:12px 14px;border:1px solid #ead7b7;border-radius:8px;background:var(--amber-soft);color:#593b12;font-size:14px}
+.agent-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.agent-card{padding:14px;border:1px solid var(--line);border-radius:10px;background:white}.agent-card.ok{border-color:var(--green-line);background:var(--green-soft)}.agent-card.repair{border-color:#ead7b7;background:var(--amber-soft)}.agent-card.sketch{background:#fffaf0}.agent-head{display:flex;align-items:center;gap:10px;margin-bottom:6px}.agent-head b{font-size:16px}.agent-status{padding:2px 9px;border-radius:999px;background:var(--soft);color:var(--muted);font-size:12px;font-weight:650}.agent-card.ok .agent-status{background:var(--green);color:#fff}.agent-card.repair .agent-status{background:#8b5a19;color:#fff}.agent-attempts{margin-left:auto;color:var(--muted);font-size:12px}.agent-controls{margin-top:10px;display:grid;gap:6px}.agent-cmd{font-size:12px;color:var(--muted)}.agent-cmd code{display:block;margin-top:2px;padding:6px 8px;background:#171917;color:#eef5ec;border-radius:6px;overflow-wrap:anywhere;font:11px/1.5 "SFMono-Regular",Consolas,monospace}
 .sg-main{margin-bottom:14px}.sg-groups{display:grid;gap:14px}.sg-group b{display:block;margin-bottom:6px}.sg-list{margin:0;padding:0;list-style:none;display:grid;gap:6px}.sg-list li{padding-left:18px;position:relative;color:var(--ink)}.sg-list li:before{content:"";position:absolute;left:2px;top:.72em;width:6px;height:6px;border-radius:50%;background:var(--green)}.sg-state{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:var(--soft);color:var(--muted);font-size:12px}.sg-next{margin-top:14px;padding:12px 14px;border:1px solid var(--green-line);border-radius:8px;background:var(--green-soft)}.sg-notes{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--soft)}.sg-notes b{display:block;margin-bottom:6px}.route-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}.route-table th,.route-table td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}.route-table th{background:var(--soft);color:var(--muted);font-weight:600}
 @media (max-width:780px){main{padding:18px}header,section{padding:24px 20px}.status,.route-grid,.review-grid{grid-template-columns:1fr}.judgment-icons{grid-template-columns:1fr}.status div{border-right:0;border-bottom:1px solid var(--line)}.status div:last-child{border-bottom:0}.selection-row{display:block}.effort{display:inline-block;margin-top:12px}}
 """.strip()

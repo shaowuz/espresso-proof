@@ -2325,6 +2325,83 @@ class FrontHalfRunReport(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class AgentRunStatusEntry(StrictBaseModel):
+    """Process status for ONE evidence / understanding agent (Goal 27).
+
+    This record tracks ONLY process state for the on-demand / parallel evidence
+    runner and the dashboard. ``extra="forbid"`` (StrictBaseModel) rejects any
+    mathematical status-upgrade field (``source_backed`` / ``checked`` /
+    ``proved`` / ``refutes_claim`` / ``proof_status`` / ``grade`` / ...): an agent
+    can never carry mathematical status here.
+
+    ``safe_to_use_as_evidence`` is a DISPLAY gate, not a status. It may be True
+    only when ``status == 'done'`` (and the validator additionally requires the
+    artifact to exist). Even when True it never upgrades a kernel status: the
+    dashboard/memo read evidence from the validated mathematical artifacts, never
+    from this flag. A running / failed / skipped / not-run agent never counts as
+    evidence.
+    """
+
+    agent: Literal[
+        "claim_understanding",
+        "literature",
+        "examples",
+        "counterexamples",
+        "failure_patterns",
+    ]
+    status: Literal["not_run", "queued", "running", "done", "failed", "skipped"] = "not_run"
+    started_at: str | None = None
+    finished_at: str | None = None
+    artifact_path: str | None = None
+    error_summary: str | None = None
+    attempts: int = 0
+    last_updated: str
+    safe_to_use_as_evidence: bool = False
+
+    @model_validator(mode="after")
+    def validate_entry(self) -> AgentRunStatusEntry:
+        if self.safe_to_use_as_evidence and self.status != "done":
+            raise ValueError(
+                "safe_to_use_as_evidence may be True only when status='done'"
+            )
+        if self.attempts < 0:
+            raise ValueError("attempts must be non-negative")
+        if self.artifact_path is not None:
+            path = self.artifact_path
+            if path.startswith("/") or ".." in path.split("/"):
+                raise ValueError(
+                    f"agent artifact_path must be run-relative: {path!r}"
+                )
+        return self
+
+
+class AgentRunStatusReport(StrictBaseModel):
+    """Per-agent run-status board for a run (``agent_run_status.yaml``, Goal 27).
+
+    Advisory process audit only. It must never affect grades, proof/source/
+    evidence status, or lifecycle state, and (via StrictBaseModel) cannot carry a
+    status-upgrade field. ``validate_run`` binds it to the run and re-checks
+    everything; nothing here can promote an artifact into evidence.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    last_updated: str
+    agents: list[AgentRunStatusEntry]
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_report(self) -> AgentRunStatusReport:
+        seen: set[str] = set()
+        for entry in self.agents:
+            if entry.agent in seen:
+                raise ValueError(f"duplicate agent_run_status entry: {entry.agent}")
+            seen.add(entry.agent)
+        return self
+
+
 MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "claim": Claim,
     "agent_contracts": AgentContracts,
@@ -2372,6 +2449,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "prover_round_index": ProverRoundIndex,
     "proof_goal_graph": ProofGoalGraph,
     "front_half_run": FrontHalfRunReport,
+    "agent_run_status": AgentRunStatusReport,
     "memory_entry": MemoryEntry,
     "memory_index": MemoryIndex,
     "memory_context": MemoryContext,
