@@ -172,6 +172,12 @@ def test_semantic_match_with_locator_and_attribution_is_accepted() -> None:
 
 
 def test_matched_reasons_surface_as_satisfied_conditions() -> None:
+    # Goal 37 de-circularization: the audit recomputes coverage from the claim
+    # hypotheses and the CITED STATEMENT (it no longer echoes the grounding's
+    # stored matched reasons), so satisfied conditions require a statement that
+    # genuinely covers the hypotheses.
+    from espresso_proof.models import SourceRef
+
     step = SourceGroundingStep.model_validate(
         {
             "proof_step_id": "s1",
@@ -189,11 +195,36 @@ def test_matched_reasons_surface_as_satisfied_conditions() -> None:
             "note": "Exact theorem locator Theorem 1.1 matched; ...",
         }
     )
-    conditions = _conditions_from_step(step)
+    source_ref = SourceRef.model_validate(
+        {
+            "id": "verified_thm_001",
+            "type": "paper",
+            "title": "Groups of prime-square order",
+            "authors": ["A. Author"],
+            "locator": {"kind": "theorem", "value": "Theorem 1.1"},
+            "statement_or_summary": "Theorem 1.1. Let |G| = p^2 for a prime p. Then G is abelian.",
+            "hypothesis_match": {"matches": True, "mismatches": []},
+            "confidence": "high",
+            "status": "source_backed",
+        }
+    )
+    claim_hypotheses = [
+        {"name": "group of order p^2", "status": "explicit", "source": "agent"},
+        {"name": "p is prime", "status": "explicit", "source": "agent"},
+    ]
+    conditions, independent_matches = _conditions_from_step(step, source_ref, claim_hypotheses)
+    assert independent_matches is True
     assert [c["status"] for c in conditions] == ["satisfied", "satisfied"]
-    texts = [c["text"] for c in conditions]
-    assert texts[0] == '"group of order p^2" matched "|G| = p^2"'
-    assert texts[1] == '"p is prime" matched "prime p"'
+    texts = " ".join(c["text"] for c in conditions)
+    assert "group of order p^2" in texts
+    assert "p is prime" in texts
+    # ...and the SAME stored verdict over a NON-covering statement fails closed.
+    bad_ref = source_ref.model_copy(
+        update={"statement_or_summary": "Theorem 9.9. Every elliptic curve over Q is modular."}
+    )
+    bad_conditions, bad_matches = _conditions_from_step(step, bad_ref, claim_hypotheses)
+    assert bad_matches != True  # noqa: E712 - may be "unclear"
+    assert any(c["status"] == "unclear" for c in bad_conditions)
 
 
 # ---------------------------------------------------------------------------
