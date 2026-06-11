@@ -33,17 +33,6 @@ _GROUNDABLE_STATEMENT = (
     "Theorem 1.2. Exact literature statement supporting the Hodge-theoretic step "
     "over base field C for cubic fourfolds."
 )
-_BOUNDED_STOP_REASONS = {
-    "loop_decision_ask_human",
-    "loop_decision_stop",
-    "budget_rounds",
-    "budget_agent_calls",
-    "no_progress",
-    "clean",
-    "validation_error",
-}
-
-
 def _grounded_run(root: Path) -> Path:
     """A deterministic run that EARNS source_backed through the real pipeline."""
 
@@ -80,7 +69,7 @@ def _probe_source_grounding(root: Path) -> dict:
     run_dir = _grounded_run(root / "grounding")
     sg = read_yaml(run_dir / "source_grounding.yaml")
     earned = [s for s in sg["steps"] if s["status"] == "source_backed"]
-    return {"earned_steps": len(earned), "passed": bool(earned), "run_dir": str(run_dir)}
+    return {"earned_steps": len(earned), "passed": bool(earned)}
 
 
 def _probe_applicability_block(root: Path) -> dict:
@@ -326,9 +315,11 @@ def render_scorecard_markdown(report: dict) -> str:
         lines.append(f"- {key}: {value}")
     lines += [
         "",
-        "All metrics are deterministic fixture probes. They measure conservative",
-        "behavior and earning-pipeline wiring; they never earn or upgrade any",
-        "mathematical status, and no claim is ever 'proved' by a scorecard.",
+        "All metrics are deterministic fixture probes. Capability values are",
+        "single-probe pass/fail checks (n = 1-2), not sampled rates: they detect",
+        "regressions in conservative behavior and earning-pipeline wiring; they",
+        "never earn or upgrade any mathematical status, and no claim is ever",
+        "'proved' by a scorecard.",
         "",
     ]
     return "\n".join(lines)

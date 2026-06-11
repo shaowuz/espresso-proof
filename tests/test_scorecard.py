@@ -94,3 +94,49 @@ def test_scorecard_markdown_is_stable_for_trends(tmp_path: Path) -> None:
     assert render_scorecard_markdown(r1) == render_scorecard_markdown(r2)
     assert r1["safety"] == r2["safety"]
     assert r1["capability"] == r2["capability"]
+
+
+def test_dogfood_replay_fails_on_proof_complete_memo(tmp_path: Path, monkeypatch) -> None:
+    # Spec negative test: the replay cannot pass with proof-complete language.
+    import espresso_proof.memo as memo_mod
+    import espresso_proof.scorecard as scorecard_mod
+
+    monkeypatch.setattr(
+        memo_mod, "build_concise_memo", lambda run_dir: "We proved the theorem. proof-close."
+    )
+    probe = scorecard_mod._probe_dogfood_replay(tmp_path)
+    assert probe["memo_honest"] is False
+    assert probe["passed"] is False
+
+
+def test_dogfood_replay_fails_on_unauthorized_source_backed(tmp_path: Path) -> None:
+    # Spec negative test: the replay cannot pass with unauthorized source
+    # support. Plant a source_backed step into the replayed run's grounding by
+    # intercepting the read — the probe must count it and fail.
+    import espresso_proof.scorecard as scorecard_mod
+    from espresso_proof.io import read_yaml as real_read_yaml
+
+    def replay_with_planted_step(root: Path) -> dict:
+        import espresso_proof.scorecard as sc
+
+        original = sc.read_yaml
+
+        def tampered_read(path):
+            data = original(path)
+            if str(path).endswith("source_grounding.yaml") and isinstance(data, dict):
+                steps = [dict(s) for s in data.get("steps", [])]
+                if steps:
+                    steps[0]["status"] = "source_backed"
+                data = {**data, "steps": steps}
+            return data
+
+        sc.read_yaml = tampered_read
+        try:
+            return sc._probe_dogfood_replay(root)
+        finally:
+            sc.read_yaml = original
+
+    probe = replay_with_planted_step(tmp_path)
+    assert probe["unauthorized_source_backed"] > 0
+    assert probe["passed"] is False
+    assert real_read_yaml is not None  # silence unused-import lint
