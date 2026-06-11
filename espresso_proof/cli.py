@@ -2049,6 +2049,9 @@ def summarize_feedback(
 @app.command("benchmark")
 def benchmark_command(
     output_root: Path = typer.Option(Path(".benchmark_runs"), "--out-root", help="Where benchmark runs are written."),
+    json_out: Path | None = typer.Option(
+        None, "--json-out", help="Also write the full report as machine-readable JSON (Goal 40A)."
+    ),
 ) -> None:
     """Run the regression benchmark (curated conservative-behaviour cases over the
     existing mock fixtures) and print a stable report. Exits non-zero if any case
@@ -2056,6 +2059,13 @@ def benchmark_command(
     """
     report = run_benchmark(output_root)
     passed = sum(1 for row in report if row["passed"])
+    if json_out is not None:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(
+            json.dumps({"cases": report, "passed": passed, "total": len(report)},
+                       indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
     for row in report:
         mark = "PASS" if row["passed"] else "FAIL"
         typer.echo(f"[{mark}] {row['category']:24s} {row['fixture']:42s} status={row['idea_status']}")
@@ -2069,6 +2079,9 @@ def benchmark_command(
 @app.command()
 def calibration(
     output_root: Path = typer.Option(Path(".benchmark_runs"), "--out-root", help="Where calibration runs are written."),
+    json_out: Path | None = typer.Option(
+        None, "--json-out", help="Also write the full report as machine-readable JSON (Goal 40A)."
+    ),
 ) -> None:
     """Aggregate the product's core SAFETY metrics over the mock fixtures.
 
@@ -2078,6 +2091,9 @@ def calibration(
     status and never asserts a claim is proved.
     """
     report = run_calibration(output_root)
+    if json_out is not None:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
     m = report["metrics"]
     for row in report["rows"]:
         mark = "ok " if row["memo_honest"] and not row["source_support_false_positives"] \

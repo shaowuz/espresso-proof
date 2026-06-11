@@ -45,3 +45,12 @@ jobs:
 
       - name: Check VS Code UI bridge
         run: python scripts/check_vscode_ui.py
+
+      # Goal 40A autoprover baseline: deterministic conservative-behaviour
+      # benchmark + safety calibration over the mock fixtures. Both exit
+      # non-zero on any planted overconfidence regression.
+      - name: Run conservative-behaviour benchmark
+        run: espresso benchmark --out-root .benchmark_runs --json-out .benchmark_runs/benchmark.json
+
+      - name: Run safety calibration baseline
+        run: espresso calibration --out-root .benchmark_runs --json-out .benchmark_runs/calibration.json
