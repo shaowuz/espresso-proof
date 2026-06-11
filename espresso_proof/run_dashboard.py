@@ -645,6 +645,28 @@ def _now_strip(
 </div></section>"""
 
 
+def _demo_panel(run_dir: Path) -> str:
+    """Goal 32: the "What this demo shows" panel, rendered only for demo runs
+    (project directory named ``demo-<id>``). Pure display copy from the demo
+    registry — it explains the showcase and its trust boundary, never a status."""
+
+    from .demos import demo_for_project
+
+    demo = demo_for_project(Path(run_dir).parents[1].name)
+    if demo is None:
+        return ""
+    return f"""<section class="card demo-panel"><div class="pad">
+  <h2>What this demo shows</h2>
+  <p class="demo-line"><b>{_h(demo['title'])}</b> &mdash; {_h(demo['demonstrates'])}</p>
+  <p class="demo-line">{_h(demo['lesson'])}</p>
+  <div class="demo-meta">
+    <div><span class="now-label">First result</span> {_h(demo['first_result'])}</div>
+    <div><span class="now-label">Safe next click</span> {_h(demo['next_click'])}</div>
+  </div>
+  <div class="note">Trust boundary: {_h(demo['trust_boundary'])}</div>
+</div></section>"""
+
+
 def _claim_section(state: dict[str, Any]) -> str:
     claim = state["claim"]
     locked = "locked" if claim.get("locked") else "unlocked"
@@ -1358,6 +1380,7 @@ def _template(
 
 <div class="wrap">
 <main class="maincol">
+  {_demo_panel(run_dir)}
   {_claim_section(state)}
   {_now_strip(state, agent_rows, routes_preliminary=routes_preliminary, has_routes=initial["id"] != "none")}
   {_routes_section(state, route_data, initial, routes_preliminary=routes_preliminary, cx_pressure=cx_pressure)}
@@ -1636,6 +1659,12 @@ h2{margin:0 0 4px;font-size:12.5px;text-transform:uppercase;letter-spacing:.1em;
 p{margin:0}
 .note{margin-top:14px;padding:11px 14px;border:1px solid var(--amber-line);border-radius:9px;
   background:var(--amber-soft);color:#5c4310;font-size:13px}
+.demo-panel{border-color:var(--done-blue-line);background:linear-gradient(180deg,#fbfcfe,var(--done-blue-soft))}
+.demo-panel .pad{padding:16px 26px}
+.demo-line{margin:0 0 6px;font-size:14px;max-width:none}
+.demo-meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 0;font-size:13px}
+.demo-meta .now-label{display:block;margin-bottom:2px}
+@media (max-width:760px){.demo-meta{grid-template-columns:1fr}}
 .now-pad{padding:14px 26px !important;display:grid;gap:10px}
 .now-evidence,.now-action{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
 .now-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;min-width:86px}

@@ -45,23 +45,10 @@ _AGENT_ALIASES = {"failure-patterns": "failure_patterns"}
 
 # Human-facing run modes -> internal provider. Users never see provider words.
 # "Demo mode" reuses the deterministic fast path with a seeded prompt.
-_MODE_PROVIDER = {"fast": "stub", "codex": "external", "demo": "stub"}
+# "Fast preview" and "Codex deep run" are MODES; demos are a separate
+# "Open demo" path (Goal 32) — never a mode or provider.
+_MODE_PROVIDER = {"fast": "stub", "codex": "external"}
 
-# Stable demo cases for the entry page (prompt + a one-line "what it shows").
-_DEMO_CASES = [
-    {"label": "p² group theorem", "mode": "fast",
-     "text": "Every group of order p^2, where p is prime, is abelian.",
-     "note": "A true classical theorem."},
-    {"label": "order-6 abelian (false)", "mode": "fast",
-     "text": "Every group of order 6 is abelian.",
-     "note": "A false finite-group claim (S3 is a counterexample)."},
-    {"label": "EVT without compactness", "mode": "fast",
-     "text": "Every continuous real function on an open interval attains a maximum.",
-     "note": "A missing-hypothesis claim (no compactness)."},
-    {"label": "matrix rank check", "mode": "fast",
-     "text": "The 3x3 integer matrix [[1,2,3],[4,5,6],[7,8,9]] has rank 2.",
-     "note": "A scoped finite/computational check."},
-]
 
 
 def _now() -> str:
@@ -283,6 +270,31 @@ class Workbench:
             "state": result["state"],
         }
 
+    def start_demo(self, demo_id: str) -> dict[str, Any]:
+        """Build a pre-validated showcase run on a background job (Goal 32).
+
+        Demos are NOT a run mode: each is a deterministic, model-free run built
+        through the existing kernel paths (and ``create_demo_run`` ends with
+        ``validate_run``, fail closed). Returns a ``job_id`` immediately.
+        """
+
+        from .demos import DEMOS, create_demo_run
+
+        if demo_id not in DEMOS:
+            raise WorkbenchError(404, "unknown demo")
+        job_id = self._new_job(run_id=None, action="demo", agent=None)
+
+        def work() -> dict[str, Any]:
+            run_dir = create_demo_run(self.root, demo_id)
+            return {
+                "run_id": run_dir.name,
+                "project": run_dir.parents[1].name,
+                "demo": demo_id,
+            }
+
+        threading.Thread(target=self._run_job, args=(job_id, work), daemon=True).start()
+        return {"job_id": job_id, "demo": demo_id}
+
     def start_agent(self, run_id: str, agent: str) -> dict[str, Any]:
         run_dir = self.resolve_run(run_id)
         agent = _AGENT_ALIASES.get(agent, agent)
@@ -483,6 +495,9 @@ def _make_handler(workbench: Workbench):
                         status=202,
                     )
                     return
+                if len(parts) == 3 and parts[:2] == ["api", "demos"]:
+                    self._send_json(workbench.start_demo(parts[2]), status=202)
+                    return
                 if len(parts) == 5 and parts[:2] == ["api", "runs"] and parts[3] == "agents":
                     self._send_json(workbench.start_agent(parts[2], parts[4]), status=202)
                     return
@@ -524,10 +539,16 @@ def _index_page(workbench: Workbench) -> str:
         f'<span class="st">{_html.escape(_STATE_WORDS.get(r["state"], r["state"].replace("_", " ").title()))}</span></li>'
         for r in runs
     )
-    demo_buttons = "".join(
-        f'<button type="button" class="demo" data-text="{_html.escape(c["text"])}" data-mode="{_html.escape(c["mode"])}">'
-        f'<b>{_html.escape(c["label"])}</b><span>{_html.escape(c["note"])}</span></button>'
-        for c in _DEMO_CASES
+    from .demos import DEMOS
+
+    demo_cards = "".join(
+        f'<div class="demo-card">'
+        f'<b>{_html.escape(d["title"])}</b>'
+        f'<span class="demo-what">{_html.escape(d["demonstrates"])}</span>'
+        f'<span class="demo-lesson">{_html.escape(d["lesson"])}</span>'
+        f'<button type="button" class="demo-open" data-demo="{_html.escape(demo_id)}">Open demo</button>'
+        f'</div>'
+        for demo_id, d in DEMOS.items()
     )
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -543,9 +564,8 @@ def _index_page(workbench: Workbench) -> str:
     <div class="modes" role="radiogroup" aria-label="Run mode">
       <label class="mode"><input type="radio" name="mode" value="fast" checked><b>Fast preview</b><span>Quick deterministic read of the flow.</span></label>
       <label class="mode"><input type="radio" name="mode" value="codex"><b>Codex deep run</b><span>Uses the real model. Slower, more meaningful.</span></label>
-      <label class="mode"><input type="radio" name="mode" value="demo"><b>Demo mode</b><span>A known-good example case.</span></label>
     </div>
-    <div class="go-row"><button id="go" type="button" class="go">Run Espresso</button>
+    <div class="go-row"><button id="go" type="button" class="go">Run Espresso</button></div>
     <div class="jobrow" id="jobrow" hidden>
       <div class="jr-head"><span class="jr-spin"></span><b id="jr-stage">Starting run…</b><span class="jr-elapsed" id="jr-elapsed"></span></div>
       <div class="jr-bar"><i></i></div>
@@ -570,7 +590,9 @@ def _index_page(workbench: Workbench) -> str:
         <li><b>Continue the proof search</b> — read what is checked, cited, or still missing.</li>
       </ol>
     </div>
-    <div class="card demos"><h2>Try an example</h2><div class="demo-grid">{demo_buttons}</div></div>
+    <div class="card demos"><h2>Open demo</h2>
+      <p class="demo-note">Pre-validated showcase runs — instant, model-free, honest about every trust boundary.</p>
+      <div class="demo-grid">{demo_cards}</div></div>
     <div class="card runs"><h2>Recent runs</h2><ul>{rows or '<li class="st">No runs yet.</li>'}</ul></div>
   </aside>
 </main>
@@ -578,11 +600,34 @@ def _index_page(workbench: Workbench) -> str:
 const go=document.getElementById("go"),err=document.getElementById("err");
 const textEl=document.getElementById("text");
 function selectedMode(){{const r=document.querySelector('input[name=mode]:checked');return r?r.value:"fast";}}
-document.querySelectorAll(".demo").forEach(b=>b.addEventListener("click",()=>{{
-  textEl.value=b.dataset.text;
-  const m=document.querySelector('input[name=mode][value="'+b.dataset.mode+'"]');if(m)m.checked=true;
-  textEl.focus();
+// Open demo: one click creates a pre-validated showcase run (model-free,
+// deterministic) via its own endpoint — demos are NOT a run mode.
+document.querySelectorAll(".demo-open").forEach(b=>b.addEventListener("click",()=>{{
+  openDemo(b.dataset.demo,b);
 }}));
+async function openDemo(demoId,btn){{
+  btn.disabled=true;btn.textContent="Opening…";err.textContent="";
+  jobrow.hidden=false;jobrow.classList.remove("failed");jrFail.hidden=true;
+  jrStage.textContent="Preparing the demo…";
+  jrNote.textContent="Espresso is building a pre-validated showcase run. This is model-free and takes a few seconds.";
+  jrElapsed.textContent="";
+  const t0=Date.now();
+  try{{
+    const r=await fetch("/api/demos/"+encodeURIComponent(demoId),{{method:"POST"}});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||"failed");
+    for(let i=0;i<300;i++){{
+      await new Promise(res=>setTimeout(res,600));
+      let j;
+      try{{j=await (await fetch("/api/jobs/"+encodeURIComponent(d.job_id))).json();}}
+      catch{{jrNote.textContent="The local server did not answer. Check that Espresso is still running, then retry.";continue;}}
+      jrElapsed.textContent=Math.round((Date.now()-t0)/1000)+"s";
+      if(j.state==="done"&&j.result&&j.result.run_id){{jrStage.textContent="Demo ready — opening…";location.href="/run/"+encodeURIComponent(j.result.run_id);return;}}
+      if(j.state==="failed"){{jobFailed(j.error||"The demo could not be opened.",false);btn.disabled=false;btn.textContent="Open demo";return;}}
+    }}
+    jobFailed("Timed out preparing the demo.",false);btn.disabled=false;btn.textContent="Open demo";
+  }}catch(e){{jobFailed(e.message,false);btn.disabled=false;btn.textContent="Open demo";}}
+}}
 // Durable job row: the click is acknowledged immediately, the row stays visible
 // while the background job works (stage + elapsed + alive bar), and a failure
 // offers Retry / Switch to Fast preview — never a frozen page or raw fetch error.
@@ -680,10 +725,15 @@ textarea{width:100%;min-height:130px;padding:15px 17px;border:1px solid var(--es
 .card.how,.card.demos,.card.runs{padding:20px 22px}
 .side h2{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:0 0 12px}
 .how ol{margin:0;padding-left:20px;display:grid;gap:7px}.how li{font-size:14px}.how b{color:var(--esp-deep)}
-.demo-grid{display:grid;gap:9px}
-.demo{appearance:none;text-align:left;border:1px solid var(--line);background:#fffefb;border-radius:10px;padding:11px 13px;cursor:pointer;font:inherit}
-.demo:hover{border-color:var(--esp-line);background:var(--esp-soft)}
-.demo b{display:block;font-size:14px}.demo span{display:block;color:var(--muted);font-size:12.5px;margin-top:2px}
+.demo-note{color:var(--muted);font-size:12.5px;margin:-4px 0 12px}
+.demo-grid{display:grid;gap:10px}
+.demo-card{border:1px solid var(--line);background:#fffefb;border-radius:10px;padding:12px 14px}
+.demo-card b{display:block;font-size:14px}
+.demo-what{display:block;color:var(--ink);font-size:12.5px;margin-top:2px}
+.demo-lesson{display:block;color:var(--muted);font-size:12px;margin-top:4px;line-height:1.5}
+.demo-open{appearance:none;margin-top:9px;border:1px solid var(--esp-line);background:transparent;color:var(--esp);font:inherit;font-size:12.5px;font-weight:650;padding:6px 13px;border-radius:8px;cursor:pointer}
+.demo-open:hover{background:var(--esp-soft)}
+.demo-open:disabled{opacity:.6;cursor:progress}
 .runs ul{list-style:none;padding:0;margin:0;display:grid;gap:7px}
 .runs li{display:flex;justify-content:space-between;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:#fffefb}
 .runs a{color:var(--ink);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
