@@ -257,7 +257,8 @@ def test_retrieval_with_empty_corpus_is_a_validated_no_op(tmp_path: Path) -> Non
         providers=["local_corpus"],
     )
     assert report["candidates"] == []
-    assert report.get("grounding") in (None, {}, {"attempted": False}) or not report["grounding"].get("attempted", False)
+    assert report["grounded"] is False
+    assert report["earned_source_backed"] is False
     validate_run(run_dir)
     sg_after = read_yaml(run_dir / "source_grounding.yaml")
     assert sg_after["steps"][0]["status"] == sg_before["steps"][0]["status"] == "candidate"
