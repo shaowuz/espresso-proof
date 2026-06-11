@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .io import read_yaml, write_yaml
+from .run_events import EVENTS_FILENAME, append_event
 
 MANIFEST_NAME = "run_manifest.yaml"
 
@@ -69,7 +70,10 @@ class StageRunner:
             if root.is_dir():
                 covered_dirs.append(root)
                 for f in root.rglob("*"):
-                    if f.is_file():
+                    # The diagnostic events.jsonl timeline is append-only and is
+                    # never rolled back: rolling it back would erase the record
+                    # of the failed stage it exists to explain.
+                    if f.is_file() and f.name != EVENTS_FILENAME:
                         files[f] = f.read_bytes()
             else:
                 files[root] = root.read_bytes() if root.exists() else None
@@ -81,7 +85,7 @@ class StageRunner:
         for directory in covered_dirs:
             if directory.exists():
                 for f in directory.rglob("*"):
-                    if f.is_file() and f not in files:
+                    if f.is_file() and f not in files and f.name != EVENTS_FILENAME:
                         f.unlink()
         # Restore captured file bytes (or remove files that did not exist before).
         for path, data in files.items():
@@ -123,20 +127,25 @@ class StageRunner:
             if manifest_path not in scope:
                 scope.append(manifest_path)
 
+        append_event(self.run_dir, "stage_started", stage=name)
         snapshot = self._snapshot(scope)
         try:
             mutate()
             validate()
+            append_event(self.run_dir, "validation_passed", stage=name)
             if state_after is not None:
                 self._advance_state(state_after)
         except Exception as exc:  # noqa: BLE001 - restore then re-raise with context
             self._restore(snapshot)
+            append_event(self.run_dir, "validation_failed", stage=name, detail=str(exc))
+            append_event(self.run_dir, "rollback", stage=name)
             outcome = StageOutcome(
                 name=name, status="rolled_back", state_after=None, error=str(exc)
             )
             self.outcomes.append(outcome)
             raise StageError(name, str(exc)) from exc
 
+        append_event(self.run_dir, "stage_ok", stage=name)
         outcome = StageOutcome(name=name, status="ok", state_after=state_after)
         self.outcomes.append(outcome)
         return outcome
