@@ -1041,6 +1041,11 @@ def append_prover_loop_round(
             if blockers
             else "Expand this candidate with source matching and checked examples."
         ),
+        # Goal 39: persist the scheduler's pick so the round is durably bound to
+        # a named subgoal (prompt context alone is not auditable). None when no
+        # subgoal was selectable. Never earns or upgrades any status.
+        "target_subgoal_id": target_subgoal.get("id"),
+        "target_local_claim": target_subgoal.get("local_claim") or "",
     }
     loop_report["attempts"].append(new_attempt)
     loop_report["generated_at"] = datetime.now(UTC).isoformat()
