@@ -212,6 +212,48 @@ def recorded_misapplication_refusal(run_dir: Path) -> tuple[bool, str]:
     )
 
 
+def _probe_true_theorem_source_engaged(run_dir: Path) -> tuple[bool, str]:
+    """For a true classical theorem the smoke-mode earned outcome is an
+    ENGAGED grounding: at least one step and one cited reference with an
+    exact locator, attribution, and a recorded all-hypotheses match — held
+    honestly at candidate. Smoke mode can never earn reference support, so
+    any source_backed status fails the probe (fail closed)."""
+
+    grounding_path = run_dir / "source_grounding.yaml"
+    if not grounding_path.exists():
+        return False, "no source_grounding.yaml was produced"
+    grounding = read_yaml(grounding_path)
+    steps = grounding.get("steps", [])
+    refs = grounding.get("source_refs", [])
+    backed = [
+        item for item in steps + refs if item.get("status") == "source_backed"
+    ]
+    if backed:
+        return False, (
+            f"{len(backed)} source_backed item(s) in a smoke run — reference "
+            "support can never be earned without real source verification"
+        )
+    if not steps or not refs:
+        return False, "source grounding never engaged (no steps or no references)"
+    engaged = [
+        ref for ref in refs
+        if str(ref.get("title", "")).strip()
+        and (ref.get("locator") or {}).get("kind") not in (None, "", "unknown")
+        and str((ref.get("locator") or {}).get("value", "")).strip()
+        and (ref.get("hypothesis_match") or {}).get("matches") is True
+        and not (ref.get("hypothesis_match") or {}).get("mismatches")
+    ]
+    if not engaged:
+        return False, (
+            "no cited reference carries an exact locator plus a recorded "
+            "all-hypotheses match"
+        )
+    return True, (
+        f"classical source engaged ({len(engaged)} reference(s) with exact "
+        "locator and matched hypotheses); held honestly at candidate"
+    )
+
+
 PROBLEM_PROBES = {
     "false_theorem_counterexample_present": _probe_false_theorem_counterexample_present,
     "scoped_computation_present": _probe_scoped_computation_present,
@@ -221,6 +263,7 @@ PROBLEM_PROBES = {
     "computation_request_blockers_resolved": _probe_computation_request_blockers_resolved,
     "standing_risks_classified_human_gated": _probe_standing_risks_classified_human_gated,
     "source_mismatch_refusal_recorded": recorded_misapplication_refusal,
+    "true_theorem_source_engaged": _probe_true_theorem_source_engaged,
 }
 
 
