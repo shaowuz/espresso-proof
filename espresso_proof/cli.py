@@ -2244,10 +2244,20 @@ def loop_replay(
     improvement or without sibling/holdout no-regression evidence is never
     successful; a failed pre-merge replay BLOCKS the merge (exit 1).
     """
+    from .io import read_yaml as _read_yaml
     from .loop_harness import load_cases
     from .loop_replay import run_replay
 
-    holdouts = [c for c in load_cases(None) if c.case_id not in {case, *sibling}][:2]
+    # blinded holdouts: never cases that were in the reviewed cycle (those
+    # were used to select the fix), never the trigger/siblings.
+    recorded = {
+        c.get("case_id")
+        for c in _read_yaml(cycle / "cases.yaml").get("cases", [])
+    }
+    holdouts = [
+        c for c in load_cases(None)
+        if c.case_id not in recorded and c.case_id not in {case, *sibling}
+    ][:2]
     try:
         result = run_replay(
             cycle,

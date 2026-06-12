@@ -64,17 +64,12 @@ def _cycles(out_root: Path) -> list[Path]:
 
 
 def _memo_paths(cycle_dir: Path) -> list[Path]:
-    manifest = read_yaml(cycle_dir / "run_manifest.yaml")
-    paths = []
-    for run in manifest.get("runs", []):
-        run_dir = run.get("run_dir", "not_run")
-        if run_dir == "not_run":
-            continue
-        for name in ("final_report.md",):
-            candidate = Path(run_dir) / name
-            if candidate.exists():
-                paths.append(candidate)
-    return paths
+    # single source of truth with the reviewers' sweep (same file set).
+    from .loop_models import LoopRunManifest
+    from .loop_reviewers import _memo_paths as reviewer_memo_paths
+
+    manifest = LoopRunManifest.model_validate(read_yaml(cycle_dir / "run_manifest.yaml"))
+    return reviewer_memo_paths(manifest)
 
 
 def _hard_safety_counts(out_root: Path) -> dict[str, int]:
@@ -135,9 +130,12 @@ def _cycle_is_clean(cycle_dir: Path) -> tuple[bool, str]:
 
 
 def _run_command_clean(args: list[str], cwd: Path) -> tuple[bool, str]:
-    completed = subprocess.run(
-        args, cwd=cwd, capture_output=True, text=True, timeout=900
-    )
+    try:
+        completed = subprocess.run(
+            args, cwd=cwd, capture_output=True, text=True, timeout=900
+        )
+    except subprocess.TimeoutExpired:
+        return False, "timed out after 900s (gate fails closed)"
     tail = (completed.stdout + completed.stderr).strip().splitlines()[-1:]
     return completed.returncode == 0, (tail[0] if tail else "")[:200]
 
@@ -225,7 +223,13 @@ def evaluate_stop_gate(
     gate.safety_gate = GateState(
         passed=safety_zero and scorecard_ok,
         evidence_path=str(out_root / "gate_scorecard"),
-        note=f"hard counts {counts}; scorecard {'clean' if scorecard_ok else scorecard_note}",
+        note=(
+            f"hard counts {counts} (measured sweeps: unauthorized_refuted, "
+            "unauthorized_source_backed, proof_complete_language; the other four "
+            "are structural zeros guaranteed by kernel vocabulary/validators, "
+            "not independent measurements); "
+            f"scorecard {'clean' if scorecard_ok else scorecard_note}"
+        ),
     )
     gate.scorecard_gate = GateState(
         passed=scorecard_ok, evidence_path=str(out_root / "gate_scorecard"),
@@ -304,12 +308,10 @@ def evaluate_stop_gate(
 
     # --- ledger + streak --------------------------------------------------------
     ledger = GapLedger.model_validate(read_yaml(out_root / "gap_ledger.yaml"))
-    open_p0p1 = False
-    for gap in ledger.gaps:
-        if gap.status in {"open", "selected"} and (
-            "P0" in gap.before_metric or "P1" in gap.before_metric
-        ):
-            open_p0p1 = True
+    open_p0p1 = any(
+        gap.status in {"open", "selected"} and gap.severity in {"P0", "P1"}
+        for gap in ledger.gaps
+    )
     # additionally: any latest-cycle non-probe P0/P1 finding keeps the flag up.
     gate.open_p0_or_p1_in_gap_ledger = open_p0p1 or new_p0p1 > 0
 

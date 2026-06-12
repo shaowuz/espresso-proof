@@ -67,11 +67,9 @@ def _priority_bucket(reviewer: str, finding: ActionableFinding) -> int:
         return 2
     if finding.gap_kind == "math_capability":
         return 3
-    if (
-        finding.gap_kind == "product_workflow"
-        and finding.severity in {"P0", "P1"}
-        and "block" in (finding.why_it_matters + finding.what_happened).lower()
-    ):
+    if finding.gap_kind == "product_workflow" and finding.severity in {"P0", "P1"}:
+        # the product_ux reviewer only emits P0/P1 for workflow-blocking
+        # failures, so gap_kind + severity is the faithful bucket key.
         return 4
     if finding.gap_kind == "source_tool_capability":
         return 5
@@ -132,19 +130,19 @@ def run_triage(cycle_dir: Path) -> TriageDecision:
             "gaps must improve the harness instead (Goal 42 five-cycle rule)"
         )
 
-    # Non-overridable math-side BLOCKERs constrain the candidate pool unless a
-    # kernel-safety P0/P1 outranks them in the priority order.
-    blocker_pool = [
+    # Non-overridable math-side BLOCKER findings always ENTER triage (they can
+    # never be filtered out), but they do not exclude other reviewers'
+    # findings: the priority order decides (Math Workflow reviewer fix — the
+    # old pool-replacement let a probe-inflated BLOCKER hijack selection).
+    pool = list(candidates)
+    non_overridable_p0 = [
         (name, finding)
         for name, finding in candidates
-        if reports[name].verdict == "BLOCKER" and name in _NON_OVERRIDABLE
+        if name in _NON_OVERRIDABLE and finding.severity == "P0"
     ]
-    kernel_pool = [
-        (name, finding)
-        for name, finding in candidates
-        if _priority_bucket(name, finding) == 1
-    ]
-    pool = kernel_pool or blocker_pool or candidates
+    for item in non_overridable_p0:
+        if item not in pool:
+            pool.append(item)
 
     def sort_key(item):
         name, finding = item
@@ -265,13 +263,20 @@ def _update_ledger_for_selection(
             before_metric=selected.what_happened[:160],
         )
         ledger.gaps.append(entry)
+    entry.severity = selected.severity
     entry.status = "selected"
     entry.selection_note = decision.selection_rationale[:240]
     if decision.new_goal_proposal_path:
-        # mark oversized companions as converted in the ledger when present.
-        for gap in ledger.gaps:
-            if gap.gap_id != entry.gap_id and gap.status == "selected":
-                gap.status = "open"
+        proposal_id = Path(decision.new_goal_proposal_path).stem
+        converted = next((g for g in ledger.gaps if g.gap_id == proposal_id), None)
+        if converted is None:
+            converted = GapLedgerEntry(
+                gap_id=proposal_id, first_seen_cycle=decision.cycle_id,
+                linked_finding_ids=[proposal_id],
+                before_metric="oversized finding converted to a goal proposal",
+            )
+            ledger.gaps.append(converted)
+        converted.status = "converted_to_goal"
     write_yaml(ledger_path, ledger.model_dump(mode="json"))
 
 
@@ -313,13 +318,21 @@ def build_autofix_plan(
     return plan
 
 
-# Paths an autofix may never weaken. Touching them is allowed only through a
-# dedicated goal (not a loop autofix), so the planner fails closed here.
+# Paths an autofix may never weaken — including the loop's OWN guard
+# machinery, so an autofix cannot edit the gate that is checking it
+# (Kernel Safety reviewer fix). Touching these is allowed only through a
+# dedicated goal (not a loop autofix); the planner fails closed here and
+# scripts/check_loop_fix_gate.py imports this same list.
 _PROTECTED_PREFIXES = (
     "espresso_proof/validators.py",
     "espresso_proof/validation/",
     "espresso_proof/proof_language.py",
     "schemas/",
+    "scripts/check_loop_fix_gate.py",
+    "espresso_proof/loop_models.py",
+    "espresso_proof/loop_triage.py",
+    ".github/",
+    ".gitignore",
 )
 
 

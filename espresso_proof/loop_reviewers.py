@@ -485,10 +485,15 @@ def run_review_pass(cycle_dir: Path) -> Path:
     calibration = {}
     for name, reviewer in _REVIEWERS.items():
         findings, advisories, caught = reviewer(cycle_dir, data, probe)
-        has_p0 = any(f.severity == "P0" for f in findings)
+        # Calibration-probe findings are evaluator material: they are recorded
+        # (and drive planted_flaw_caught) but must never inflate the verdict —
+        # otherwise the probe-duty reviewers would be BLOCKER every cycle and
+        # hijack triage (Math Workflow reviewer finding).
+        real_findings = [f for f in findings if "planted_probe" not in f.evidence_path]
+        has_p0 = any(f.severity == "P0" for f in real_findings)
         verdict = (
             "BLOCKER" if has_p0
-            else "PASS_WITH_NOTES" if findings
+            else "PASS_WITH_NOTES" if real_findings
             else "NO_BLOCKING_OBJECTION_AT_CURRENT_SCOPE"
         )
         report = ReviewReport(

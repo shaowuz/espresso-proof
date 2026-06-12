@@ -160,6 +160,8 @@ def run_replay(
 
     if probe not in PROBLEM_PROBES:
         raise ValueError(f"unknown problem probe {probe!r}; known: {sorted(PROBLEM_PROBES)}")
+    if checkpoint not in {"baseline", "pre_merge", "post_merge"}:
+        raise ValueError("checkpoint must be baseline, pre_merge, or post_merge")
     cycle_dir = Path(cycle_dir)
     triage = TriageDecision.model_validate(read_yaml(cycle_dir / "triage.yaml"))
     from .loop_harness import load_cases

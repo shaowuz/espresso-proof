@@ -161,3 +161,27 @@ def test_triage_never_changes_code(triaged_cycle: Path) -> None:
     ).stdout
     for line in status.splitlines():
         assert "loop_runs" not in line  # tmp dirs are outside the repo anyway
+
+
+def test_probe_inflated_blocker_cannot_hijack_priority(tmp_path: Path) -> None:
+    # Regression for the Math Workflow reviewer's observed inversion: the
+    # calibration probe must not inflate a reviewer's verdict, and a P2 from a
+    # probe-duty reviewer must never outrank a P1 math-capability finding.
+    root = tmp_path / "loop_runs"
+    cycle_dir = run_loop_cycle(out_root=root, mode="smoke", max_cases=3)
+    run_review_pass(cycle_dir)
+    # verdicts: probe-duty reviewers must NOT be BLOCKER from the probe alone.
+    from espresso_proof.loop_models import ReviewReport
+
+    source_report = ReviewReport.model_validate(
+        read_yaml(cycle_dir / "review_reports" / "source_applicability.yaml")
+    )
+    assert source_report.verdict != "BLOCKER" or any(
+        f.severity == "P0" and "planted_probe" not in f.evidence_path
+        for f in source_report.actionable_findings
+    )
+    decision = run_triage(cycle_dir)
+    # the P1 math-capability finding (bucket 3) wins over the P2 source/tool
+    # finding (bucket 5) — the exact inversion previously observed.
+    assert decision.selected_gap_id == "math_logic_001"
+    assert decision.selected_gap_kind == "math_capability"
