@@ -578,7 +578,14 @@ def _collect_blockers(record: dict, prior_fingerprints: set[str]) -> list[Blocke
                 continue
             seen.add(fingerprint)
             lowered = text.lower()
-            if "source" in lowered or "citation" in lowered or "reference" in lowered:
+            # Goal 42E cycle 3: theorem/locator requests ARE source gaps — they
+            # need a verified citation, not a proof step. Misclassifying them
+            # as failed_proof_step hid that the right remediation channel is a
+            # curated source registry, not a loop autofix.
+            if any(
+                k in lowered
+                for k in ("source", "citation", "reference", "theorem", "locator")
+            ):
                 evidence_type = "source_gap"
             elif "definition" in lowered:
                 evidence_type = "missing_definition"

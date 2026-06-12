@@ -578,12 +578,60 @@ def run_llm_agent_pass(
     return report
 
 
+def _split_machine_answered_blockers(
+    blockers: list[str], *, run_dir: Path | None, claim_id: str
+) -> tuple[list[str], list[str]]:
+    """Split reviewer blockers into (open, machine_answered).
+
+    Goal 42E cycle 3: a blocker is machine-answered ONLY when (a) its text
+    explicitly asks for an exact computation AND (b) this run already carries
+    a trusted, confirmed machine-check entry for THIS locked claim
+    (instance_checked / computation_checked in proof_verification.yaml).
+    Conservative by construction: source/theorem/locator requests, missing
+    hypotheses, and standing risk objections are NEVER machine-answered —
+    they stay open until real source grounding or human judgment. Resolution
+    is bookkeeping over reviewer REQUESTS; it never touches any
+    proof/source/evidence/grade status."""
+
+    if run_dir is None or not blockers:
+        return blockers, []
+    pv_path = Path(run_dir) / "proof_verification.yaml"
+    if not pv_path.exists():
+        return blockers, []
+    try:
+        entries = read_yaml(pv_path).get("entries", [])
+    except Exception:  # noqa: BLE001 - fail closed: unreadable evidence answers nothing
+        return blockers, []
+    confirmed = [
+        e for e in entries
+        if e.get("trusted") and e.get("confirmed")
+        and e.get("earned_status") in {"instance_checked", "computation_checked"}
+        and e.get("claim_id") == claim_id
+    ]
+    if not confirmed:
+        return blockers, []
+    answered = [b for b in blockers if "exact computation" in str(b).lower()]
+    if not answered:
+        return blockers, []
+    open_blockers = [b for b in blockers if b not in answered]
+    return open_blockers, answered
+
+
+def _machine_answer_note(answered: list[str]) -> str:
+    return (
+        f" {len(answered)} reviewer request(s) answered by trusted machine "
+        "checks (see proof_verification.yaml); the evidence is scoped, never "
+        "a universal proof."
+    )
+
+
 def build_prover_loop_report(
     *,
     agent_report: dict,
     strategy_brief: dict,
     human_choice: dict | None = None,
     approved_effort: str = "normal_pass",
+    run_dir: Path | None = None,
 ) -> dict:
     top_strategies = strategy_brief.get("top_strategies", [])[:3]
     if not top_strategies:
@@ -615,6 +663,9 @@ def build_prover_loop_report(
             if str(item).strip()
         }
     )[:12]
+    blockers, machine_answered = _split_machine_answered_blockers(
+        blockers, run_dir=run_dir, claim_id=agent_report["claim_id"]
+    )
     gate = agent_report["human_gate"]
     selected_strategy = _selected_strategy_from_choice(human_choice, top_strategies)
     approved_effort = _approved_effort_from_choice(human_choice, approved_effort)
@@ -647,7 +698,8 @@ def build_prover_loop_report(
                     strategy=strategy,
                     gate=gate,
                     blockers=blockers,
-                ),
+                )
+                + (_machine_answer_note(machine_answered) if machine_answered else ""),
             }
         )
     decision = "ask_human" if gate["status"] == "pending" else _decision_from_gate(gate)
@@ -1025,6 +1077,9 @@ def append_prover_loop_round(
             if str(item).strip()
         }
     )[:12]
+    blockers, machine_answered = _split_machine_answered_blockers(
+        blockers, run_dir=run_dir, claim_id=loop_report["claim_id"]
+    )
     reviewer_pointers = [
         {
             "verifier_id": review["verifier_id"],
@@ -1053,7 +1108,8 @@ def append_prover_loop_round(
             "Repair reviewer blockers before another proof round."
             if blockers
             else "Expand this candidate with source matching and checked examples."
-        ),
+        )
+        + (_machine_answer_note(machine_answered) if machine_answered else ""),
         # Goal 39: persist the scheduler's pick so the round is durably bound to
         # a named subgoal (prompt context alone is not auditable). None when no
         # subgoal was selectable. Never earns or upgrades any status.

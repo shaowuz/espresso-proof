@@ -246,6 +246,17 @@ def orchestrate_run(
             snapshot_paths=[artifacts["literature_review"]],
         )
 
+    # Goal 42E cycle 3: execute any structured scoped-verification requests
+    # the front half proposed BEFORE the prover/reviewer pass, so round 1
+    # already sees the trusted machine evidence and computation requests can
+    # be machine-answered instead of recurring. Idempotent and fail-closed
+    # (re-validates; a run without requests wires nothing; a confirming
+    # result earns instance_checked only — never a universal status).
+    if not _reached(run_dir, "WAITING_LLM_AGENT_HUMAN_GATE"):
+        from .proof_verification import auto_wire_scoped_verifications
+
+        auto_wire_scoped_verifications(run_dir)
+
     # Stage 3 — live Prover + Reviewers; stop at the human gate.
     if not _reached(run_dir, "WAITING_LLM_AGENT_HUMAN_GATE"):
         def _llm_prover_reviewers() -> None:
@@ -263,6 +274,7 @@ def orchestrate_run(
                 agent_report=agent_report,
                 strategy_brief=read_yaml(run_dir / artifacts["strategy_brief"]),
                 human_choice=read_yaml(run_dir / artifacts["human_choice"]),
+                run_dir=run_dir,
             )
             ProverLoopReport.model_validate(loop_report)
             stage_manifest = read_yaml(run_dir / "run_manifest.yaml")
@@ -325,6 +337,7 @@ def _resolve_and_build_loop(run_dir: Path, *, decision: str, reason: str, human_
         agent_report=report,
         strategy_brief=read_yaml(run_dir / artifacts["strategy_brief"]),
         human_choice=human_choice,
+        run_dir=run_dir,
     )
     ProverLoopReport.model_validate(loop_report)
     manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"

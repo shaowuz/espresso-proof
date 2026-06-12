@@ -336,12 +336,32 @@ def _review_proof_search(cycle_dir: Path, data: dict, probe: dict) -> tuple:
     for blocker in recurring:
         by_fingerprint.setdefault(blocker.recurrence_fingerprint, []).append(blocker)
     for fingerprint, group in sorted(by_fingerprint.items()):
+        # Goal 42E cycle 3: route by what could actually resolve the family.
+        # A source/theorem/locator request (or a human-judgment call) is not
+        # machine-answerable: honest resolution needs a curated HUMAN-VERIFIED
+        # source registry — fabricating citations is forbidden. Those families
+        # keep their P1 evidence but carry the oversize marker so triage
+        # converts them to new-goal proposals instead of recycling them as the
+        # selected gap every cycle. Everything else stays a bounded-fix target.
+        registry_required = all(
+            b.blocking_evidence_type in {"source_gap", "human_judgment_needed"}
+            for b in group
+        )
+        if registry_required:
+            fix = (
+                "requires a curated human-verified source/theorem registry "
+                "with exact locators — a broad rewrite beyond a bounded loop "
+                "autofix; route to a dedicated goal (fabricated citations are "
+                "forbidden)"
+            )
+        else:
+            fix = "select this blocker family for a bounded capability fix"
         add(
             "P1", _rel(cycle_dir, cycle_dir / "blockers.yaml"),
             f"recurring blocker ({len(group)} case(s)): {group[0].blocker_text[:160]}",
             "the same blocker recurs across cycles without resolution — the loop "
             "is not making proof-search progress on it",
-            "select this blocker family for a bounded capability fix",
+            fix,
             "math_capability",
         )
     for case in data["subgoals"].cases:
