@@ -156,7 +156,7 @@ def test_false_theorem_capability_gap_is_found(tmp_path: Path) -> None:
     assert any(
         f.severity == "P1"
         and f.gap_kind == "math_capability"
-        and "order21_abelian_false" in f.what_happened
+        and "order27_abelian_false" in f.what_happened
         for f in report.actionable_findings
     )
 

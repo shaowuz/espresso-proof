@@ -3,8 +3,10 @@
 When a locked claim states EXACTLY "every group of order N is abelian" for a
 concrete integer N, the counterexamples pipeline can do better than asking a
 model: if a non-abelian group of order N exists, this module CONSTRUCTS one
-(the dihedral group D_{N/2} for even N >= 6) and machine-verifies its Cayley
-table with the trusted deterministic ``verify_group_abelian`` backend.
+(the dihedral group D_{N/2} for even N >= 6; for odd N = q*p with primes
+q < p and q | p-1, the semidirect product Z_p x| Z_q — Goal 42E cycle 10)
+and machine-verifies its Cayley table with the trusted deterministic
+``verify_group_abelian`` backend.
 
 Trust model (reviewed by Kernel Safety + Math Workflow, cycle 1):
 
@@ -29,8 +31,9 @@ Trust model (reviewed by Kernel Safety + Math Workflow, cycle 1):
   Cayley-table check ran (``result=failed``) — but DOWNGRADES admissibility to
   ``"unclear"`` and sets ``refutes_claim=False``. An undetermined hypothesis
   ledger never earns a refutation.
-- If every group of order N is abelian (no construction exists), or the order
-  is symbolic/odd/out of range, the probe returns nothing — it cannot
+- If every group of order N is abelian (no construction exists), or the
+  order is symbolic, out of range, or outside both construction families
+  (e.g. odd prime powers like 27), the probe returns nothing — it cannot
   fabricate pressure against a true claim.
 - The probe earns NO status by itself: grade/refutation routing still flows
   through the existing kernel gates.
@@ -111,17 +114,68 @@ def _dihedral_cayley(n: int) -> list[list[int]]:
     return [[multiply(a, b) for b in range(order)] for a in range(order)]
 
 
+def _odd_pq_with_nonabelian_group(order: int) -> tuple[int, int, int] | None:
+    """For odd order = q*p (q < p distinct primes) with q | p-1 — exactly the
+    odd squarefree-semiprime orders admitting a non-abelian group — return
+    (p, q, r) where r has multiplicative order q mod p. Any other odd order
+    returns None (fail closed: e.g. every group of order 15 is cyclic, and
+    odd prime powers like 27 stay out of this probe's scope)."""
+
+    factor_pairs = [
+        (d, order // d)
+        for d in range(3, int(order**0.5) + 1, 2)
+        if order % d == 0
+    ]
+    if len(factor_pairs) != 1:
+        return None
+    q, p = factor_pairs[0]
+    if q >= p:
+        return None
+
+    def _is_prime(n: int) -> bool:
+        return n >= 2 and all(n % k for k in range(2, int(n**0.5) + 1))
+
+    if not (_is_prime(q) and _is_prime(p)) or (p - 1) % q != 0:
+        return None
+    for r in range(2, p):
+        if pow(r, q, p) == 1 and all(pow(r, e, p) != 1 for e in range(1, q)):
+            return p, q, r
+    return None  # unreachable for valid (p, q); fail closed regardless
+
+
+def _semidirect_cayley(p: int, q: int, r: int) -> list[list[int]]:
+    """Cayley table of Z_p x| Z_q, elements (a, b) indexed as a + p*b, with
+    (a1, b1)·(a2, b2) = (a1 + r^{b1}·a2 mod p, b1 + b2 mod q) where r has
+    multiplicative order q mod p. Non-abelian because r != 1. Nothing is
+    trusted from this construction: the verifier independently re-proves
+    closure, identity, inverses, and associativity."""
+
+    def multiply(x: int, y: int) -> int:
+        a1, b1 = x % p, x // p
+        a2, b2 = y % p, y // p
+        return (a1 + pow(r, b1, p) * a2) % p + p * ((b1 + b2) % q)
+
+    return [[multiply(x, y) for y in range(p * q)] for x in range(p * q)]
+
+
 def _nonabelian_group_of_order(order: int) -> tuple[str, list[list[int]]] | None:
     """A concrete non-abelian group of the given order, or None when this
-    probe cannot construct one. Dihedral groups have even order, so every odd
-    order is out of scope for this probe regardless of whether a non-abelian
-    group of that order exists (the smallest such odd order is 21)."""
+    probe cannot construct one. Even orders >= 6 use the dihedral family;
+    odd orders q*p with q | p-1 (Goal 42E cycle 10, smallest case 21 =
+    Z_7 x| Z_3) use the semidirect-product family. Every other order fails
+    closed regardless of whether a non-abelian group exists."""
 
     # The 200 cap bounds the synchronous O(order^3) pure-Python associativity
     # re-check in verify_group_abelian (~8M multiplications at the cap, a few
     # seconds); claims about larger concrete orders simply stay agent-only.
-    if order < 6 or order > 200 or order % 2 == 1:
+    if order < 6 or order > 200:
         return None
+    if order % 2 == 1:
+        pqr = _odd_pq_with_nonabelian_group(order)
+        if pqr is None:
+            return None
+        p, q, r = pqr
+        return f"semidirect_group_Z{p}_Z{q}", _semidirect_cayley(p, q, r)
     n = order // 2
     if n < 3:
         return None  # D_1, D_2 are abelian
