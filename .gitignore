@@ -22,3 +22,4 @@ projects/*/input_*.txt
 /*_source/
 /*_source.tar.gz
 .scorecard_runs/
+loop_runs/

@@ -2145,6 +2145,33 @@ def scorecard(
         raise typer.Exit(code=1)
 
 
+@app.command("loop-cycle")
+def loop_cycle(
+    out: Path = typer.Option(..., "--out", help="Loop root directory (e.g. loop_runs). Local only; never committed."),
+    cases: Path | None = typer.Option(None, "--cases", exists=True, dir_okay=False, help="Dogfood case YAML; defaults to the built-in family set."),
+    mode: str = typer.Option("smoke", "--mode", help="smoke = deterministic stub run; deep = external provider."),
+    cycle_id: str | None = typer.Option(None, "--cycle-id", help="Override the auto-numbered cycle id."),
+    max_cases: int = typer.Option(5, "--max-cases", min=1, max=6),
+) -> None:
+    """Goal 42A: run ONE observational dogfood improvement cycle.
+
+    Runs Espresso on 3-5 dogfood cases through the existing runtime and writes
+    the durable cycle folder (cases, run manifest, agent events/outputs,
+    timings, bottlenecks, failures, refutations, blockers, strategy trace,
+    subgoal progress, theorem-use ledger, summary) plus campaign-level
+    campaign_index / gap_ledger / loop_memory / stop_gate. Strictly
+    observational: it never changes code, never opens PRs, and no loop record
+    can upgrade any proof/source/evidence/grade/refutation/claim status.
+    """
+    from .loop_harness import run_loop_cycle
+
+    cycle_dir = run_loop_cycle(
+        out_root=out, cases_path=cases, mode=mode, cycle_id=cycle_id, max_cases=max_cases
+    )
+    typer.echo(f"Cycle recorded at {cycle_dir}")
+    typer.echo(f"Campaign files updated under {out}")
+
+
 @app.command()
 def eval(
     mode: str = typer.Option("mock", "--mode"),
