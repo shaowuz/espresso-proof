@@ -130,6 +130,50 @@ def _probe_computation_request_blockers_resolved(run_dir: Path) -> tuple[bool, s
     )
 
 
+def _probe_standing_risks_classified_human_gated(run_dir: Path) -> tuple[bool, str]:
+    """Blockers that originated as reviewer OBJECTIONS (standing risks) or
+    MISSING HYPOTHESES (claim/hypothesis work) are human-gated by nature: no
+    loop autofix can resolve them. The loop's classifier must say so, so
+    triage routes them to goal proposals instead of bounded-fix selection."""
+
+    from .loop_harness import (
+        _blocker_provenance,
+        classify_blocker,
+        provenance_is_human_gated,
+    )
+
+    loop_path = run_dir / "prover_loop.yaml"
+    if not loop_path.exists():
+        return False, "no prover_loop.yaml was produced"
+    provenance = _blocker_provenance(run_dir)
+    misclassified: list[str] = []
+    human_gated_seen = 0
+    seen: set[str] = set()
+    for attempt in read_yaml(loop_path).get("attempts", []):
+        for text in attempt.get("blockers", []):
+            text = str(text).strip()
+            if text in seen:
+                continue
+            seen.add(text)
+            kinds = provenance.get(text, set())
+            if not provenance_is_human_gated(kinds):
+                continue  # requests keep their request-kind classification
+            human_gated_seen += 1
+            label = classify_blocker(text, provenance=kinds)
+            if label not in {"human_judgment_needed", "reviewer_objection"}:
+                misclassified.append(text)
+    if misclassified:
+        return False, (
+            f"{len(misclassified)} standing-risk/hypothesis blocker(s) still "
+            f"classified as bounded-fix targets, e.g. {misclassified[0][:80]!r}"
+        )
+    if not human_gated_seen:
+        # fail closed (mirrors the sibling probes): a run with nothing to
+        # classify proves nothing about the fix.
+        return False, "no objection/hypothesis blocker present to classify"
+    return True, "all objection/hypothesis blockers classified human-gated"
+
+
 PROBLEM_PROBES = {
     "false_theorem_counterexample_present": _probe_false_theorem_counterexample_present,
     "scoped_computation_present": _probe_scoped_computation_present,
@@ -137,6 +181,7 @@ PROBLEM_PROBES = {
     "memo_proof_language_clean": _probe_memo_proof_language_clean,
     "examples_present": _probe_examples_present,
     "computation_request_blockers_resolved": _probe_computation_request_blockers_resolved,
+    "standing_risks_classified_human_gated": _probe_standing_risks_classified_human_gated,
 }
 
 

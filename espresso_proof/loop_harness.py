@@ -560,6 +560,104 @@ def _collect_refutations(record: dict, cycle_id: str) -> list[RefutationRecord]:
     return records
 
 
+def _blocker_provenance(run_dir: Path) -> dict[str, set[str]]:
+    """Map each reviewer-emitted text to its recorded provenance kinds
+    ({"source_request", "missing_hypothesis", "objection"}), read from the
+    run's persisted verifier reviews (llm_agent_run.yaml and every
+    prover_rounds/round_*.yaml). Texts the artifacts do not contain map to
+    an empty set (legacy keyword classification applies)."""
+
+    provenance: dict[str, set[str]] = {}
+    review_sources: list[dict] = []
+    agent_run = _read_optional(run_dir, "llm_agent_run")
+    if isinstance(agent_run, dict):
+        review_sources.append(agent_run)
+    rounds_dir = Path(run_dir) / "prover_rounds"
+    if rounds_dir.is_dir():
+        for round_path in sorted(rounds_dir.glob("round_*.yaml")):
+            try:
+                doc = read_yaml(round_path)
+            except Exception:  # noqa: BLE001 - unreadable round: skip, fail open to legacy rules
+                continue
+            if isinstance(doc, dict):
+                review_sources.append(doc)
+    for doc in review_sources:
+        reviews = doc.get("verifier_reviews")
+        if not isinstance(reviews, list):
+            continue
+        for review in reviews:
+            if not isinstance(review, dict):
+                continue
+            for kind, field in (
+                ("source_request", "source_requests"),
+                ("missing_hypothesis", "missing_hypotheses"),
+                ("objection", "objections"),
+            ):
+                items = review.get(field)
+                if not isinstance(items, list):
+                    continue
+                for item in items:
+                    text = str(item).strip()
+                    if text:
+                        provenance.setdefault(text, set()).add(kind)
+    return provenance
+
+
+def provenance_is_human_gated(kinds: set[str]) -> bool:
+    """Single source of truth for "this blocker can never be a bounded
+    loop-autofix target": it has recorded provenance and did not originate
+    as a reviewer source request. Shared by the classifier and the replay
+    probe so the two predicates cannot drift apart."""
+
+    return bool(kinds) and "source_request" not in kinds
+
+
+def classify_blocker(text: str, *, provenance: set[str] | None = None) -> str:
+    """Deterministic blocking_evidence_type for a prover blocker text.
+
+    Goal 42E cycle 4: provenance decides first. A blocker that originated
+    ONLY as a reviewer OBJECTION (a standing risk like "a sketch-only
+    argument cannot become proof-complete evidence") or as a MISSING
+    HYPOTHESIS (claim scoping / hypothesis work) is human-gated by nature —
+    no loop autofix can resolve it, so offering it as a bounded-fix target
+    every cycle was dishonest triage input. Reviewer SOURCE REQUESTS (and
+    texts with no recorded provenance, e.g. legacy runs) classify by the
+    keyword rules."""
+
+    kinds = provenance or set()
+    if provenance_is_human_gated(kinds):
+        # Objections and missing hypotheses are never bounded loop-autofix
+        # targets: code cannot fix an argument's mathematics, and replay
+        # could not distinguish repair from suppression. Label precisely
+        # (Math Workflow review): a missing hypothesis is claim-scoping
+        # judgment; a pure objection keeps the truthful reviewer_objection
+        # label. Both are human-gated downstream.
+        if "missing_hypothesis" in kinds:
+            return "human_judgment_needed"
+        return "reviewer_objection"
+    lowered = str(text).lower()
+    # Goal 42E cycle 3: theorem/locator REQUESTS are source gaps — they
+    # need a verified citation, not a proof step. The theorem keyword
+    # is phrase-scoped (review nit): "the theorem's step 3 is invalid"
+    # is a proof problem, not a citation request.
+    if any(
+        k in lowered
+        for k in (
+            "source", "citation", "reference", "locator",
+            "exact theorem", "theorem supporting", "cited theorem",
+            "theorem statement",
+        )
+    ):
+        return "source_gap"
+    if "definition" in lowered:
+        return "missing_definition"
+    if "comput" in lowered or "check" in lowered:
+        return "missing_computation"
+    if "human" in lowered:
+        return "human_judgment_needed"
+    return "failed_proof_step"
+
+
 def _collect_blockers(record: dict, prior_fingerprints: set[str]) -> list[BlockerRecord]:
     run_dir = record["run_dir"]
     if run_dir is None:
@@ -568,6 +666,7 @@ def _collect_blockers(record: dict, prior_fingerprints: set[str]) -> list[Blocke
     loop = _read_optional(run_dir, "prover_loop") or {}
     graph = _read_optional(run_dir, "proof_goal_graph") or {}
     nodes = {n.get("id"): n for n in graph.get("nodes", [])}
+    provenance = _blocker_provenance(run_dir)
     blockers: list[BlockerRecord] = []
     seen: set[str] = set()
     for attempt in loop.get("attempts", []):
@@ -576,28 +675,9 @@ def _collect_blockers(record: dict, prior_fingerprints: set[str]) -> list[Blocke
             if fingerprint in seen:
                 continue
             seen.add(fingerprint)
-            lowered = text.lower()
-            # Goal 42E cycle 3: theorem/locator REQUESTS are source gaps — they
-            # need a verified citation, not a proof step. The theorem keyword
-            # is phrase-scoped (review nit): "the theorem's step 3 is invalid"
-            # is a proof problem, not a citation request.
-            if any(
-                k in lowered
-                for k in (
-                    "source", "citation", "reference", "locator",
-                    "exact theorem", "theorem supporting", "cited theorem",
-                    "theorem statement",
-                )
-            ):
-                evidence_type = "source_gap"
-            elif "definition" in lowered:
-                evidence_type = "missing_definition"
-            elif "comput" in lowered or "check" in lowered:
-                evidence_type = "missing_computation"
-            elif "human" in lowered:
-                evidence_type = "human_judgment_needed"
-            else:
-                evidence_type = "failed_proof_step"
+            evidence_type = classify_blocker(
+                text, provenance=provenance.get(str(text).strip(), set())
+            )
             blockers.append(
                 BlockerRecord(
                     case_id=record["case"].case_id,

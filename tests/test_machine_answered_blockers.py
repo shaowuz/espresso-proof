@@ -275,3 +275,112 @@ def test_replay_probe_computation_request_blockers_resolved(tmp_path: Path) -> N
     )
     ok, note = probe(tmp_path)
     assert ok and "no exact-computation blocker remains open" in note
+
+
+def test_classifier_provenance_tiers() -> None:
+    # Goal 42E cycle 4: provenance decides first.
+    from espresso_proof.loop_harness import classify_blocker
+
+    risk = "A sketch-only argument cannot become proof-complete evidence."
+    assert classify_blocker(risk, provenance={"objection"}) == "reviewer_objection"
+    hyp = "Precise genericity condition for the route."
+    assert classify_blocker(hyp, provenance={"missing_hypothesis"}) == "human_judgment_needed"
+    req = "Exact theorem supporting the main reduction."
+    assert classify_blocker(req, provenance={"source_request"}) == "source_gap"
+    # a text recorded as BOTH a request and an objection keeps the request kind.
+    assert classify_blocker(req, provenance={"source_request", "objection"}) == "source_gap"
+    # no recorded provenance (legacy runs): keyword rules.
+    assert classify_blocker(risk, provenance=set()) == "failed_proof_step"
+    assert classify_blocker(req) == "source_gap"
+
+
+def test_standing_risks_classified_human_gated_in_cycle(tmp_path: Path) -> None:
+    # End-to-end through the harness: objection/hypothesis blockers carry
+    # human_judgment_needed in blockers.yaml, so the reviewer routes them to
+    # goal proposals instead of bounded-fix selection.
+    from espresso_proof.loop_harness import run_loop_cycle
+
+    cases_file = tmp_path / "cases.yaml"
+    write_yaml(
+        cases_file,
+        {
+            "cases": [
+                {
+                    "case_id": "p2_groups_true",
+                    "claim": "Every group of order p^2, where p is prime, is abelian.",
+                    "case_family": "true_theorem",
+                    "expected_difficulty": "smoke",
+                    "known_truth_status": "evaluator_only_true",
+                    "what_this_case_tests": ["proof-search progress"],
+                    "must_not_claim": ["Espresso proved the theorem"],
+                }
+            ]
+        },
+    )
+    cycle_dir = run_loop_cycle(
+        out_root=tmp_path / "loop_runs", mode="smoke", cases_path=cases_file
+    )
+    by_text = {
+        b["blocker_text"]: b["blocking_evidence_type"]
+        for b in read_yaml(cycle_dir / "blockers.yaml")["blockers"]
+    }
+    assert by_text["A sketch-only argument cannot become proof-complete evidence."] == "reviewer_objection"
+    assert by_text["Precise genericity condition for the route."] == "human_judgment_needed"
+    assert by_text["The strategy may prove only a narrower statement than the locked claim."] == "reviewer_objection"
+    # requests keep request-kind classification.
+    assert by_text["Exact theorem supporting the main reduction."] == "source_gap"
+
+
+def test_standing_risk_families_carry_redesign_marker(tmp_path: Path) -> None:
+    # Two consecutive cycles -> recurring families; the standing-risk ones
+    # must carry an oversize marker so triage proposes instead of selecting.
+    from espresso_proof.loop_harness import run_loop_cycle
+    from espresso_proof.loop_models import ReviewReport
+    from espresso_proof.loop_reviewers import run_review_pass
+    from espresso_proof.loop_triage import _is_oversized, run_triage
+    from tests.loop_gap_case import gap_cases
+
+    cases_file = tmp_path / "cases.yaml"
+    write_yaml(cases_file, gap_cases())
+    root = tmp_path / "loop_runs"
+    run_loop_cycle(out_root=root, mode="smoke", cases_path=cases_file)
+    second = run_loop_cycle(out_root=root, mode="smoke", cases_path=cases_file)
+    run_review_pass(second)
+    report = ReviewReport.model_validate(
+        read_yaml(second / "review_reports" / "proof_search.yaml")
+    )
+    standing = [
+        f for f in report.actionable_findings if "sketch-only" in f.what_happened
+    ]
+    assert standing, "the standing-risk family must still be reported"
+    assert all(_is_oversized(f) for f in standing)
+    decision = run_triage(second)
+    marked_ids = {
+        f.finding_id for f in report.actionable_findings if _is_oversized(f)
+    }
+    assert decision.selected_gap_id not in marked_ids
+
+
+def test_replay_probe_standing_risks_classified(tmp_path: Path) -> None:
+    from espresso_proof.loop_replay import (
+        _probe_standing_risks_classified_human_gated as probe,
+    )
+
+    ok, note = probe(tmp_path)
+    assert not ok and "no prover_loop.yaml" in note
+    risk = "A sketch-only argument cannot become proof-complete evidence."
+    write_yaml(tmp_path / "prover_loop.yaml", {"attempts": [{"blockers": [risk]}]})
+    # no recorded provenance at all -> nothing to classify -> fail closed.
+    ok, note = probe(tmp_path)
+    assert not ok and "no objection/hypothesis blocker present" in note
+    # provenance is read via the run manifest (same path as the harness).
+    write_yaml(
+        tmp_path / "run_manifest.yaml",
+        {"artifacts": {}, "optional_artifacts": {"llm_agent_run": "llm_agent_run.yaml"}},
+    )
+    write_yaml(
+        tmp_path / "llm_agent_run.yaml",
+        {"verifier_reviews": [{"objections": [risk], "missing_hypotheses": [], "source_requests": []}]},
+    )
+    ok, note = probe(tmp_path)
+    assert ok and "human-gated" in note

@@ -343,16 +343,23 @@ def _review_proof_search(cycle_dir: Path, data: dict, probe: dict) -> tuple:
         # keep their P1 evidence but carry the oversize marker so triage
         # converts them to new-goal proposals instead of recycling them as the
         # selected gap every cycle. Everything else stays a bounded-fix target.
-        registry_required = all(
-            b.blocking_evidence_type in {"source_gap", "human_judgment_needed"}
-            for b in group
-        )
-        if registry_required:
+        # NOTE: groups are keyed by (case, text) fingerprints, so kinds is a
+        # singleton in practice; the subset checks are defensive.
+        kinds = {b.blocking_evidence_type for b in group}
+        if kinds <= {"source_gap"}:
             fix = (
                 "requires a curated human-verified source/theorem registry "
                 "with exact locators — a broad rewrite beyond a bounded loop "
                 "autofix; route to a dedicated goal (fabricated citations are "
                 "forbidden)"
+            )
+        elif kinds <= {"human_judgment_needed", "reviewer_objection", "source_gap"}:
+            fix = (
+                "standing risk or open mathematical judgment (claim scoping, "
+                "hypothesis work, or human-led proof development); not "
+                "machine-fixable — closing it in code would require a "
+                "redesign of the evidence semantics; route to a dedicated "
+                "goal and keep the blocker honestly open in run artifacts"
             )
         else:
             fix = "select this blocker family for a bounded capability fix"
