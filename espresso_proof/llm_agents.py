@@ -602,9 +602,9 @@ def _split_machine_answered_blockers(
     """Split reviewer blockers into (open, machine_answered).
 
     Goal 42E cycle 3: a blocker is machine-answered ONLY when ALL hold:
-    (a) it originated as a reviewer SOURCE REQUEST (provenance is checked
-        structurally via ``source_request_texts``; objections and missing
-        hypotheses are never answerable regardless of phrasing);
+    (a) it originated as a reviewer SOURCE REQUEST (provenance by text-set
+        membership against the round's ``source_requests``; objections and
+        missing hypotheses are never answerable regardless of phrasing);
     (b) its WHOLE text fullmatches the generic disjunctive
         "(source or) exact computation for the most dangerous example" form
         — requests naming specific objects stay open;
@@ -640,12 +640,10 @@ def _split_machine_answered_blockers(
         if text in requests and _ANSWERABLE_COMPUTATION_REQUEST.fullmatch(
             " ".join(text.split())
         ):
-            answered.append(
-                {
-                    "request": text,
-                    "entry_ids": [str(e.get("id", "")) for e in confirmed][:8],
-                }
-            )
+            ids = [str(e.get("id", "")) for e in confirmed]
+            if len(ids) > 8:
+                ids = ids[:8] + [f"+{len(ids) - 8} more"]
+            answered.append({"request": text, "entry_ids": ids})
         else:
             open_blockers.append(blocker)
     if not answered:
@@ -659,11 +657,12 @@ def _machine_answer_note(answered: list[dict]) -> str:
         f"[{', '.join(item['entry_ids'])}]"
         for item in answered
     )
-    return (
+    note = (
         f" Machine-answered reviewer request(s): {parts} "
         "(see proof_verification.yaml; the evidence is scoped, never a "
         "universal proof)."
-    )[:600]
+    )
+    return note if len(note) <= 600 else note[:597] + "..."
 
 
 def build_prover_loop_report(
@@ -930,8 +929,12 @@ def _attempt_status_for_allocation(allocation: str, blockers: list[str]) -> str:
         return "blocked"
     if allocation == "ask_human":
         return "waiting_human"
-    if allocation == "repair" or blockers:
+    if blockers:
         return "needs_repair"
+    # repair allocation with zero OPEN blockers (e.g. the only recorded
+    # request was machine-answered): nothing is repairable — the attempt is
+    # an honest candidate; the kernel model rejects needs_repair without
+    # blockers, so this is also the fail-closed branch.
     return "candidate"
 
 
@@ -1192,6 +1195,11 @@ def append_prover_loop_round(
     loop_report["loop_decision"] = "repair" if blockers else "continue"
     loop_report["decision_reason"] = (
         "Round appended from resolved human gate; reviewer blockers were routed into the prover prompt."
+        + (
+            " Recorded computation request(s) were machine-answered by trusted scoped checks (see attempt next_action)."
+            if machine_answered
+            else ""
+        )
     )
     ProverLoopReport.model_validate(loop_report)
     write_yaml(run_dir / loop_path, loop_report)
