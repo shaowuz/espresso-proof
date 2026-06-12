@@ -560,6 +560,65 @@ def _collect_refutations(record: dict, cycle_id: str) -> list[RefutationRecord]:
     return records
 
 
+def _blocker_provenance(run_dir: Path) -> dict[str, set[str]]:
+    """Map each reviewer-emitted text to its recorded provenance kinds
+    ({"source_request", "missing_hypothesis", "objection"}), read from the
+    run's persisted verifier reviews (llm_agent_run.yaml and every
+    prover_rounds/round_*.yaml). Texts the artifacts do not contain map to
+    an empty set (legacy keyword classification applies)."""
+
+    provenance: dict[str, set[str]] = {}
+    review_sources: list[dict] = []
+    agent_run = _read_optional(run_dir, "llm_agent_run")
+    if agent_run:
+        review_sources.append(agent_run)
+    rounds_dir = Path(run_dir) / "prover_rounds"
+    if rounds_dir.is_dir():
+        for round_path in sorted(rounds_dir.glob("round_*.yaml")):
+            try:
+                review_sources.append(read_yaml(round_path))
+            except Exception:  # noqa: BLE001 - unreadable round: skip, fail open to legacy rules
+                continue
+    for doc in review_sources:
+        for review in doc.get("verifier_reviews", []) or []:
+            for kind, field in (
+                ("source_request", "source_requests"),
+                ("missing_hypothesis", "missing_hypotheses"),
+                ("objection", "objections"),
+            ):
+                for item in review.get(field, []) or []:
+                    text = str(item).strip()
+                    if text:
+                        provenance.setdefault(text, set()).add(kind)
+    return provenance
+
+
+def classify_blocker(text: str, *, provenance: set[str] | None = None) -> str:
+    """Deterministic blocking_evidence_type for a prover blocker text."""
+
+    lowered = str(text).lower()
+    # Goal 42E cycle 3: theorem/locator REQUESTS are source gaps — they
+    # need a verified citation, not a proof step. The theorem keyword
+    # is phrase-scoped (review nit): "the theorem's step 3 is invalid"
+    # is a proof problem, not a citation request.
+    if any(
+        k in lowered
+        for k in (
+            "source", "citation", "reference", "locator",
+            "exact theorem", "theorem supporting", "cited theorem",
+            "theorem statement",
+        )
+    ):
+        return "source_gap"
+    if "definition" in lowered:
+        return "missing_definition"
+    if "comput" in lowered or "check" in lowered:
+        return "missing_computation"
+    if "human" in lowered:
+        return "human_judgment_needed"
+    return "failed_proof_step"
+
+
 def _collect_blockers(record: dict, prior_fingerprints: set[str]) -> list[BlockerRecord]:
     run_dir = record["run_dir"]
     if run_dir is None:
@@ -576,28 +635,7 @@ def _collect_blockers(record: dict, prior_fingerprints: set[str]) -> list[Blocke
             if fingerprint in seen:
                 continue
             seen.add(fingerprint)
-            lowered = text.lower()
-            # Goal 42E cycle 3: theorem/locator REQUESTS are source gaps — they
-            # need a verified citation, not a proof step. The theorem keyword
-            # is phrase-scoped (review nit): "the theorem's step 3 is invalid"
-            # is a proof problem, not a citation request.
-            if any(
-                k in lowered
-                for k in (
-                    "source", "citation", "reference", "locator",
-                    "exact theorem", "theorem supporting", "cited theorem",
-                    "theorem statement",
-                )
-            ):
-                evidence_type = "source_gap"
-            elif "definition" in lowered:
-                evidence_type = "missing_definition"
-            elif "comput" in lowered or "check" in lowered:
-                evidence_type = "missing_computation"
-            elif "human" in lowered:
-                evidence_type = "human_judgment_needed"
-            else:
-                evidence_type = "failed_proof_step"
+            evidence_type = classify_blocker(text)
             blockers.append(
                 BlockerRecord(
                     case_id=record["case"].case_id,
