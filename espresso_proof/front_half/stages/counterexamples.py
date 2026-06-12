@@ -202,6 +202,17 @@ def _counterexamples(*, run_dir: Path, client: LLMClient, context: dict) -> dict
         raw.get("tests"), counterexamples=counterexamples
     )
 
+    # Goal 42E cycle 1: deterministic machine probes. Agent TEXT stays
+    # candidate-only (refutes_claim forced False above), but a Cayley-table
+    # verified non-abelian group of the claimed order is a MACHINE result and
+    # may carry result=failed/refutes_claim=True — the kernel validator
+    # re-checks it like any artifact, and grade routing is unchanged.
+    from ...counterexample_probes import propose_deterministic_counterexamples
+
+    probe_tests = propose_deterministic_counterexamples(claim)
+    existing_ids = {t.get("id") for t in counterexamples}
+    counterexamples.extend(t for t in probe_tests if t["id"] not in existing_ids)
+
     counterexample_report = {"claim_id": claim_id, "tests": counterexamples}
     test_report = {
         "claim_id": claim_id,
