@@ -578,13 +578,17 @@ def _collect_blockers(record: dict, prior_fingerprints: set[str]) -> list[Blocke
                 continue
             seen.add(fingerprint)
             lowered = text.lower()
-            # Goal 42E cycle 3: theorem/locator requests ARE source gaps — they
-            # need a verified citation, not a proof step. Misclassifying them
-            # as failed_proof_step hid that the right remediation channel is a
-            # curated source registry, not a loop autofix.
+            # Goal 42E cycle 3: theorem/locator REQUESTS are source gaps — they
+            # need a verified citation, not a proof step. The theorem keyword
+            # is phrase-scoped (review nit): "the theorem's step 3 is invalid"
+            # is a proof problem, not a citation request.
             if any(
                 k in lowered
-                for k in ("source", "citation", "reference", "theorem", "locator")
+                for k in (
+                    "source", "citation", "reference", "locator",
+                    "exact theorem", "theorem supporting", "cited theorem",
+                    "theorem statement",
+                )
             ):
                 evidence_type = "source_gap"
             elif "definition" in lowered:

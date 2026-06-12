@@ -578,19 +578,41 @@ def run_llm_agent_pass(
     return report
 
 
+# The ONLY machine-answerable request shape: the generic disjunctive
+# "(source or) exact computation for the most dangerous example/case" —
+# an ANCHORED FULLMATCH (Kernel Safety + Math Workflow review): a request
+# naming any specific object ("exact computation of the Hodge numbers ...")
+# never matches and stays open, because claim-scoped evidence does not bind
+# to specifics the entries' targets do not cover. Fail-closed false
+# negatives are the intended direction.
+_ANSWERABLE_COMPUTATION_REQUEST = re.compile(
+    r"(?:source\s+or\s+)?exact\s+computation\s+for\s+the\s+most\s+dangerous\s+"
+    r"(?:example|case)\s*\.?",
+    re.IGNORECASE,
+)
+
+
 def _split_machine_answered_blockers(
-    blockers: list[str], *, run_dir: Path | None, claim_id: str
-) -> tuple[list[str], list[str]]:
+    blockers: list[str],
+    *,
+    run_dir: Path | None,
+    claim_id: str,
+    source_request_texts: set[str] | None = None,
+) -> tuple[list[str], list[dict]]:
     """Split reviewer blockers into (open, machine_answered).
 
-    Goal 42E cycle 3: a blocker is machine-answered ONLY when (a) its text
-    explicitly asks for an exact computation AND (b) this run already carries
-    a trusted, confirmed machine-check entry for THIS locked claim
-    (instance_checked / computation_checked in proof_verification.yaml).
-    Conservative by construction: source/theorem/locator requests, missing
-    hypotheses, and standing risk objections are NEVER machine-answered —
-    they stay open until real source grounding or human judgment. Resolution
-    is bookkeeping over reviewer REQUESTS; it never touches any
+    Goal 42E cycle 3: a blocker is machine-answered ONLY when ALL hold:
+    (a) it originated as a reviewer SOURCE REQUEST (provenance is checked
+        structurally via ``source_request_texts``; objections and missing
+        hypotheses are never answerable regardless of phrasing);
+    (b) its WHOLE text fullmatches the generic disjunctive
+        "(source or) exact computation for the most dangerous example" form
+        — requests naming specific objects stay open;
+    (c) this run carries trusted, confirmed machine-check entries for THIS
+        locked claim (instance_checked / computation_checked in
+        proof_verification.yaml).
+    Each answer records WHICH entries discharged WHICH request text.
+    Resolution is bookkeeping over reviewer requests; it never touches any
     proof/source/evidence/grade status."""
 
     if run_dir is None or not blockers:
@@ -610,19 +632,38 @@ def _split_machine_answered_blockers(
     ]
     if not confirmed:
         return blockers, []
-    answered = [b for b in blockers if "exact computation" in str(b).lower()]
+    requests = {str(t).strip() for t in (source_request_texts or set())}
+    answered: list[dict] = []
+    open_blockers: list[str] = []
+    for blocker in blockers:
+        text = str(blocker).strip()
+        if text in requests and _ANSWERABLE_COMPUTATION_REQUEST.fullmatch(
+            " ".join(text.split())
+        ):
+            answered.append(
+                {
+                    "request": text,
+                    "entry_ids": [str(e.get("id", "")) for e in confirmed][:8],
+                }
+            )
+        else:
+            open_blockers.append(blocker)
     if not answered:
         return blockers, []
-    open_blockers = [b for b in blockers if b not in answered]
     return open_blockers, answered
 
 
-def _machine_answer_note(answered: list[str]) -> str:
-    return (
-        f" {len(answered)} reviewer request(s) answered by trusted machine "
-        "checks (see proof_verification.yaml); the evidence is scoped, never "
-        "a universal proof."
+def _machine_answer_note(answered: list[dict]) -> str:
+    parts = "; ".join(
+        f"{item['request']!r} answered by trusted machine check(s) "
+        f"[{', '.join(item['entry_ids'])}]"
+        for item in answered
     )
+    return (
+        f" Machine-answered reviewer request(s): {parts} "
+        "(see proof_verification.yaml; the evidence is scoped, never a "
+        "universal proof)."
+    )[:600]
 
 
 def build_prover_loop_report(
@@ -664,7 +705,14 @@ def build_prover_loop_report(
         }
     )[:12]
     blockers, machine_answered = _split_machine_answered_blockers(
-        blockers, run_dir=run_dir, claim_id=agent_report["claim_id"]
+        blockers,
+        run_dir=run_dir,
+        claim_id=agent_report["claim_id"],
+        source_request_texts={
+            str(item).strip()
+            for review in verifier_reviews
+            for item in review.get("source_requests", [])
+        },
     )
     gate = agent_report["human_gate"]
     selected_strategy = _selected_strategy_from_choice(human_choice, top_strategies)
@@ -721,7 +769,9 @@ def build_prover_loop_report(
         "attempts": attempts,
         "human_gate_status": gate["status"],
         "loop_decision": decision,
-        "decision_reason": _loop_decision_reason(gate, blockers),
+        "decision_reason": _loop_decision_reason(
+            gate, blockers, machine_answered=machine_answered
+        ),
         "audit_note": (
             "Prover-loop scaffold: records attempt portfolio, reviewer objections, "
             "time allocation, and human gate without upgrading proof/source/evidence status."
@@ -904,13 +954,21 @@ def _decision_from_gate(gate: dict) -> str:
     return "repair"
 
 
-def _loop_decision_reason(gate: dict, blockers: list[str]) -> str:
+def _loop_decision_reason(
+    gate: dict, blockers: list[str], *, machine_answered: list[dict] | None = None
+) -> str:
     if gate.get("status") == "pending":
         return "Human gate is pending; Espresso must not run deeper prover rounds yet."
     if gate.get("decision") == "stop":
         return "Human gate resolved to stop."
     if blockers:
         return "Reviewer objections or source requests require repair before another proof round."
+    if machine_answered:
+        return (
+            "Human gate resolved; recorded reviewer computation request(s) were "
+            "machine-answered by trusted scoped checks (see attempt next_action "
+            "and proof_verification.yaml)."
+        )
     return "Human gate resolved and no blocking reviewer objection was recorded."
 
 
@@ -1078,7 +1136,14 @@ def append_prover_loop_round(
         }
     )[:12]
     blockers, machine_answered = _split_machine_answered_blockers(
-        blockers, run_dir=run_dir, claim_id=loop_report["claim_id"]
+        blockers,
+        run_dir=run_dir,
+        claim_id=loop_report["claim_id"],
+        source_request_texts={
+            str(item).strip()
+            for review in verifier_reviews
+            for item in review.get("source_requests", [])
+        },
     )
     reviewer_pointers = [
         {

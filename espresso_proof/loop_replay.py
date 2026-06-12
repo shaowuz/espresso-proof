@@ -98,10 +98,12 @@ def _probe_computation_request_blockers_resolved(run_dir: Path) -> tuple[bool, s
     pv_path = run_dir / "proof_verification.yaml"
     if not pv_path.exists():
         return False, "no proof_verification.yaml — nothing machine-answered"
+    claim_id = read_yaml(run_dir / "locked_claim.yaml").get("id")
     confirmed = [
         e for e in read_yaml(pv_path).get("entries", [])
         if e.get("trusted") and e.get("confirmed")
         and e.get("earned_status") in {"instance_checked", "computation_checked"}
+        and e.get("claim_id") == claim_id
     ]
     if not confirmed:
         return False, "no trusted confirmed machine-check entry to answer with"

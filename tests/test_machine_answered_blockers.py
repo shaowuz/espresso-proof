@@ -38,37 +38,72 @@ def _pv_report(claim_id: str, *, confirmed: bool) -> dict:
     }
 
 
+REQUESTS = {
+    "Exact theorem supporting the main reduction.",
+    "Source or exact computation for the most dangerous example.",
+}
+
+
 def test_exact_computation_blocker_answered_only_with_confirmed_evidence(
     tmp_path: Path,
 ) -> None:
     write_yaml(tmp_path / "proof_verification.yaml", _pv_report("c1", confirmed=True))
     open_blockers, answered = _split_machine_answered_blockers(
-        list(BLOCKERS), run_dir=tmp_path, claim_id="c1"
+        list(BLOCKERS), run_dir=tmp_path, claim_id="c1", source_request_texts=REQUESTS
     )
-    assert answered == ["Source or exact computation for the most dangerous example."]
+    assert [a["request"] for a in answered] == [
+        "Source or exact computation for the most dangerous example."
+    ]
+    # the answer is BOUND to the discharging entries.
+    assert answered[0]["entry_ids"] == ["e1"]
     # source/theorem requests and standing risks are NEVER machine-answered.
     assert "Exact theorem supporting the main reduction." in open_blockers
     assert "A sketch-only argument cannot become proof-complete evidence." in open_blockers
 
 
+def test_specific_requests_and_non_source_provenance_stay_open(tmp_path: Path) -> None:
+    # Kernel Safety + Math Workflow blockers: request-blind matching is
+    # forbidden. A request naming SPECIFIC objects must never be discharged
+    # by unrelated claim-scoped evidence, and a non-source-request item must
+    # never be answered no matter how it is phrased.
+    write_yaml(tmp_path / "proof_verification.yaml", _pv_report("c1", confirmed=True))
+    specific = "Exact computation of the Hodge numbers requires the source's spectral sequence."
+    open_blockers, answered = _split_machine_answered_blockers(
+        [specific], run_dir=tmp_path, claim_id="c1", source_request_texts={specific}
+    )
+    assert answered == [] and open_blockers == [specific]
+    # generic text but NOT a source request (e.g. a missing hypothesis):
+    generic = "Source or exact computation for the most dangerous example."
+    open_blockers, answered = _split_machine_answered_blockers(
+        [generic], run_dir=tmp_path, claim_id="c1", source_request_texts=set()
+    )
+    assert answered == [] and open_blockers == [generic]
+    # variant phrasing of the generic family still answers (case/space only).
+    variant = "source OR exact computation for the most dangerous case"
+    open_blockers, answered = _split_machine_answered_blockers(
+        [variant], run_dir=tmp_path, claim_id="c1", source_request_texts={variant}
+    )
+    assert [a["request"] for a in answered] == [variant]
+
+
 def test_nothing_answered_without_evidence_or_on_claim_mismatch(tmp_path: Path) -> None:
     # no proof_verification.yaml at all
     assert _split_machine_answered_blockers(
-        list(BLOCKERS), run_dir=tmp_path, claim_id="c1"
+        list(BLOCKERS), run_dir=tmp_path, claim_id="c1", source_request_texts=REQUESTS
     ) == (BLOCKERS, [])
     # unconfirmed entry
     write_yaml(tmp_path / "proof_verification.yaml", _pv_report("c1", confirmed=False))
     assert _split_machine_answered_blockers(
-        list(BLOCKERS), run_dir=tmp_path, claim_id="c1"
+        list(BLOCKERS), run_dir=tmp_path, claim_id="c1", source_request_texts=REQUESTS
     ) == (BLOCKERS, [])
     # confirmed but for a DIFFERENT claim
     write_yaml(tmp_path / "proof_verification.yaml", _pv_report("other", confirmed=True))
     assert _split_machine_answered_blockers(
-        list(BLOCKERS), run_dir=tmp_path, claim_id="c1"
+        list(BLOCKERS), run_dir=tmp_path, claim_id="c1", source_request_texts=REQUESTS
     ) == (BLOCKERS, [])
     # no run_dir context
     assert _split_machine_answered_blockers(
-        list(BLOCKERS), run_dir=None, claim_id="c1"
+        list(BLOCKERS), run_dir=None, claim_id="c1", source_request_texts=REQUESTS
     ) == (BLOCKERS, [])
 
 
@@ -111,12 +146,18 @@ def test_e2e_p2_run_resolves_computation_request_and_keeps_source_requests(
     )
     # source/theorem requests honestly remain open.
     assert any("theorem" in b.lower() for b in all_blockers)
-    # the resolution is auditable in the attempt's next_action.
+    # the resolution is auditable: the note QUOTES the answered request and
+    # names the discharging entries.
     noted = [
         a for a in loop["attempts"]
-        if "answered by trusted machine checks" in a.get("next_action", "")
+        if "Machine-answered reviewer request(s)" in a.get("next_action", "")
     ]
     assert noted, "machine-answered requests must be recorded transparently"
+    assert any(
+        "Source or exact computation for the most dangerous example." in a["next_action"]
+        and "auto_req_fg_p2_g1_commutative" in a["next_action"]
+        for a in noted
+    )
 
 
 def test_e2e_run_without_evidence_keeps_all_blockers(tmp_path: Path) -> None:
