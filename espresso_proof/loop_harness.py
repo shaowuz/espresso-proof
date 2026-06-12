@@ -594,8 +594,22 @@ def _blocker_provenance(run_dir: Path) -> dict[str, set[str]]:
 
 
 def classify_blocker(text: str, *, provenance: set[str] | None = None) -> str:
-    """Deterministic blocking_evidence_type for a prover blocker text."""
+    """Deterministic blocking_evidence_type for a prover blocker text.
 
+    Goal 42E cycle 4: provenance decides first. A blocker that originated
+    ONLY as a reviewer OBJECTION (a standing risk like "a sketch-only
+    argument cannot become proof-complete evidence") or as a MISSING
+    HYPOTHESIS (claim scoping / hypothesis work) is human-gated by nature —
+    no loop autofix can resolve it, so offering it as a bounded-fix target
+    every cycle was dishonest triage input. Reviewer SOURCE REQUESTS (and
+    texts with no recorded provenance, e.g. legacy runs) classify by the
+    keyword rules."""
+
+    kinds = provenance or set()
+    if kinds and "source_request" not in kinds:
+        # objections / missing hypotheses: standing risks and open
+        # mathematical judgments — never a bounded loop-autofix target.
+        return "human_judgment_needed"
     lowered = str(text).lower()
     # Goal 42E cycle 3: theorem/locator REQUESTS are source gaps — they
     # need a verified citation, not a proof step. The theorem keyword
@@ -627,6 +641,7 @@ def _collect_blockers(record: dict, prior_fingerprints: set[str]) -> list[Blocke
     loop = _read_optional(run_dir, "prover_loop") or {}
     graph = _read_optional(run_dir, "proof_goal_graph") or {}
     nodes = {n.get("id"): n for n in graph.get("nodes", [])}
+    provenance = _blocker_provenance(run_dir)
     blockers: list[BlockerRecord] = []
     seen: set[str] = set()
     for attempt in loop.get("attempts", []):
@@ -635,7 +650,9 @@ def _collect_blockers(record: dict, prior_fingerprints: set[str]) -> list[Blocke
             if fingerprint in seen:
                 continue
             seen.add(fingerprint)
-            evidence_type = classify_blocker(text)
+            evidence_type = classify_blocker(
+                text, provenance=provenance.get(str(text).strip(), set())
+            )
             blockers.append(
                 BlockerRecord(
                     case_id=record["case"].case_id,
