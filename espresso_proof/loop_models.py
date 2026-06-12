@@ -699,4 +699,8 @@ class StopGate(LoopBaseModel):
         return self
 
 
-__all__ = [name for name in dir() if name[0].isupper()]
+__all__ = [
+    name
+    for name, value in list(globals().items())
+    if isinstance(value, type) and getattr(value, "__module__", "") == __name__
+]

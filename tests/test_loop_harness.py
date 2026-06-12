@@ -209,3 +209,91 @@ def test_proof_step_attack_recorded_separately_from_refutation(cycle_env) -> Non
         if record.failure_class == "claim_refuted":
             assert record.counterexample_checked
             assert record.satisfies_all_locked_hypotheses is True
+
+
+def test_refutation_classification_on_synthetic_kernel_tests(tmp_path: Path) -> None:
+    # Non-vacuous classification test (Math Workflow reviewer): feed
+    # schema-shaped CounterexampleTest dicts through _collect_refutations and
+    # pin every failure class, including a REACHABLE claim_refuted.
+    from espresso_proof.loop_harness import DEFAULT_CASES, _collect_refutations
+    from espresso_proof.loop_models import DogfoodCase
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_yaml(
+        run_dir / "run_manifest.yaml",
+        {
+            "artifacts": {
+                "counterexamples": "counterexamples.yaml",
+                "locked_claim": "locked_claim.yaml",
+                "idea_grade": "idea_grade.yaml",
+            },
+            "optional_artifacts": {},
+        },
+    )
+    write_yaml(run_dir / "locked_claim.yaml", {"id": "claim_001"})
+    write_yaml(run_dir / "idea_grade.yaml", {"status": "refuted"})
+
+    def synthetic(test_id, **over):
+        base = {
+            "id": test_id,
+            "operator_id": "drop_hypothesis",
+            "example_id": f"ex_{test_id}",
+            "satisfies_all_claim_hypotheses": True,
+            "target": "theorem",
+            "result": "failed",
+            "refutes_claim": False,
+            "refutes_step_only": False,
+            "exposes_missing_hypothesis": False,
+            "explanation": "synthetic test record",
+        }
+        base.update(over)
+        return base
+
+    write_yaml(
+        run_dir / "counterexamples.yaml",
+        {
+            "tests": [
+                # 1) genuine checked all-hypotheses refutation -> claim_refuted
+                synthetic("t1", refutes_claim=True),
+                # 2) proof-step-only attack -> strategy_failed_by_example
+                synthetic("t2", target="proof_step", refutes_step_only=True),
+                # 3) dropped hypothesis -> theorem_condition_gap (never refutes)
+                synthetic(
+                    "t3",
+                    satisfies_all_claim_hypotheses=False,
+                    exposes_missing_hypothesis=True,
+                    missing_hypothesis="compact domain",
+                ),
+                # 4) unchecked candidate -> computation_unchecked
+                synthetic("t4", result="not_tested"),
+            ]
+        },
+    )
+    record = {
+        "case": DogfoodCase.model_validate(DEFAULT_CASES[1]),
+        "run_dir": run_dir,
+        "validation_result": "valid",
+    }
+    by_id = {
+        r.candidate_counterexample.split(":")[0]: r
+        for r in _collect_refutations(record, "cycle_test")
+    }
+    assert by_id["ex_t1"].failure_class == "claim_refuted"
+    assert by_id["ex_t1"].counterexample_checked is True
+    assert by_id["ex_t1"].check_method == "failed"
+    assert by_id["ex_t2"].failure_class == "strategy_failed_by_example"
+    assert by_id["ex_t2"].is_proof_step_attack_only is True
+    assert by_id["ex_t3"].failure_class == "theorem_condition_gap"
+    assert by_id["ex_t3"].failed_lemma == "compact domain"
+    assert by_id["ex_t4"].failure_class == "computation_unchecked"
+    assert by_id["ex_t4"].counterexample_checked is False
+
+    # claim_refuted is gated on a kernel-VALID run: the same artifacts on an
+    # invalid run must not produce a claim_refuted record.
+    record_invalid = {**record, "validation_result": "invalid"}
+    by_id_invalid = {
+        r.candidate_counterexample.split(":")[0]: r
+        for r in _collect_refutations(record_invalid, "cycle_test")
+    }
+    assert by_id_invalid["ex_t1"].failure_class != "claim_refuted"

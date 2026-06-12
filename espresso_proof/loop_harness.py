@@ -104,7 +104,10 @@ DEFAULT_CASES: list[dict] = [
         ),
         "case_family": "source_sensitive",
         "expected_difficulty": "normal",
-        "known_truth_status": "evaluator_only_unknown",
+        # The universal conclusion is classically FALSE (Pfaffian cubic
+        # fourfolds are rational); the case tests very-general-vs-all source
+        # discipline, and the evaluator must be able to score a miss.
+        "known_truth_status": "evaluator_only_false",
         "what_this_case_tests": ["source applicability", "very-general vs all discipline"],
         "must_not_claim": ["a very-general source supports an all-objects claim"],
     },
@@ -477,23 +480,35 @@ def _case_timings(record: dict, events: list[AgentEvent]) -> CaseTimings:
 
 
 def _collect_refutations(record: dict, cycle_id: str) -> list[RefutationRecord]:
+    """Map kernel CounterexampleTest records (the REAL schema: operator_id /
+    example_id / target / result / refutes_claim / refutes_step_only /
+    exposes_missing_hypothesis / explanation) into loop refutation records.
+
+    Conservative by construction, mirroring the kernel validator: a test is
+    "checked" exactly when ``result == "failed"`` (the kernel precondition for
+    refutes_claim); claim_refuted additionally requires satisfies_all is True,
+    refutes_claim, AND a kernel-valid run. Dropped-hypothesis tests map to
+    theorem_condition_gap; proof-step attacks are visibly separate."""
+
     run_dir = record["run_dir"]
     if run_dir is None:
         return []
     counterexamples = _read_optional(run_dir, "counterexamples") or {}
     claim = _read_optional(run_dir, "locked_claim") or {}
     grade = _read_optional(run_dir, "idea_grade") or {}
+    run_is_valid = record["validation_result"] == "valid"
     records: list[RefutationRecord] = []
     for test in counterexamples.get("tests", []):
         refutes_claim = bool(test.get("refutes_claim"))
         satisfies = test.get("satisfies_all_claim_hypotheses")
-        checked = test.get("evidence_status") in {"checked", "source_checked"}
+        result = str(test.get("result", "not_tested"))
+        checked = result == "failed"
         step_attack_only = bool(test.get("refutes_step_only")) and not refutes_claim
-        if refutes_claim and satisfies is True and checked:
+        if refutes_claim and satisfies is True and checked and run_is_valid:
             failure_class = "claim_refuted"
         elif step_attack_only:
             failure_class = "strategy_failed_by_example"
-        elif satisfies is False:
+        elif bool(test.get("exposes_missing_hypothesis")) or satisfies is False:
             failure_class = "theorem_condition_gap"
         elif not checked:
             failure_class = "computation_unchecked"
@@ -503,17 +518,22 @@ def _collect_refutations(record: dict, cycle_id: str) -> list[RefutationRecord]:
             RefutationRecord(
                 case_id=record["case"].case_id,
                 run_id=run_dir.name,
-                claimed_by=str(test.get("proposed_by", "counterexample_agent")),
-                candidate_counterexample=str(test.get("candidate", test.get("id", "")))[:300],
-                satisfies_all_locked_hypotheses=satisfies,
-                conclusion_fails=test.get("conclusion_fails"),
+                claimed_by=str(test.get("operator_id", "counterexample_agent")),
+                candidate_counterexample=(
+                    f"{test.get('example_id', '')}: {test.get('explanation', '')}"
+                )[:300],
+                satisfies_all_locked_hypotheses=(
+                    satisfies if isinstance(satisfies, bool) else None
+                ),
+                conclusion_fails=(True if checked and refutes_claim else None),
                 counterexample_checked=checked,
                 espresso_allowed_refuted=grade.get("status") == "refuted",
                 locked_claim_id=str(claim.get("id", "")),
                 hypothesis_ledger_path=str(run_dir / "hypothesis_ledger.yaml"),
                 failure_class=failure_class,
-                attacked_step_or_tactic=str(test.get("attacks_step", ""))[:200],
-                check_method=str(test.get("evidence_status", "")),
+                attacked_step_or_tactic=str(test.get("target", ""))[:200],
+                failed_lemma=str(test.get("missing_hypothesis") or "")[:200],
+                check_method=result,
                 recurrence_fingerprint=_fingerprint(
                     record["case"].case_id, str(test.get("id", "")), failure_class
                 ),
@@ -523,8 +543,8 @@ def _collect_refutations(record: dict, cycle_id: str) -> list[RefutationRecord]:
                 ),
                 next_action="needs check" if not checked else "review scope",
                 success_criterion=(
-                    "candidate satisfies all hypotheses, conclusion fails, and the "
-                    "check is machine-verified"
+                    "candidate satisfies all hypotheses, the claim fails on it "
+                    "(result=failed), and the run stays kernel-valid"
                 ),
                 is_proof_step_attack_only=step_attack_only,
             )
@@ -791,7 +811,9 @@ def _update_campaign_files(
     blockers: list[BlockerRecord],
     bottlenecks: list[BottleneckEntry],
     failures: list[TechnicalFailure],
+    cycle_wall_hours: float = 0.0,
 ) -> None:
+    family_by_case = {r["case"].case_id: r["case"].case_family for r in records}
     campaign_id = out_root.name or "campaign"
     index_path = out_root / "campaign_index.yaml"
     index = _load_campaign_file(
@@ -812,17 +834,18 @@ def _update_campaign_files(
     by_fingerprint = {g.gap_id: g for g in ledger.gaps}
     for blocker in blockers:
         gap_id = f"gap_{blocker.recurrence_fingerprint}"
+        family = family_by_case.get(blocker.case_id, blocker.case_id)
         if gap_id in by_fingerprint:
             entry = by_fingerprint[gap_id]
             entry.recurrence_count += 1
-            if blocker.case_id not in entry.affected_case_families:
-                entry.affected_case_families.append(blocker.case_id)
+            if family not in entry.affected_case_families:
+                entry.affected_case_families.append(family)
         else:
             entry = GapLedgerEntry(
                 gap_id=gap_id,
                 first_seen_cycle=cycle_id,
                 linked_blocker_ids=[blocker.recurrence_fingerprint],
-                affected_case_families=[blocker.case_id],
+                affected_case_families=[family],
                 bottleneck_category="proof_search_stall",
                 before_metric=blocker.blocker_text[:160],
                 selection_note="auto-derived from a recurring prover blocker",
@@ -839,7 +862,7 @@ def _update_campaign_files(
                     gap_id=gap_id,
                     first_seen_cycle=cycle_id,
                     linked_blocker_ids=[bottleneck.bottleneck_id],
-                    affected_case_families=[bottleneck.case_id],
+                    affected_case_families=[family_by_case.get(bottleneck.case_id, bottleneck.case_id)],
                     bottleneck_category=bottleneck.category,
                     before_metric=bottleneck.metric_or_evidence_path[:160],
                     selection_note="auto-derived from a bottleneck entry",
@@ -882,14 +905,17 @@ def _update_campaign_files(
     if gate_path.exists():
         gate = StopGate.model_validate(read_yaml(gate_path))
     else:
-        pending = GateState(passed=False, note="not yet evaluated")
+        def pending() -> GateState:
+            return GateState(passed=False, note="not yet evaluated")
+
         gate = StopGate(
             status="RUNNING",
-            safety_gate=pending, capability_gate=pending, ux_gate=pending,
-            dogfood_coverage_gate=pending, replay_gate=pending, holdout_gate=pending,
-            scorecard_gate=pending, calibration_gate=pending,
+            safety_gate=pending(), capability_gate=pending(), ux_gate=pending(),
+            dogfood_coverage_gate=pending(), replay_gate=pending(), holdout_gate=pending(),
+            scorecard_gate=pending(), calibration_gate=pending(),
         )
     gate.cycles_completed = len(index.cycles)
+    gate.wall_time_hours_used = round(gate.wall_time_hours_used + cycle_wall_hours, 4)
     gate.decision_evidence.append(f"{out_root.name}/{cycle_id}/cycle_summary.md")
     write_yaml(gate_path, gate.model_dump(mode="json"))
 
@@ -1102,7 +1128,10 @@ def run_loop_cycle(
     ]
     write_text(cycle_dir / "cycle_summary.md", "\n".join(summary_lines))
 
-    _update_campaign_files(out_root, cycle_id, records, blockers, bottlenecks, failures)
+    _update_campaign_files(
+        out_root, cycle_id, records, blockers, bottlenecks, failures,
+        cycle_wall_hours=(time.monotonic() - cycle_t0) / 3600.0,
+    )
     return cycle_dir
 
 
