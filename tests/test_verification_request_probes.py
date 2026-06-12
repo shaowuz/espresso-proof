@@ -84,8 +84,11 @@ def test_requests_auto_wire_to_instance_checked_in_full_run(tmp_path: Path) -> N
         effort="normal_pass",
         prover_provider="stub",
     )
+    # Goal 42E cycle 3: orchestrate_run wires the requests BEFORE the prover
+    # pass, so a later manual call is a pure no-op (idempotent).
     summary = auto_wire_scoped_verifications(run_dir)
-    assert len(summary["appended"]) == 8
+    assert not summary["appended"]
+    assert {s["reason"] for s in summary["skipped"]} == {"already wired"}
     validate_run(run_dir)
     report = read_yaml(run_dir / "proof_verification.yaml")
     earned = [
@@ -94,9 +97,7 @@ def test_requests_auto_wire_to_instance_checked_in_full_run(tmp_path: Path) -> N
     ]
     assert len(earned) == 8
     assert all("only" in e["scope_note"] for e in earned)
-    # second wiring is a no-op (idempotent).
-    again = auto_wire_scoped_verifications(run_dir)
-    assert not again["appended"]
+
 
 
 def test_unrelated_run_wires_nothing(tmp_path: Path) -> None:

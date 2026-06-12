@@ -171,3 +171,40 @@ def test_blocker_taxonomy_routes_theorem_requests_to_source_gap(tmp_path: Path) 
     assert by_text["Exact locator for every external theorem step."] == "source_gap"
     # the machine-answered computation request no longer appears at all.
     assert not any("exact computation" in t.lower() for t in by_text)
+
+
+def test_registry_required_blocker_families_route_to_goal_proposals(tmp_path: Path) -> None:
+    # Goal 42E cycle 3: a recurring source/theorem-request blocker cannot be
+    # honestly machine-resolved (fabricated citations are forbidden), so its
+    # P1 finding must carry the oversize marker, and triage must never SELECT
+    # such a family as the cycle's gap (when one heads the priority order it
+    # becomes a new-goal proposal and selection moves on).
+    from espresso_proof.loop_harness import run_loop_cycle
+    from espresso_proof.loop_models import ReviewReport
+    from espresso_proof.loop_reviewers import run_review_pass
+    from espresso_proof.loop_triage import run_triage
+    from tests.loop_gap_case import gap_cases
+
+    cases_file = tmp_path / "cases.yaml"
+    write_yaml(cases_file, gap_cases())
+    root = tmp_path / "loop_runs"
+    run_loop_cycle(out_root=root, mode="smoke", cases_path=cases_file)
+    second = run_loop_cycle(out_root=root, mode="smoke", cases_path=cases_file)
+    run_review_pass(second)
+    report = ReviewReport.model_validate(
+        read_yaml(second / "review_reports" / "proof_search.yaml")
+    )
+    registry = [
+        f for f in report.actionable_findings
+        if "theorem supporting" in f.what_happened
+        or "locator" in f.what_happened.lower()
+    ]
+    assert registry, "recurring source-request families must still be reported"
+    assert all("broad rewrite" in f.recommended_fix for f in registry)
+    decision = run_triage(second)
+    if decision.selected_gap_id.startswith("proof_search"):
+        selected = next(
+            f for f in report.actionable_findings
+            if f.finding_id == decision.selected_gap_id
+        )
+        assert "broad rewrite" not in selected.recommended_fix

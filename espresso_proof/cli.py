@@ -1837,7 +1837,6 @@ def run_llm_agents(
         agent_report=report,
         strategy_brief=read_yaml(run / artifacts["strategy_brief"]),
         human_choice=read_yaml(run / artifacts["human_choice"]),
-        run_dir=run,
     )
     ProverLoopReport.model_validate(loop_report)
     manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
@@ -1877,7 +1876,6 @@ def resolve_agent_gate(
             agent_report=report,
             strategy_brief=read_yaml(run / artifacts["strategy_brief"]),
             human_choice=read_yaml(run / artifacts["human_choice"]),
-            run_dir=run,
         )
         ProverLoopReport.model_validate(loop_report)
         manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"

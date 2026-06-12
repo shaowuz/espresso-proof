@@ -174,39 +174,3 @@ def test_fixed_false_theorem_case_no_longer_flagged(reviewed_cycle: Path) -> Non
         and f.gap_kind == "math_capability"
         for f in report.actionable_findings
     )
-
-
-def test_registry_required_blocker_families_route_to_goal_proposals(tmp_path: Path) -> None:
-    # Goal 42E cycle 3: a recurring source/theorem-request blocker cannot be
-    # honestly machine-resolved (fabricated citations are forbidden), so its
-    # P1 finding must carry the oversize marker and triage must convert it to
-    # a new-goal proposal instead of selecting it as the cycle's gap.
-    from espresso_proof.loop_harness import run_loop_cycle
-    from espresso_proof.loop_triage import run_triage
-
-    cases_file = tmp_path / "cases.yaml"
-    write_yaml(cases_file, gap_cases())
-    root = tmp_path / "loop_runs"
-    run_loop_cycle(out_root=root, mode="smoke", cases_path=cases_file)
-    second = run_loop_cycle(out_root=root, mode="smoke", cases_path=cases_file)
-    run_review_pass(second)
-    report = ReviewReport.model_validate(
-        read_yaml(second / "review_reports" / "proof_search.yaml")
-    )
-    registry = [
-        f for f in report.actionable_findings
-        if "theorem supporting" in f.what_happened
-        or "locator" in f.what_happened.lower()
-    ]
-    assert registry, "recurring source-request families must still be reported"
-    assert all("broad rewrite" in f.recommended_fix for f in registry)
-    decision = run_triage(second)
-    # triage must never SELECT a registry-required family as the cycle's gap
-    # (when one heads the priority order it is converted to a proposal and
-    # selection moves on — loop_triage's existing oversize handling).
-    if decision.selected_gap_id.startswith("proof_search"):
-        selected = next(
-            f for f in report.actionable_findings
-            if f.finding_id == decision.selected_gap_id
-        )
-        assert "broad rewrite" not in selected.recommended_fix
