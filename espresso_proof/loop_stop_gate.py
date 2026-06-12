@@ -259,10 +259,32 @@ def evaluate_stop_gate(
     if latest is not None:
         replay_path = latest / "replay_result.yaml"
         post_path = latest / "replay_result_post_merge.yaml"
-        replay_resolved = (
-            replay_path.exists() and read_yaml(replay_path).get("successful") is True
-            and post_path.exists() and read_yaml(post_path).get("successful") is True
-        )
+        if (latest / "autofix_plan.yaml").exists():
+            # a fix cycle must demonstrate its own pre-merge AND post-merge replay.
+            replay_resolved = (
+                replay_path.exists() and read_yaml(replay_path).get("successful") is True
+                and post_path.exists() and read_yaml(post_path).get("successful") is True
+            )
+        else:
+            # a no-fix (clean) cycle carries a post-merge REGRESSION replay
+            # re-confirming the most recent fixed gap stays resolved, and the
+            # fixing cycle itself must have full pre+post evidence.
+            regression_ok = (
+                post_path.exists() and read_yaml(post_path).get("successful") is True
+            )
+            prior_ok = False
+            for cycle_dir in reversed(cycles[:-1]):
+                if (cycle_dir / "autofix_plan.yaml").exists():
+                    prior_pre = cycle_dir / "replay_result.yaml"
+                    prior_post = cycle_dir / "replay_result_post_merge.yaml"
+                    prior_ok = (
+                        prior_pre.exists()
+                        and read_yaml(prior_pre).get("successful") is True
+                        and prior_post.exists()
+                        and read_yaml(prior_post).get("successful") is True
+                    )
+                    break
+            replay_resolved = regression_ok and prior_ok
     gate.capability_gate = GateState(
         passed=scorecard_ok and new_p0p1 == 0 and replay_resolved,
         evidence_path=str(latest) if latest else "",
@@ -280,10 +302,16 @@ def evaluate_stop_gate(
         else "missing or unsuccessful replay checkpoints",
     )
     holdout_ok = False
-    if latest is not None and (latest / "replay_result.yaml").exists():
-        replay = read_yaml(latest / "replay_result.yaml")
-        holdouts = replay.get("holdout_cases", [])
-        holdout_ok = bool(holdouts) and all(c.get("no_regression") for c in holdouts)
+    if latest is not None:
+        replay_file = (
+            latest / "replay_result.yaml"
+            if (latest / "replay_result.yaml").exists()
+            else latest / "replay_result_post_merge.yaml"
+        )
+        if replay_file.exists():
+            replay = read_yaml(replay_file)
+            holdouts = replay.get("holdout_cases", [])
+            holdout_ok = bool(holdouts) and all(c.get("no_regression") for c in holdouts)
     gate.holdout_gate = GateState(
         passed=holdout_ok if holdout_required else True,
         evidence_path=str(latest / "replay_result.yaml") if latest else "",
