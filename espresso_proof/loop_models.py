@@ -606,6 +606,7 @@ GapStatus = Literal["open", "selected", "fixed", "deferred", "converted_to_goal"
 class GapLedgerEntry(LoopBaseModel):
     gap_id: str
     first_seen_cycle: str
+    severity: Literal["P0", "P1", "P2", "P3", "unknown"] = "unknown"
     recurrence_count: int = 1
     linked_finding_ids: list[str] = Field(default_factory=list)
     linked_blocker_ids: list[str] = Field(default_factory=list)
