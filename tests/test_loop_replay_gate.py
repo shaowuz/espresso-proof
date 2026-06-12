@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -116,7 +117,7 @@ def test_fix_gate_refuses_without_explicit_allow(triaged: Path) -> None:
     completed = subprocess.run(
         [sys.executable, str(REPO_ROOT / "scripts" / "check_loop_fix_gate.py"),
          "--cycle", str(triaged), "--base", "HEAD"],
-        capture_output=True, text=True, cwd=REPO_ROOT,
+        capture_output=True, text=True, cwd=REPO_ROOT, env=_git_env(),
     )
     assert completed.returncode == 2
     assert "read-only by default" in completed.stdout
@@ -128,10 +129,93 @@ def test_fix_gate_refuses_without_plan(triaged: Path, tmp_path: Path) -> None:
     completed = subprocess.run(
         [sys.executable, str(REPO_ROOT / "scripts" / "check_loop_fix_gate.py"),
          "--cycle", str(empty_cycle), "--base", "HEAD", "--allow-code-change"],
-        capture_output=True, text=True, cwd=REPO_ROOT,
+        capture_output=True, text=True, cwd=REPO_ROOT, env=_git_env(),
     )
     assert completed.returncode == 2
     assert "no autofix_plan.yaml" in completed.stdout
+
+
+def _git_env() -> dict[str, str]:
+    """Environment for tmp-repo git calls with every GIT_* variable scrubbed.
+
+    Regression guard (Goal 42E cycle 9, incident first recorded in PR #129):
+    when pytest runs under a git hook (e.g. the local pre-push release gate),
+    git exports GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE into the hook's
+    environment. A subprocess git call that inherits them operates on the
+    REAL repository regardless of ``cwd`` — during a real push this created
+    stray commits on the branch, overwrote the repo-level user.email, and
+    unstaged tracked files. Scrubbing GIT_* confines every command below to
+    the tmp repo it targets."""
+
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+def _build_tiny_repo(repo: Path) -> str:
+    """A two-commit tmp repo (protected + unplanned change); returns base sha."""
+
+    env = _git_env()
+    repo.mkdir(exist_ok=True)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True, env=env)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True, env=env)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True, env=env)
+    (repo / "espresso_proof").mkdir(exist_ok=True)
+    (repo / "espresso_proof" / "validators.py").write_text("x = 1\n")
+    (repo / "espresso_proof" / "other.py").write_text("y = 1\n")
+    subprocess.run(["git", "add", "espresso_proof"], cwd=repo, check=True, env=env)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True, env=env)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, env=env
+    ).stdout.strip()
+    (repo / "espresso_proof" / "validators.py").write_text("x = 2\n")
+    (repo / "espresso_proof" / "other.py").write_text("y = 2\n")
+    subprocess.run(["git", "add", "espresso_proof"], cwd=repo, check=True, env=env)
+    subprocess.run(["git", "commit", "-qm", "change"], cwd=repo, check=True, env=env)
+    return base
+
+
+def test_tmp_repo_builder_ignores_hook_git_env(tmp_path: Path, monkeypatch) -> None:
+    # Regression for the PR #129 incident: simulate the hook environment by
+    # pointing GIT_DIR at a sentinel repository, then build the tiny repo.
+    # The sentinel must be COMPLETELY untouched (no commits, no config, no
+    # index changes) and the tiny repo must get its own two commits.
+    env = _git_env()
+    sentinel = tmp_path / "sentinel"
+    sentinel.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=sentinel, check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(sentinel), "-c", "user.email=s@s", "-c", "user.name=s",
+         "commit", "-qm", "sentinel", "--allow-empty"],
+        check=True, env=env,
+    )
+    sentinel_head = subprocess.run(
+        ["git", "-C", str(sentinel), "rev-parse", "HEAD"],
+        capture_output=True, text=True, env=env,
+    ).stdout.strip()
+    monkeypatch.setenv("GIT_DIR", str(sentinel / ".git"))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(sentinel / ".git" / "index"))
+    repo = tmp_path / "repo"
+    _build_tiny_repo(repo)
+    monkeypatch.delenv("GIT_DIR")
+    monkeypatch.delenv("GIT_INDEX_FILE")
+    assert (
+        subprocess.run(
+            ["git", "-C", str(sentinel), "rev-parse", "HEAD"],
+            capture_output=True, text=True, env=env,
+        ).stdout.strip()
+        == sentinel_head
+    ), "the sentinel repo must not gain commits from the tmp-repo builder"
+    assert (
+        subprocess.run(
+            ["git", "-C", str(sentinel), "config", "--local", "user.email"],
+            capture_output=True, text=True, env=env,
+        ).stdout.strip()
+        == ""
+    ), "the sentinel repo's config must stay untouched"
+    tiny_log = subprocess.run(
+        ["git", "-C", str(repo), "log", "--format=%s"],
+        capture_output=True, text=True, env=env,
+    ).stdout.split()
+    assert tiny_log == ["change", "base"]
 
 
 def test_fix_gate_refuses_protected_and_unplanned_paths(tmp_path: Path) -> None:
@@ -148,28 +232,13 @@ def test_fix_gate_refuses_protected_and_unplanned_paths(tmp_path: Path) -> None:
         },
     )
     # build a tiny git repo with a protected + an unplanned change.
+    base = _build_tiny_repo(tmp_path / "repo")
     repo = tmp_path / "repo"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
-    subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
-    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
-    (repo / "espresso_proof").mkdir()
-    (repo / "espresso_proof" / "validators.py").write_text("x = 1\n")
-    (repo / "espresso_proof" / "other.py").write_text("y = 1\n")
-    subprocess.run(["git", "add", "espresso_proof"], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
-    base = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
-    ).stdout.strip()
-    (repo / "espresso_proof" / "validators.py").write_text("x = 2\n")
-    (repo / "espresso_proof" / "other.py").write_text("y = 2\n")
-    subprocess.run(["git", "add", "espresso_proof"], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-qm", "change"], cwd=repo, check=True)
     completed = subprocess.run(
         [sys.executable, str(REPO_ROOT / "scripts" / "check_loop_fix_gate.py"),
          "--cycle", str(cycle), "--base", base, "--allow-code-change",
          "--repo", str(repo)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=_git_env(),
     )
     assert completed.returncode == 1
     assert "protected safety surface touched" in completed.stdout
