@@ -136,13 +136,18 @@ def _probe_standing_risks_classified_human_gated(run_dir: Path) -> tuple[bool, s
     loop autofix can resolve them. The loop's classifier must say so, so
     triage routes them to goal proposals instead of bounded-fix selection."""
 
-    from .loop_harness import _blocker_provenance, classify_blocker
+    from .loop_harness import (
+        _blocker_provenance,
+        classify_blocker,
+        provenance_is_human_gated,
+    )
 
     loop_path = run_dir / "prover_loop.yaml"
     if not loop_path.exists():
         return False, "no prover_loop.yaml was produced"
     provenance = _blocker_provenance(run_dir)
     misclassified: list[str] = []
+    human_gated_seen = 0
     seen: set[str] = set()
     for attempt in read_yaml(loop_path).get("attempts", []):
         for text in attempt.get("blockers", []):
@@ -151,15 +156,21 @@ def _probe_standing_risks_classified_human_gated(run_dir: Path) -> tuple[bool, s
                 continue
             seen.add(text)
             kinds = provenance.get(text, set())
-            if not kinds or "source_request" in kinds:
+            if not provenance_is_human_gated(kinds):
                 continue  # requests keep their request-kind classification
-            if classify_blocker(text, provenance=kinds) != "human_judgment_needed":
+            human_gated_seen += 1
+            label = classify_blocker(text, provenance=kinds)
+            if label not in {"human_judgment_needed", "reviewer_objection"}:
                 misclassified.append(text)
     if misclassified:
         return False, (
             f"{len(misclassified)} standing-risk/hypothesis blocker(s) still "
             f"classified as bounded-fix targets, e.g. {misclassified[0][:80]!r}"
         )
+    if not human_gated_seen:
+        # fail closed (mirrors the sibling probes): a run with nothing to
+        # classify proves nothing about the fix.
+        return False, "no objection/hypothesis blocker present to classify"
     return True, "all objection/hypothesis blockers classified human-gated"
 
 

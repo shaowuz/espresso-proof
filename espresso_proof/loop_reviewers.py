@@ -343,6 +343,8 @@ def _review_proof_search(cycle_dir: Path, data: dict, probe: dict) -> tuple:
         # keep their P1 evidence but carry the oversize marker so triage
         # converts them to new-goal proposals instead of recycling them as the
         # selected gap every cycle. Everything else stays a bounded-fix target.
+        # NOTE: groups are keyed by (case, text) fingerprints, so kinds is a
+        # singleton in practice; the subset checks are defensive.
         kinds = {b.blocking_evidence_type for b in group}
         if kinds <= {"source_gap"}:
             fix = (
@@ -351,7 +353,7 @@ def _review_proof_search(cycle_dir: Path, data: dict, probe: dict) -> tuple:
                 "autofix; route to a dedicated goal (fabricated citations are "
                 "forbidden)"
             )
-        elif kinds <= {"human_judgment_needed", "source_gap"}:
+        elif kinds <= {"human_judgment_needed", "reviewer_objection", "source_gap"}:
             fix = (
                 "standing risk or open mathematical judgment (claim scoping, "
                 "hypothesis work, or human-led proof development); not "

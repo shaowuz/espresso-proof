@@ -570,27 +570,46 @@ def _blocker_provenance(run_dir: Path) -> dict[str, set[str]]:
     provenance: dict[str, set[str]] = {}
     review_sources: list[dict] = []
     agent_run = _read_optional(run_dir, "llm_agent_run")
-    if agent_run:
+    if isinstance(agent_run, dict):
         review_sources.append(agent_run)
     rounds_dir = Path(run_dir) / "prover_rounds"
     if rounds_dir.is_dir():
         for round_path in sorted(rounds_dir.glob("round_*.yaml")):
             try:
-                review_sources.append(read_yaml(round_path))
+                doc = read_yaml(round_path)
             except Exception:  # noqa: BLE001 - unreadable round: skip, fail open to legacy rules
                 continue
+            if isinstance(doc, dict):
+                review_sources.append(doc)
     for doc in review_sources:
-        for review in doc.get("verifier_reviews", []) or []:
+        reviews = doc.get("verifier_reviews")
+        if not isinstance(reviews, list):
+            continue
+        for review in reviews:
+            if not isinstance(review, dict):
+                continue
             for kind, field in (
                 ("source_request", "source_requests"),
                 ("missing_hypothesis", "missing_hypotheses"),
                 ("objection", "objections"),
             ):
-                for item in review.get(field, []) or []:
+                items = review.get(field)
+                if not isinstance(items, list):
+                    continue
+                for item in items:
                     text = str(item).strip()
                     if text:
                         provenance.setdefault(text, set()).add(kind)
     return provenance
+
+
+def provenance_is_human_gated(kinds: set[str]) -> bool:
+    """Single source of truth for "this blocker can never be a bounded
+    loop-autofix target": it has recorded provenance and did not originate
+    as a reviewer source request. Shared by the classifier and the replay
+    probe so the two predicates cannot drift apart."""
+
+    return bool(kinds) and "source_request" not in kinds
 
 
 def classify_blocker(text: str, *, provenance: set[str] | None = None) -> str:
@@ -606,10 +625,16 @@ def classify_blocker(text: str, *, provenance: set[str] | None = None) -> str:
     keyword rules."""
 
     kinds = provenance or set()
-    if kinds and "source_request" not in kinds:
-        # objections / missing hypotheses: standing risks and open
-        # mathematical judgments — never a bounded loop-autofix target.
-        return "human_judgment_needed"
+    if provenance_is_human_gated(kinds):
+        # Objections and missing hypotheses are never bounded loop-autofix
+        # targets: code cannot fix an argument's mathematics, and replay
+        # could not distinguish repair from suppression. Label precisely
+        # (Math Workflow review): a missing hypothesis is claim-scoping
+        # judgment; a pure objection keeps the truthful reviewer_objection
+        # label. Both are human-gated downstream.
+        if "missing_hypothesis" in kinds:
+            return "human_judgment_needed"
+        return "reviewer_objection"
     lowered = str(text).lower()
     # Goal 42E cycle 3: theorem/locator REQUESTS are source gaps — they
     # need a verified citation, not a proof step. The theorem keyword
