@@ -2228,6 +2228,72 @@ def loop_triage(
         typer.echo("No autofix plan written (provide --plan-* after investigating the gap).")
 
 
+@app.command("loop-replay")
+def loop_replay(
+    cycle: Path = typer.Option(..., "--cycle", exists=True, file_okay=False),
+    checkpoint: str = typer.Option(..., "--checkpoint", help="baseline | pre_merge | post_merge"),
+    probe: str = typer.Option(..., "--probe", help="Named deterministic problem probe."),
+    case: str = typer.Option(..., "--case", help="Triggering case id."),
+    sibling: list[str] = typer.Option([], "--sibling", help="Sibling case id (repeatable)."),
+    observed: str = typer.Option(..., "--observed", help="The observed problem being fixed."),
+    before_evidence: str = typer.Option(..., "--before-evidence", help="Evidence path of the BEFORE state."),
+    mode: str = typer.Option("smoke", "--mode"),
+) -> None:
+    """Goal 42D: replay the triggering dogfood case (+ siblings/holdouts)
+    through the real runtime and write replay_result.yaml. A replay without
+    improvement or without sibling/holdout no-regression evidence is never
+    successful; a failed pre-merge replay BLOCKS the merge (exit 1).
+    """
+    from .loop_harness import load_cases
+    from .loop_replay import run_replay
+
+    holdouts = [c for c in load_cases(None) if c.case_id not in {case, *sibling}][:2]
+    try:
+        result = run_replay(
+            cycle,
+            checkpoint=checkpoint,
+            probe=probe,
+            triggering_case_id=case,
+            sibling_case_ids=list(sibling),
+            holdout_cases=holdouts,
+            observed_problem=observed,
+            before_evidence_path=before_evidence,
+            mode=mode,
+        )
+    except RuntimeError as exc:
+        typer.echo(f"REPLAY BLOCKED MERGE: {exc}")
+        raise typer.Exit(code=1) from exc
+    typer.echo(
+        f"Replay [{checkpoint}] fixed={result.after.fixed} "
+        f"successful={result.successful} ({result.after.observed_problem})"
+    )
+    if not result.successful and checkpoint != "baseline":
+        raise typer.Exit(code=1)
+
+
+@app.command("loop-stop-gate")
+def loop_stop_gate_command(
+    out: Path = typer.Option(..., "--out", exists=True, file_okay=False, help="Loop root directory."),
+) -> None:
+    """Goal 42D/E: recompute the machine-checkable campaign stop gate from
+    artifacts and command results. SUCCESS requires >=5 cycles, two
+    consecutive clean cycles on an unchanged commit, all eight gates, and no
+    open P0/P1; hitting max_cycles/max_wall_time is STOP_BUDGET_EXHAUSTED,
+    never acceptance.
+    """
+    from .loop_stop_gate import evaluate_stop_gate
+
+    gate = evaluate_stop_gate(out, repo_root=Path.cwd())
+    typer.echo(
+        f"stop_gate: {gate.status} (cycles={gate.cycles_completed}, "
+        f"clean streak={gate.consecutive_clean_cycles_observed}/"
+        f"{gate.consecutive_clean_cycles_required})"
+    )
+    for name in ("safety", "capability", "ux", "dogfood_coverage", "replay", "holdout", "scorecard", "calibration"):
+        state = getattr(gate, f"{name}_gate")
+        typer.echo(f"  {name}_gate: {'PASS' if state.passed else 'fail'} — {state.note[:120]}")
+
+
 @app.command()
 def eval(
     mode: str = typer.Option("mock", "--mode"),
