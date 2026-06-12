@@ -48,7 +48,7 @@ from .finite_group_verifier import verify_group_abelian
 # "every cyclic group ...", "... has an abelian subgroup", and
 # "... is non-abelian" can never match.
 _ORDER_N_ABELIAN_EXACT = re.compile(
-    r"(?:every|all|each)\s+(?:finite\s+)?groups?\s+of\s+order\s+(\d{1,3})\s+"
+    r"(?:every|all|each)\s+(?:finite\s+)?groups?\s+of\s+order\s+([0-9]{1,3})\s+"
     r"(?:is|are)\s+abelian\s*\.?",
     re.IGNORECASE,
 )

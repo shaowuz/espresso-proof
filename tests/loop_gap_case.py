@@ -30,7 +30,8 @@ ORDER21_GAP_CASE = {
 
 
 def _default_case(case_id: str) -> dict:
-    return next(c for c in DEFAULT_CASES if c["case_id"] == case_id)
+    # copy: never hand consumers live references into module-global state.
+    return dict(next(c for c in DEFAULT_CASES if c["case_id"] == case_id))
 
 
 def gap_cases() -> dict:

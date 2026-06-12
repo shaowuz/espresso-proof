@@ -19,14 +19,13 @@ from espresso_proof.loop_replay import (
 )
 from espresso_proof.loop_reviewers import run_review_pass
 from espresso_proof.loop_triage import run_triage
+from tests.loop_gap_case import gap_cases
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _gap_cases_file(directory: Path) -> Path:
     # Planted order-21 gap (see tests/loop_gap_case.py for why order 21).
-    from tests.loop_gap_case import gap_cases
-
     path = directory / "cases.yaml"
     write_yaml(path, gap_cases())
     return path

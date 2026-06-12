@@ -11,6 +11,7 @@ from espresso_proof.loop_harness import run_loop_cycle
 from espresso_proof.loop_models import AutofixPlan, GapLedger, TriageDecision
 from espresso_proof.loop_reviewers import run_review_pass
 from espresso_proof.loop_triage import build_autofix_plan, run_triage
+from tests.loop_gap_case import gap_cases
 
 
 @pytest.fixture(scope="module")
@@ -169,8 +170,6 @@ def test_probe_inflated_blocker_cannot_hijack_priority(tmp_path: Path) -> None:
     # probe-duty reviewer must never outrank a P1 math-capability finding.
     # The P1 gap is planted with the order-21 false case (the order-6 gap is
     # fixed by the dihedral probe and no longer produces a P1).
-    from tests.loop_gap_case import gap_cases
-
     cases_file = tmp_path / "cases.yaml"
     write_yaml(cases_file, gap_cases())
     root = tmp_path / "loop_runs"
