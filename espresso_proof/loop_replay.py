@@ -174,6 +174,44 @@ def _probe_standing_risks_classified_human_gated(run_dir: Path) -> tuple[bool, s
     return True, "all objection/hypothesis blockers classified human-gated"
 
 
+def recorded_misapplication_refusal(run_dir: Path) -> tuple[bool, str]:
+    """For a source-discipline case the earned outcome is a RECORDED refusal:
+    a hypothesis mismatch (e.g. very-general vs all) with every source held
+    at/below candidate. An unrecorded refusal (no mismatch anywhere) means
+    the source machinery never engaged the misapplication.
+
+    Public: the source-applicability reviewer keys its earned-refusal
+    carve-out on this exact predicate so reviewer and probe cannot drift —
+    unclear/not_checked applicability conditions alone never count as a
+    recorded refusal."""
+
+    grounding_path = run_dir / "source_grounding.yaml"
+    if not grounding_path.exists():
+        return False, "no source_grounding.yaml was produced"
+    grounding = read_yaml(grounding_path)
+    backed = [
+        r for r in grounding.get("source_refs", [])
+        if r.get("status") == "source_backed"
+    ]
+    if backed:
+        return False, (
+            f"{len(backed)} source_backed reference(s) on a discipline case — "
+            "the misapplied source must never earn support"
+        )
+    mismatches = [
+        m
+        for item in (grounding.get("steps", []) + grounding.get("source_refs", []))
+        for m in ((item.get("hypothesis_match") or {}).get("mismatches", []) or [])
+        if str(m).strip()
+    ]
+    if not mismatches:
+        return False, "no hypothesis-mismatch refusal recorded anywhere in the grounding"
+    return True, (
+        f"misapplication refusal recorded ({len(mismatches)} mismatch note(s)); "
+        "sources held at/below candidate"
+    )
+
+
 PROBLEM_PROBES = {
     "false_theorem_counterexample_present": _probe_false_theorem_counterexample_present,
     "scoped_computation_present": _probe_scoped_computation_present,
@@ -182,6 +220,7 @@ PROBLEM_PROBES = {
     "examples_present": _probe_examples_present,
     "computation_request_blockers_resolved": _probe_computation_request_blockers_resolved,
     "standing_risks_classified_human_gated": _probe_standing_risks_classified_human_gated,
+    "source_mismatch_refusal_recorded": recorded_misapplication_refusal,
 }
 
 

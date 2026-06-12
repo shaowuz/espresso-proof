@@ -40,6 +40,7 @@ from .loop_models import (
     SubgoalProgressReport,
     TheoremUseLedger,
 )
+from .loop_replay import recorded_misapplication_refusal
 from .proof_language import contains_proof_language
 
 REVIEW_MODE = "deterministic_artifact_checks_v1"
@@ -220,9 +221,10 @@ def _review_source_applicability(cycle_dir: Path, data: dict, probe: dict) -> tu
                     "hypothesis match is a hard requirement for reference support",
                     "audit theorem applicability for this case", "status_overclaim",
                 )
+    families = {c.case_id: c.case_family for c in data["cases"].cases}
     source_cases = {
-        c.case_id for c in data["cases"].cases
-        if c.case_family in {"source_sensitive", "true_theorem", "hard_research_sketch"}
+        case_id for case_id, family in families.items()
+        if family in {"source_sensitive", "true_theorem", "hard_research_sketch"}
     }
     entries_by_case: dict[str, list] = {}
     for entry in data["theorem_use"].entries:
@@ -238,14 +240,40 @@ def _review_source_applicability(cycle_dir: Path, data: dict, probe: dict) -> tu
                 "source_tool_capability",
             )
         elif all(e.step_status != "reference_supported" for e in entries):
-            add(
-                "P1", _rel(cycle_dir, cycle_dir / "theorem_use_ledger.yaml"),
-                f"case {case_id}: every cited source stayed candidate/needs_check",
-                "no proof step earned reference support, so the evidence currency "
-                "of the product is empty for this case",
-                "improve hypothesis matching or source ingestion for this family",
-                "math_capability",
-            )
+            # Goal 42E cycle 5: for a source_sensitive case the PRODUCT
+            # PROMISE is the refusal — a recorded hypothesis-mismatch
+            # (very-general-vs-all) with sources held at/below candidate is
+            # the earned-correct outcome, not an empty evidence currency.
+            # The carve-out uses the replay probe's exact predicate over the
+            # run's own grounding (fail closed when the run is missing), so
+            # unclear/not_checked applicability conditions in the ledger can
+            # never masquerade as a recorded refusal.
+            refusal_recorded = False
+            if families.get(case_id) == "source_sensitive":
+                refusal_recorded = any(
+                    recorded_misapplication_refusal(Path(run.run_dir))[0]
+                    for run in data["manifest"].runs
+                    if run.case_id == case_id and run.run_dir != "not_run"
+                )
+            if refusal_recorded:
+                advisories.append(
+                    AdvisoryFinding(
+                        note=(
+                            f"case {case_id}: misapplication refusal recorded "
+                            "(hypothesis mismatch); sources correctly held "
+                            "at/below candidate"
+                        )
+                    )
+                )
+            else:
+                add(
+                    "P1", _rel(cycle_dir, cycle_dir / "theorem_use_ledger.yaml"),
+                    f"case {case_id}: every cited source stayed candidate/needs_check",
+                    "no proof step earned reference support, so the evidence currency "
+                    "of the product is empty for this case",
+                    "improve hypothesis matching or source ingestion for this family",
+                    "math_capability",
+                )
     # planted probe duty: detect the unauthorized source_backed reference.
     probe_grounding = read_yaml(probe["grounding"])
     caught = False
