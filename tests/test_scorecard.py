@@ -35,6 +35,7 @@ def test_scorecard_is_clean_and_complete(tmp_path: Path) -> None:
     assert cap["counterexample_scope_accuracy"] == 1.0
     assert cap["scoped_verifier_wiring_success"] == 1.0
     assert cap["matcher_discipline_rate"] == 1.0
+    assert cap["counterexample_discipline_rate"] == 1.0
     assert cap["reviewer_objection_recall"] == 1.0
     assert cap["repair_round_non_regression"] is True
     assert cap["dogfood_replay_honest"] is True
@@ -44,7 +45,12 @@ def test_scorecard_is_clean_and_complete(tmp_path: Path) -> None:
     assert probes["applicability_block"]["total"] == 3
     assert probes["scoped_verifier"]["total"] == 2
     assert probes["matcher_discipline"]["total"] == 3
-    for family in ("source_grounding", "applicability_block", "scoped_verifier", "matcher_discipline"):
+    # Goal 42E cycle 11: the loop-earned counterexample disciplines stay pinned.
+    assert probes["counterexample_discipline"]["total"] == 6
+    for family in (
+        "source_grounding", "applicability_block", "scoped_verifier",
+        "matcher_discipline", "counterexample_discipline",
+    ):
         assert probes[family]["correct"] == probes[family]["total"], family
 
 
