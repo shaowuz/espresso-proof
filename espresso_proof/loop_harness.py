@@ -802,11 +802,24 @@ def _collect_theorem_use(record: dict) -> list[TheoremUseEntry]:
                     for c in conditions
                     if c.get("status") == "satisfied"
                 ][:8],
-                missing_or_unclear_hypotheses=[
-                    str(c.get("text", ""))[:160]
-                    for c in conditions
-                    if c.get("status") in {"missing", "unclear", "mismatched", "not_checked"}
-                ][:8],
+                missing_or_unclear_hypotheses=(
+                    [
+                        str(c.get("text", ""))[:160]
+                        for c in conditions
+                        if c.get("status") in {"missing", "unclear", "mismatched", "not_checked"}
+                    ]
+                    # Goal 42E cycle 5: step/ref-level hypothesis-match
+                    # mismatches (e.g. a recorded very-general-vs-all
+                    # refusal) are part of the same evidence stream.
+                    + [
+                        str(m)[:160]
+                        for m in (step.get("hypothesis_match") or {}).get("mismatches", [])
+                    ]
+                    + [
+                        str(m)[:160]
+                        for m in (ref.get("hypothesis_match") or {}).get("mismatches", [])
+                    ]
+                )[:8],
                 step_status=(
                     "reference_supported" if status == "source_backed" else
                     "candidate" if status == "candidate" else "needs_check"

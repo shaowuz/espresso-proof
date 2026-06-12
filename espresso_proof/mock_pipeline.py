@@ -155,6 +155,13 @@ def _detect_scenario(input_path: Path, text: str) -> str:
     }:
         return name
     lowered = text.lower()
+    # Goal 42E cycle 5: a universal irrationality claim over ALL cubic
+    # fourfolds is the canonical very-general-vs-all discipline test — the
+    # smoke run must exercise the source-misapplication machinery (recorded
+    # hypothesis-mismatch refusal), not the generic hodge sketch. Fixture
+    # inputs are unaffected (matched by directory name above).
+    if "all cubic fourfold" in lowered and "irrational" in lowered:
+        return "source_misapplication_very_general_to_all"
     if "all cubic fourfold" in lowered:
         return "hodge_all_cubic_fourfolds"
     if "drop smooth" in lowered or "without projective" in lowered:
