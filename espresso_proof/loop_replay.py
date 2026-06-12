@@ -297,6 +297,47 @@ def _probe_engaged_candidates_routed_to_goal(run_dir: Path) -> tuple[bool, str]:
     )
 
 
+def _probe_missing_hypothesis_counterexample_recorded(run_dir: Path) -> tuple[bool, str]:
+    """Cycle 8: a missing-hypothesis case earns its outcome when the run
+    records a CHECKED counterexample that exposes the missing hypothesis and
+    proposes a repaired claim — WITHOUT claiming a refutation (undetermined
+    hypotheses never earn one, and exposing a missing hypothesis never
+    refutes the repaired claim). Fail closed on empty banks, unchecked
+    results, missing repair suggestions, or any refutation claim."""
+
+    bank_path = run_dir / "counterexamples.yaml"
+    if not bank_path.exists():
+        return False, "no counterexamples.yaml was produced"
+    tests = read_yaml(bank_path).get("tests", [])
+    if not tests:
+        return False, "empty counterexample bank on a missing-hypothesis case"
+    exposing = [
+        t for t in tests
+        if t.get("exposes_missing_hypothesis") is True
+        and str(t.get("result")) == "failed"
+        and str(t.get("missing_hypothesis") or "").strip()
+        and str(t.get("repaired_claim_suggestion") or "").strip()
+    ]
+    if not exposing:
+        return False, (
+            "no checked counterexample exposes the missing hypothesis with a "
+            "repaired-claim suggestion"
+        )
+    # the family's must_not_claim forbids ANY refutation claim on this case,
+    # not just on the exposing records — scan the whole bank.
+    overclaiming = [t for t in tests if t.get("refutes_claim")]
+    if overclaiming:
+        return False, (
+            f"{len(overclaiming)} record(s) claim a refutation on a "
+            "missing-hypothesis case — exposing a missing hypothesis must "
+            "stay below refuted"
+        )
+    return True, (
+        f"missing hypothesis exposed by {len(exposing)} checked record(s) "
+        "with a repaired-claim suggestion; no refutation claimed"
+    )
+
+
 PROBLEM_PROBES = {
     "false_theorem_counterexample_present": _probe_false_theorem_counterexample_present,
     "scoped_computation_present": _probe_scoped_computation_present,
@@ -308,6 +349,7 @@ PROBLEM_PROBES = {
     "source_mismatch_refusal_recorded": recorded_misapplication_refusal,
     "true_theorem_source_engaged": _probe_true_theorem_source_engaged,
     "engaged_candidates_routed_to_goal": _probe_engaged_candidates_routed_to_goal,
+    "missing_hypothesis_counterexample_recorded": _probe_missing_hypothesis_counterexample_recorded,
 }
 
 # Public alias (cycle-5 precedent): the source-applicability reviewer keys

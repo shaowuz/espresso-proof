@@ -14,11 +14,33 @@ from espresso_proof.loop_triage import build_autofix_plan, run_triage
 from tests.loop_gap_case import gap_cases
 
 
+def _plant_bounded_finding(cycle_dir: Path) -> None:
+    # Goal 42E cycle 8: the loop keeps fixing the organic bounded gaps these
+    # tests previously selected (cycles 6-8), so selection machinery is now
+    # exercised against a planted, evidenced, non-oversized finding — the
+    # same pattern as the kernel-safety outranking test below.
+    report_path = cycle_dir / "review_reports" / "product_ux.yaml"
+    report = read_yaml(report_path)
+    report["actionable_findings"].append(
+        {
+            "finding_id": "product_ux_900",
+            "severity": "P2",
+            "evidence_path": str(cycle_dir / "timings.yaml"),
+            "what_happened": "synthetic: a bounded selectable gap for triage tests",
+            "why_it_matters": "selection machinery needs a non-oversized candidate",
+            "recommended_fix": "a small bounded fix",
+            "gap_kind": "coverage_gap",
+        }
+    )
+    write_yaml(report_path, report)
+
+
 @pytest.fixture(scope="module")
 def triaged_cycle(tmp_path_factory) -> Path:
     root = tmp_path_factory.mktemp("loop") / "loop_runs"
     cycle_dir = run_loop_cycle(out_root=root, mode="smoke", max_cases=3)
     run_review_pass(cycle_dir)
+    _plant_bounded_finding(cycle_dir)
     run_triage(cycle_dir)
     return cycle_dir
 
@@ -29,9 +51,10 @@ def test_triage_selects_exactly_one_evidenced_gap(triaged_cycle: Path) -> None:
     assert decision.selected_evidence_paths
     # probe calibration findings are never selectable.
     assert "planted_probe" not in decision.selected_evidence_paths[0]
-    # Goal 42E cycle 7: the engaged-candidate standing P1 routes to a goal
+    # Goal 42E cycle 7/8: the engaged-candidate standing P1 routes to a goal
     # proposal (so proposals MUST exist), and the selection moves to the
-    # next evidenced bounded gap — on this fixture the harness-gap finding.
+    # next evidenced bounded gap — here the PLANTED coverage_gap finding,
+    # which _gap_kind_for_triage maps to harness_gap.
     proposal_stems = {
         p.stem for p in (triaged_cycle / "new_goal_proposals").glob("*.md")
     }
@@ -87,10 +110,11 @@ def test_nonexistent_selected_gap_id_fails_closed(triaged_cycle: Path) -> None:
 
 def test_oversized_finding_becomes_goal_proposal(tmp_path: Path) -> None:
     root = tmp_path / "loop_runs"
-    # 3 cases: cycle 7 routes the engaged-candidate standing P1 to a
-    # proposal, so a third case is needed to keep a smaller selectable gap.
     cycle_dir = run_loop_cycle(out_root=root, mode="smoke", max_cases=3)
     run_review_pass(cycle_dir)
+    # the loop has fixed the organic bounded gaps (cycles 6-8), so plant the
+    # smaller selectable gap the oversized P0 must be skipped in favour of.
+    _plant_bounded_finding(cycle_dir)
     report_path = cycle_dir / "review_reports" / "math_logic.yaml"
     report = read_yaml(report_path)
     report["actionable_findings"].insert(
