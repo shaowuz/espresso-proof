@@ -1161,8 +1161,8 @@ def _validate_source_discipline_bindings(
     run_dir: Path,
     manifest: RunManifest,
     source_grounding: SourceGroundingReport,
-    theorem_extraction,
-    theorem_applicability,
+    theorem_extraction: TheoremExtractionReport | None,
+    theorem_applicability: TheoremApplicabilityReport | None,
 ) -> None:
     """Goal 41 provenance bindings (optional/additive — both fields default "").
 
@@ -1178,6 +1178,14 @@ def _validate_source_discipline_bindings(
 
     import hashlib
 
+    extracted_hashes: set[str] | None = (
+        {
+            hashlib.sha256(theorem.statement.encode("utf-8")).hexdigest()
+            for theorem in theorem_extraction.theorems
+        }
+        if theorem_extraction is not None
+        else None
+    )
     for ref in source_grounding.source_refs:
         if not ref.statement_sha256:
             continue
@@ -1187,16 +1195,12 @@ def _validate_source_discipline_bindings(
                 f"{ref.id}: cited statement does not match its recorded excerpt "
                 "hash (the statement was edited after grounding; re-run grounding)"
             )
-        if theorem_extraction is not None:
-            extracted_hashes = {
-                hashlib.sha256(theorem.statement.encode("utf-8")).hexdigest()
-                for theorem in theorem_extraction.theorems
-            }
-            if ref.statement_sha256 not in extracted_hashes:
-                raise KernelValidationError(
-                    f"{ref.id}: excerpt hash does not name any extracted theorem "
-                    "in theorem_extraction.yaml (fabricated or stale citation)"
-                )
+        if extracted_hashes is not None and ref.statement_sha256 not in extracted_hashes:
+            raise KernelValidationError(
+                f"{ref.id}: excerpt hash does not name any extracted theorem in "
+                "theorem_extraction.yaml (fabricated or stale citation; re-run "
+                "theorem extraction and grounding)"
+            )
 
     if theorem_applicability is not None and theorem_applicability.source_grounding_sha256:
         grounding_rel = manifest.artifacts.get("source_grounding")

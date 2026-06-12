@@ -205,8 +205,9 @@ def _unnegated_word_present(term: str, lowered_statement: str) -> bool:
     """True iff ``term`` occurs as a whole word NOT immediately negated."""
 
     for match in re.finditer(r"\b" + re.escape(term) + r"\b", lowered_statement):
-        prefix = lowered_statement[max(0, match.start() - 4) : match.start()]
-        if prefix.endswith(("non-", "non ", "not ", " no ")) or prefix == "no ":
+        before = lowered_statement[: match.start()]
+        # whitespace/hyphen-tolerant immediate negators: non-/non/not/no
+        if re.search(r"(?:\bnon[-\u2011]?|\bnot|\bno)\s*$", before):
             continue
         return True
     return False
