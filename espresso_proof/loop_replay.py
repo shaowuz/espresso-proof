@@ -238,6 +238,8 @@ def _probe_true_theorem_source_engaged(run_dir: Path) -> tuple[bool, str]:
     engaged = [
         ref for ref in refs
         if str(ref.get("title", "")).strip()
+        and any(str(a).strip() for a in ref.get("authors", []))
+        and ref.get("status") == "candidate"
         and (ref.get("locator") or {}).get("kind") not in (None, "", "unknown")
         and str((ref.get("locator") or {}).get("value", "")).strip()
         and (ref.get("hypothesis_match") or {}).get("matches") is True
@@ -245,8 +247,8 @@ def _probe_true_theorem_source_engaged(run_dir: Path) -> tuple[bool, str]:
     ]
     if not engaged:
         return False, (
-            "no cited reference carries an exact locator plus a recorded "
-            "all-hypotheses match"
+            "no candidate reference carries attribution, an exact locator, "
+            "and a recorded all-hypotheses match"
         )
     return True, (
         f"classical source engaged ({len(engaged)} reference(s) with exact "

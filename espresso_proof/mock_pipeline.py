@@ -6,7 +6,10 @@ from uuid import uuid4
 
 from .contracts import default_agent_contracts
 from .counterexample_probes import propose_deterministic_counterexamples
-from .verification_request_probes import propose_scoped_verification_requests
+from .verification_request_probes import (
+    _ORDER_P_SQUARED_ABELIAN_EXACT,
+    propose_scoped_verification_requests,
+)
 from .io import read_text, write_text, write_yaml
 from .memory import write_run_memory
 from .validators import validate_run
@@ -180,8 +183,11 @@ def _detect_scenario(input_path: Path, text: str) -> str:
         return "source_misapplication_very_general_to_all"
     # Goal 42E cycle 6: the true classical p^2-abelian claim must engage the
     # source-grounding machinery instead of falling through to the vague
-    # scenario (which records no theorem use at all).
-    if "p^2" in lowered and "abelian" in lowered:
+    # scenario (which records no theorem use at all). Anchored fullmatch
+    # (Kernel Safety review): the favorable scaffold must never catch
+    # negated, weakened, or primality-free variants — those read literally
+    # are DIFFERENT (false) claims and stay on the vague path.
+    if _ORDER_P_SQUARED_ABELIAN_EXACT.fullmatch(" ".join(lowered.split()).strip()):
         return "true_theorem_classical_source"
     return "vague_claim_unclear"
 
@@ -1478,6 +1484,15 @@ def _true_theorem_classical_source(text: str, run_id: str) -> dict[str, object]:
                 ),
             }
         ],
+    }
+    artifacts["tests.yaml"] = {
+        "claim_id": claim_id,
+        "target": "user_sketch",
+        "summary": (
+            "Tests are deferred pending verification of the classical source "
+            "statement; the claim itself is precise."
+        ),
+        "tests": [],
     }
     artifacts["review.yaml"] = _parallel_review(
         claim_id,

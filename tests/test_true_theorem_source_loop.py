@@ -42,7 +42,8 @@ def test_replay_probe_true_theorem_source_engaged(tmp_path: Path) -> None:
     )
     ok, note = probe(tmp_path)
     assert not ok and "never be earned" in note
-    # an inexact locator or an unresolved hypothesis match is not engagement.
+    # an inexact locator, missing attribution, or an unresolved hypothesis
+    # match is not engagement.
     write_yaml(
         tmp_path / "source_grounding.yaml",
         {
@@ -78,6 +79,25 @@ def test_replay_probe_true_theorem_source_engaged(tmp_path: Path) -> None:
         },
     )
     ok, note = probe(tmp_path)
+    assert not ok and "attribution" in note  # authors are required
+    write_yaml(
+        tmp_path / "source_grounding.yaml",
+        {
+            "claim_id": "c",
+            "steps": [{"proof_step_id": "s1", "status": "candidate", "source_refs": ["r"]}],
+            "source_refs": [
+                {
+                    "id": "r",
+                    "title": "Classical group theory text",
+                    "authors": ["Placeholder Author"],
+                    "status": "candidate",
+                    "locator": {"kind": "theorem", "value": "Corollary (class equation)"},
+                    "hypothesis_match": {"matches": True, "mismatches": []},
+                }
+            ],
+        },
+    )
+    ok, note = probe(tmp_path)
     assert ok and "held honestly at candidate" in note
 
 
@@ -89,6 +109,19 @@ def test_p2_claim_routes_to_classical_source_scenario(tmp_path: Path) -> None:
         _detect_scenario(path, "Every group of order 6 is abelian.\n")
         != "true_theorem_classical_source"
     )
+    # anchored fullmatch (Kernel Safety): negated, weakened, primality-free,
+    # or modified variants are DIFFERENT (often false) claims — the favorable
+    # classical-source scaffold must never catch them.
+    for variant in (
+        "Every group of order p^2, where p is prime, is non-abelian.\n",
+        "No group of order p^2 is abelian.\n",
+        "Some group of order p^2, where p is prime, is not abelian.\n",
+        "Every group of order p^2 is abelian.\n",  # missing primality clause
+        "Every group of order p^2, where p is prime, is cyclic.\n",
+    ):
+        assert (
+            _detect_scenario(path, variant) != "true_theorem_classical_source"
+        ), variant
     # fixture inputs are still matched by directory name BEFORE text rules.
     fixture = tmp_path / "vague_claim_unclear" / "input.md"
     assert _detect_scenario(fixture, P2_CLAIM) == "vague_claim_unclear"
@@ -171,8 +204,11 @@ def test_ledger_engages_and_honest_p1_remains(tmp_path: Path) -> None:
         for f in report.actionable_findings
     )
     # ...while the honest standing P1 (stuck at candidate without real
-    # verification) remains: engagement is not evidence.
+    # verification) remains AT P1: engagement is not evidence, and the
+    # finding must not be quietly demoted.
     assert any(
-        "p2_groups_true" in f.what_happened and "stayed candidate" in f.what_happened
+        "p2_groups_true" in f.what_happened
+        and "stayed candidate" in f.what_happened
+        and f.severity == "P1"
         for f in report.actionable_findings
     )
