@@ -174,11 +174,16 @@ def _probe_standing_risks_classified_human_gated(run_dir: Path) -> tuple[bool, s
     return True, "all objection/hypothesis blockers classified human-gated"
 
 
-def _probe_source_mismatch_refusal_recorded(run_dir: Path) -> tuple[bool, str]:
+def recorded_misapplication_refusal(run_dir: Path) -> tuple[bool, str]:
     """For a source-discipline case the earned outcome is a RECORDED refusal:
     a hypothesis mismatch (e.g. very-general vs all) with every source held
     at/below candidate. An unrecorded refusal (no mismatch anywhere) means
-    the source machinery never engaged the misapplication."""
+    the source machinery never engaged the misapplication.
+
+    Public: the source-applicability reviewer keys its earned-refusal
+    carve-out on this exact predicate so reviewer and probe cannot drift —
+    unclear/not_checked applicability conditions alone never count as a
+    recorded refusal."""
 
     grounding_path = run_dir / "source_grounding.yaml"
     if not grounding_path.exists():
@@ -203,7 +208,7 @@ def _probe_source_mismatch_refusal_recorded(run_dir: Path) -> tuple[bool, str]:
         return False, "no hypothesis-mismatch refusal recorded anywhere in the grounding"
     return True, (
         f"misapplication refusal recorded ({len(mismatches)} mismatch note(s)); "
-        "sources held at candidate"
+        "sources held at/below candidate"
     )
 
 
@@ -215,7 +220,7 @@ PROBLEM_PROBES = {
     "examples_present": _probe_examples_present,
     "computation_request_blockers_resolved": _probe_computation_request_blockers_resolved,
     "standing_risks_classified_human_gated": _probe_standing_risks_classified_human_gated,
-    "source_mismatch_refusal_recorded": _probe_source_mismatch_refusal_recorded,
+    "source_mismatch_refusal_recorded": recorded_misapplication_refusal,
 }
 
 

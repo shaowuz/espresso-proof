@@ -147,10 +147,130 @@ def test_true_theorem_case_still_gets_the_p1(tmp_path: Path) -> None:
     assert findings, "true-theorem candidate-stuck sources must still be flagged"
 
 
-def test_replay_probe_source_mismatch_refusal(tmp_path: Path) -> None:
-    from espresso_proof.loop_replay import (
-        _probe_source_mismatch_refusal_recorded as probe,
+def test_unclear_conditions_alone_do_not_count_as_refusal(tmp_path: Path) -> None:
+    # Review-round hardening: the carve-out keys on the replay probe's exact
+    # predicate over the run's OWN grounding. A ledger entry whose
+    # missing_or_unclear_hypotheses came only from unclear/not_checked
+    # applicability conditions (external-mode shape: the misapplication
+    # machinery never engaged) must still draw the P1, never the advisory.
+    from espresso_proof.loop_harness import run_loop_cycle
+    from espresso_proof.loop_models import ReviewReport
+    from espresso_proof.loop_reviewers import run_review_pass
+
+    cases_file = tmp_path / "cases.yaml"
+    write_yaml(
+        cases_file,
+        {
+            "cases": [
+                {
+                    "case_id": "source_sensitive_very_general",
+                    "claim": DISCIPLINE_CLAIM.strip(),
+                    "case_family": "source_sensitive",
+                    "expected_difficulty": "normal",
+                    "known_truth_status": "evaluator_only_false",
+                    "what_this_case_tests": ["source applicability"],
+                    "must_not_claim": [
+                        "a very-general source supports an all-objects claim"
+                    ],
+                }
+            ]
+        },
     )
+    cycle_dir = run_loop_cycle(
+        out_root=tmp_path / "loop_runs", mode="smoke", cases_path=cases_file
+    )
+    # strip every recorded mismatch from the run's grounding, leaving the
+    # stale ledger notes in place — the reviewer must not trust the ledger.
+    manifest = read_yaml(cycle_dir / "run_manifest.yaml")
+    stripped = 0
+    for run in manifest["runs"]:
+        grounding_path = Path(run["run_dir"]) / "source_grounding.yaml"
+        if not grounding_path.exists():
+            continue
+        grounding = read_yaml(grounding_path)
+        for item in grounding.get("steps", []) + grounding.get("source_refs", []):
+            match = item.get("hypothesis_match")
+            if match and match.get("mismatches"):
+                match["mismatches"] = []
+                stripped += 1
+        write_yaml(grounding_path, grounding)
+    assert stripped, "the smoke run must have recorded mismatches to strip"
+    ledger = read_yaml(cycle_dir / "theorem_use_ledger.yaml")
+    assert any(e["missing_or_unclear_hypotheses"] for e in ledger["entries"]), (
+        "the stale ledger notes must survive so the test exercises the drift"
+    )
+    run_review_pass(cycle_dir)
+    report = ReviewReport.model_validate(
+        read_yaml(cycle_dir / "review_reports" / "source_applicability.yaml")
+    )
+    assert any(
+        "source_sensitive_very_general" in f.what_happened
+        and "stayed candidate" in f.what_happened
+        for f in report.actionable_findings
+    ), "without a recorded mismatch in the grounding the P1 must stay"
+    assert not any(
+        "misapplication refusal recorded" in a.note
+        for a in report.advisory_findings
+    )
+
+
+def test_mismatch_notes_survive_condition_truncation(tmp_path: Path) -> None:
+    # the recorded mismatch is the refusal signal: it takes the ledger slots
+    # first and can never be crowded out by eight unclear conditions.
+    from espresso_proof.loop_harness import _collect_theorem_use, load_cases
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_yaml(
+        run_dir / "run_manifest.yaml",
+        {
+            "artifacts": {
+                "source_grounding": "source_grounding.yaml",
+                "theorem_applicability": "theorem_applicability.yaml",
+            }
+        },
+    )
+    write_yaml(
+        run_dir / "source_grounding.yaml",
+        {
+            "steps": [
+                {
+                    "proof_step_id": "s1",
+                    "status": "misapplied",
+                    "source_refs": ["src"],
+                    "hypothesis_match": {
+                        "matches": False,
+                        "mismatches": ["very general hypothesis used as all"],
+                    },
+                }
+            ],
+            "source_refs": [{"id": "src", "title": "T", "status": "candidate"}],
+        },
+    )
+    write_yaml(
+        run_dir / "theorem_applicability.yaml",
+        {
+            "usages": [
+                {
+                    "proof_step_id": "s1",
+                    "conditions": [
+                        {"text": f"condition {n}", "status": "not_checked"}
+                        for n in range(10)
+                    ],
+                }
+            ]
+        },
+    )
+    case = next(c for c in load_cases(None) if c.case_family == "source_sensitive")
+    entries = _collect_theorem_use({"case": case, "run_dir": run_dir})
+    assert entries
+    notes = entries[0].missing_or_unclear_hypotheses
+    assert len(notes) <= 8
+    assert "very general hypothesis used as all" in notes
+
+
+def test_replay_probe_source_mismatch_refusal(tmp_path: Path) -> None:
+    from espresso_proof.loop_replay import recorded_misapplication_refusal as probe
 
     ok, note = probe(tmp_path)
     assert not ok and "no source_grounding.yaml" in note

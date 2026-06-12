@@ -789,6 +789,26 @@ def _collect_theorem_use(record: dict) -> list[TheoremUseEntry]:
         usage = usage_by_step.get(step.get("proof_step_id")) or {}
         conditions = usage.get("conditions", [])
         status = step.get("status")
+        # Goal 42E cycle 5: step/ref-level hypothesis-match mismatches (e.g.
+        # a recorded very-general-vs-all refusal) are part of the same
+        # evidence stream. They are the refusal signal, so they take the
+        # ledger slots FIRST — unclear/not_checked conditions fill the rest
+        # and can never crowd a recorded mismatch out of the entry.
+        mismatch_notes = (
+            [
+                str(m)[:160]
+                for m in (step.get("hypothesis_match") or {}).get("mismatches", [])
+            ]
+            + [
+                str(m)[:160]
+                for m in (ref.get("hypothesis_match") or {}).get("mismatches", [])
+            ]
+        )[:8]
+        unclear_conditions = [
+            str(c.get("text", ""))[:160]
+            for c in conditions
+            if c.get("status") in {"missing", "unclear", "mismatched", "not_checked"}
+        ]
         entries.append(
             TheoremUseEntry(
                 case_id=record["case"].case_id,
@@ -803,23 +823,9 @@ def _collect_theorem_use(record: dict) -> list[TheoremUseEntry]:
                     if c.get("status") == "satisfied"
                 ][:8],
                 missing_or_unclear_hypotheses=(
-                    [
-                        str(c.get("text", ""))[:160]
-                        for c in conditions
-                        if c.get("status") in {"missing", "unclear", "mismatched", "not_checked"}
-                    ]
-                    # Goal 42E cycle 5: step/ref-level hypothesis-match
-                    # mismatches (e.g. a recorded very-general-vs-all
-                    # refusal) are part of the same evidence stream.
-                    + [
-                        str(m)[:160]
-                        for m in (step.get("hypothesis_match") or {}).get("mismatches", [])
-                    ]
-                    + [
-                        str(m)[:160]
-                        for m in (ref.get("hypothesis_match") or {}).get("mismatches", [])
-                    ]
-                )[:8],
+                    mismatch_notes
+                    + unclear_conditions[: max(0, 8 - len(mismatch_notes))]
+                ),
                 step_status=(
                     "reference_supported" if status == "source_backed" else
                     "candidate" if status == "candidate" else "needs_check"
