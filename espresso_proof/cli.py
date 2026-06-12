@@ -2172,6 +2172,22 @@ def loop_cycle(
     typer.echo(f"Campaign files updated under {out}")
 
 
+@app.command("loop-review")
+def loop_review(
+    cycle: Path = typer.Option(..., "--cycle", exists=True, file_okay=False, help="A recorded loop cycle directory."),
+) -> None:
+    """Goal 42B: run the six independent artifact-grounded reviewers over a
+    recorded cycle. Read-only over product behavior: writes only
+    review_reports/ and the clearly-marked planted calibration probe inside
+    the cycle folder. Actionable findings always cite evidence paths;
+    unevidenced impressions are advisory and can never drive an autofix.
+    """
+    from .loop_reviewers import run_review_pass
+
+    reports_dir = run_review_pass(cycle)
+    typer.echo(f"Six review reports written to {reports_dir}")
+
+
 @app.command()
 def eval(
     mode: str = typer.Option("mock", "--mode"),
