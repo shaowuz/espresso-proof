@@ -2188,6 +2188,46 @@ def loop_review(
     typer.echo(f"Six review reports written to {reports_dir}")
 
 
+@app.command("loop-triage")
+def loop_triage(
+    cycle: Path = typer.Option(..., "--cycle", exists=True, file_okay=False, help="A reviewed loop cycle directory."),
+    plan_file: list[str] = typer.Option([], "--plan-file", help="Expected file to change (repeatable; max 8)."),
+    plan_test: list[str] = typer.Option([], "--plan-test", help="Focused test for the fix (repeatable)."),
+    replay_case: list[str] = typer.Option([], "--replay-case", help="Case id to replay before/after the fix (repeatable)."),
+    why: str = typer.Option("", "--why", help="Why this gap now (required when planning)."),
+    extra_reviewer: list[str] = typer.Option([], "--extra-reviewer", help="Additional required reviewer (repeatable)."),
+) -> None:
+    """Goal 42C: aggregate the six reviews and choose EXACTLY ONE evidenced
+    gap (kernel-safety first, then status overclaims, then math capability).
+    Writes triage.yaml; oversized findings become new-goal proposals instead
+    of broad fixes. With --plan-* arguments it also writes the bounded
+    autofix_plan.yaml (8 files / 800 lines, Engineering + Kernel Safety
+    mandatory, replay cases required; protected safety surfaces refused).
+    Never changes code.
+    """
+    from .loop_triage import build_autofix_plan, run_triage
+
+    decision = run_triage(cycle)
+    typer.echo(f"Selected gap: {decision.selected_gap_id} ({decision.selected_gap_kind})")
+    if decision.new_goal_proposal_path:
+        typer.echo(f"Oversized finding converted to goal proposal: {decision.new_goal_proposal_path}")
+    if plan_file or plan_test or replay_case:
+        if not (plan_file and plan_test and replay_case and why.strip()):
+            typer.echo("Planning requires --plan-file, --plan-test, --replay-case and --why together.")
+            raise typer.Exit(code=2)
+        plan = build_autofix_plan(
+            cycle,
+            files_expected_to_change=list(plan_file),
+            focused_tests=list(plan_test),
+            replay_cases=list(replay_case),
+            why_this_gap_now=why,
+            extra_reviewers=list(extra_reviewer),
+        )
+        typer.echo(f"Bounded autofix plan written for {plan.selected_gap_id}")
+    else:
+        typer.echo("No autofix plan written (provide --plan-* after investigating the gap).")
+
+
 @app.command()
 def eval(
     mode: str = typer.Option("mock", "--mode"),
