@@ -6,7 +6,10 @@ from uuid import uuid4
 
 from .contracts import default_agent_contracts
 from .counterexample_probes import propose_deterministic_counterexamples
-from .verification_request_probes import propose_scoped_verification_requests
+from .verification_request_probes import (
+    _ORDER_P_SQUARED_ABELIAN_EXACT,
+    propose_scoped_verification_requests,
+)
 from .io import read_text, write_text, write_yaml
 from .memory import write_run_memory
 from .validators import validate_run
@@ -178,6 +181,14 @@ def _detect_scenario(input_path: Path, text: str) -> str:
         return "likely_false_multiple_pressures"
     if "very general" in lowered and "locked claim for all" in lowered:
         return "source_misapplication_very_general_to_all"
+    # Goal 42E cycle 6: the true classical p^2-abelian claim must engage the
+    # source-grounding machinery instead of falling through to the vague
+    # scenario (which records no theorem use at all). Anchored fullmatch
+    # (Kernel Safety review): the favorable scaffold must never catch
+    # negated, weakened, or primality-free variants — those read literally
+    # are DIFFERENT (false) claims and stay on the vague path.
+    if _ORDER_P_SQUARED_ABELIAN_EXACT.fullmatch(" ".join(lowered.split()).strip()):
+        return "true_theorem_classical_source"
     return "vague_claim_unclear"
 
 
@@ -217,6 +228,8 @@ def _artifacts_for_scenario(scenario: str, text: str, run_id: str, project_id: s
         return _likely_false_multiple_pressures(text, run_id)
     if scenario == "source_misapplication_very_general_to_all":
         return _source_misapplication(text, run_id)
+    if scenario == "true_theorem_classical_source":
+        return _true_theorem_classical_source(text, run_id)
     if scenario in {
         "human_marks_example_interesting",
         "human_marks_example_misleading_not_evidence",
@@ -1380,6 +1393,162 @@ def _source_misapplication(text: str, run_id: str) -> dict[str, object]:
     )
     artifacts["final_report.md"] = (
         "Mock critique: Referencing marks the very-general-to-all citation as misapplied.\n"
+    )
+    return artifacts
+
+
+def _true_theorem_classical_source(text: str, run_id: str) -> dict[str, object]:
+    # Goal 42E cycle 6: a true classical theorem (groups of order p^2 are
+    # abelian) must ENGAGE source grounding in smoke mode: one classical
+    # citation with an exact locator, attribution, and a recorded
+    # all-hypotheses match — held honestly at candidate. Smoke mode runs no
+    # real source verification, so nothing here may reach source_backed.
+    artifacts = _vague_claim(text, run_id)
+    claim = artifacts["locked_claim.yaml"]
+    claim["objects"] = ["finite groups of order p^2, p prime"]
+    claim["hypotheses"] = [
+        {"name": "the group has order p^2", "status": "explicit", "source": "user"},
+        {"name": "p is prime", "status": "explicit", "source": "user"},
+    ]
+    claim["conclusion"] = "The group is abelian."
+    claim_id = claim["id"]
+    artifacts["hypothesis_ledger.yaml"] = {
+        "claim_id": claim_id,
+        "hypotheses": claim["hypotheses"],
+        "missing_or_unclear": [],
+        "notes": ["The claim is precise; both hypotheses are explicit in the statement."],
+    }
+    artifacts["literature_review.yaml"] = {
+        "claim_id": claim_id,
+        "query_summary": "Classical finite group theory: order p^2 forces abelian.",
+        "candidate_references": [
+            {
+                "id": "lit_p2_classical",
+                "title": "Classical group theory text (class equation chapter)",
+                "authors": ["Placeholder Author"],
+                "locator": {
+                    "kind": "theorem",
+                    "value": "Corollary: groups of order p^2 are abelian",
+                },
+                "relevance": "possible_theorem_source",
+                "status": "candidate",
+                "why_relevant": (
+                    "Standard corollary: a group of order p^2 has nontrivial "
+                    "center, and G/Z(G) cyclic forces G abelian."
+                ),
+                "found_by": "literature_review",
+            }
+        ],
+        "known_examples": [],
+        "known_counterexample_families": [],
+        "notes": [
+            "Referencing must check exact locator and hypotheses before any "
+            "step can claim reference support."
+        ],
+    }
+    artifacts["source_grounding.yaml"] = {
+        "claim_id": claim_id,
+        "source_refs": [
+            {
+                "id": "src_p2_classical",
+                "type": "book",
+                "title": "Classical group theory text (class equation chapter)",
+                "authors": ["Placeholder Author"],
+                "locator": {
+                    "kind": "theorem",
+                    "value": "Corollary: groups of order p^2 are abelian",
+                },
+                "statement_or_summary": (
+                    "Every group of order p^2, p prime, is abelian (via "
+                    "nontrivial center and the G/Z(G)-cyclic criterion)."
+                ),
+                "hypothesis_match": {"matches": True, "mismatches": []},
+                "confidence": "high",
+                "status": "candidate",
+            }
+        ],
+        "steps": [
+            {
+                "proof_step_id": "step_p2_center",
+                "needed_theorem": (
+                    "Nontrivial center of a finite p-group plus the "
+                    "G/Z(G)-cyclic-implies-abelian criterion."
+                ),
+                "status": "candidate",
+                "source_refs": ["src_p2_classical"],
+                "hypothesis_match": {"matches": True, "mismatches": []},
+                "note": (
+                    "Hypotheses match the locked claim; reference support "
+                    "still requires real source verification (never earned "
+                    "in smoke mode)."
+                ),
+            }
+        ],
+    }
+    artifacts["tests.yaml"] = {
+        "claim_id": claim_id,
+        "target": "user_sketch",
+        "summary": (
+            "Tests are deferred pending verification of the classical source "
+            "statement; the claim itself is precise."
+        ),
+        "tests": [],
+    }
+    artifacts["review.yaml"] = _parallel_review(
+        claim_id,
+        attempt_status="unclear",
+        verdict="continue",
+        strategy_verdict="pass",
+        evidence_verdict="pass",
+        line_verdict="unclear",
+        line_applicability="sketch_only",
+        strongest_objection=(
+            "The classical route is plausible and a candidate source matches "
+            "all hypotheses, but no line-by-line proof or verified source "
+            "excerpt is available."
+        ),
+        source_risks=["candidate source still needs verified statement excerpt"],
+        downgrade_reasons=["Sketch-only line proof review blocks proof-like language."],
+    )
+    artifacts["idea_grade.yaml"] = {
+        "claim_id": claim_id,
+        "status": "promising",
+        "score": 70,
+        "confidence": "medium",
+        "reasons": [
+            "A classical candidate source matches every stated hypothesis; "
+            "the claim remains unproved here pending verification."
+        ],
+        "survived_tests": [],
+        "failed_tests": [],
+        "counterexample_candidates": [],
+        "missing_hypotheses": [],
+        "source_gaps": ["verified statement excerpt for the classical corollary"],
+        "repair_options": [
+            "Verify the exact source statement, then attempt the center/class-equation route."
+        ],
+        "next_cheapest_test": "Verify the classical corollary's exact statement and locator.",
+        "human_review_required": True,
+        "proof_language_status": "idea_sketch",
+    }
+    artifacts["loop_control.yaml"] = _loop_control(claim_id)
+    artifacts["strategy_synthesis.yaml"] = _strategy_synthesis(
+        claim_id,
+        run_id,
+        status="promising",
+        base_score=70,
+        source_status="candidate",
+    )
+    artifacts["strategy_brief.yaml"] = _strategy_brief(
+        claim_id,
+        run_id,
+        status="promising",
+        base_score=70,
+        source_status="candidate",
+    )
+    artifacts["final_report.md"] = (
+        "Mock critique: the classical-source route is engaged and held at "
+        "candidate pending real verification.\n"
     )
     return artifacts
 
