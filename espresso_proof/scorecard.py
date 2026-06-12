@@ -215,6 +215,78 @@ def _probe_matcher_discipline() -> dict:
     return {"cases": cases, "correct": correct, "total": len(cases), "passed": correct == len(cases)}
 
 
+def _probe_counterexample_discipline() -> dict:
+    """Counterexample family (Goal 42E cycle 11, n=6): the deterministic
+    probes from loop cycles 1/8/10 must keep their earned outcomes — an
+    admissible checked refutation exactly where a non-abelian construction
+    exists, silence on every true claim, and a non-refuting exposing record
+    for the missing-hypothesis family."""
+
+    from .counterexample_probes import propose_deterministic_counterexamples
+
+    def group_claim(order: int) -> dict:
+        return {
+            "normalized_statement": f"Every group of order {order} is abelian.",
+            "hypotheses": [
+                {"name": f"G is a group of order {order}", "status": "explicit", "source": "user"}
+            ],
+        }
+
+    dihedral = propose_deterministic_counterexamples(group_claim(6))
+    semidirect = propose_deterministic_counterexamples(group_claim(21))
+    missing = propose_deterministic_counterexamples(
+        {
+            "normalized_statement": (
+                "Every continuous function f: R -> R attains a maximum value."
+            ),
+            "hypotheses": [],
+        }
+    )
+    cases = [
+        {
+            "case": "dihedral_refutes_order6",
+            "correct": bool(dihedral) and dihedral[0]["refutes_claim"] is True,
+        },
+        {
+            "case": "semidirect_refutes_order21",
+            "correct": bool(semidirect) and semidirect[0]["refutes_claim"] is True,
+        },
+        {
+            # 15: all groups cyclic; 27: prime power out of scope — silence.
+            "case": "true_or_out_of_scope_claims_stay_silent",
+            "correct": propose_deterministic_counterexamples(group_claim(15)) == []
+            and propose_deterministic_counterexamples(group_claim(27)) == [],
+        },
+        {
+            "case": "negated_claim_stays_silent",
+            "correct": propose_deterministic_counterexamples(
+                {"normalized_statement": "Every group of order 6 is non-abelian."}
+            )
+            == [],
+        },
+        {
+            "case": "missing_hypothesis_exposes_without_refuting",
+            "correct": bool(missing)
+            and missing[0]["exposes_missing_hypothesis"] is True
+            and missing[0]["refutes_claim"] is False
+            and bool(str(missing[0].get("repaired_claim_suggestion") or "").strip()),
+        },
+        {
+            # undetermined hypotheses never earn a refutation (cycle-1 rule).
+            "case": "undetermined_hypotheses_downgrade",
+            "correct": (
+                lambda t: bool(t) and t[0]["refutes_claim"] is False
+            )(
+                propose_deterministic_counterexamples(
+                    {"normalized_statement": "Every group of order 6 is abelian."}
+                )
+            ),
+        },
+    ]
+    correct = sum(1 for c in cases if c["correct"])
+    return {"cases": cases, "correct": correct, "total": len(cases), "passed": correct == len(cases)}
+
+
 def _probe_reviewer_quality(root: Path) -> dict:
     """Reviewer-quality benchmark: seed GOLD FLAWS into a fixture run and require
     the artifact-grounded reviewer checklist to recall every high-severity flaw.
@@ -343,6 +415,7 @@ def run_scorecard(output_root: Path) -> dict:
     applicability = _probe_applicability_block(output_root / "probes" / "applicability")
     verifier = _probe_scoped_verifier(output_root / "probes" / "verifier")
     matcher = _probe_matcher_discipline()
+    counterexample = _probe_counterexample_discipline()
     reviewer = _probe_reviewer_quality(output_root / "probes" / "reviewer")
     dogfood = _probe_dogfood_replay(output_root / "probes" / "dogfood")
 
@@ -365,6 +438,7 @@ def run_scorecard(output_root: Path) -> dict:
         ),
         "scoped_verifier_wiring_success": verifier["correct"] / verifier["total"],
         "matcher_discipline_rate": matcher["correct"] / matcher["total"],
+        "counterexample_discipline_rate": counterexample["correct"] / counterexample["total"],
         "reviewer_objection_recall": (
             reviewer["recalled"] / reviewer["seeded"] if reviewer["seeded"] else 0.0
         ),
@@ -380,6 +454,7 @@ def run_scorecard(output_root: Path) -> dict:
         and applicability["passed"]
         and verifier["passed"]
         and matcher["passed"]
+        and counterexample["passed"]
         and reviewer["passed"]
         and dogfood["passed"]
     )
@@ -392,6 +467,7 @@ def run_scorecard(output_root: Path) -> dict:
             "applicability_block": applicability,
             "scoped_verifier": verifier,
             "matcher_discipline": matcher,
+            "counterexample_discipline": counterexample,
             "reviewer_quality": reviewer,
             "dogfood_replay": dogfood,
         },
@@ -420,7 +496,8 @@ def render_scorecard_markdown(report: dict) -> str:
         "",
         "All metrics are deterministic fixture probes over small per-family case",
         "sets (grounding n=3, applicability n=3, verifier n=2, matcher n=3,",
-        "reviewer gold flaws n=2, dogfood replay n=1): they detect regressions",
+        "counterexample n=6, reviewer gold flaws n=2, dogfood replay n=1):",
+        "they detect regressions",
         "in conservative behavior and earning-pipeline wiring. The probes",
         "never earn or upgrade any mathematical status, and no claim is ever",
         "'proved' by a scorecard.",
