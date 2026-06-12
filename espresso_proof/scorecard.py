@@ -204,7 +204,7 @@ def _probe_matcher_discipline() -> dict:
                 "Theorem 5.1. Let X be a proper variety. For example, a curve.",
                 projective,
                 [],
-            )["matches"] != True,  # noqa: E712 - may be "unclear"
+            )["matches"] is not True,  # may be the string "unclear"
         },
         {
             "case": "honest_coverage_matches",
