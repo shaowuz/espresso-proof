@@ -24,9 +24,11 @@ from espresso_proof.validators import KernelValidationError, validate_run
 
 # Claim text that triggers the hodge_atoms mock scenario, whose scaffold seeds a
 # source_grounding with one proof step (step_001) — a real step to scout against.
+# (Phrased WITHOUT "irrational": since Goal 42E cycle 5, universal
+# irrationality claims route to the source-misapplication scenario instead.)
 HODGE_CLAIM = (
-    "For all cubic fourfolds, the Hodge atom obstruction proves irrationality. "
-    "The very general case is treated as all smooth cubic fourfolds."
+    "For all cubic fourfolds, the Hodge atom obstruction controls the rationality "
+    "question. The very general case is treated as all smooth cubic fourfolds."
 )
 
 
