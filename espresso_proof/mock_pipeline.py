@@ -57,6 +57,7 @@ def run_mock_critique(project_id: str, input_path: Path, output_root: Path) -> P
     optional_artifacts = {
         "human_example_feedback": "human_example_feedback.yaml",
         "example_feedback_summary": "example_feedback_summary.yaml",
+        "scoped_verification_requests": "scoped_verification_requests.yaml",
     }
     optional_manifest = {
         key: filename

@@ -21,6 +21,7 @@ from ...models import (
     IdeaGrade,
     LiteratureReviewReport,
     Review,
+    ScopedVerificationRequests,
     SourceGroundingReport,
     StrategyBrief,
     StrategySynthesis,
@@ -202,7 +203,6 @@ def _strategy(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     # concrete commutativity checks so auto-wiring can earn instance_checked
     # evidence through the trusted backend. Requests are proposals only —
     # they carry no status and the probe fails closed on any other claim.
-    from ...models import ScopedVerificationRequests
     from ...verification_request_probes import propose_scoped_verification_requests
 
     request_count = 0
@@ -211,6 +211,11 @@ def _strategy(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
         requests_doc = {"claim_id": claim_id, "requests": requests}
         ScopedVerificationRequests.model_validate(requests_doc)
         write_yaml(run_dir / "scoped_verification_requests.yaml", requests_doc)
+        manifest = read_yaml(run_dir / "run_manifest.yaml")
+        manifest.setdefault("optional_artifacts", {})["scoped_verification_requests"] = (
+            "scoped_verification_requests.yaml"
+        )
+        write_yaml(run_dir / "run_manifest.yaml", manifest)
         request_count = len(requests)
 
     return {
