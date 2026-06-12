@@ -196,11 +196,33 @@ def _strategy(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
 
     write_yaml(run_dir / artifacts["strategy_synthesis"], synthesis)
     write_yaml(run_dir / artifacts["strategy_brief"], brief)
+
+    # Goal 42E cycle 2: deterministic scoped-verification REQUESTS. When the
+    # locked claim anchors to the symbolic p^2-abelian form, propose the
+    # concrete commutativity checks so auto-wiring can earn instance_checked
+    # evidence through the trusted backend. Requests are proposals only —
+    # they carry no status and the probe fails closed on any other claim.
+    from ...models import ScopedVerificationRequests
+    from ...verification_request_probes import propose_scoped_verification_requests
+
+    request_count = 0
+    requests = propose_scoped_verification_requests(claim)
+    if requests:
+        requests_doc = {"claim_id": claim_id, "requests": requests}
+        ScopedVerificationRequests.model_validate(requests_doc)
+        write_yaml(run_dir / "scoped_verification_requests.yaml", requests_doc)
+        request_count = len(requests)
+
     return {
         "unsafe_language": [],
         "notes": [
             f"strategy wrote {len(routes)} candidate route(s) "
             f"(idea_status={idea_status}; scores are candidate confidence, not proof status)"
+            + (
+                f"; {request_count} deterministic scoped-verification request(s) proposed"
+                if request_count
+                else ""
+            )
         ],
     }
 

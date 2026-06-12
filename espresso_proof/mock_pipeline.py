@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from .contracts import default_agent_contracts
 from .counterexample_probes import propose_deterministic_counterexamples
+from .verification_request_probes import propose_scoped_verification_requests
 from .io import read_text, write_text, write_yaml
 from .memory import write_run_memory
 from .validators import validate_run
@@ -37,6 +38,20 @@ def run_mock_critique(project_id: str, input_path: Path, output_root: Path) -> P
             t for t in probe_tests if t["id"] not in existing_ids
         )
         artifacts["counterexamples.yaml"] = bank
+
+    # Goal 42E cycle 2: deterministic scoped-verification REQUESTS run in the
+    # mock path too, so the symbolic p^2-abelian dogfood claim proposes its
+    # concrete commutativity instance checks. Requests are proposals only
+    # (no status); auto-wiring through the trusted backend is what can earn
+    # instance_checked, and the probe fails closed on any other claim.
+    verification_requests = propose_scoped_verification_requests(
+        artifacts["locked_claim.yaml"]
+    )
+    if verification_requests:
+        artifacts["scoped_verification_requests.yaml"] = {
+            "claim_id": claim_id,
+            "requests": verification_requests,
+        }
     artifacts["agent_contracts.yaml"] = default_agent_contracts(project_id)
     artifacts.setdefault("human_choice.yaml", _pending_human_choice(claim_id))
     optional_artifacts = {
