@@ -225,6 +225,15 @@ def _run_case(
             effort="normal_pass",
             prover_provider=provider,
         )
+        # Goal 42E cycle 2: execute any structured scoped-verification
+        # requests through the trusted backend (same path as the CLI's
+        # --auto-wire-verifications). Idempotent, fail-closed, re-validates
+        # the run; a run without requests wires nothing. Only a confirming
+        # deterministic result earns instance_checked — never a universal
+        # status.
+        from .proof_verification import auto_wire_scoped_verifications
+
+        auto_wire_scoped_verifications(run_dir)
     except Exception as exc:  # noqa: BLE001 - one case failing must not kill the cycle
         record["failure"] = f"{type(exc).__name__}: {exc}"
     record["duration_s"] = round(time.monotonic() - t0, 3)
