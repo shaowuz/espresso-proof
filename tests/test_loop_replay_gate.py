@@ -22,26 +22,13 @@ from espresso_proof.loop_triage import run_triage
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# The order-6 gap is fixed by the deterministic dihedral probe, so the
-# unfixed-gap tests pin against a false-theorem case still beyond the probe's
-# scope: order 21 is odd (no dihedral group), yet Z_7 x| Z_3 is non-abelian,
-# so the claim is false and the smoke pipeline still yields zero tests.
-ORDER21_GAP_CASE = {
-    "case_id": "order21_abelian_false",
-    "claim": "Every group of order 21 is abelian.",
-    "case_family": "false_theorem",
-    "expected_difficulty": "smoke",
-    "known_truth_status": "evaluator_only_false",
-    "what_this_case_tests": ["counterexample reasoning beyond the dihedral probe"],
-    "must_not_claim": ["Espresso proved the theorem"],
-}
-
 
 def _gap_cases_file(directory: Path) -> Path:
-    from espresso_proof.loop_harness import DEFAULT_CASES
+    # Planted order-21 gap (see tests/loop_gap_case.py for why order 21).
+    from tests.loop_gap_case import gap_cases
 
     path = directory / "cases.yaml"
-    write_yaml(path, {"cases": [DEFAULT_CASES[0], ORDER21_GAP_CASE, DEFAULT_CASES[2]]})
+    write_yaml(path, gap_cases())
     return path
 
 

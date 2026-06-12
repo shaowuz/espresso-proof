@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ...counterexample_probes import propose_deterministic_counterexamples
 from ...hypothesis_normalization import normalize_ambient_object_hypotheses
 from ...io import read_yaml, write_yaml
 from ...llm_agents import LLMClient, load_agent_context, safe_list, safe_text
@@ -203,15 +204,20 @@ def _counterexamples(*, run_dir: Path, client: LLMClient, context: dict) -> dict
     )
 
     # Goal 42E cycle 1: deterministic machine probes. Agent TEXT stays
-    # candidate-only (refutes_claim forced False above), but a Cayley-table
+    # candidate-only (refutes_claim forced False above); a Cayley-table
     # verified non-abelian group of the claimed order is a MACHINE result and
-    # may carry result=failed/refutes_claim=True — the kernel validator
-    # re-checks it like any artifact, and grade routing is unchanged.
-    from ...counterexample_probes import propose_deterministic_counterexamples
-
-    probe_tests = propose_deterministic_counterexamples(claim)
+    # may carry result=failed — with refutes_claim=True only when the probe's
+    # anchored statement match AND the locked hypothesis list make
+    # admissibility machine-derivable. The kernel's gates check the record's
+    # flag coherence; the mathematical trust base is the probe's fail-closed
+    # matcher plus verify_group_abelian (see counterexample_probes docstring).
     existing_ids = {t.get("id") for t in counterexamples}
-    counterexamples.extend(t for t in probe_tests if t["id"] not in existing_ids)
+    probe_tests = [
+        t
+        for t in propose_deterministic_counterexamples(claim)
+        if t["id"] not in existing_ids
+    ]
+    counterexamples.extend(probe_tests)
 
     counterexample_report = {"claim_id": claim_id, "tests": counterexamples}
     test_report = {
@@ -229,8 +235,9 @@ def _counterexamples(*, run_dir: Path, client: LLMClient, context: dict) -> dict
     return {
         "unsafe_language": [],
         "notes": [
-            f"counterexamples wrote {len(counterexamples)} candidate(s) "
-            f"(refutes_claim forced False), {len(test_items)} admissibility test(s)"
+            f"counterexamples wrote {len(counterexamples) - len(probe_tests)} agent "
+            f"candidate(s) (refutes_claim forced False), {len(probe_tests)} "
+            f"deterministic machine probe(s), {len(test_items)} admissibility test(s)"
         ],
     }
 
