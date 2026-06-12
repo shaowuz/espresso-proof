@@ -22,25 +22,49 @@ from espresso_proof.loop_triage import run_triage
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# The order-6 gap is fixed by the deterministic dihedral probe, so the
+# unfixed-gap tests pin against a false-theorem case still beyond the probe's
+# scope: order 21 is odd (no dihedral group), yet Z_7 x| Z_3 is non-abelian,
+# so the claim is false and the smoke pipeline still yields zero tests.
+ORDER21_GAP_CASE = {
+    "case_id": "order21_abelian_false",
+    "claim": "Every group of order 21 is abelian.",
+    "case_family": "false_theorem",
+    "expected_difficulty": "smoke",
+    "known_truth_status": "evaluator_only_false",
+    "what_this_case_tests": ["counterexample reasoning beyond the dihedral probe"],
+    "must_not_claim": ["Espresso proved the theorem"],
+}
+
+
+def _gap_cases_file(directory: Path) -> Path:
+    from espresso_proof.loop_harness import DEFAULT_CASES
+
+    path = directory / "cases.yaml"
+    write_yaml(path, {"cases": [DEFAULT_CASES[0], ORDER21_GAP_CASE, DEFAULT_CASES[2]]})
+    return path
+
 
 @pytest.fixture(scope="module")
 def triaged(tmp_path_factory) -> Path:
-    root = tmp_path_factory.mktemp("loop") / "loop_runs"
-    cycle_dir = run_loop_cycle(out_root=root, mode="smoke", max_cases=3)
+    base = tmp_path_factory.mktemp("loop")
+    cycle_dir = run_loop_cycle(
+        out_root=base / "loop_runs", mode="smoke", cases_path=_gap_cases_file(base)
+    )
     run_review_pass(cycle_dir)
     run_triage(cycle_dir)
     return cycle_dir
 
 
 def test_baseline_replay_records_unfixed_problem(triaged: Path) -> None:
-    # the genuine smoke gap (zero counterexample tests on the false-theorem
-    # case) is NOT fixed yet: baseline replay must say fixed=False and must
-    # not be successful.
+    # the genuine smoke gap (zero counterexample tests on the out-of-probe-scope
+    # false-theorem case) is NOT fixed: baseline replay must say fixed=False
+    # and must not be successful.
     result = run_replay(
         triaged,
         checkpoint="baseline",
         probe="false_theorem_counterexample_present",
-        triggering_case_id="order6_abelian_false",
+        triggering_case_id="order21_abelian_false",
         sibling_case_ids=["p2_groups_true"],
         holdout_cases=[c for c in load_cases(None) if c.case_id == "matrix_rank_scoped"],
         observed_problem="false-theorem case produces zero counterexample tests",
@@ -58,7 +82,7 @@ def test_pre_merge_replay_failure_blocks_merge(triaged: Path) -> None:
             triaged,
             checkpoint="pre_merge",
             probe="false_theorem_counterexample_present",
-            triggering_case_id="order6_abelian_false",
+            triggering_case_id="order21_abelian_false",
             sibling_case_ids=["p2_groups_true"],
             observed_problem="false-theorem case produces zero counterexample tests",
             before_evidence_path=str(triaged / "refutations.yaml"),
@@ -199,7 +223,9 @@ def test_stop_gate_running_and_budget_semantics(tmp_path: Path, monkeypatch) -> 
     from espresso_proof import loop_stop_gate
 
     root = tmp_path / "loop_runs"
-    cycle_dir = run_loop_cycle(out_root=root, mode="smoke", max_cases=3)
+    cycle_dir = run_loop_cycle(
+        out_root=root, mode="smoke", cases_path=_gap_cases_file(tmp_path)
+    )
     run_review_pass(cycle_dir)
     # avoid the expensive scorecard/calibration subprocesses in unit tests.
     monkeypatch.setattr(

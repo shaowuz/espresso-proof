@@ -167,8 +167,33 @@ def test_probe_inflated_blocker_cannot_hijack_priority(tmp_path: Path) -> None:
     # Regression for the Math Workflow reviewer's observed inversion: the
     # calibration probe must not inflate a reviewer's verdict, and a P2 from a
     # probe-duty reviewer must never outrank a P1 math-capability finding.
+    # The P1 gap is planted with the order-21 false case (the order-6 gap is
+    # fixed by the dihedral probe and no longer produces a P1).
+    from espresso_proof.loop_harness import DEFAULT_CASES
+
+    cases_file = tmp_path / "cases.yaml"
+    write_yaml(
+        cases_file,
+        {
+            "cases": [
+                DEFAULT_CASES[0],
+                {
+                    "case_id": "order21_abelian_false",
+                    "claim": "Every group of order 21 is abelian.",
+                    "case_family": "false_theorem",
+                    "expected_difficulty": "smoke",
+                    "known_truth_status": "evaluator_only_false",
+                    "what_this_case_tests": [
+                        "counterexample reasoning beyond the dihedral probe"
+                    ],
+                    "must_not_claim": ["Espresso proved the theorem"],
+                },
+                DEFAULT_CASES[2],
+            ]
+        },
+    )
     root = tmp_path / "loop_runs"
-    cycle_dir = run_loop_cycle(out_root=root, mode="smoke", max_cases=3)
+    cycle_dir = run_loop_cycle(out_root=root, mode="smoke", cases_path=cases_file)
     run_review_pass(cycle_dir)
     # verdicts: probe-duty reviewers must NOT be BLOCKER from the probe alone.
     from espresso_proof.loop_models import ReviewReport

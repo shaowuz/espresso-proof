@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.loop_harness import run_loop_cycle
+from espresso_proof.loop_harness import DEFAULT_CASES, run_loop_cycle
 from espresso_proof.loop_models import ActionableFinding, ReviewReport
 from espresso_proof.loop_reviewers import run_review_pass
 
@@ -15,6 +15,25 @@ REVIEWERS = (
     "math_logic", "source_applicability", "counterexample",
     "proof_search", "kernel_safety", "product_ux",
 )
+
+# The order-6 gap was fixed by the deterministic dihedral probe (cycle 1
+# autofix), so detection-logic tests pin against a false-theorem case still
+# beyond the probe's scope: order 21 is odd (no dihedral group), yet
+# Z_7 x| Z_3 is non-abelian, so the claim is false and the smoke pipeline
+# still yields zero counterexample tests for it.
+ORDER21_GAP_CASE = {
+    "case_id": "order21_abelian_false",
+    "claim": "Every group of order 21 is abelian.",
+    "case_family": "false_theorem",
+    "expected_difficulty": "smoke",
+    "known_truth_status": "evaluator_only_false",
+    "what_this_case_tests": ["counterexample reasoning beyond the dihedral probe"],
+    "must_not_claim": [
+        "Espresso proved the theorem",
+        "refuted without a checked counterexample",
+    ],
+}
+GAP_CASES = {"cases": [DEFAULT_CASES[0], ORDER21_GAP_CASE, DEFAULT_CASES[2]]}
 
 
 @pytest.fixture(scope="module")
@@ -138,16 +157,37 @@ def test_status_overclaim_yields_math_logic_blocker(tmp_path: Path) -> None:
     )
 
 
-def test_false_theorem_capability_gap_is_found(reviewed_cycle: Path) -> None:
-    # The smoke run genuinely produces zero counterexample tests for the
-    # false-theorem case — the reviewers must surface that as an evidenced
-    # math-capability finding (this is the loop's purpose).
+def test_false_theorem_capability_gap_is_found(tmp_path: Path) -> None:
+    # A false-theorem case whose counterexample bank stays empty must surface
+    # as an evidenced math-capability finding (this is the loop's purpose).
+    # order6 is now covered by the dihedral probe, so the gap is planted with
+    # the still-uncovered order-21 case.
+    cases_file = tmp_path / "cases.yaml"
+    write_yaml(cases_file, GAP_CASES)
+    cycle_dir = run_loop_cycle(
+        out_root=tmp_path / "loop_runs", mode="smoke", cases_path=cases_file
+    )
+    run_review_pass(cycle_dir)
     report = ReviewReport.model_validate(
-        read_yaml(reviewed_cycle / "review_reports" / "math_logic.yaml")
+        read_yaml(cycle_dir / "review_reports" / "math_logic.yaml")
     )
     assert any(
         f.severity == "P1"
         and f.gap_kind == "math_capability"
-        and "order6_abelian_false" in f.what_happened
+        and "order21_abelian_false" in f.what_happened
+        for f in report.actionable_findings
+    )
+
+
+def test_fixed_false_theorem_case_no_longer_flagged(reviewed_cycle: Path) -> None:
+    # After the dihedral-probe fix, the canonical order-6 false case carries a
+    # checked counterexample, so the math reviewer must NOT report the
+    # zero-counterexample gap for it anymore.
+    report = ReviewReport.model_validate(
+        read_yaml(reviewed_cycle / "review_reports" / "math_logic.yaml")
+    )
+    assert not any(
+        "order6_abelian_false" in f.what_happened
+        and "zero counterexample tests" in f.what_happened
         for f in report.actionable_findings
     )
