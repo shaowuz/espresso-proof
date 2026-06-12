@@ -3,8 +3,10 @@
 When a locked claim states EXACTLY "every group of order N is abelian" for a
 concrete integer N, the counterexamples pipeline can do better than asking a
 model: if a non-abelian group of order N exists, this module CONSTRUCTS one
-(the dihedral group D_{N/2} for even N >= 6) and machine-verifies its Cayley
-table with the trusted deterministic ``verify_group_abelian`` backend.
+(the dihedral group D_{N/2} for even N >= 6; for odd N = q*p with primes
+q < p and q | p-1, the semidirect product Z_p x| Z_q — Goal 42E cycle 10)
+and machine-verifies its Cayley table with the trusted deterministic
+``verify_group_abelian`` backend.
 
 Trust model (reviewed by Kernel Safety + Math Workflow, cycle 1):
 
@@ -29,8 +31,9 @@ Trust model (reviewed by Kernel Safety + Math Workflow, cycle 1):
   Cayley-table check ran (``result=failed``) — but DOWNGRADES admissibility to
   ``"unclear"`` and sets ``refutes_claim=False``. An undetermined hypothesis
   ledger never earns a refutation.
-- If every group of order N is abelian (no construction exists), or the order
-  is symbolic/odd/out of range, the probe returns nothing — it cannot
+- If every group of order N is abelian (no construction exists), or the
+  order is symbolic, out of range, or outside both construction families
+  (e.g. odd prime powers like 27), the probe returns nothing — it cannot
   fabricate pressure against a true claim.
 - The probe earns NO status by itself: grade/refutation routing still flows
   through the existing kernel gates.

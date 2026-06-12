@@ -32,13 +32,14 @@ def test_dihedral_tables_are_nonabelian_groups() -> None:
 def test_semidirect_tables_are_nonabelian_groups() -> None:
     # Goal 42E cycle 10: odd orders q*p with q | p-1 — the smallest is
     # 21 = Z_7 x| Z_3 (r=2: 2^3 = 8 = 1 mod 7); 55 = Z_11 x| Z_5 and
-    # 57 = Z_19 x| Z_3 exercise other (p, q, r) shapes.
+    # 57 = Z_19 x| Z_3 exercise other (p, q, r) shapes; 183 = Z_61 x| Z_3
+    # pins the largest in-cap odd construction.
     from espresso_proof.counterexample_probes import (
         _odd_pq_with_nonabelian_group,
         _semidirect_cayley,
     )
 
-    for order in (21, 55, 57):
+    for order in (21, 55, 57, 183):
         p, q, r = _odd_pq_with_nonabelian_group(order)
         assert p * q == order and pow(r, q, p) == 1
         verdict = verify_group_abelian(_semidirect_cayley(p, q, r))

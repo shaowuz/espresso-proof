@@ -26,7 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _gap_cases_file(directory: Path) -> Path:
-    # Planted order-21 gap (see tests/loop_gap_case.py for why order 21).
+    # Planted live gap (tests/loop_gap_case.py is the single source of truth).
     path = directory / "cases.yaml"
     write_yaml(path, gap_cases())
     return path
