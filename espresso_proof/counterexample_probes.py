@@ -146,7 +146,11 @@ def _verify_strictly_increasing_linear(coeffs: list[int]) -> dict:
     UNIVERSAL identity p(x+1) - p(x) > 0 for degree <= 1: the difference of a
     linear polynomial is a constant, so one exact integer comparison decides
     the fact for every real x — algebra, not sampling. Degree > 1 fails
-    closed (the constant-difference argument no longer applies)."""
+    closed (the constant-difference argument no longer applies). NOTE: the
+    implication "p(x+1) - p(x) > 0 everywhere => strictly increasing" is
+    SPECIFIC to degree <= 1 (where that difference equals the slope); for
+    general functions a positive unit-step difference does not imply
+    monotonicity — do not lift this pattern out of the linear scope."""
 
     if len(coeffs) > 2:
         return {"is_strictly_increasing": False, "detail": "degree > 1: out of scope"}
@@ -180,10 +184,15 @@ def _missing_hypothesis_counterexample(claim: dict) -> list[dict]:
     is strictly increasing (so f(x+1) > f(x) for EVERY candidate maximum x —
     the deterministic check above proves this universally by exact
     polynomial algebra). The record exposes the missing hypothesis and
-    proposes the repaired claim; per the cycle-1 discipline an undetermined
-    hypothesis ledger never earns a refutation, and exposing a missing
-    hypothesis never refutes the REPAIRED claim, so refutes_claim stays
-    False here regardless of admissibility."""
+    proposes the repaired claim. ``refutes_claim`` stays False here as a
+    ROUTING/ESCALATION POLICY, not as a mathematical fact: when the locked
+    hypotheses are exactly continuity + domain R the witness genuinely
+    refutes the AS-STATED claim, but this family's must_not_claim contract
+    ('a dropped-hypothesis counterexample refutes the claim') withholds the
+    refutation flag pending claim repair — a false refuted grade propagates
+    irreversibly, while a withheld one stays recoverable. An undetermined
+    hypothesis ledger additionally downgrades admissibility to 'unclear'
+    (cycle-1 discipline)."""
 
     hypotheses = claim.get("hypotheses") or []
     names = [

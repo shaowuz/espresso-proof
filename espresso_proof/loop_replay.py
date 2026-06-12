@@ -323,12 +323,14 @@ def _probe_missing_hypothesis_counterexample_recorded(run_dir: Path) -> tuple[bo
             "no checked counterexample exposes the missing hypothesis with a "
             "repaired-claim suggestion"
         )
-    overclaiming = [t for t in exposing if t.get("refutes_claim")]
+    # the family's must_not_claim forbids ANY refutation claim on this case,
+    # not just on the exposing records — scan the whole bank.
+    overclaiming = [t for t in tests if t.get("refutes_claim")]
     if overclaiming:
         return False, (
-            f"{len(overclaiming)} missing-hypothesis record(s) claim a "
-            "refutation — exposing a missing hypothesis must stay below "
-            "refuted"
+            f"{len(overclaiming)} record(s) claim a refutation on a "
+            "missing-hypothesis case — exposing a missing hypothesis must "
+            "stay below refuted"
         )
     return True, (
         f"missing hypothesis exposed by {len(exposing)} checked record(s) "

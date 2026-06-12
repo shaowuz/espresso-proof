@@ -31,6 +31,9 @@ def test_probe_matches_only_the_anchored_form() -> None:
         "Every continuous function f: R -> R attains a minimum value.",
         "Every continuous function f: R -> R is bounded.",
         "Every bounded continuous function f: R -> R attains a maximum value.",
+        # trailing modifiers guard the RIGHT anchor (fullmatch, not match):
+        "Every continuous function f: R -> R attains a maximum value at exactly one point.",
+        "Every continuous function f: R -> R attains a maximum value on every compact subset.",
     ):
         assert propose_deterministic_counterexamples(_claim(variant)) == [], variant
 
@@ -86,6 +89,12 @@ def test_run_records_counterexample_and_validates(tmp_path: Path) -> None:
     # the grade must NOT become refuted from this record.
     grade = read_yaml(run_dir / "idea_grade.yaml")
     assert grade["status"] != "refuted"
+    # the registry-wired replay probe passes on the real run dir.
+    from espresso_proof.loop_replay import PROBLEM_PROBES
+
+    probe = PROBLEM_PROBES["missing_hypothesis_counterexample_recorded"]
+    ok, note = probe(run_dir)
+    assert ok and "no refutation claimed" in note
 
 
 def test_cycle_clears_the_no_activity_finding(tmp_path: Path) -> None:
