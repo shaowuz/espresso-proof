@@ -45,6 +45,28 @@ from .proof_language import contains_proof_language
 
 REVIEW_MODE = "deterministic_artifact_checks_v1"
 
+
+def source_support_fix(*, smoke_only: bool, engaged: bool) -> str:
+    """Shared routing predicate (Goal 42E cycle 7) for the 'stayed candidate'
+    finding — also consumed by the engaged_candidates_routed_to_goal replay
+    probe so reviewer and probe cannot drift. When grounding has ENGAGED
+    (exact locator + recorded all-hypotheses match) in a smoke-only run, the
+    only remaining distance to reference support is real source verification,
+    which smoke mode can never run and a loop autofix must never fake: that
+    finding keeps its P1 evidence but routes to a dedicated goal. An
+    unengaged grounding, or any non-smoke run, stays a bounded-fix target."""
+
+    if smoke_only and engaged:
+        return (
+            "earning reference support needs the real source-verification "
+            "pipeline (verified statement excerpt, theorem extraction); "
+            "smoke mode cannot run it and fabricated support is forbidden — "
+            "a broad rewrite beyond a bounded loop autofix; route to a "
+            "dedicated goal and keep the candidate status honestly open"
+        )
+    return "improve hypothesis matching or source ingestion for this family"
+
+
 _PROBE_MEMO = """# PLANTED PROBE (evaluator calibration material — not a real run)
 This synthetic memo asserts: we proved the theorem. proof-close. Proof complete.
 """
@@ -266,12 +288,21 @@ def _review_source_applicability(cycle_dir: Path, data: dict, probe: dict) -> tu
                     )
                 )
             else:
+                smoke_only = all(
+                    run.mode == "smoke"
+                    for run in data["manifest"].runs
+                    if run.case_id == case_id and run.run_dir != "not_run"
+                )
+                engaged = any(
+                    e.exact_locator and e.missing_or_unclear_hypotheses == []
+                    for e in entries
+                )
                 add(
                     "P1", _rel(cycle_dir, cycle_dir / "theorem_use_ledger.yaml"),
                     f"case {case_id}: every cited source stayed candidate/needs_check",
                     "no proof step earned reference support, so the evidence currency "
                     "of the product is empty for this case",
-                    "improve hypothesis matching or source ingestion for this family",
+                    source_support_fix(smoke_only=smoke_only, engaged=engaged),
                     "math_capability",
                 )
     # planted probe duty: detect the unauthorized source_backed reference.
