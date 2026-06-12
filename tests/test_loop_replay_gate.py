@@ -19,28 +19,38 @@ from espresso_proof.loop_replay import (
 )
 from espresso_proof.loop_reviewers import run_review_pass
 from espresso_proof.loop_triage import run_triage
+from tests.loop_gap_case import gap_cases
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _gap_cases_file(directory: Path) -> Path:
+    # Planted order-21 gap (see tests/loop_gap_case.py for why order 21).
+    path = directory / "cases.yaml"
+    write_yaml(path, gap_cases())
+    return path
+
+
 @pytest.fixture(scope="module")
 def triaged(tmp_path_factory) -> Path:
-    root = tmp_path_factory.mktemp("loop") / "loop_runs"
-    cycle_dir = run_loop_cycle(out_root=root, mode="smoke", max_cases=3)
+    base = tmp_path_factory.mktemp("loop")
+    cycle_dir = run_loop_cycle(
+        out_root=base / "loop_runs", mode="smoke", cases_path=_gap_cases_file(base)
+    )
     run_review_pass(cycle_dir)
     run_triage(cycle_dir)
     return cycle_dir
 
 
 def test_baseline_replay_records_unfixed_problem(triaged: Path) -> None:
-    # the genuine smoke gap (zero counterexample tests on the false-theorem
-    # case) is NOT fixed yet: baseline replay must say fixed=False and must
-    # not be successful.
+    # the genuine smoke gap (zero counterexample tests on the out-of-probe-scope
+    # false-theorem case) is NOT fixed: baseline replay must say fixed=False
+    # and must not be successful.
     result = run_replay(
         triaged,
         checkpoint="baseline",
         probe="false_theorem_counterexample_present",
-        triggering_case_id="order6_abelian_false",
+        triggering_case_id="order21_abelian_false",
         sibling_case_ids=["p2_groups_true"],
         holdout_cases=[c for c in load_cases(None) if c.case_id == "matrix_rank_scoped"],
         observed_problem="false-theorem case produces zero counterexample tests",
@@ -58,7 +68,7 @@ def test_pre_merge_replay_failure_blocks_merge(triaged: Path) -> None:
             triaged,
             checkpoint="pre_merge",
             probe="false_theorem_counterexample_present",
-            triggering_case_id="order6_abelian_false",
+            triggering_case_id="order21_abelian_false",
             sibling_case_ids=["p2_groups_true"],
             observed_problem="false-theorem case produces zero counterexample tests",
             before_evidence_path=str(triaged / "refutations.yaml"),
@@ -199,7 +209,9 @@ def test_stop_gate_running_and_budget_semantics(tmp_path: Path, monkeypatch) -> 
     from espresso_proof import loop_stop_gate
 
     root = tmp_path / "loop_runs"
-    cycle_dir = run_loop_cycle(out_root=root, mode="smoke", max_cases=3)
+    cycle_dir = run_loop_cycle(
+        out_root=root, mode="smoke", cases_path=_gap_cases_file(tmp_path)
+    )
     run_review_pass(cycle_dir)
     # avoid the expensive scorecard/calibration subprocesses in unit tests.
     monkeypatch.setattr(

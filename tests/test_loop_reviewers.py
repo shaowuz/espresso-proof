@@ -10,6 +10,7 @@ from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.loop_harness import run_loop_cycle
 from espresso_proof.loop_models import ActionableFinding, ReviewReport
 from espresso_proof.loop_reviewers import run_review_pass
+from tests.loop_gap_case import gap_cases
 
 REVIEWERS = (
     "math_logic", "source_applicability", "counterexample",
@@ -138,16 +139,38 @@ def test_status_overclaim_yields_math_logic_blocker(tmp_path: Path) -> None:
     )
 
 
-def test_false_theorem_capability_gap_is_found(reviewed_cycle: Path) -> None:
-    # The smoke run genuinely produces zero counterexample tests for the
-    # false-theorem case — the reviewers must surface that as an evidenced
-    # math-capability finding (this is the loop's purpose).
+def test_false_theorem_capability_gap_is_found(tmp_path: Path) -> None:
+    # A false-theorem case whose counterexample bank stays empty must surface
+    # as an evidenced math-capability finding (this is the loop's purpose).
+    # order6 is now covered by the dihedral probe, so the gap is planted with
+    # the still-uncovered order-21 case.
+    cases_file = tmp_path / "cases.yaml"
+    write_yaml(cases_file, gap_cases())
+    cycle_dir = run_loop_cycle(
+        out_root=tmp_path / "loop_runs", mode="smoke", cases_path=cases_file
+    )
+    run_review_pass(cycle_dir)
     report = ReviewReport.model_validate(
-        read_yaml(reviewed_cycle / "review_reports" / "math_logic.yaml")
+        read_yaml(cycle_dir / "review_reports" / "math_logic.yaml")
     )
     assert any(
         f.severity == "P1"
         and f.gap_kind == "math_capability"
-        and "order6_abelian_false" in f.what_happened
+        and "order21_abelian_false" in f.what_happened
+        for f in report.actionable_findings
+    )
+
+
+def test_fixed_false_theorem_case_no_longer_flagged(reviewed_cycle: Path) -> None:
+    # After the dihedral-probe fix, the canonical order-6 false case carries a
+    # machine-checked counterexample, so the math reviewer must NOT raise any
+    # actionable math-capability finding against it anymore (wording-agnostic:
+    # any finding mentioning the case would fail this).
+    report = ReviewReport.model_validate(
+        read_yaml(reviewed_cycle / "review_reports" / "math_logic.yaml")
+    )
+    assert not any(
+        "order6_abelian_false" in f.what_happened
+        and f.gap_kind == "math_capability"
         for f in report.actionable_findings
     )

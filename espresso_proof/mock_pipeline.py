@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .contracts import default_agent_contracts
+from .counterexample_probes import propose_deterministic_counterexamples
 from .io import read_text, write_text, write_yaml
 from .memory import write_run_memory
 from .validators import validate_run
@@ -20,6 +21,22 @@ def run_mock_critique(project_id: str, input_path: Path, output_root: Path) -> P
     write_text(run_dir / "input.md", text)
     artifacts = _artifacts_for_scenario(scenario, text, run_id, project_id)
     claim_id = artifacts["locked_claim.yaml"]["id"]
+
+    # Goal 42E cycle 1: deterministic machine counterexample probes run in the
+    # mock path too, so a concrete false claim ("every group of order 6 is
+    # abelian") carries a Cayley-table-verified counterexample instead of an
+    # empty bank. The probe fails closed (nothing for symbolic/true/modified
+    # claims), and because the vague-claim path leaves the hypothesis list
+    # undetermined, the record it adds here is DOWNGRADED (satisfies=unclear,
+    # refutes_claim=False): an undetermined ledger never earns a refutation.
+    probe_tests = propose_deterministic_counterexamples(artifacts["locked_claim.yaml"])
+    if probe_tests:
+        bank = artifacts.get("counterexamples.yaml", {"claim_id": claim_id, "tests": []})
+        existing_ids = {t.get("id") for t in bank.get("tests", [])}
+        bank.setdefault("tests", []).extend(
+            t for t in probe_tests if t["id"] not in existing_ids
+        )
+        artifacts["counterexamples.yaml"] = bank
     artifacts["agent_contracts.yaml"] = default_agent_contracts(project_id)
     artifacts.setdefault("human_choice.yaml", _pending_human_choice(claim_id))
     optional_artifacts = {
