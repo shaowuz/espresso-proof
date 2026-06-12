@@ -114,7 +114,7 @@ def validate_run(run_dir: Path) -> None:
     )
     strategy_brief = validate_yaml_model(run_dir / artifacts["strategy_brief"], StrategyBrief)
     human_choice = validate_yaml_model(run_dir / artifacts["human_choice"], HumanChoice)
-    _load_optional_theorem_extraction(run_dir, manifest)
+    theorem_extraction = _load_optional_theorem_extraction(run_dir, manifest)
     _load_optional_literature_review_agent(run_dir, manifest)
     _load_optional_literature_search_plan(run_dir, manifest)
     _load_optional_autonomous_literature_retrieval(run_dir, manifest)
@@ -177,6 +177,9 @@ def validate_run(run_dir: Path) -> None:
     )
     _validate_example_evidence(computations, counterexamples, idea_grade)
     _validate_source_backing(source_grounding)
+    _validate_source_discipline_bindings(
+        run_dir, manifest, source_grounding, theorem_extraction, theorem_applicability
+    )
     _validate_theorem_applicability(manifest, claim, source_grounding, theorem_applicability)
     _validate_review_outcome(review, idea_grade)
     _validate_loop_control(loop_control)
@@ -1154,6 +1157,62 @@ def _validate_literature_review_separation(literature_review: LiteratureReviewRe
             )
 
 
+def _validate_source_discipline_bindings(
+    run_dir: Path,
+    manifest: RunManifest,
+    source_grounding: SourceGroundingReport,
+    theorem_extraction: TheoremExtractionReport | None,
+    theorem_applicability: TheoremApplicabilityReport | None,
+) -> None:
+    """Goal 41 provenance bindings (optional/additive — both fields default "").
+
+    1. A source ref carrying ``statement_sha256`` must quote EXACTLY the bytes it
+       hashed (self-hash), and when ``theorem_extraction.yaml`` is present the
+       hash must name a really-extracted theorem — editing the cited statement
+       after grounding fails closed.
+    2. A theorem_applicability report carrying ``source_grounding_sha256`` must
+       match the CURRENT grounding file — editing the grounding after the audit
+       (without re-running it) fails closed instead of leaving a stale
+       "applicable" verdict standing.
+    """
+
+    import hashlib
+
+    extracted_hashes: set[str] | None = (
+        {
+            hashlib.sha256(theorem.statement.encode("utf-8")).hexdigest()
+            for theorem in theorem_extraction.theorems
+        }
+        if theorem_extraction is not None
+        else None
+    )
+    for ref in source_grounding.source_refs:
+        if not ref.statement_sha256:
+            continue
+        actual = hashlib.sha256(ref.statement_or_summary.encode("utf-8")).hexdigest()
+        if actual != ref.statement_sha256:
+            raise KernelValidationError(
+                f"{ref.id}: cited statement does not match its recorded excerpt "
+                "hash (the statement was edited after grounding; re-run grounding)"
+            )
+        if extracted_hashes is not None and ref.statement_sha256 not in extracted_hashes:
+            raise KernelValidationError(
+                f"{ref.id}: excerpt hash does not name any extracted theorem in "
+                "theorem_extraction.yaml (fabricated or stale citation; re-run "
+                "theorem extraction and grounding)"
+            )
+
+    if theorem_applicability is not None and theorem_applicability.source_grounding_sha256:
+        grounding_rel = manifest.artifacts.get("source_grounding")
+        if grounding_rel:
+            current = hashlib.sha256((run_dir / grounding_rel).read_bytes()).hexdigest()
+            if current != theorem_applicability.source_grounding_sha256:
+                raise KernelValidationError(
+                    "theorem_applicability.yaml is stale: source_grounding.yaml "
+                    "changed after the applicability audit; re-run the audit"
+                )
+
+
 def _validate_source_backing(source_grounding: SourceGroundingReport) -> None:
     refs = {ref.id: ref for ref in source_grounding.source_refs}
     for ref in refs.values():
@@ -1900,6 +1959,19 @@ def _first_forbidden_proof_language(text: str) -> str | None:
         r"\bestablishes\s+the\s+theorem\b": "establishes the theorem",
         r"\bestablishes\s+the\s+claim\b": "establishes the claim",
         r"\bproof\s+establishes\b": "proof establishes",
+        # Goal 41: Chinese global proof-completion markers (no \b — Python's
+        # word boundary treats CJK as word chars, so \b would never fire inside
+        # Chinese prose). Same curation as the display lexicon.
+        r"证毕": "证毕",
+        r"证明完毕": "证明完毕",
+        r"证明完成": "证明完成",
+        r"定理得证": "定理得证",
+        r"命题得证": "命题得证",
+        r"猜想得证": "猜想得证",
+        r"定理已证明": "定理已证明",
+        r"命题已证明": "命题已证明",
+        r"我们证明了该定理": "我们证明了该定理",
+        r"我们证明了这个定理": "我们证明了这个定理",
     }
     for pattern, phrase in forbidden_patterns.items():
         if re.search(pattern, text):

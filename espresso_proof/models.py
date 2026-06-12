@@ -194,6 +194,12 @@ class SourceRef(StrictBaseModel):
     hypothesis_match: HypothesisMatch
     confidence: Literal["high", "medium", "low"]
     status: SourceStatus
+    # Goal 41: sha256 of the EXTRACTED theorem statement this citation quotes.
+    # Optional/additive provenance binding: when set, the run validator requires
+    # statement_or_summary to hash to it AND (when theorem_extraction.yaml is
+    # present) the hash to name a really-extracted theorem — editing the cited
+    # statement after grounding fails closed. Never earns or upgrades status.
+    statement_sha256: str = ""
 
     @model_validator(mode="after")
     def validate_source_backed(self) -> SourceRef:
@@ -1398,6 +1404,11 @@ class TheoremApplicabilityReport(StrictBaseModel):
     usages: list[TheoremApplicabilityUsage]
     overall_status: Literal["all_applicable", "blocked", "misapplied", "unclear"]
     notes: list[str] = Field(default_factory=list)
+    # Goal 41: sha256 of source_grounding.yaml's bytes AT AUDIT TIME. Optional/
+    # additive: when set, the run validator requires the current file to match —
+    # editing the grounding after the audit (without re-running it) fails
+    # closed instead of leaving a stale "applicable" verdict standing.
+    source_grounding_sha256: str = ""
 
     @model_validator(mode="after")
     def validate_overall_status(self) -> TheoremApplicabilityReport:
