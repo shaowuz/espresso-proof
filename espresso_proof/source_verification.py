@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 
@@ -54,6 +55,10 @@ def verify_source_grounding_from_theorems(
             "hypothesis_match": hypothesis_match,
             "confidence": "high" if status == "source_backed" else "medium",
             "status": status,
+            # Goal 41: bind the quoted statement to the extracted theorem (the
+            # validator re-checks both the self-hash and membership in the
+            # theorem_extraction artifact).
+            "statement_sha256": hashlib.sha256(theorem.statement.encode("utf-8")).hexdigest(),
         }
         step["needed_theorem"] = theorem.statement[:240]
         step["status"] = status
@@ -182,16 +187,29 @@ def term_present(term: str, statement: str) -> bool:
     """Whole-word coverage of ``term`` in ``statement`` (case-insensitive).
 
     Whole-word matching is deliberate: it keeps ``finite`` from matching inside
-    ``infinite`` and ``singular`` from matching inside other words. Falls back to
-    the explicit :func:`term_covered` notation aliases. A token that fails to
-    match is treated as missing, which downgrades to a candidate — the safe
-    direction.
+    ``infinite`` and ``singular`` from matching inside other words. A NEGATED
+    occurrence ("non-proper", "non proper", "not proper") never counts as
+    coverage (Goal 41): a theorem about non-proper varieties cannot support a
+    properness hypothesis. Falls back to the explicit :func:`term_covered`
+    notation aliases. A token that fails to match is treated as missing, which
+    downgrades to a candidate — the safe direction.
     """
 
     lowered = statement.lower()
-    if re.search(r"\b" + re.escape(term) + r"\b", lowered):
+    if _unnegated_word_present(term, lowered):
         return True
     return term_covered(term, lowered)
+
+
+def _unnegated_word_present(term: str, lowered_statement: str) -> bool:
+    """True iff ``term`` occurs as a whole word NOT immediately negated."""
+
+    for match in re.finditer(r"\b" + re.escape(term) + r"\b", lowered_statement):
+        prefix = lowered_statement[max(0, match.start() - 4) : match.start()]
+        if prefix.endswith(("non-", "non ", "not ", " no ")) or prefix == "no ":
+            continue
+        return True
+    return False
 
 
 def significant_terms(text: str) -> list[str]:
@@ -203,13 +221,20 @@ def significant_terms(text: str) -> list[str]:
 
 
 def term_covered(term: str, statement: str) -> bool:
+    # Goal 41: aliases and rule tokens match as whole words, never substrings —
+    # "ample" must not fire inside "example"/"sample", and the proper+ample
+    # projectivity rule must not be satisfied by negated occurrences.
     for alias in TERM_ALIASES.get(term, []):
-        if alias in statement:
+        if _unnegated_word_present(alias, statement):
             return True
     if term == "field":
-        return "over" in statement or "base field" in statement
+        return _unnegated_word_present("over", statement) or _unnegated_word_present(
+            "base field", statement
+        )
     if term == "projective":
-        return "proper" in statement and "ample" in statement
+        return _unnegated_word_present("proper", statement) and _unnegated_word_present(
+            "ample", statement
+        )
     return False
 
 

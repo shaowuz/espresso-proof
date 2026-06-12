@@ -65,6 +65,19 @@ FORBIDDEN_LANGUAGE = [
     "the claim is true",
     "the theorem is established",
     "proof-close",
+    # Goal 41: Chinese global completion markers (FORBIDDEN_LANGUAGE must stay
+    # a superset of the validator's parse-time gate; the ASCII lookarounds in
+    # forbidden_pattern() are satisfied around CJK characters).
+    "证毕",
+    "证明完毕",
+    "证明完成",
+    "定理得证",
+    "命题得证",
+    "猜想得证",
+    "定理已证明",
+    "命题已证明",
+    "我们证明了该定理",
+    "我们证明了这个定理",
 ]
 
 INPUT_ARTIFACTS = [

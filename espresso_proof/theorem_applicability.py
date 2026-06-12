@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -33,6 +34,11 @@ def audit_theorem_applicability(run_dir: Path) -> dict:
         "run_id": manifest["run_id"],
         "generated_at": datetime.now(UTC).isoformat(),
         "source_grounding_artifact": artifacts["source_grounding"],
+        # Goal 41: bind this audit to the exact grounding bytes it audited; the
+        # validator rejects a stale audit if the grounding changes afterwards.
+        "source_grounding_sha256": hashlib.sha256(
+            (run_dir / artifacts["source_grounding"]).read_bytes()
+        ).hexdigest(),
         "literature_review_agent_artifact": optional.get("literature_review_agent"),
         "usages": usages,
         "overall_status": overall,
