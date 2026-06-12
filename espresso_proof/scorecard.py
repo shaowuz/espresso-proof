@@ -26,23 +26,31 @@ from .io import read_yaml, write_yaml
 from .mock_pipeline import run_mock_critique
 from .proof_language import contains_proof_language
 
-SCORECARD_SCHEMA_VERSION = 1
+SCORECARD_SCHEMA_VERSION = 2
 
 FIXTURES_DIR = Path("tests/fixtures")
 _GROUNDABLE_STATEMENT = (
     "Theorem 1.2. Exact literature statement supporting the Hodge-theoretic step "
     "over base field C for cubic fourfolds."
 )
-def _grounded_run(root: Path) -> Path:
-    """A deterministic run that EARNS source_backed through the real pipeline."""
+def _grounded_run(
+    root: Path,
+    *,
+    statement: str = _GROUNDABLE_STATEMENT,
+    authors: list[str] | None = None,
+    project: str = "scorecard_ground",
+) -> Path:
+    """A deterministic run pushed through the REAL grounding pipeline. With the
+    default statement/attribution it EARNS source_backed; near-miss variants
+    (missing attribution, no exact locator) must stay candidate."""
 
     from .source_verification import ground_run
 
     run_dir = run_mock_critique(
-        "scorecard_ground", FIXTURES_DIR / "hodge_all_cubic_fourfolds" / "input.md", root
+        project, FIXTURES_DIR / "hodge_all_cubic_fourfolds" / "input.md", root
     )
     src = root / "scorecard_source.txt"
-    src.write_text(_GROUNDABLE_STATEMENT, encoding="utf-8")
+    src.write_text(statement, encoding="utf-8")
     from .pdf_ingestion import ingest_source_for_theorems
 
     claim = read_yaml(run_dir / read_yaml(run_dir / "run_manifest.yaml")["artifacts"]["locked_claim"])
@@ -51,7 +59,7 @@ def _grounded_run(root: Path) -> Path:
         source=str(src),
         source_id="scorecard_src",
         title="Scorecard probe source",
-        authors=["A. Author"],
+        authors=["A. Author"] if authors is None else authors,
         source_type="paper",
     )
     manifest = read_yaml(run_dir / "run_manifest.yaml")
@@ -62,54 +70,149 @@ def _grounded_run(root: Path) -> Path:
     return run_dir
 
 
-def _probe_source_grounding(root: Path) -> dict:
-    """Capability: the honest grounding pipeline still EARNS a reference-
-    supported step (exact locator + attribution + hypothesis match)."""
-
-    run_dir = _grounded_run(root / "grounding")
+def _earned_steps(run_dir: Path) -> int:
     sg = read_yaml(run_dir / "source_grounding.yaml")
-    earned = [s for s in sg["steps"] if s["status"] == "source_backed"]
-    return {"earned_steps": len(earned), "passed": bool(earned)}
+    return sum(1 for s in sg["steps"] if s["status"] == "source_backed")
+
+
+def _probe_source_grounding(root: Path) -> dict:
+    """Grounding family (Goal 40C, n=3): the honest pipeline EARNS a reference-
+    supported step, and the two classic near-misses stay candidate."""
+
+    cases = []
+    honest = _grounded_run(root / "honest")
+    cases.append({"case": "honest_earns", "correct": _earned_steps(honest) > 0})
+    no_attr = _grounded_run(root / "no_attr", authors=[], project="scorecard_noattr")
+    cases.append({"case": "missing_attribution_stays_candidate", "correct": _earned_steps(no_attr) == 0})
+    no_loc = _grounded_run(
+        root / "no_loc",
+        statement=(
+            "An informal remark supporting the Hodge-theoretic step over base "
+            "field C for cubic fourfolds, with no theorem label."
+        ),
+        project="scorecard_noloc",
+    )
+    cases.append({"case": "no_exact_locator_stays_candidate", "correct": _earned_steps(no_loc) == 0})
+    correct = sum(1 for c in cases if c["correct"])
+    return {"cases": cases, "correct": correct, "total": len(cases), "passed": correct == len(cases)}
 
 
 def _probe_applicability_block(root: Path) -> dict:
-    """Capability/safety: the independent applicability audit BLOCKS a tampered
-    hypothesis_match over a non-covering statement (Goal 37 de-circularization)."""
+    """Applicability family (Goal 40C, n=3): honest grounding audits applicable;
+    a tampered cited statement is detected (Goal 41 excerpt-hash binding); a
+    legacy-style tamper without hashes is still blocked by the independent
+    audit recheck (Goal 37 de-circularization)."""
 
     from .theorem_applicability import audit_theorem_applicability
+    from .validation.errors import KernelValidationError
+    from .validators import validate_run
 
-    run_dir = _grounded_run(root / "applicability")
-    sg = read_yaml(run_dir / "source_grounding.yaml")
+    cases = []
+
+    honest = _grounded_run(root / "honest", project="scorecard_app_ok")
+    report = read_yaml(honest / "theorem_applicability.yaml")
+    backed = [u for u in report["usages"] if u["source_status"] == "source_backed"]
+    cases.append(
+        {
+            "case": "honest_audits_applicable",
+            "correct": bool(backed)
+            and all(u["applicability_status"] == "applicable" for u in backed),
+        }
+    )
+
+    hash_tamper = _grounded_run(root / "hash_tamper", project="scorecard_app_hash")
+    sg = read_yaml(hash_tamper / "source_grounding.yaml")
     for ref in sg["source_refs"]:
         if ref["status"] == "source_backed":
             ref["statement_or_summary"] = "Theorem 9.9. Every elliptic curve over Q is modular."
-    write_yaml(run_dir / "source_grounding.yaml", sg)
-    audit_theorem_applicability(run_dir)
-    report = read_yaml(run_dir / "theorem_applicability.yaml")
+    write_yaml(hash_tamper / "source_grounding.yaml", sg)
+    try:
+        validate_run(hash_tamper)
+        detected = False
+    except KernelValidationError:
+        detected = True  # excerpt-hash (or stale-audit) binding caught the edit
+    cases.append({"case": "statement_edit_detected", "correct": detected})
+
+    legacy = _grounded_run(root / "legacy_tamper", project="scorecard_app_leg")
+    sg = read_yaml(legacy / "source_grounding.yaml")
+    for ref in sg["source_refs"]:
+        ref.pop("statement_sha256", None)
+        if ref["status"] == "source_backed":
+            ref["statement_or_summary"] = "Theorem 9.9. Every elliptic curve over Q is modular."
+    write_yaml(legacy / "source_grounding.yaml", sg)
+    audit_theorem_applicability(legacy)  # re-audit: no hash to catch the edit...
+    report = read_yaml(legacy / "theorem_applicability.yaml")
     backed = [u for u in report["usages"] if u["source_status"] == "source_backed"]
-    blocked = [u for u in backed if u["blocks_source_backed"]]
-    return {
-        "planted": len(backed),
-        "blocked": len(blocked),
-        "passed": bool(backed) and len(blocked) == len(backed),
-    }
+    cases.append(
+        {
+            "case": "legacy_tamper_blocked_by_independent_recheck",
+            "correct": bool(backed) and all(u["blocks_source_backed"] for u in backed),
+        }
+    )
+
+    correct = sum(1 for c in cases if c["correct"])
+    return {"cases": cases, "correct": correct, "total": len(cases), "passed": correct == len(cases)}
 
 
 def _probe_scoped_verifier(root: Path) -> dict:
-    """Capability: the allowlisted deterministic adapter still earns ONE scoped
-    computation_checked entry through the kernel bridge (never a proof)."""
+    """Verifier family (Goal 40C, n=2): a confirming run of the allowlisted
+    adapter earns ONE scoped entry through the kernel bridge; a non-confirming
+    run earns nothing (fail closed)."""
 
     from .external_tool_adapters import run_exact_modexp_adapter
 
+    cases = []
     run_dir = run_mock_critique(
         "scorecard_verify", FIXTURES_DIR / "promising_but_unproved" / "input.md", root
     )
-    result = run_exact_modexp_adapter(
+    confirmed = run_exact_modexp_adapter(
         run_dir, base=4, exp=1, mod=4, expected=0, entry_id="scorecard_modexp"
     )
-    entries = read_yaml(run_dir / "proof_verification.yaml")["entries"] if result["earned"] else []
+    entries = read_yaml(run_dir / "proof_verification.yaml")["entries"] if confirmed["earned"] else []
     scoped = [e for e in entries if e["earned_status"] == "computation_checked"]
-    return {"earned": result["earned"], "scoped_entries": len(scoped), "passed": result["earned"]}
+    cases.append({"case": "confirming_run_earns_scoped", "correct": confirmed["earned"] and bool(scoped)})
+
+    wrong = run_exact_modexp_adapter(
+        run_dir, base=4, exp=1, mod=4, expected=1, entry_id="scorecard_modexp_wrong"
+    )
+    pv = run_dir / "proof_verification.yaml"
+    wrong_entries = (
+        [e for e in read_yaml(pv)["entries"] if "wrong" in e["id"]] if pv.exists() else []
+    )
+    cases.append(
+        {"case": "non_confirming_run_earns_nothing", "correct": not wrong["earned"] and not wrong_entries}
+    )
+    correct = sum(1 for c in cases if c["correct"])
+    return {"cases": cases, "correct": correct, "total": len(cases), "passed": correct == len(cases)}
+
+
+def _probe_matcher_discipline() -> dict:
+    """Matcher family (Goal 40C, n=3): negated terms and substring aliases must
+    not fake hypothesis coverage; honest coverage must still match (Goal 41)."""
+
+    from .source_verification import check_hypothesis_applicability, term_present
+
+    projective = [{"name": "X is projective", "status": "explicit", "source": "agent"}]
+    cases = [
+        {
+            "case": "negated_term_no_cover",
+            "correct": term_present("proper", "let x be a non-proper variety.") is False,
+        },
+        {
+            "case": "substring_alias_no_cover",
+            "correct": check_hypothesis_applicability(
+                "Theorem 5.1. Let X be a proper variety. For example, a curve.",
+                projective,
+                [],
+            )["matches"] != True,  # noqa: E712 - may be "unclear"
+        },
+        {
+            "case": "honest_coverage_matches",
+            "correct": term_present("proper", "let x be a proper variety.") is True,
+        },
+    ]
+    correct = sum(1 for c in cases if c["correct"])
+    return {"cases": cases, "correct": correct, "total": len(cases), "passed": correct == len(cases)}
 
 
 def _probe_reviewer_quality(root: Path) -> dict:
@@ -236,11 +339,12 @@ def run_scorecard(output_root: Path) -> dict:
     bench_passed = sum(1 for row in bench if row["passed"])
     counterexample_rows = [r for r in bench if r["category"] == "checked_counterexample"]
 
-    grounding = _probe_source_grounding(output_root / "probes")
-    applicability = _probe_applicability_block(output_root / "probes")
-    verifier = _probe_scoped_verifier(output_root / "probes")
-    reviewer = _probe_reviewer_quality(output_root / "probes")
-    dogfood = _probe_dogfood_replay(output_root / "probes")
+    grounding = _probe_source_grounding(output_root / "probes" / "grounding")
+    applicability = _probe_applicability_block(output_root / "probes" / "applicability")
+    verifier = _probe_scoped_verifier(output_root / "probes" / "verifier")
+    matcher = _probe_matcher_discipline()
+    reviewer = _probe_reviewer_quality(output_root / "probes" / "reviewer")
+    dogfood = _probe_dogfood_replay(output_root / "probes" / "dogfood")
 
     safety = {
         # both MUST be zero, always.
@@ -252,18 +356,15 @@ def run_scorecard(output_root: Path) -> dict:
         "benchmark_cases_passed": f"{bench_passed}/{len(bench)}",
     }
     capability = {
-        "exact_source_grounding_rate": 1.0 if grounding["passed"] else 0.0,
-        "theorem_applicability_block_recall": (
-            applicability["blocked"] / applicability["planted"]
-            if applicability["planted"]
-            else 0.0
-        ),
+        "exact_source_grounding_rate": grounding["correct"] / grounding["total"],
+        "theorem_applicability_block_recall": applicability["correct"] / applicability["total"],
         "counterexample_scope_accuracy": (
             sum(1 for r in counterexample_rows if r["passed"]) / len(counterexample_rows)
             if counterexample_rows
             else 0.0
         ),
-        "scoped_verifier_wiring_success": 1.0 if verifier["passed"] else 0.0,
+        "scoped_verifier_wiring_success": verifier["correct"] / verifier["total"],
+        "matcher_discipline_rate": matcher["correct"] / matcher["total"],
         "reviewer_objection_recall": (
             reviewer["recalled"] / reviewer["seeded"] if reviewer["seeded"] else 0.0
         ),
@@ -278,6 +379,7 @@ def run_scorecard(output_root: Path) -> dict:
         and grounding["passed"]
         and applicability["passed"]
         and verifier["passed"]
+        and matcher["passed"]
         and reviewer["passed"]
         and dogfood["passed"]
     )
@@ -289,6 +391,7 @@ def run_scorecard(output_root: Path) -> dict:
             "source_grounding": grounding,
             "applicability_block": applicability,
             "scoped_verifier": verifier,
+            "matcher_discipline": matcher,
             "reviewer_quality": reviewer,
             "dogfood_replay": dogfood,
         },
@@ -315,9 +418,10 @@ def render_scorecard_markdown(report: dict) -> str:
         lines.append(f"- {key}: {value}")
     lines += [
         "",
-        "All metrics are deterministic fixture probes. Capability values are",
-        "single-probe pass/fail checks (n = 1-2), not sampled rates: they detect",
-        "regressions in conservative behavior and earning-pipeline wiring; they",
+        "All metrics are deterministic fixture probes over small per-family case",
+        "sets (grounding n=3, applicability n=3, verifier n=2, matcher n=3,",
+        "reviewer gold flaws n=2, dogfood replay n=1): they detect regressions",
+        "in conservative behavior and earning-pipeline wiring. The probes",
         "never earn or upgrade any mathematical status, and no claim is ever",
         "'proved' by a scorecard.",
         "",

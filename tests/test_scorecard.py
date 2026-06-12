@@ -34,9 +34,18 @@ def test_scorecard_is_clean_and_complete(tmp_path: Path) -> None:
     assert cap["theorem_applicability_block_recall"] == 1.0
     assert cap["counterexample_scope_accuracy"] == 1.0
     assert cap["scoped_verifier_wiring_success"] == 1.0
+    assert cap["matcher_discipline_rate"] == 1.0
     assert cap["reviewer_objection_recall"] == 1.0
     assert cap["repair_round_non_regression"] is True
     assert cap["dogfood_replay_honest"] is True
+    # Goal 40C: each family measures a real (if small) case set.
+    probes = report["probes"]
+    assert probes["source_grounding"]["total"] == 3
+    assert probes["applicability_block"]["total"] == 3
+    assert probes["scoped_verifier"]["total"] == 2
+    assert probes["matcher_discipline"]["total"] == 3
+    for family in ("source_grounding", "applicability_block", "scoped_verifier", "matcher_discipline"):
+        assert probes[family]["correct"] == probes[family]["total"], family
 
 
 def test_reviewer_quality_probe_seeds_and_recalls_gold_flaws(tmp_path: Path) -> None:
@@ -140,3 +149,20 @@ def test_dogfood_replay_fails_on_unauthorized_source_backed(tmp_path: Path) -> N
     assert probe["unauthorized_source_backed"] > 0
     assert probe["passed"] is False
     assert real_read_yaml is not None  # silence unused-import lint
+
+
+def test_matcher_discipline_probe_fails_on_regressed_matcher(tmp_path: Path, monkeypatch) -> None:
+    # If the matcher loses its negation discipline (regression to pre-Goal-41
+    # behavior), the scorecard must fail.
+    import re
+
+    import espresso_proof.source_verification as sv
+    import espresso_proof.scorecard as scorecard_mod
+
+    def lenient(term: str, lowered_statement: str) -> bool:
+        return bool(re.search(r"\b" + re.escape(term) + r"\b", lowered_statement))
+
+    monkeypatch.setattr(sv, "_unnegated_word_present", lenient)
+    probe = scorecard_mod._probe_matcher_discipline()
+    assert probe["passed"] is False
+    assert any(c["case"] == "negated_term_no_cover" and not c["correct"] for c in probe["cases"])
