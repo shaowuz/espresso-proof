@@ -90,12 +90,48 @@ def _probe_examples_present(run_dir: Path) -> tuple[bool, str]:
     return True, f"{len(items)} example(s) present"
 
 
+def _probe_computation_request_blockers_resolved(run_dir: Path) -> tuple[bool, str]:
+    """A run carrying trusted confirmed machine checks must not still list a
+    reviewer blocker that asks for an exact computation: the loop is expected
+    to answer the request with the evidence it already has."""
+
+    pv_path = run_dir / "proof_verification.yaml"
+    if not pv_path.exists():
+        return False, "no proof_verification.yaml — nothing machine-answered"
+    confirmed = [
+        e for e in read_yaml(pv_path).get("entries", [])
+        if e.get("trusted") and e.get("confirmed")
+        and e.get("earned_status") in {"instance_checked", "computation_checked"}
+    ]
+    if not confirmed:
+        return False, "no trusted confirmed machine-check entry to answer with"
+    loop_path = run_dir / "prover_loop.yaml"
+    if not loop_path.exists():
+        return False, "no prover_loop.yaml was produced"
+    stale = [
+        text
+        for attempt in read_yaml(loop_path).get("attempts", [])
+        for text in attempt.get("blockers", [])
+        if "exact computation" in str(text).lower()
+    ]
+    if stale:
+        return False, (
+            f"{len(stale)} exact-computation blocker(s) still open despite "
+            f"{len(confirmed)} confirmed machine check(s)"
+        )
+    return True, (
+        f"no exact-computation blocker remains open; "
+        f"{len(confirmed)} confirmed machine check(s) present"
+    )
+
+
 PROBLEM_PROBES = {
     "false_theorem_counterexample_present": _probe_false_theorem_counterexample_present,
     "scoped_computation_present": _probe_scoped_computation_present,
     "reference_supported_present": _probe_reference_supported_present,
     "memo_proof_language_clean": _probe_memo_proof_language_clean,
     "examples_present": _probe_examples_present,
+    "computation_request_blockers_resolved": _probe_computation_request_blockers_resolved,
 }
 
 
