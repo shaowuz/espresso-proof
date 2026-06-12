@@ -99,7 +99,6 @@ def test_requests_auto_wire_to_instance_checked_in_full_run(tmp_path: Path) -> N
     assert all("only" in e["scope_note"] for e in earned)
 
 
-
 def test_unrelated_run_wires_nothing(tmp_path: Path) -> None:
     from espresso_proof.io import write_text
     from espresso_proof.orchestrator import orchestrate_run

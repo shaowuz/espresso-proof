@@ -243,9 +243,35 @@ def test_registry_required_blocker_families_route_to_goal_proposals(tmp_path: Pa
     assert registry, "recurring source-request families must still be reported"
     assert all("broad rewrite" in f.recommended_fix for f in registry)
     decision = run_triage(second)
-    if decision.selected_gap_id.startswith("proof_search"):
-        selected = next(
-            f for f in report.actionable_findings
-            if f.finding_id == decision.selected_gap_id
-        )
-        assert "broad rewrite" not in selected.recommended_fix
+    # the selected gap must never be a registry-required (marked) family,
+    # whatever component it comes from.
+    marked_ids = {f.finding_id for f in report.actionable_findings if "broad rewrite" in f.recommended_fix}
+    assert decision.selected_gap_id not in marked_ids
+
+
+def test_replay_probe_computation_request_blockers_resolved(tmp_path: Path) -> None:
+    from espresso_proof.loop_replay import (
+        _probe_computation_request_blockers_resolved as probe,
+    )
+
+    write_yaml(tmp_path / "locked_claim.yaml", {"id": "c1"})
+    ok, note = probe(tmp_path)
+    assert not ok and "no proof_verification.yaml" in note
+    write_yaml(tmp_path / "proof_verification.yaml", _pv_report("c1", confirmed=False))
+    ok, note = probe(tmp_path)
+    assert not ok and "no trusted confirmed" in note
+    write_yaml(tmp_path / "proof_verification.yaml", _pv_report("c1", confirmed=True))
+    ok, note = probe(tmp_path)
+    assert not ok and "no prover_loop.yaml" in note
+    write_yaml(
+        tmp_path / "prover_loop.yaml",
+        {"attempts": [{"blockers": ["Source or exact computation for the most dangerous example."]}]},
+    )
+    ok, note = probe(tmp_path)
+    assert not ok and "still open" in note
+    write_yaml(
+        tmp_path / "prover_loop.yaml",
+        {"attempts": [{"blockers": ["Exact theorem supporting the main reduction."]}]},
+    )
+    ok, note = probe(tmp_path)
+    assert ok and "no exact-computation blocker remains open" in note

@@ -225,12 +225,11 @@ def _run_case(
             effort="normal_pass",
             prover_provider=provider,
         )
-        # Goal 42E cycle 2: execute any structured scoped-verification
-        # requests through the trusted backend (same path as the CLI's
-        # --auto-wire-verifications). Idempotent, fail-closed, re-validates
-        # the run; a run without requests wires nothing. Only a confirming
-        # deterministic result earns instance_checked — never a universal
-        # status.
+        # Defensive re-check: since cycle 3, orchestrate_run wires the
+        # scoped-verification requests BEFORE the prover pass; this
+        # idempotent re-run covers pre-cycle-3 runs and resumed runs.
+        # Fail-closed, re-validates; instance_checked at most — never a
+        # universal status.
         from .proof_verification import auto_wire_scoped_verifications
 
         auto_wire_scoped_verifications(run_dir)

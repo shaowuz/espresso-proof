@@ -703,7 +703,7 @@ def build_prover_loop_report(
             )
             if str(item).strip()
         }
-    )[:12]
+    )
     blockers, machine_answered = _split_machine_answered_blockers(
         blockers,
         run_dir=run_dir,
@@ -714,6 +714,7 @@ def build_prover_loop_report(
             for item in review.get("source_requests", [])
         },
     )
+    blockers = blockers[:12]
     gate = agent_report["human_gate"]
     selected_strategy = _selected_strategy_from_choice(human_choice, top_strategies)
     approved_effort = _approved_effort_from_choice(human_choice, approved_effort)
@@ -1134,7 +1135,7 @@ def append_prover_loop_round(
             )
             if str(item).strip()
         }
-    )[:12]
+    )
     blockers, machine_answered = _split_machine_answered_blockers(
         blockers,
         run_dir=run_dir,
@@ -1145,6 +1146,7 @@ def append_prover_loop_round(
             for item in review.get("source_requests", [])
         },
     )
+    blockers = blockers[:12]
     reviewer_pointers = [
         {
             "verifier_id": review["verifier_id"],

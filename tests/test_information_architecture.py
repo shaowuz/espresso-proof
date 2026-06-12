@@ -16,7 +16,7 @@ from espresso_proof.validators import validate_run
 # A claim no deterministic probe matches: the run must stay at ZERO earned
 # evidence (the p^2 claim now legitimately earns instance_checked at
 # orchestration time via scoped-verification auto-wiring, Goal 42E c2/c3).
-CLAIM = "Every continuous function f: R -> R attains a maximum value."
+CLAIM = "Every continuous function f: [0, 1] -> R attains a maximum value."
 
 
 def _run(tmp_path: Path, name: str = "ia") -> Path:
