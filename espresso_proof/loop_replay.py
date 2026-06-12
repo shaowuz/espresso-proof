@@ -276,14 +276,17 @@ def _probe_engaged_candidates_routed_to_goal(run_dir: Path) -> tuple[bool, str]:
             "no shared standing-route predicate: engaged candidate findings "
             "are still recycled as bounded-fix targets"
         )
-    standing = source_support_fix(smoke_only=True, engaged=True)
-    bounded = source_support_fix(smoke_only=False, engaged=True)
-    markers = ("broad rewrite", "redesign", "rewrite the", "rearchitect")
-    if not any(marker in standing for marker in markers):
+    # the markers are triage's own oversize predicate (lowercased there) —
+    # imported, not duplicated, so probe and triage cannot drift.
+    from .loop_triage import _BROAD_FIX_MARKERS
+
+    standing = source_support_fix(smoke_only=True, engaged=True).lower()
+    bounded = source_support_fix(smoke_only=False, engaged=True).lower()
+    if not any(marker in standing for marker in _BROAD_FIX_MARKERS):
         return False, (
             "the smoke-engaged standing gap is not marked oversized for triage"
         )
-    if any(marker in bounded for marker in markers):
+    if any(marker in bounded for marker in _BROAD_FIX_MARKERS):
         return False, (
             "non-smoke engaged findings must STAY bounded-fix targets "
             "(routing must not over-generalize)"
@@ -306,6 +309,11 @@ PROBLEM_PROBES = {
     "true_theorem_source_engaged": _probe_true_theorem_source_engaged,
     "engaged_candidates_routed_to_goal": _probe_engaged_candidates_routed_to_goal,
 }
+
+# Public alias (cycle-5 precedent): the source-applicability reviewer keys
+# its standing-route decision on this exact engagement predicate over the
+# run's own grounding, so reviewer and probe cannot drift.
+true_theorem_source_engaged = _probe_true_theorem_source_engaged
 
 
 def _fresh_case_run(case: DogfoodCase, work_root: Path, mode: str) -> tuple[Path | None, str]:

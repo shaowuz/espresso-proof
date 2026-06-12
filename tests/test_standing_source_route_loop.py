@@ -93,9 +93,11 @@ def test_engaged_candidate_p1_keeps_evidence_and_routes_to_proposal(
 
 
 def test_unengaged_grounding_still_a_bounded_target(tmp_path: Path) -> None:
-    # strip the engagement (locator) from the ledger: the finding must go
-    # back to the bounded-fix message — the routing must not over-generalize
-    # to gaps the loop CAN fix.
+    # strip the engagement (attribution) from the run's OWN grounding — the
+    # surface the reviewer's routing predicate actually reads: the finding
+    # must go back to the bounded-fix message, because a weak grounding
+    # shape (e.g. missing attribution) is a gap the loop CAN fix and the
+    # routing must not over-generalize.
     from espresso_proof.loop_harness import run_loop_cycle
     from espresso_proof.loop_models import ReviewReport
     from espresso_proof.loop_reviewers import run_review_pass
@@ -105,11 +107,19 @@ def test_unengaged_grounding_still_a_bounded_target(tmp_path: Path) -> None:
         mode="smoke",
         cases_path=_p2_cases_file(tmp_path),
     )
-    ledger_path = cycle_dir / "theorem_use_ledger.yaml"
-    ledger = read_yaml(ledger_path)
-    for entry in ledger["entries"]:
-        entry["exact_locator"] = ""
-    write_yaml(ledger_path, ledger)
+    manifest = read_yaml(cycle_dir / "run_manifest.yaml")
+    stripped = 0
+    for run in manifest["runs"]:
+        grounding_path = Path(run["run_dir"]) / "source_grounding.yaml"
+        if not grounding_path.exists():
+            continue
+        grounding = read_yaml(grounding_path)
+        for ref in grounding.get("source_refs", []):
+            if ref.get("authors"):
+                ref["authors"] = []
+                stripped += 1
+        write_yaml(grounding_path, grounding)
+    assert stripped, "the smoke run must have an attributed reference to strip"
     run_review_pass(cycle_dir)
     report = ReviewReport.model_validate(
         read_yaml(cycle_dir / "review_reports" / "source_applicability.yaml")

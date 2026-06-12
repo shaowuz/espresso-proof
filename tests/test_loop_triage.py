@@ -30,12 +30,13 @@ def test_triage_selects_exactly_one_evidenced_gap(triaged_cycle: Path) -> None:
     # probe calibration findings are never selectable.
     assert "planted_probe" not in decision.selected_evidence_paths[0]
     # Goal 42E cycle 7: the engaged-candidate standing P1 routes to a goal
-    # proposal, so the selection moves to the next evidenced bounded gap;
-    # the selected finding is never one of the oversized/standing ones.
-    assert decision.selected_gap_kind
+    # proposal (so proposals MUST exist), and the selection moves to the
+    # next evidenced bounded gap — on this fixture the harness-gap finding.
     proposal_stems = {
         p.stem for p in (triaged_cycle / "new_goal_proposals").glob("*.md")
     }
+    assert proposal_stems, "the standing P1 must have produced a goal proposal"
+    assert decision.selected_gap_kind == "harness_gap"
     assert decision.selected_gap_id not in proposal_stems
     # every unchosen P0/P1/P2 has a reason.
     for finding in decision.unselected_findings:
