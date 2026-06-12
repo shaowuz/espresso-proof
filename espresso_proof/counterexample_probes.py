@@ -128,10 +128,115 @@ def _nonabelian_group_of_order(order: int) -> tuple[str, list[list[int]]] | None
     return f"dihedral_group_D{n}", _dihedral_cayley(n)
 
 
+# Anchored claim form (Goal 42E cycle 8): the WHOLE normalized statement must
+# be exactly "every continuous function f: R -> R attains a maximum (value)."
+# — no free modifiers, so negations ("no continuous function ..."), weakened
+# domains ("on [a, b]"), "bounded", "supremum", and "minimum" phrasings can
+# never match. The witness below is specific to THIS form.
+_CONTINUOUS_MAX_EXACT = re.compile(
+    r"every\s+continuous\s+functions?\s+f\s*:\s*r\s*->\s*r\s+"
+    r"attains\s+(?:a|its)\s+maximum(?:\s+value)?\s*\.?",
+    re.IGNORECASE,
+)
+
+
+def _verify_strictly_increasing_linear(coeffs: list[int]) -> dict:
+    """Exact-arithmetic check that the polynomial with integer coefficients
+    ``coeffs`` (ascending degree) is strictly increasing on all of R, via the
+    UNIVERSAL identity p(x+1) - p(x) > 0 for degree <= 1: the difference of a
+    linear polynomial is a constant, so one exact integer comparison decides
+    the fact for every real x — algebra, not sampling. Degree > 1 fails
+    closed (the constant-difference argument no longer applies)."""
+
+    if len(coeffs) > 2:
+        return {"is_strictly_increasing": False, "detail": "degree > 1: out of scope"}
+    slope = coeffs[1] if len(coeffs) == 2 else 0
+    # p(x+1) - p(x) == slope exactly, for every real x.
+    return {
+        "is_strictly_increasing": slope > 0,
+        "detail": (
+            f"p(x+1) - p(x) = {slope} (constant, exact integer arithmetic); "
+            "strictly increasing on R iff that constant is positive"
+        ),
+    }
+
+
+# Hypothesis names that say nothing beyond what the matched statement already
+# carries ("f is continuous", "f maps R to R") — anything else (e.g. "f is
+# bounded") could exclude the identity witness and the probe must stay silent.
+_TRIVIAL_CONTINUITY_HYPOTHESIS = re.compile(
+    r"(?:"
+    r"(?:f\s+is\s+)?continuous(?:\s+on\s+r)?"
+    r"|f\s*:\s*r\s*->\s*r"
+    r"|(?:the\s+)?domain(?:\s+of\s+f)?\s+is\s+r"
+    r"|f\s+(?:maps|is\s+defined\s+on)\s+r(?:\s+to\s+r)?"
+    r")\s*\.?"
+)
+
+
+def _missing_hypothesis_counterexample(claim: dict) -> list[dict]:
+    """The continuous-max claim as stated omits compactness: the identity
+    function f(x) = x is continuous on R and attains no maximum, because it
+    is strictly increasing (so f(x+1) > f(x) for EVERY candidate maximum x —
+    the deterministic check above proves this universally by exact
+    polynomial algebra). The record exposes the missing hypothesis and
+    proposes the repaired claim; per the cycle-1 discipline an undetermined
+    hypothesis ledger never earns a refutation, and exposing a missing
+    hypothesis never refutes the REPAIRED claim, so refutes_claim stays
+    False here regardless of admissibility."""
+
+    hypotheses = claim.get("hypotheses") or []
+    names = [
+        h.get("name", "") if isinstance(h, dict) else str(h) for h in hypotheses
+    ]
+    if any(not _TRIVIAL_CONTINUITY_HYPOTHESIS.fullmatch(_normalize(n)) for n in names):
+        # a non-trivial hypothesis (e.g. "f is bounded") might exclude the
+        # identity witness; fail closed entirely (cycle-1 discipline).
+        return []
+    verdict = _verify_strictly_increasing_linear([0, 1])
+    if not verdict["is_strictly_increasing"]:
+        return []  # fail closed: a non-increasing witness earns nothing.
+    return [
+        {
+            "id": "ce_probe_identity_no_maximum",
+            "operator_id": "deterministic_missing_hypothesis_probe",
+            "example_id": "identity_function_on_R",
+            "satisfies_all_claim_hypotheses": True if hypotheses else "unclear",
+            "target": "theorem",
+            "result": "failed",
+            "refutes_claim": False,
+            "refutes_step_only": False,
+            "exposes_missing_hypothesis": True,
+            "missing_hypothesis": (
+                "the domain must be compact (e.g. a closed bounded interval "
+                "[a, b]) — on all of R the extreme value theorem does not apply"
+            ),
+            "support": (
+                f"machine check (strict increase by exact polynomial algebra): "
+                f"{verdict['detail']}"
+            )[:300],
+            "explanation": (
+                "f(x) = x is continuous on R and attains no maximum: it is "
+                "strictly increasing (f(x+1) - f(x) = 1 > 0 for every real x, "
+                "an exact algebraic identity), so any candidate maximum point "
+                "x0 is beaten by x0 + 1. This exposes the missing compactness "
+                "hypothesis; it does not refute the repaired claim below."
+            ),
+            "repaired_claim_suggestion": (
+                "Every continuous function f: [a, b] -> R on a closed bounded "
+                "interval attains a maximum value (extreme value theorem)."
+            ),
+        }
+    ]
+
+
 def propose_deterministic_counterexamples(claim: dict) -> list[dict]:
     """Machine-verified counterexample tests for the locked claim, or []."""
 
-    match = _ORDER_N_ABELIAN_EXACT.fullmatch(_normalize(claim.get("normalized_statement", "")))
+    normalized = _normalize(claim.get("normalized_statement", ""))
+    if _CONTINUOUS_MAX_EXACT.fullmatch(normalized):
+        return _missing_hypothesis_counterexample(claim)
+    match = _ORDER_N_ABELIAN_EXACT.fullmatch(normalized)
     if not match:
         return []
     order = int(match.group(1))
