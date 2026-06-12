@@ -29,9 +29,15 @@ def test_triage_selects_exactly_one_evidenced_gap(triaged_cycle: Path) -> None:
     assert decision.selected_evidence_paths
     # probe calibration findings are never selectable.
     assert "planted_probe" not in decision.selected_evidence_paths[0]
-    # the genuine smoke-mode gap (false-theorem case with zero counterexample
-    # tests) is the expected math-capability selection.
-    assert decision.selected_gap_kind == "math_capability"
+    # Goal 42E cycle 7: the engaged-candidate standing P1 routes to a goal
+    # proposal (so proposals MUST exist), and the selection moves to the
+    # next evidenced bounded gap — on this fixture the harness-gap finding.
+    proposal_stems = {
+        p.stem for p in (triaged_cycle / "new_goal_proposals").glob("*.md")
+    }
+    assert proposal_stems, "the standing P1 must have produced a goal proposal"
+    assert decision.selected_gap_kind == "harness_gap"
+    assert decision.selected_gap_id not in proposal_stems
     # every unchosen P0/P1/P2 has a reason.
     for finding in decision.unselected_findings:
         assert finding.why_not_selected.strip()
@@ -81,7 +87,9 @@ def test_nonexistent_selected_gap_id_fails_closed(triaged_cycle: Path) -> None:
 
 def test_oversized_finding_becomes_goal_proposal(tmp_path: Path) -> None:
     root = tmp_path / "loop_runs"
-    cycle_dir = run_loop_cycle(out_root=root, mode="smoke", max_cases=2)
+    # 3 cases: cycle 7 routes the engaged-candidate standing P1 to a
+    # proposal, so a third case is needed to keep a smaller selectable gap.
+    cycle_dir = run_loop_cycle(out_root=root, mode="smoke", max_cases=3)
     run_review_pass(cycle_dir)
     report_path = cycle_dir / "review_reports" / "math_logic.yaml"
     report = read_yaml(report_path)

@@ -256,6 +256,47 @@ def _probe_true_theorem_source_engaged(run_dir: Path) -> tuple[bool, str]:
     )
 
 
+def _probe_engaged_candidates_routed_to_goal(run_dir: Path) -> tuple[bool, str]:
+    """Cycle 7: an ENGAGED smoke grounding stuck at candidate (exact locator,
+    matched hypotheses, no unearned support) is a standing verification gap —
+    earning reference support needs the real source-verification pipeline and
+    fabricated support is forbidden. The probe verifies the reviewer's shared
+    routing predicate marks that shape oversized-for-loop (so triage writes a
+    goal proposal instead of recycling an unfixable selected gap), keeping
+    probe and reviewer from drifting. Fails closed when there is nothing to
+    classify or the predicate is absent."""
+
+    engaged, note = _probe_true_theorem_source_engaged(run_dir)
+    if not engaged:
+        return False, f"nothing to classify: {note}"
+    try:
+        from .loop_reviewers import source_support_fix
+    except ImportError:
+        return False, (
+            "no shared standing-route predicate: engaged candidate findings "
+            "are still recycled as bounded-fix targets"
+        )
+    # the markers are triage's own oversize predicate (lowercased there) —
+    # imported, not duplicated, so probe and triage cannot drift.
+    from .loop_triage import _BROAD_FIX_MARKERS
+
+    standing = source_support_fix(smoke_only=True, engaged=True).lower()
+    bounded = source_support_fix(smoke_only=False, engaged=True).lower()
+    if not any(marker in standing for marker in _BROAD_FIX_MARKERS):
+        return False, (
+            "the smoke-engaged standing gap is not marked oversized for triage"
+        )
+    if any(marker in bounded for marker in _BROAD_FIX_MARKERS):
+        return False, (
+            "non-smoke engaged findings must STAY bounded-fix targets "
+            "(routing must not over-generalize)"
+        )
+    return True, (
+        "engaged candidate grounding routes to a dedicated goal "
+        "(oversized for a loop autofix; P1 evidence kept)"
+    )
+
+
 PROBLEM_PROBES = {
     "false_theorem_counterexample_present": _probe_false_theorem_counterexample_present,
     "scoped_computation_present": _probe_scoped_computation_present,
@@ -266,7 +307,13 @@ PROBLEM_PROBES = {
     "standing_risks_classified_human_gated": _probe_standing_risks_classified_human_gated,
     "source_mismatch_refusal_recorded": recorded_misapplication_refusal,
     "true_theorem_source_engaged": _probe_true_theorem_source_engaged,
+    "engaged_candidates_routed_to_goal": _probe_engaged_candidates_routed_to_goal,
 }
+
+# Public alias (cycle-5 precedent): the source-applicability reviewer keys
+# its standing-route decision on this exact engagement predicate over the
+# run's own grounding, so reviewer and probe cannot drift.
+true_theorem_source_engaged = _probe_true_theorem_source_engaged
 
 
 def _fresh_case_run(case: DogfoodCase, work_root: Path, mode: str) -> tuple[Path | None, str]:
