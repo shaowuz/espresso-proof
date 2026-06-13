@@ -30,6 +30,7 @@ from .llm_agents import (
     write_initial_prover_round_artifacts,
 )
 from .mock_pipeline import run_mock_critique
+from .observability import register_observability_artifacts, write_timings
 from .prover_loop_driver import continue_prover_loop
 from .run_dashboard import write_run_dashboard
 from .run_lock import run_writer_lock
@@ -315,6 +316,10 @@ def orchestrate_run(
         init_agent_run_status(run_dir, done=done)
         validate_run(run_dir)
 
+    # Goal 54A: aggregate run timings + register the per-run observability logs as
+    # optional artifacts (diagnostic only; both helpers fail closed and never gate).
+    write_timings(run_dir)
+    register_observability_artifacts(run_dir)
     final_manifest = read_yaml(run_dir / "run_manifest.yaml")
     agent_run = read_yaml(run_dir / "llm_agent_run.yaml")
     dashboard = write_run_dashboard(run_dir)
@@ -402,6 +407,8 @@ def _resume_run_locked(
             except Exception:  # noqa: BLE001 - advisory view must fail closed
                 remove_subgoal_graph(run_dir)
                 validate_run(run_dir)
+        write_timings(run_dir)
+        register_observability_artifacts(run_dir)
         write_run_dashboard(run_dir)
         return build_concise_memo(run_dir)
     if _state_index(state) < _state_index("WAITING_LLM_AGENT_HUMAN_GATE"):
@@ -497,6 +504,8 @@ def _resume_run_locked(
         validate_run(run_dir)
 
     _set_state(run_dir, "COMPLETED_MEMO")
+    write_timings(run_dir)
+    register_observability_artifacts(run_dir)
     memo = build_concise_memo(run_dir)
     write_run_dashboard(run_dir)
     if loop_summary is not None:

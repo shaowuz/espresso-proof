@@ -8,6 +8,8 @@ from pathlib import Path
 from ..io import read_yaml, write_yaml
 from ..llm_agents import LLMClient, load_agent_context
 from ..models import FrontHalfRunReport
+from ..observability import append_agent_event, monotonic_ms, now_iso
+from ..run_events import append_event
 from ..validators import validate_run
 from .registry import FRONT_HALF_STAGES, _STAGE_REGISTRY
 from . import stages as _stages  # noqa: F401 - ensure stage normalizers are registered
@@ -44,11 +46,24 @@ def run_front_half_agent_pass(
                 }
             )
             continue
+        # Goal 54A: bracket each front-half agent call with provenance (events.jsonl
+        # + agent_events.jsonl). Diagnostic only — never gates or upgrades status.
+        provider = getattr(client, "provider", "unknown")
+        started_at = now_iso()
+        _t0 = monotonic_ms()
+        append_event(run_dir, "agent_call_started", stage=stage)
         try:
             context = load_agent_context(run_dir)
             outcome = normalizer(run_dir=run_dir, client=client, context=context) or {}
             validate_run(run_dir)
         except Exception as exc:  # noqa: BLE001 - fail closed, record, optionally re-raise
+            append_agent_event(
+                run_dir, agent_name=stage, provider=provider, adapter=provider, stage=stage,
+                agent_status="failed", started_at=started_at, finished_at=now_iso(),
+                duration_ms=monotonic_ms() - _t0, model=getattr(client, "model", None),
+                validation_status="failed", error_summary=str(exc),
+            )
+            append_event(run_dir, "agent_call_failed", stage=stage, detail=str(exc))
             results.append(
                 {
                     "stage": stage,
@@ -61,6 +76,13 @@ def run_front_half_agent_pass(
             if strict:
                 raise
             continue
+        append_agent_event(
+            run_dir, agent_name=stage, provider=provider, adapter=provider, stage=stage,
+            agent_status="finished", started_at=started_at, finished_at=now_iso(),
+            duration_ms=monotonic_ms() - _t0, model=getattr(client, "model", None),
+            validation_status="passed",
+        )
+        append_event(run_dir, "agent_call_finished", stage=stage)
         results.append(
             {
                 "stage": stage,
