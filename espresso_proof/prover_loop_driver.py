@@ -251,7 +251,15 @@ def _continue_prover_loop_locked(
             break
 
         if escalate_now:
-            _grant_escalation_round(run_dir, loop_path, attempts)
+            # Fail closed: if granting the round's budget cannot keep the run valid,
+            # stop the loop cleanly rather than propagate (the run is never left
+            # over-budget / invalid by a partial grant).
+            try:
+                _grant_escalation_round(run_dir, loop_path, attempts)
+            except Exception as exc:  # noqa: BLE001
+                stop_reason = "budget_rounds"
+                notes.append(f"escalation grant aborted, stopping: {exc}")
+                break
             escalated = True
             notes.append(
                 "escalated one targeted repair round: unresolved blocking objections "
