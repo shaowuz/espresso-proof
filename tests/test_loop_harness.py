@@ -297,3 +297,65 @@ def test_refutation_classification_on_synthetic_kernel_tests(tmp_path: Path) -> 
         for r in _collect_refutations(record_invalid, "cycle_test")
     }
     assert by_id_invalid["ex_t1"].failure_class != "claim_refuted"
+
+
+# --- Goal 44-53 autofix #1: deep-mode resume must pick a route-allowed effort ---
+
+from espresso_proof.loop_harness import _EFFORT_PREFERENCE, _select_allowed_effort
+
+
+def _brief_with(effort_options_by_route: dict) -> dict:
+    """Minimal strategy-brief dict shaped like the real artifact's
+    allowed_human_choices (the same field validate_run checks)."""
+    return {
+        "allowed_human_choices": [
+            {"strategy_id": sid, "effort_options": list(opts)}
+            for sid, opts in effort_options_by_route.items()
+        ]
+    }
+
+
+def test_select_effort_prefers_normal_pass_when_allowed():
+    brief = _brief_with({"strategy_route_001": ["quick_test", "normal_pass", "deep_exploration"]})
+    assert _select_allowed_effort(brief, "strategy_route_001") == "normal_pass"
+
+
+def test_select_effort_falls_back_when_route_forbids_normal_pass():
+    # The exact real-agent failure mode from the Goal 44-53 campaigns: the route
+    # only offers quick_test, so the old hardcoded normal_pass was rejected.
+    brief = _brief_with({"strategy_lock_claim": ["quick_test"]})
+    assert _select_allowed_effort(brief, "strategy_lock_claim") == "quick_test"
+
+
+def test_select_effort_uses_preference_order():
+    brief = _brief_with({"r": ["long_watch", "deep_exploration"]})
+    # normal_pass absent -> next preference present is deep_exploration.
+    assert _select_allowed_effort(brief, "r") == "deep_exploration"
+
+
+def test_select_effort_no_options_falls_back_to_quick_test():
+    assert _select_allowed_effort(_brief_with({}), "missing_route") == "quick_test"
+    assert _select_allowed_effort(_brief_with({"r": []}), "r") == "quick_test"
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["quick_test"],
+        ["normal_pass"],
+        ["quick_test", "normal_pass", "deep_exploration", "long_watch"],
+        ["long_watch", "quick_test"],
+    ],
+)
+def test_selected_effort_is_always_in_route_options(options):
+    # The property validate_run enforces: the chosen effort must be one the
+    # route actually allows, so the deep-mode resume can never be rejected.
+    brief = _brief_with({"r": options})
+    assert _select_allowed_effort(brief, "r") in options
+
+
+def test_effort_preference_values_are_valid_exploration_modes():
+    from espresso_proof.models import ExplorationMode
+
+    valid = {m.value for m in ExplorationMode}
+    assert set(_EFFORT_PREFERENCE) <= valid

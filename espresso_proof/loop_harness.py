@@ -171,6 +171,38 @@ def _next_cycle_id(out_root: Path) -> str:
 # Per-case execution + collection
 # ---------------------------------------------------------------------------
 
+# Effort the loop prefers when the selected route offers a choice. The harness
+# must NEVER submit an effort the route does not allow: a real-agent strategy
+# brief may offer a different effort menu per route (e.g. only ``quick_test``),
+# and ``validate_run`` (correctly) rejects a ``human_choice`` whose effort is not
+# in that route's ``effort_options``. This is advisory ordering only; it never
+# widens a route's allowed options and never weakens the validator.
+_EFFORT_PREFERENCE = ("normal_pass", "deep_exploration", "quick_test", "long_watch")
+
+
+def _select_allowed_effort(brief: dict, selected_strategy: str) -> str:
+    """Pick an effort the SELECTED route permits, per the strategy brief's
+    ``allowed_human_choices``. Prefer ``normal_pass``; otherwise fall back to the
+    first preference the route allows, then to whatever the route lists. If the
+    route has no listed options, fall back to ``quick_test`` (the always-present
+    ``none`` option's effort). The returned effort is guaranteed to be one the
+    kernel will accept for ``selected_strategy``, so the deep-mode run reaches a
+    valid state instead of dying at the human gate."""
+    options_by_strategy = {
+        choice.get("strategy_id"): [
+            opt for opt in (choice.get("effort_options") or []) if isinstance(opt, str)
+        ]
+        for choice in (brief.get("allowed_human_choices") or [])
+        if isinstance(choice, dict)
+    }
+    allowed = options_by_strategy.get(selected_strategy) or []
+    if not allowed:
+        return "quick_test"
+    for preferred in _EFFORT_PREFERENCE:
+        if preferred in allowed:
+            return preferred
+    return allowed[0]
+
 
 def _run_case(
     case: DogfoodCase,
@@ -219,10 +251,15 @@ def _run_case(
         brief = read_yaml(run_dir / manifest["artifacts"]["strategy_brief"])
         selected = brief["top_strategies"][0]["id"] if brief.get("top_strategies") else "none"
         record["selected_route"] = selected
+        # Choose an effort the selected route actually allows. Hardcoding
+        # "normal_pass" made every real-agent run fail validate_run when the
+        # route's brief offered a different effort menu (Goals 44-53 diagnosis).
+        effort = _select_allowed_effort(brief, selected)
+        record["selected_effort"] = effort
         resume_run(
             run_dir=run_dir,
             selected_strategy=selected,
-            effort="normal_pass",
+            effort=effort,
             prover_provider=provider,
         )
         # Defensive re-check: since cycle 3, orchestrate_run wires the
