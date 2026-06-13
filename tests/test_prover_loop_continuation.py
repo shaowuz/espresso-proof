@@ -295,3 +295,46 @@ def _to_resolved_loop_via_resume(tmp_path: Path) -> tuple[Path, str]:
     resume_run(run_dir=run_dir, selected_strategy=selected, effort="normal_pass",
                prover_client=_ProverClient(objections=["loc X"]))
     return run_dir, selected
+
+
+# --- Goal 44-53 autofix #2: the strategy human_choice and the LLM-agent human gate
+#     are DISTINCT gates. A 'selected'+'continue' human_choice (which model-requires
+#     human_confirmed=true) may legitimately coexist with a pending prover-pass gate
+#     (the human picked a route; the prover output still awaits review). The kernel
+#     already forbids prover WORK on a pending gate; it must NOT, however, reject this
+#     legitimate selected+pending state. This guard locks that so the Goal-47
+#     'fabricated human_confirmed' misread is never "fixed" with an unsafe cross-check.
+
+
+def test_selected_continue_with_pending_prover_gate_is_valid(tmp_path: Path) -> None:
+    claim = tmp_path / "c.md"
+    claim.write_text("Every group of order p^2 is abelian.\n", encoding="utf-8")
+    res = orchestrate_run(
+        project="pml", input_path=claim, output_root=tmp_path,
+        provider="stub", front_half="stub", front_half_client=FakeClaude(precision="precise"),
+    )
+    run_dir = res["run_dir"]
+    art = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    validate_run(run_dir)  # at the gate: valid
+    # Record a 'continue' selection (human picked a route) WITHOUT resolving the
+    # prover-pass gate. prover_loop stays in its pending/ask_human form.
+    brief = read_yaml(run_dir / art["strategy_brief"])
+    hc = read_yaml(run_dir / art["human_choice"])
+    hc.update({
+        "status": "selected",
+        "selected_strategy": brief["top_strategies"][0]["id"],
+        "effort": "normal_pass",
+        "continue_decision": "continue",
+        "human_confirmed": True,
+    })
+    write_yaml(run_dir / art["human_choice"], hc)
+    # This legitimate intermediate state MUST remain valid (distinct gates).
+    validate_run(run_dir)
+    agent_run = read_yaml(run_dir / "llm_agent_run.yaml")
+    assert agent_run["human_gate"]["status"] == "pending"  # prover gate still pending
+    loop = read_yaml(run_dir / "prover_loop.yaml")
+    # ...and the kernel still forbids prover WORK on that pending gate:
+    assert loop["loop_decision"] in {"ask_human", "stop"}
+    for attempt in loop["attempts"]:
+        assert attempt["time_allocation"] in {"ask_human", "stop"}
+        assert attempt["status"] in {"waiting_human", "stopped"}
