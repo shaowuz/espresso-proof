@@ -279,3 +279,41 @@ def test_continue_coerces_disallowed_effort_and_run_stays_valid(client) -> None:
     # the run still validates (the snapshot would 409 otherwise).
     status, _ = call("GET", f"/api/runs/{run_id}/snapshot")
     assert status == 200
+
+
+def test_opaque_null_origin_is_blocked(client) -> None:
+    # a sandboxed iframe / data: URL sends Origin: null; a mutating call must
+    # not be honored from an opaque origin even though Host is loopback.
+    wb, call, _ = client
+    run_id = _create(call)
+    sid = _first_strategy(call, run_id)
+    status, body = call(
+        "POST",
+        f"/api/runs/{run_id}/strategy-feedback",
+        {"strategy_id": sid, "score": 50},
+        headers={"Origin": "null"},
+    )
+    assert status == 403 and "cross-site" in body["error"]
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://127.0.0.1.evil.com",      # suffix trick
+        "http://localhost.evil.com",        # suffix trick
+        "http://127.0.0.1:9/@evil.com",    # userinfo @ trick
+        "http://0.0.0.0",                   # not loopback
+        "https://evil.com",
+    ],
+)
+def test_loopback_lookalike_origins_blocked(client, origin) -> None:
+    wb, call, _ = client
+    run_id = _create(call)
+    sid = _first_strategy(call, run_id)
+    status, body = call(
+        "POST",
+        f"/api/runs/{run_id}/strategy-feedback",
+        {"strategy_id": sid, "score": 50},
+        headers={"Origin": origin},
+    )
+    assert status == 403, (origin, status, body)

@@ -792,7 +792,12 @@ def _make_handler(workbench: Workbench):
                 return hostname in {"127.0.0.1", "localhost", "::1", "[::1]"}
 
             origin = (self.headers.get("Origin") or "").strip().lower()
-            if origin and origin != "null":
+            if origin:
+                # A present Origin must be a loopback http(s) origin. An opaque
+                # "null" origin (sandboxed iframe, data: URL) has no "//" and is
+                # rejected here — a mutating call must not come from one. A
+                # legitimate non-browser client (curl/CLI) sends no Origin and
+                # is covered by the loopback Host check below.
                 if "//" not in origin:
                     raise WorkbenchError(403, "cross-site request blocked")
                 scheme, _, rest = origin.partition("//")

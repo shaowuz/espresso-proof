@@ -51,7 +51,35 @@ export interface StrategyView {
   main_risk: string;
   next_step: string;
   selected: boolean;
+  my_feedback: { score: number; priority: string; note: string } | null;
 }
+
+export interface LedgerContext {
+  source_gaps: number;
+  example_pressure: number;
+  counterexample_pressure: number;
+  reviewer_objections: string[];
+  target_subgoal_id: string | null;
+  target_local_claim: string;
+  effort: string;
+  next_cheapest_test: string;
+}
+
+export interface LatestRound {
+  selected_strategy: string;
+  target_subgoal_id: string | null;
+  local_claim: string | null;
+  effort: string;
+  reviewer_blockers: string[];
+  stop_reason: string;
+  rounds_used: number | null;
+  max_rounds: number | null;
+  graph_changed: boolean;
+  open_subgoals: number | null;
+  advisory_only: true;
+}
+
+export type FeedbackPriority = "focus" | "normal" | "reduce" | "repair";
 
 export interface ExampleView {
   id: string;
@@ -171,6 +199,8 @@ export interface ClaimPanel extends PanelBase {
 export interface StrategyPanel extends PanelBase {
   panel: "strategies";
   strategies: StrategyView[];
+  ledger_context?: LedgerContext;
+  latest_round?: LatestRound | null;
 }
 export interface ExamplesPanel extends PanelBase {
   panel: "examples";
