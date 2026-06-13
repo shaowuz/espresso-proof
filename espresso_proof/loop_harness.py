@@ -1145,7 +1145,7 @@ def run_loop_cycle(
                     case_id=r["case"].case_id,
                     command=(
                         f"orchestrate(front_half={front_half}, provider={provider}) "
-                        "+ resume(effort=normal_pass)"
+                        f"+ resume(effort={r.get('selected_effort', 'n/a')})"
                     ),
                     run_dir=str(r["run_dir"]) if r["run_dir"] else "not_run",
                     provider=provider,
