@@ -130,3 +130,62 @@ export interface JobInfo {
   error?: string;
   result?: { run_id?: string };
 }
+
+/**
+ * Goal 43B: per-panel slices (each panel refreshes independently).
+ *
+ * ``agent_state`` is honest PROCESS state only — "ready" once the artifact is
+ * present, "not_run" when neither artifact nor agent exist, and
+ * running/queued/failed/skipped/done from the backing agent. It is never an
+ * evidence signal; the tones inside each slice still come only from the
+ * validated artifact status, so a "running" or cached panel cannot earn green.
+ */
+export type PanelName =
+  | "claim"
+  | "strategies"
+  | "examples"
+  | "counterexamples"
+  | "computations"
+  | "literature";
+
+export type AgentState =
+  | "ready"
+  | "not_run"
+  | "running"
+  | "queued"
+  | "failed"
+  | "skipped"
+  | "done";
+
+export interface PanelBase {
+  run_id: string;
+  panel: PanelName;
+  missing: boolean;
+  agent_state: AgentState;
+}
+
+export interface ClaimPanel extends PanelBase {
+  panel: "claim";
+  claim: ClaimView;
+}
+export interface StrategyPanel extends PanelBase {
+  panel: "strategies";
+  strategies: StrategyView[];
+}
+export interface ExamplesPanel extends PanelBase {
+  panel: "examples";
+  items: ExampleView[];
+}
+export interface CounterexamplesPanel extends PanelBase {
+  panel: "counterexamples";
+  items: CounterexampleView[];
+}
+export interface ComputationsPanel extends PanelBase {
+  panel: "computations";
+  items: ComputationView[];
+}
+export interface LiteraturePanel extends PanelBase {
+  panel: "literature";
+  items: LiteratureView[];
+  source_gaps: string[];
+}

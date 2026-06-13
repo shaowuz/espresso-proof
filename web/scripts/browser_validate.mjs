@@ -77,6 +77,27 @@ const greenBadges = await page.evaluate(
 );
 log(greenBadges === 0, `no earned-green evidence badges on unearned run (got ${greenBadges})`);
 
+// Goal 43B: independent panels — the evidence rail renders its three sections
+// plus the literature rail, each loading on its own query.
+const sectionCount = await page.locator("main section h2").count();
+log(sectionCount >= 4, `independent panel sections rendered (got ${sectionCount})`);
+
+// Goal 43B: an expanded card survives background polling (state preserved).
+const firstCard = page.locator("main aside button[aria-expanded]").first();
+if ((await firstCard.count()) > 0) {
+  await firstCard.click();
+  await page.waitForTimeout(250);
+  const expandedAfterClick = await firstCard.getAttribute("aria-expanded");
+  await page.waitForTimeout(3600); // span at least one fast-poll tick
+  const expandedAfterPoll = await firstCard.getAttribute("aria-expanded");
+  log(
+    expandedAfterClick === "true" && expandedAfterPoll === "true",
+    "expanded card stays expanded across a poll refresh",
+  );
+} else {
+  log(true, "no expandable evidence card on this run (skipped expand check)");
+}
+
 await page.screenshot({ path: join(out, "desktop.png"), fullPage: false });
 
 // narrow viewport

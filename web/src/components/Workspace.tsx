@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronRight, Loader2, Play, Route, UserRound } from "lucide-react";
-import type { AgentView, Snapshot, StrategyView } from "../lib/types";
-import { continueRoute, runAgent } from "../lib/api";
+import type { AgentView, ClaimView, StatusView, StrategyView } from "../lib/types";
+import { continueRoute, errorText, runAgent } from "../lib/api";
+import { useClaimPanel, useStrategiesPanel } from "../hooks/useCockpit";
 import { useJob } from "../hooks/useJob";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -10,11 +11,11 @@ import { Separator } from "./ui/separator";
 import { ToneBadge } from "./ToneBadge";
 import { JobChip } from "./JobChip";
 import { PanelPlaceholder } from "./ExpandableCard";
+import { PanelSection } from "./PanelSection";
 import { cn } from "../lib/cn";
 
-function ClaimCard({ snapshot }: { snapshot: Snapshot }) {
-  const { claim, missing } = snapshot;
-  if (missing.claim) {
+function ClaimCard({ claim, missing }: { claim: ClaimView | undefined; missing: boolean }) {
+  if (missing || !claim || claim.text === "") {
     return (
       <Card>
         <CardContent className="pt-2.5">
@@ -180,72 +181,74 @@ function AgentRow({
   );
 }
 
-/** CENTER workspace: claim, strategy board, agent board. */
+/**
+ * CENTER workspace: claim card, strategy board, agent board (Goal 43B).
+ * The claim and strategies each read their own fast-core panel query, so the
+ * workspace opens before evidence agents finish; the agent board reads the
+ * shared status query. ``onChanged`` (passed from App) refreshes the affected
+ * queries after a Continue/Run pass without a full page reload.
+ */
 export function Workspace({
-  snapshot,
+  runId,
+  status,
   onChanged,
 }: {
-  snapshot: Snapshot;
+  runId: string;
+  status: StatusView | undefined;
   onChanged: () => void;
 }) {
-  const { strategies, status, missing } = snapshot;
+  const claim = useClaimPanel(runId);
+  const strat = useStrategiesPanel(runId);
+  const agents = status?.agents ?? [];
+  const strategies = strat.data && !strat.data.missing ? strat.data.strategies : [];
+
   return (
     <div className="flex flex-col gap-4 p-4">
-      <ClaimCard snapshot={snapshot} />
+      <ClaimCard claim={claim.data?.claim} missing={claim.data?.missing ?? true} />
 
-      <section>
-        <div className="mb-1.5 flex items-center gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-stone-500">
-            Strategies
-          </h2>
-          {status.routes_preliminary && (
-            <Badge className="border-gray-200 bg-gray-100 text-gray-600">
+      <PanelSection
+        icon={Route}
+        title="Strategies"
+        count={strat.data && !strat.data.missing ? strategies.length : null}
+        agentState={strat.data?.agent_state}
+        isPending={strat.isPending}
+        isError={strat.isError}
+        errorText={errorText(strat.error)}
+        hasData={strategies.length > 0}
+        emptyText="Not run yet — no proof routes have been explored."
+        onRetry={() => void strat.refetch()}
+      >
+        <div className="flex flex-col gap-2">
+          {status?.routes_preliminary && (
+            <Badge className="w-fit border-gray-200 bg-gray-100 text-gray-600">
               preliminary
             </Badge>
           )}
-          {status.selected_route !== null && (
-            <span className="truncate text-[11px] text-stone-400">
-              selected: {status.selected_route.title}
-            </span>
-          )}
+          {strategies.map((s) => (
+            <StrategyCard key={s.id} strategy={s} runId={runId} onChanged={onChanged} />
+          ))}
         </div>
-        {missing.strategies ? (
-          <PanelPlaceholder text="Not run yet — no proof routes have been explored." />
-        ) : strategies.length === 0 ? (
-          <PanelPlaceholder text="Candidate routes have not been written down yet." />
-        ) : (
-          <div className="flex flex-col gap-2">
-            {strategies.map((s) => (
-              <StrategyCard
-                key={s.id}
-                strategy={s}
-                runId={snapshot.run_id}
-                onChanged={onChanged}
-              />
-            ))}
-          </div>
-        )}
-      </section>
+      </PanelSection>
 
       <section>
         <h2 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-stone-500">
           Agents
         </h2>
-        {status.agents.length === 0 ? (
+        {agents.length === 0 ? (
           <PanelPlaceholder text="Not run yet — no agent activity recorded for this run." />
         ) : (
           <Card>
-            {status.agents.map((a, i) => (
+            {agents.map((a, i) => (
               <div key={a.agent}>
                 {i > 0 && <Separator />}
-                <AgentRow agent={a} runId={snapshot.run_id} onChanged={onChanged} />
+                <AgentRow agent={a} runId={runId} onChanged={onChanged} />
               </div>
             ))}
           </Card>
         )}
       </section>
 
-      {status.completed && (
+      {status?.completed && (
         <p className="flex items-center gap-1.5 text-xs text-stone-500">
           <CheckCircle2 className="h-3.5 w-3.5 text-stone-400" aria-hidden />
           This run has finished its budgeted passes. Conclusions above carry their own
