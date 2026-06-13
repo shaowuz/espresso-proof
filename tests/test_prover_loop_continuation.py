@@ -338,3 +338,46 @@ def test_selected_continue_with_pending_prover_gate_is_valid(tmp_path: Path) -> 
     for attempt in loop["attempts"]:
         assert attempt["time_allocation"] in {"ask_human", "stop"}
         assert attempt["status"] in {"waiting_human", "stopped"}
+
+
+# --- Goal 44-53 autofix #3 (option A): escalate exactly ONE targeted repair round
+#     when blocking objections remain at a quick_test-style 1-round effort budget,
+#     so the loop reaches round 2 where the named-subgoal attack happens. ---
+
+
+def _simulate_quick_test_budget(run_dir: Path) -> None:
+    """Shrink the loop budget to a spent quick_test (1 round, 4 agent calls) so the
+    effort budget -- not an explicit cap -- is what would stop the loop at round 1."""
+    loop_path = run_dir / "prover_loop.yaml"
+    loop = read_yaml(loop_path)
+    loop["budget"]["max_rounds"] = 1
+    loop["budget"]["max_agent_calls"] = loop["budget"]["agent_calls_used"]
+    write_yaml(loop_path, loop)
+    validate_run(run_dir)
+
+
+def test_escalates_one_targeted_round_at_quick_test_budget(tmp_path: Path) -> None:
+    run_dir, _ = _to_resolved_loop(tmp_path, effort="normal_pass")  # round 1 built, has blockers
+    _simulate_quick_test_budget(run_dir)  # 1-round, both budgets spent
+    before = read_yaml(run_dir / "prover_loop.yaml")["budget"]
+    assert before["rounds_used"] == 1 and before["max_rounds"] == 1
+    result = continue_prover_loop(run_dir=run_dir, client=_ProverClient(objections=["loc X", "hyp Y"]))
+    validate_run(run_dir)
+    loop = read_yaml(run_dir / "prover_loop.yaml")
+    # exactly one extra round was granted and run -> the loop reached round 2.
+    assert {a["round_index"] for a in loop["attempts"]} == {1, 2}
+    assert loop["budget"]["max_rounds"] == 2  # budget granted; artifact stays valid
+    assert loop["budget"]["rounds_used"] == 2
+    assert any("escalated" in n for n in result["notes"]), result["notes"]
+    # round 2 attacks a NAMED subgoal selected from the graph.
+    round2 = [a for a in loop["attempts"] if a["round_index"] == 2]
+    assert round2 and any(a.get("target_subgoal_id") for a in round2), round2
+
+
+def test_escalation_is_capped_at_one_extra_round(tmp_path: Path) -> None:
+    run_dir, _ = _to_resolved_loop(tmp_path, effort="normal_pass")
+    _simulate_quick_test_budget(run_dir)
+    continue_prover_loop(run_dir=run_dir, client=_ProverClient(objections=["loc X", "hyp Y"]))
+    loop = read_yaml(run_dir / "prover_loop.yaml")
+    assert max(a["round_index"] for a in loop["attempts"]) <= 2
+    assert loop["budget"]["max_rounds"] <= 2  # never grants more than one round
