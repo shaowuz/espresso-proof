@@ -9,11 +9,12 @@ import { ToneBadge } from "./ToneBadge";
 import { DetailRow, ExpandableCard } from "./ExpandableCard";
 import { PanelSection } from "./PanelSection";
 import { errorText } from "../lib/api";
+import { MathText } from "./MathText";
 
 function ItemHeader({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <span className="flex min-w-0 flex-col gap-0.5">
-      <span className="truncate text-xs font-medium text-stone-800">{title}</span>
+      <span className="truncate text-xs font-medium text-stone-800"><MathText>{title}</MathText></span>
       {children}
     </span>
   );
@@ -67,7 +68,7 @@ export function EvidenceRail({ runId }: { runId: string }) {
               }
               detail={
                 <div className="flex flex-col gap-1.5">
-                  {ex.behavior !== "" && <DetailRow label="Behavior">{ex.behavior}</DetailRow>}
+                  {ex.behavior !== "" && <DetailRow label="Behavior"><MathText>{ex.behavior}</MathText></DetailRow>}
                   {ex.tests.length > 0 && (
                     <DetailRow label="Tests">{ex.tests.join(" · ")}</DetailRow>
                   )}
@@ -104,11 +105,11 @@ export function EvidenceRail({ runId }: { runId: string }) {
               detail={
                 <div className="flex flex-col gap-1.5">
                   {ce.explanation !== "" && (
-                    <DetailRow label="Explanation">{ce.explanation}</DetailRow>
+                    <DetailRow label="Explanation"><MathText>{ce.explanation}</MathText></DetailRow>
                   )}
                   <DetailRow label="Admissibility">{ce.admissibility}</DetailRow>
                   {ce.repair !== "" && (
-                    <DetailRow label="Repaired claim">{ce.repair}</DetailRow>
+                    <DetailRow label="Repaired claim"><MathText>{ce.repair}</MathText></DetailRow>
                   )}
                 </div>
               }
@@ -143,7 +144,7 @@ export function EvidenceRail({ runId }: { runId: string }) {
                   </span>
                 </ItemHeader>
               }
-              detail={<DetailRow label="Result">{co.result}</DetailRow>}
+              detail={<DetailRow label="Result"><MathText>{co.result}</MathText></DetailRow>}
             />
           ))}
         </div>

@@ -1,4 +1,5 @@
 import { FlaskConical } from "lucide-react";
+import { MathText } from "./MathText";
 import type { ClaimView, RunListItem, StatusView } from "../lib/types";
 
 /**
@@ -31,13 +32,13 @@ export function Header({
       <div className="min-w-0 flex-1">
         {claimText !== "" ? (
           <p className="truncate text-[13px] text-stone-700" title={claimText}>
-            {claimText}
+            <MathText>{claimText}</MathText>
           </p>
         ) : (
           <p className="text-[13px] text-stone-400">No claim selected yet</p>
         )}
         {claim && claim.status_sentence !== "" && (
-          <p className="truncate text-[11px] text-stone-500">{claim.status_sentence}</p>
+          <p className="truncate text-[11px] text-stone-500"><MathText>{claim.status_sentence}</MathText></p>
         )}
       </div>
 
