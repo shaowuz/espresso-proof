@@ -359,6 +359,77 @@ def test_objection_cannot_change_subgoal_state(tmp_path: Path) -> None:
     assert all(n["state"] not in {"contradicted", "refuted"} for n in after["nodes"])
 
 
+def test_attach_survives_absent_llm_agent_run(tmp_path: Path) -> None:
+    # A refuted/early run has no llm_agent_run artifact; the attach loop must
+    # not crash on the None optional artifact (regression: full-suite failure
+    # on refuted-run graphs).
+    run_dir = _resumed_run(tmp_path)
+    manifest_path = run_dir / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    manifest.get("optional_artifacts", {}).pop("llm_agent_run", None)
+    write_yaml(manifest_path, manifest)
+    graph = assemble_subgoal_graph(run_dir)  # must not raise
+    assert graph["nodes"]
+
+
+def test_attach_skips_non_dict_reviews(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _register_llm_agent_run(
+        run_dir,
+        ["not a dict", None, {"scoped_objections": [_scoped(subgoal_id="subgoal_main", text="real obj")]}],
+    )
+    graph = assemble_subgoal_graph(run_dir)  # must not raise on the junk entries
+    main = next(n for n in graph["nodes"] if n["id"] == "subgoal_main")
+    assert any("real obj" in o for o in main["reviewer_objections"])
+
+
+def test_inferred_attachment_marked_and_next_action_surfaced(tmp_path: Path) -> None:
+    # The reviewer's repairable instruction is shown, and an attribution that was
+    # INFERRED from the round target is honestly marked (not presented as explicit).
+    run_dir = _resumed_run(tmp_path)
+    sid = _first_subgoal_id(run_dir)
+    inferred = _scoped(
+        subgoal_id=sid, scope_source="inferred_target", scope_inferred=True,
+        inference_reason="bound to the round's attacked subgoal", text="hypothesis on dimension unstated",
+        suggested_next_action="state the dimension hypothesis explicitly",
+    )
+    _register_llm_agent_run(run_dir, [{"scoped_objections": [inferred]}])
+    graph = build_subgoal_graph(run_dir)
+    node = next(n for n in graph["nodes"] if n["id"] == sid)
+    tag = " ".join(node["reviewer_objections"])
+    assert "→ next: state the dimension hypothesis explicitly" in tag
+    assert "(inferred from round target)" in tag
+
+
+def test_explicit_attachment_not_marked_inferred(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    sid = _first_subgoal_id(run_dir)
+    _register_llm_agent_run(
+        run_dir,
+        [{"scoped_objections": [_scoped(subgoal_id=sid, text="explicit gap", suggested_next_action="")]}],
+    )
+    graph = build_subgoal_graph(run_dir)
+    node = next(n for n in graph["nodes"] if n["id"] == sid)
+    tag = " ".join(node["reviewer_objections"])
+    assert "explicit gap" in tag
+    assert "(inferred from round target)" not in tag  # explicit scope is not marked inferred
+    assert "→ next:" not in tag  # no suggested action given
+
+
+def test_dashboard_renders_main_goal_objections(tmp_path: Path) -> None:
+    # Regression (FIX): the main goal's objections were dropped from the dashboard
+    # while the memo showed them. A normal run's main node carries reviewer
+    # objections derived from the review artifact, so the advisory block must show.
+    run_dir = _resumed_run(tmp_path)
+    graph = build_subgoal_graph(run_dir)
+    main = next(n for n in graph["nodes"] if n["id"] == "subgoal_main")
+    assert main["reviewer_objections"], "precondition: main node should carry review objections"
+    # in a plain run only the main node carries objections, so the marker proves
+    # the main-goal paragraph now renders them.
+    html = _proof_state_section({"graph": graph})
+    assert "Reviewer objections (advisory)" in html
+
+
 def test_status_language_in_objection_is_scrubbed_on_attach(tmp_path: Path) -> None:
     # Free text embedded in the graph can never read as a finished proof.
     run_dir = _resumed_run(tmp_path)

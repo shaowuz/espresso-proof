@@ -866,7 +866,8 @@ def _proof_state_section(state: dict[str, Any], *, route_shown: bool = False) ->
         main_html = (
             f"<p class=\"sg-main\"><span class=\"muted\">Main goal</span> "
             f"{_h(main.get('statement', ''))} "
-            f"<span class=\"sg-state\">{_h(_state_words(main.get('state', '')))}</span></p>"
+            f"<span class=\"sg-state\">{_h(_state_words(main.get('state', '')))}</span>"
+            f"{_objections_html(main)}</p>"
         )
     next_node = grouped["next"]
     next_html = ""
