@@ -13,9 +13,14 @@ import { renderTeX, splitMath } from "../lib/math";
 export function MathText({
   children,
   className,
+  inline = false,
 }: {
   children: string | null | undefined;
   className?: string;
+  /** Force display math to render inline — for single-line/truncated surfaces
+   *  (headers, item titles) where a block <div> would break the layout and
+   *  produce invalid <div>-in-<p>/<span> nesting. */
+  inline?: boolean;
 }) {
   const text = children ?? "";
   if (text === "") return null;
@@ -27,19 +32,20 @@ export function MathText({
         if (seg.type === "text") {
           return <Fragment key={i}>{seg.value}</Fragment>;
         }
-        const html = renderTeX(seg.value, seg.display);
+        const display = seg.display && !inline;
+        const html = renderTeX(seg.value, display);
         if (html === null) {
           // KaTeX refused it: show the copyable source, never a broken render.
           const raw = seg.display ? `$$${seg.value}$$` : `$${seg.value}$`;
           return <Fragment key={i}>{raw}</Fragment>;
         }
-        const Tag = seg.display ? "div" : "span";
+        const Tag = display ? "div" : "span";
         return (
           <Tag
             key={i}
             // the ONLY innerHTML in the app: KaTeX-sanitized markup (trust:
             // false). The text around it is escaped above; no user HTML passes.
-            className={seg.display ? "math-block" : "math-inline"}
+            className={display ? "math-block" : "math-inline"}
             title={seg.value}
             dangerouslySetInnerHTML={{ __html: html }}
           />

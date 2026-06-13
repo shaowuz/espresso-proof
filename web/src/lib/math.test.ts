@@ -57,6 +57,24 @@ describe("splitMath", () => {
     expect(segs[1]).toEqual({ type: "math", value: "x^2", display: false });
   });
 
+  it("does not parse bare currency as math (two-dollar false positive)", () => {
+    expect(splitMath("a $5 discount on the $10 book is fair")).toEqual([
+      { type: "text", value: "a $5 discount on the $10 book is fair" },
+    ]);
+    // a space right after the opening $ also stays text.
+    expect(splitMath("pay $ 5 now")).toEqual([{ type: "text", value: "pay $ 5 now" }]);
+  });
+
+  it("still parses real inline math adjacent to prose with a stray currency $", () => {
+    // "$x^2$" is real math; a later bare "$5" must not swallow it.
+    const segs = splitMath("the bound $x^2$ costs about $5");
+    expect(segs).toEqual([
+      { type: "text", value: "the bound " },
+      { type: "math", value: "x^2", display: false },
+      { type: "text", value: " costs about $5" },
+    ]);
+  });
+
   it("hasMath reflects whether any math segment exists", () => {
     expect(hasMath("plain text")).toBe(false);
     expect(hasMath("$x$")).toBe(true);

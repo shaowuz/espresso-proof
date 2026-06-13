@@ -14,7 +14,7 @@ import { MathText } from "./MathText";
 function ItemHeader({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <span className="flex min-w-0 flex-col gap-0.5">
-      <span className="truncate text-xs font-medium text-stone-800"><MathText>{title}</MathText></span>
+      <span className="truncate text-xs font-medium text-stone-800"><MathText inline>{title}</MathText></span>
       {children}
     </span>
   );

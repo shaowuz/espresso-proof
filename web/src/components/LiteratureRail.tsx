@@ -45,7 +45,7 @@ export function LiteratureRail({ runId }: { runId: string }) {
               header={
                 <span className="flex min-w-0 flex-col gap-1">
                   <span className="truncate text-[13px] font-medium text-stone-800">
-                    <MathText>{ref.title || ref.id}</MathText>
+                    <MathText inline>{ref.title || ref.id}</MathText>
                   </span>
                   <span className="flex flex-wrap items-center gap-1">
                     {ref.locator.value !== "" && (
@@ -66,7 +66,7 @@ export function LiteratureRail({ runId }: { runId: string }) {
                     <DetailRow label="Authors">{ref.authors.join(", ")}</DetailRow>
                   )}
                   {ref.relevance !== "" && (
-                    <DetailRow label="Relevance">{ref.relevance}</DetailRow>
+                    <DetailRow label="Relevance"><MathText>{ref.relevance}</MathText></DetailRow>
                   )}
                   {ref.why !== "" && <DetailRow label="Why relevant"><MathText>{ref.why}</MathText></DetailRow>}
                 </div>

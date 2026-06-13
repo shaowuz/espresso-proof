@@ -45,14 +45,31 @@ export function splitMath(input: string): Segment[] {
     }
   };
 
+  const isDigit = (c: string | undefined) => c !== undefined && c >= "0" && c <= "9";
+  const isSpace = (c: string | undefined) => c !== undefined && /\s/.test(c);
+
   outer: while (i < text.length) {
-    // a single-$ open must not match an escaped \$.
     for (const d of DELIMS) {
       if (!text.startsWith(d.open, i)) continue;
+      // a single-$ open must not match an escaped \$.
       if (d.open === "$" && i > 0 && text[i - 1] === "\\") continue;
       const contentStart = i + d.open.length;
-      const closeAt = text.indexOf(d.close, contentStart);
-      if (closeAt === -1) continue; // no closing delimiter -> literal text
+      // Single-$ inline math uses the standard markdown/KaTeX heuristic so a
+      // bare currency $ is never mistaken for math: the char after the opening
+      // $ must not be a space or a digit ("$5", "$ x" stay text).
+      if (d.open === "$" && (isSpace(text[contentStart]) || isDigit(text[contentStart]))) continue;
+      let closeAt = text.indexOf(d.close, contentStart);
+      if (d.open === "$") {
+        // and the closing $ must not be preceded by a space or followed by a
+        // digit ("...the $10 book" does not close a math span).
+        while (
+          closeAt !== -1 &&
+          (isSpace(text[closeAt - 1]) || isDigit(text[closeAt + 1]))
+        ) {
+          closeAt = text.indexOf(d.close, closeAt + 1);
+        }
+      }
+      if (closeAt === -1) continue; // no valid closing delimiter -> literal text
       const inner = text.slice(contentStart, closeAt);
       if (inner.trim() === "") continue; // empty math -> literal text
       flush();
