@@ -544,7 +544,9 @@ class Workbench:
         slice_ = build_panel(run_dir, run_id, summary, panel)
         with self._status_cache_lock:
             self._status_cache[key] = (digest, json.dumps(slice_, ensure_ascii=False))
-            while len(self._status_cache) > 64:
+            # 6 panels per run share the status cache; size for a handful of
+            # concurrently-open runs (display-only; eviction is always safe).
+            while len(self._status_cache) > 96:
                 self._status_cache.pop(next(iter(self._status_cache)))
         return slice_
 
