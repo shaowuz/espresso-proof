@@ -15,7 +15,7 @@ import pytest
 from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.run_events import EVENTS_FILENAME, append_event, read_events
+from espresso_proof.run_events import EVENT_KINDS, EVENTS_FILENAME, append_event, read_events
 from espresso_proof.run_lock import RunLockedError, run_writer_lock
 from espresso_proof.validators import validate_run
 
@@ -180,17 +180,11 @@ def test_events_timeline_valid_jsonl_and_no_env_leak(tmp_path: Path, monkeypatch
     for line in lines:
         record = json.loads(line)
         assert isinstance(record, dict)
-        assert record["kind"] in {
-            "stage_started",
-            "validation_passed",
-            "validation_failed",
-            "rollback",
-            "stage_ok",
-            "job_done",
-            "job_failed",
-            "lock_denied",
-        }
+        # Reference EVENT_KINDS directly so the allowlist never drifts when new
+        # additive kinds (Goal 54A: agent_call_*, server_job, replay, note) are added.
+        assert record["kind"] in set(EVENT_KINDS)
         assert "ts" in record
+        assert "monotonic_ms" in record  # Goal 54A: every event carries a monotonic stamp
     kinds = [json.loads(line)["kind"] for line in lines]
     assert "stage_started" in kinds and "stage_ok" in kinds
     # Redaction: no API key / environment dump in the timeline.
