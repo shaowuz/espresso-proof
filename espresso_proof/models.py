@@ -1581,6 +1581,12 @@ class HumanChoice(StrictBaseModel):
     effort: ExplorationMode | None = None
     taste_judgment: str = ""
     continue_decision: ContinueDecision
+    # human_confirmed records ONLY that a human made THIS strategy selection (it is
+    # required true whenever status == selected, see validate_choice_state). It is
+    # NOT a proof/claim confirmation and NOT the LLM-agent human gate: a valid run
+    # can carry human_confirmed=true here while llm_agent_run.human_gate.status is
+    # still 'pending' (the human picked a route; the prover-pass output still awaits
+    # review). Do not read it as "the human confirmed the result".
     human_confirmed: bool = False
 
     @model_validator(mode="after")
