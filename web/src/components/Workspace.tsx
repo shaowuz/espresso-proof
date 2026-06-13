@@ -32,6 +32,7 @@ import { JobChip } from "./JobChip";
 import { PanelPlaceholder } from "./ExpandableCard";
 import { PanelSection } from "./PanelSection";
 import { cn } from "../lib/cn";
+import { MathText } from "./MathText";
 
 function ClaimCard({ claim, missing }: { claim: ClaimView | undefined; missing: boolean }) {
   if (missing || !claim || claim.text === "") {
@@ -47,7 +48,7 @@ function ClaimCard({ claim, missing }: { claim: ClaimView | undefined; missing: 
     <Card>
       <CardHeader>
         <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-[15px] leading-relaxed">{claim.text}</CardTitle>
+          <CardTitle className="text-[15px] leading-relaxed"><MathText>{claim.text}</MathText></CardTitle>
           {claim.human_review_required && (
             <Badge className="shrink-0 border-violet-200 bg-violet-50 text-violet-800">
               <UserRound className="h-3 w-3" aria-hidden />
@@ -57,7 +58,7 @@ function ClaimCard({ claim, missing }: { claim: ClaimView | undefined; missing: 
         </div>
       </CardHeader>
       <CardContent>
-        <p className="text-xs leading-relaxed text-stone-600">{claim.status_sentence}</p>
+        <p className="text-xs leading-relaxed text-stone-600"><MathText>{claim.status_sentence}</MathText></p>
       </CardContent>
     </Card>
   );
@@ -212,7 +213,7 @@ function LedgerRow({
     <tr className="align-top">
       <td className="py-0.5 pr-2 font-medium text-stone-500 whitespace-nowrap w-[40%]">{label}</td>
       <td className={cn("py-0.5 break-words", warn ? "text-amber-800" : "text-stone-600")}>
-        {value}
+        <MathText>{value}</MathText>
       </td>
     </tr>
   );
@@ -440,7 +441,7 @@ function StrategyCard({
         <Chevron className="mt-1 h-3.5 w-3.5 shrink-0 text-stone-400" aria-hidden />
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-1.5">
-            <span className="text-sm font-semibold text-stone-800">{strategy.title}</span>
+            <span className="text-sm font-semibold text-stone-800"><MathText>{strategy.title}</MathText></span>
             {strategy.selected && (
               <Badge className="border-sage-200 bg-sage-50 text-sage-800">
                 <Route className="h-3 w-3" aria-hidden />
@@ -456,7 +457,7 @@ function StrategyCard({
           </span>
           {strategy.one_line !== "" && (
             <span className="mt-0.5 block text-xs leading-relaxed text-stone-600">
-              {strategy.one_line}
+              <MathText>{strategy.one_line}</MathText>
             </span>
           )}
         </span>
@@ -464,18 +465,18 @@ function StrategyCard({
       {expanded && (
         <div className="border-t border-stone-100 px-3 py-2 pl-8 text-xs leading-relaxed text-stone-700">
           {strategy.status_sentence !== "" && (
-            <p className="mb-1.5">{strategy.status_sentence}</p>
+            <p className="mb-1.5"><MathText>{strategy.status_sentence}</MathText></p>
           )}
           {strategy.main_risk !== "" && (
             <p className="mb-1.5">
               <span className="font-semibold text-stone-500">Main risk: </span>
-              {strategy.main_risk}
+              <MathText>{strategy.main_risk}</MathText>
             </p>
           )}
           {strategy.next_step !== "" && (
             <p className="mb-1.5">
               <span className="font-semibold text-stone-500">Next step: </span>
-              {strategy.next_step}
+              <MathText>{strategy.next_step}</MathText>
             </p>
           )}
 

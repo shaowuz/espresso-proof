@@ -5,6 +5,7 @@ import { ToneBadge } from "./ToneBadge";
 import { DetailRow, ExpandableCard, PanelPlaceholder } from "./ExpandableCard";
 import { PanelSection } from "./PanelSection";
 import { errorText } from "../lib/api";
+import { MathText } from "./MathText";
 
 /**
  * Right rail: literature / theorem locators / source gaps (Goal 43B: its own
@@ -44,7 +45,7 @@ export function LiteratureRail({ runId }: { runId: string }) {
               header={
                 <span className="flex min-w-0 flex-col gap-1">
                   <span className="truncate text-[13px] font-medium text-stone-800">
-                    {ref.title || ref.id}
+                    <MathText inline>{ref.title || ref.id}</MathText>
                   </span>
                   <span className="flex flex-wrap items-center gap-1">
                     {ref.locator.value !== "" && (
@@ -65,9 +66,9 @@ export function LiteratureRail({ runId }: { runId: string }) {
                     <DetailRow label="Authors">{ref.authors.join(", ")}</DetailRow>
                   )}
                   {ref.relevance !== "" && (
-                    <DetailRow label="Relevance">{ref.relevance}</DetailRow>
+                    <DetailRow label="Relevance"><MathText>{ref.relevance}</MathText></DetailRow>
                   )}
-                  {ref.why !== "" && <DetailRow label="Why relevant">{ref.why}</DetailRow>}
+                  {ref.why !== "" && <DetailRow label="Why relevant"><MathText>{ref.why}</MathText></DetailRow>}
                 </div>
               }
             />
@@ -88,7 +89,7 @@ export function LiteratureRail({ runId }: { runId: string }) {
                 key={`${i}-${gap.slice(0, 24)}`}
                 className="rounded-md border border-amber-200 bg-amber-50/60 px-2.5 py-1.5 text-xs text-amber-900"
               >
-                {gap}
+                <MathText>{gap}</MathText>
               </li>
             ))}
           </ul>

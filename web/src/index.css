@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "katex/dist/katex.min.css";
 
 @theme {
   /* Off-white paper background and a desaturated sage brand scale. */
@@ -29,4 +30,23 @@ body {
     "Helvetica Neue", Arial, sans-serif;
   font-size: 13.5px;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Goal 43D: math containers must not break the three-column layout. Inline math
+   stays on the line; block math scrolls horizontally if a formula is too wide. */
+.math-inline {
+  display: inline;
+}
+.math-block {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+  margin: 0.25rem 0;
+}
+.math-block .katex-display {
+  margin: 0;
+}
+/* keep KaTeX glyphs at the cockpit's dense type scale */
+.katex {
+  font-size: 1.02em;
 }
