@@ -886,6 +886,22 @@ def _round_artifact_rel_path(attempt: dict) -> str:
     return f"prover_rounds/round_{int(attempt['round_index']):03d}_{attempt_id}_{strategy}.yaml"
 
 
+def _human_feedback_advisory(run_dir: Path) -> str:
+    """The human's advisory ranking note for this run (human_choice.taste_judgment).
+
+    Pure read, fail-closed to empty. This is advisory prompt context only and
+    carries no evidence; the kernel re-validates every round output."""
+
+    try:
+        manifest = read_yaml(run_dir / "run_manifest.yaml")
+        rel = manifest.get("artifacts", {}).get("human_choice")
+        if not rel or not (run_dir / rel).exists():
+            return ""
+        return str(read_yaml(run_dir / rel).get("taste_judgment") or "")[:2000]
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _selected_strategy_from_choice(human_choice: dict | None, strategies: list[dict]) -> str | None:
     strategy_ids = [strategy.get("id") for strategy in strategies]
     if (
@@ -1098,6 +1114,11 @@ def append_prover_loop_round(
         "loop_decision": loop_report.get("loop_decision"),
         "time_allocation": parent_attempt.get("time_allocation"),
         "target_subgoal": target_subgoal,
+        # Goal 43C: the human's advisory ranking/time-allocation note for this
+        # continuation (from human_choice.taste_judgment). It is prompt context
+        # ONLY — the round's outputs are re-validated by the kernel, so this can
+        # never upgrade proof/source/evidence/grade/claim status.
+        "human_feedback_advisory": _human_feedback_advisory(run_dir),
     }
     created_at = datetime.now(UTC).isoformat()
     prover_raw = client.complete_json(

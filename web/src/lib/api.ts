@@ -1,7 +1,10 @@
 import type {
   AgentState,
   ClaimView,
+  FeedbackPriority,
   JobInfo,
+  LedgerContext,
+  LatestRound,
   PanelBase,
   PanelName,
   RunListItem,
@@ -136,11 +139,20 @@ export function runAgent(runId: string, agent: string): Promise<{ job_id: string
 export function continueRoute(
   runId: string,
   strategyId: string,
+  effort?: string,
 ): Promise<{ job_id: string }> {
   return post<{ job_id: string }>(
     `/api/runs/${encodeURIComponent(runId)}/continue`,
-    { strategy: strategyId, effort: "normal_pass" },
+    { strategy: strategyId, effort: effort ?? "normal_pass" },
   );
+}
+
+/** POST /api/runs/{id}/strategy-feedback → 200 {ok, strategy_id, feedback} */
+export function postStrategyFeedback(
+  runId: string,
+  feedback: { strategy_id: string; score: number; priority: FeedbackPriority; note?: string },
+): Promise<{ ok: boolean; strategy_id: string; feedback: { score: number; priority: string; note: string } | null }> {
+  return post(`/api/runs/${encodeURIComponent(runId)}/strategy-feedback`, feedback);
 }
 
 /** GET /api/jobs/{job_id} */
@@ -198,6 +210,8 @@ export async function fetchPanel<T extends PanelBase>(
     return {
       ...base,
       strategies: Array.isArray(raw.strategies) ? (raw.strategies as StrategyView[]) : [],
+      ledger_context: raw.ledger_context as LedgerContext | undefined,
+      latest_round: raw.latest_round as LatestRound | null | undefined,
     } as unknown as T;
   }
   const items = Array.isArray(raw.items) ? raw.items : [];

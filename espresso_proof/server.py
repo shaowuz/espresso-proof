@@ -387,14 +387,38 @@ class Workbench:
             raise WorkbenchError(400, f"unknown route id: {strategy}")
         if effort is not None and effort not in {"quick_test", "normal_pass", "deep_exploration"}:
             raise WorkbenchError(400, "invalid effort")
+        # A continue must never write a human_choice the kernel rejects: each
+        # strategy allows only a subset of efforts (e.g. the lock-claim route is
+        # quick-only). Coerce a missing/disallowed effort to an allowed one so a
+        # one-click continue can never corrupt the run.
+        allowed = self._allowed_efforts(run_dir).get(strategy, set())
+        if allowed and (effort is None or effort not in allowed):
+            for pref in ("normal_pass", "quick_test", "deep_exploration"):
+                if pref in allowed:
+                    effort = pref
+                    break
+            else:
+                effort = next(iter(sorted(allowed)))
         job_id = self._new_job(run_id=run_id, action="continue", agent=None)
 
         def work() -> dict[str, Any]:
+            from .strategy_feedback import feedback_summary
+            from .latest_round import graph_stamp, write_latest_round_ledger
+
+            # advisory human ranking/time-allocation context for THIS round
+            # (the existing taste_judgment channel; never evidence).
+            taste = feedback_summary(run_dir, selected_strategy=strategy)
+            prev_stamp = graph_stamp(run_dir)
             resume_run(
                 run_dir=run_dir,
                 selected_strategy=strategy,
                 effort=effort,
+                taste_judgment=taste,
                 prover_provider=self.provider,
+            )
+            # advisory explanatory ledger of what the round did (display only).
+            write_latest_round_ledger(
+                run_dir, selected_strategy=strategy, prev_graph_stamp=prev_stamp
             )
             return {"continued": strategy}
 
@@ -403,6 +427,77 @@ class Workbench:
             kwargs={"lock": self._run_lock(run_id)}, daemon=True,
         ).start()
         return {"job_id": job_id, "strategy": strategy}
+
+    def record_strategy_feedback(self, run_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Goal 43C: record one advisory strategy-feedback item.
+
+        Path-confined, bounded body (the handler already caps it), the strategy
+        id must exist in the run's brief, the item is strict-model-validated
+        (status/evidence fields rejected), written atomically to the sidecar,
+        and the CORE run is re-validated afterward (the sidecar is never part
+        of the kernel manifest, so a high score upgrades nothing)."""
+
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from pydantic import ValidationError
+
+        from .io import read_yaml
+        from .strategy_feedback import StrategyFeedback, append_feedback, latest_by_strategy
+
+        # reject any unexpected key up front so a client cannot even ATTEMPT to
+        # smuggle a status/evidence field through this advisory endpoint.
+        allowed = {"strategy_id", "score", "priority", "note", "intended_use"}
+        if set(body) - allowed:
+            raise WorkbenchError(400, "invalid feedback")
+        run_dir = self.resolve_run(run_id)
+        strategy_id = str(body.get("strategy_id") or "")
+        brief = self._strategy_ids(run_dir)
+        if strategy_id not in brief:
+            raise WorkbenchError(400, f"unknown route id: {strategy_id}")
+        try:
+            claim = read_yaml(
+                run_dir / read_yaml(run_dir / "run_manifest.yaml")["artifacts"]["locked_claim"]
+            )
+        except Exception as exc:  # noqa: BLE001 — corrupt/missing manifest fails closed
+            raise WorkbenchError(404, "run is not in a feedback-ready state") from exc
+        try:
+            item = StrategyFeedback.model_validate(
+                {
+                    "feedback_id": uuid4().hex,
+                    "run_id": run_id,
+                    "claim_id": claim.get("id", ""),
+                    "strategy_id": strategy_id,
+                    "score": body.get("score", 50),
+                    "priority": body.get("priority", "normal"),
+                    "note": str(body.get("note") or "")[:500],
+                    "intended_use": body.get("intended_use", "ranking"),
+                    "created_at": datetime.now(UTC).isoformat(),
+                }
+            )
+        except ValidationError as exc:
+            # never write on a bad payload; the prior run is untouched.
+            raise WorkbenchError(400, "invalid feedback") from exc
+        # serialize the read-modify-write append under the per-run lock so two
+        # concurrent POSTs cannot lose an item (the sidecar append is a
+        # load->append->write cycle, not a single atomic op).
+        with self._run_lock(run_id):
+            append_feedback(run_dir, item)
+            # confirm the kernel run still validates after the sidecar write.
+            try:
+                validate_run(run_dir)
+            except Exception as exc:
+                raise WorkbenchError(
+                    409,
+                    "This run no longer passes Espresso's safety validation; the "
+                    "feedback is advisory and changed no mathematical status.",
+                ) from exc
+            latest = latest_by_strategy(run_dir).get(strategy_id)
+        return {
+            "ok": True,
+            "strategy_id": strategy_id,
+            "feedback": latest.model_dump(mode="json") if latest else None,
+        }
 
     def _strategy_ids(self, run_dir: Path) -> set[str]:
         from .io import read_yaml
@@ -413,6 +508,24 @@ class Workbench:
             return set()
         brief = read_yaml(run_dir / brief_rel)
         return {str(r.get("id")) for r in (brief.get("top_strategies") or []) if r.get("id")}
+
+    def _allowed_efforts(self, run_dir: Path) -> dict[str, set[str]]:
+        """Effort options the kernel allows per strategy, from the brief's
+        allowed_human_choices (the same source the validator checks)."""
+
+        from .io import read_yaml
+
+        try:
+            manifest = read_yaml(run_dir / "run_manifest.yaml")
+            brief = read_yaml(run_dir / manifest["artifacts"]["strategy_brief"])
+        except Exception:  # noqa: BLE001
+            return {}
+        out: dict[str, set[str]] = {}
+        for choice in brief.get("allowed_human_choices") or []:
+            sid = choice.get("strategy_id")
+            if sid:
+                out[str(sid)] = {str(e) for e in (choice.get("effort_options") or [])}
+        return out
 
     # -- read views ----------------------------------------------------------
     def _run_digest(self, run_dir: Path) -> str:
@@ -674,6 +787,37 @@ def _make_handler(workbench: Workbench):
                 raise WorkbenchError(400, "expected a JSON object")
             return data
 
+        def _require_loopback_origin(self) -> None:
+            """CSRF-style guard for new mutating endpoints (Goal 43C).
+
+            The workbench binds to loopback only, so a legitimate browser POST
+            carries a loopback Host and (for fetch) a loopback Origin. Reject a
+            cross-site Origin and a non-loopback Host so a page on another
+            origin cannot drive a state change. Loopback covers any port (tests
+            and real servers use varied ports)."""
+
+            def _is_loopback_host(value: str) -> bool:
+                hostname = value.split("@")[-1].split(":")[0].strip().lower()
+                return hostname in {"127.0.0.1", "localhost", "::1", "[::1]"}
+
+            origin = (self.headers.get("Origin") or "").strip().lower()
+            if origin:
+                # A present Origin must be a loopback http(s) origin. An opaque
+                # "null" origin (sandboxed iframe, data: URL) has no "//" and is
+                # rejected here — a mutating call must not come from one. A
+                # legitimate non-browser client (curl/CLI) sends no Origin and
+                # is covered by the loopback Host check below.
+                if "//" not in origin:
+                    raise WorkbenchError(403, "cross-site request blocked")
+                scheme, _, rest = origin.partition("//")
+                if scheme not in ("http:", "https:") or not _is_loopback_host(rest):
+                    raise WorkbenchError(403, "cross-site request blocked")
+            host = (self.headers.get("Host") or "").strip().lower()
+            # HTTP/1.1 always sends Host; a non-loopback Host means the request
+            # was not addressed to this local server.
+            if not host or not _is_loopback_host(host):
+                raise WorkbenchError(403, "non-loopback host blocked")
+
         def _parts(self) -> list[str]:
             path = self.path.split("?", 1)[0]
             return [p for p in path.split("/") if p]
@@ -780,6 +924,11 @@ def _make_handler(workbench: Workbench):
                     self._send_json(
                         workbench.skip(parts[2], body.get("agent", ""), reason=body.get("reason"))
                     )
+                    return
+                if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "strategy-feedback":
+                    # new mutating endpoint: enforce the loopback CSRF guard.
+                    self._require_loopback_origin()
+                    self._send_json(workbench.record_strategy_feedback(parts[2], body))
                     return
                 raise WorkbenchError(404, "not found")
             except WorkbenchError as exc:
