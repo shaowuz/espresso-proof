@@ -23,6 +23,7 @@ run manifest + artifacts on disk; the timeline records the stage bracketing
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -38,11 +39,25 @@ EVENT_KINDS = (
     "job_done",
     "job_failed",
     "lock_denied",
+    # Goal 54A additive kinds (backward-compatible; consumers reading only the
+    # original stage_*/validation_* kinds are unaffected).
+    "agent_call_started",
+    "agent_call_finished",
+    "agent_call_failed",
+    "server_job",
+    "replay",
+    "note",
 )
 
 
 def append_event(run_dir: Path, kind: str, *, stage: str = "", detail: str = "") -> None:
-    """Append one event line. Diagnostic only; never raises into the runtime."""
+    """Append one event line. Diagnostic only; never raises into the runtime.
+
+    Goal 54A: every record also carries a monotonic_ms stamp (integer ms from a
+    monotonic clock) so stage-duration / silent-gap math does not depend on
+    wall-clock skew. Additive field; consumers reading kind/stage/detail are
+    unaffected.
+    """
 
     if kind not in EVENT_KINDS:
         return  # unknown kinds are dropped, not invented
@@ -53,6 +68,7 @@ def append_event(run_dir: Path, kind: str, *, stage: str = "", detail: str = "")
             return
         record = {
             "ts": datetime.now(UTC).isoformat(),
+            "monotonic_ms": time.monotonic_ns() // 1_000_000,
             "kind": kind,
         }
         if stage:

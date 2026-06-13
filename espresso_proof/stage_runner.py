@@ -24,17 +24,21 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .io import read_yaml, write_yaml
+from .observability import AGENT_EVENTS_FILENAME, TIMINGS_FILENAME
 from .run_events import EVENTS_FILENAME, append_event
 from .run_lock import LOCK_FILENAME
 
 MANIFEST_NAME = "run_manifest.yaml"
 
 # Runtime plumbing files that are never part of a stage transaction: the
-# append-only diagnostic timeline (rolling it back would erase the record of
-# the failed stage it exists to explain) and the writer lock file (unlinking
+# append-only diagnostic timeline + per-run observability logs (rolling them
+# back would erase the record of the failed stage they exist to explain — in
+# particular a failed agent call's record) and the writer lock file (unlinking
 # it would silently break a concurrently-held flock by splitting it across
-# inodes).
-_SNAPSHOT_EXCLUDED_NAMES = frozenset({EVENTS_FILENAME, LOCK_FILENAME})
+# inodes). Goal 54A: agent_events.jsonl / timings.yaml join events.jsonl here.
+_SNAPSHOT_EXCLUDED_NAMES = frozenset(
+    {EVENTS_FILENAME, AGENT_EVENTS_FILENAME, TIMINGS_FILENAME, LOCK_FILENAME}
+)
 
 
 @dataclass
