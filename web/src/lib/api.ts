@@ -243,3 +243,14 @@ export function errorText(err: unknown): string {
     ? err.message
     : "This panel could not load.";
 }
+
+/**
+ * POST /api/runs/{id}/research-note — bind one advisory note to a run object
+ * (Goal 43F). Returns the binding; the note never changes any status.
+ */
+export function postResearchNote(
+  runId: string,
+  note: { target_kind: string; target_id: string; text: string },
+): Promise<{ ok: boolean; target_kind: string; target_id: string }> {
+  return post(`/api/runs/${encodeURIComponent(runId)}/research-note`, note);
+}

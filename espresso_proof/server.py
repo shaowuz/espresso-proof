@@ -428,6 +428,52 @@ class Workbench:
         ).start()
         return {"job_id": job_id, "strategy": strategy}
 
+    def record_research_note(self, run_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Goal 43F: bind one advisory research/chat note to a run object.
+
+        Path-confined, bounded body, strict-model-validated (status/evidence
+        fields rejected), scrubbed and written to a sidecar the kernel never
+        reads, and the core run re-validated afterward — a note changes no
+        proof/source/evidence/grade/claim status."""
+
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from pydantic import ValidationError
+
+        from .research_notes import ResearchNote, append_note
+
+        allowed = {"target_kind", "target_id", "text"}
+        if set(body) - allowed:
+            raise WorkbenchError(400, "invalid note")
+        run_dir = self.resolve_run(run_id)
+        try:
+            note = ResearchNote.model_validate(
+                {
+                    "note_id": uuid4().hex,
+                    "run_id": run_id,
+                    "target_kind": body.get("target_kind"),
+                    "target_id": str(body.get("target_id") or ""),
+                    "text": str(body.get("text") or "")[:500],
+                    "created_at": datetime.now(UTC).isoformat(),
+                }
+            )
+        except ValidationError as exc:
+            raise WorkbenchError(400, "invalid note") from exc
+        if note.target_id.strip() == "":
+            raise WorkbenchError(400, "invalid note")
+        with self._run_lock(run_id):
+            append_note(run_dir, note)
+            try:
+                validate_run(run_dir)
+            except Exception as exc:
+                raise WorkbenchError(
+                    409,
+                    "This run no longer passes Espresso's safety validation; the "
+                    "note is advisory and changed no mathematical status.",
+                ) from exc
+        return {"ok": True, "target_kind": note.target_kind, "target_id": note.target_id}
+
     def record_strategy_feedback(self, run_id: str, body: dict[str, Any]) -> dict[str, Any]:
         """Goal 43C: record one advisory strategy-feedback item.
 
@@ -772,6 +818,42 @@ def _make_handler(workbench: Workbench):
             self.end_headers()
             self.wfile.write(body)
 
+        def _stream_chat(self, run_id: str, message: str) -> None:
+            """Goal 43F: stream the conversational preview as Server-Sent Events.
+
+            Read-only: it resolves the run (path-confined) and streams already-
+            scrubbed lines built from the validated artifacts. It writes nothing
+            and never upgrades status. A mid-stream error ends the stream with a
+            safe ``done`` event so the client falls back to polling."""
+
+            from .chat_stream import stream_chat
+
+            try:
+                run_dir = workbench.resolve_run(run_id)
+            except WorkbenchError as exc:
+                self._send_json({"error": exc.message}, status=exc.status)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+
+            def emit(event: str, data: dict) -> None:
+                chunk = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                self.wfile.write(chunk.encode("utf-8"))
+                self.wfile.flush()
+
+            try:
+                for line in stream_chat(run_dir, message):
+                    emit("message", {"text": line})
+                emit("done", {"ok": True})
+            except Exception:  # noqa: BLE001 — a broken pipe / read error ends safely
+                try:
+                    emit("done", {"ok": False})
+                except Exception:  # noqa: BLE001
+                    pass
+
         def _read_json(self) -> dict[str, Any]:
             length = int(self.headers.get("Content-Length") or 0)
             if length <= 0:
@@ -929,6 +1011,19 @@ def _make_handler(workbench: Workbench):
                     # new mutating endpoint: enforce the loopback CSRF guard.
                     self._require_loopback_origin()
                     self._send_json(workbench.record_strategy_feedback(parts[2], body))
+                    return
+                if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "research-note":
+                    # Goal 43F: bind an advisory note to a run object (CSRF-guarded).
+                    self._require_loopback_origin()
+                    self._send_json(workbench.record_research_note(parts[2], body))
+                    return
+                if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "chat":
+                    # Goal 43F: a conversational PREVIEW stream (SSE). It reads
+                    # the run's validated state and writes nothing; the loopback
+                    # guard still applies. Every line is proof-language-scrubbed
+                    # server-side before it leaves the process.
+                    self._require_loopback_origin()
+                    self._stream_chat(parts[2], str(body.get("message", "")))
                     return
                 raise WorkbenchError(404, "not found")
             except WorkbenchError as exc:
