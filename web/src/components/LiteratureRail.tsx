@@ -25,6 +25,8 @@ export function LiteratureRail({ runId }: { runId: string }) {
       <PanelSection
         icon={BookOpen}
         title="Literature & theorems"
+        download={{ runId, panel: "literature", label: "literature" }}
+        run={{ runId, agent: "literature", onRan: () => void lit.refetch() }}
         count={present ? items.length : null}
         agentState={lit.data?.agent_state}
         isPending={lit.isPending}
@@ -44,12 +46,12 @@ export function LiteratureRail({ runId }: { runId: string }) {
               }
               header={
                 <span className="flex min-w-0 flex-col gap-1">
-                  <span className="truncate text-[13px] font-medium text-stone-800">
+                  <span className="truncate text-[15px] font-medium text-stone-800">
                     <MathText inline>{ref.title || ref.id}</MathText>
                   </span>
                   <span className="flex flex-wrap items-center gap-1">
                     {ref.locator.value !== "" && (
-                      <span className="inline-flex max-w-full items-center gap-1 rounded border border-stone-200 bg-stone-50 px-1.5 py-0.5 text-[11px] text-stone-600">
+                      <span className="inline-flex max-w-full items-center gap-1 rounded border border-stone-200 bg-stone-50 px-1.5 py-0.5 text-[13px] text-stone-600">
                         <span className="font-medium uppercase tracking-wide text-stone-400">
                           {ref.locator.kind || "ref"}
                         </span>
@@ -77,7 +79,7 @@ export function LiteratureRail({ runId }: { runId: string }) {
       </PanelSection>
 
       <section>
-        <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-stone-500">
+        <h2 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone-500">
           Source gaps
         </h2>
         {gaps.length === 0 ? (
@@ -87,7 +89,7 @@ export function LiteratureRail({ runId }: { runId: string }) {
             {gaps.map((gap, i) => (
               <li
                 key={`${i}-${gap.slice(0, 24)}`}
-                className="rounded-md border border-amber-200 bg-amber-50/60 px-2.5 py-1.5 text-xs text-amber-900"
+                className="rounded-md border border-amber-200 bg-amber-50/60 px-2.5 py-1.5 text-[14px] text-amber-900"
               >
                 <MathText>{gap}</MathText>
               </li>

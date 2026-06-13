@@ -176,10 +176,30 @@ class Workbench:
                 "agent": agent,
                 "state": "queued",
                 "error": None,
+                "cancelled": False,
                 "started_at": _now(),
                 "finished_at": None,
             }
         return job_id
+
+    def cancel_job(self, job_id: str) -> dict[str, Any]:
+        """Best-effort stop. A job still QUEUED is cancelled before it runs; a
+        job already RUNNING cannot be force-killed (the agent work is not
+        cooperatively interruptible), so we only mark the intent — the kernel
+        still validates whatever the in-flight agent finishes, and nothing is
+        ever left in an unsafe state."""
+
+        with self._jobs_lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise WorkbenchError(404, "job not found")
+            if job["state"] in ("done", "failed", "cancelled"):
+                return {"ok": True, "state": job["state"]}
+            job["cancelled"] = True
+            if job["state"] == "queued":
+                job["state"] = "cancelled"
+                job["finished_at"] = _now()
+            return {"ok": True, "state": job["state"]}
 
     def _set_job(self, job_id: str, **fields: Any) -> None:
         with self._jobs_lock:
@@ -205,6 +225,11 @@ class Workbench:
 
         import time as _time
 
+        # a job cancelled while still queued never starts its work.
+        with self._jobs_lock:
+            if self._jobs.get(job_id, {}).get("cancelled"):
+                self._jobs[job_id].update(state="cancelled", finished_at=_now())
+                return
         self._set_job(job_id, state="running")
         t0 = _time.monotonic()
         try:
@@ -427,6 +452,48 @@ class Workbench:
             kwargs={"lock": self._run_lock(run_id)}, daemon=True,
         ).start()
         return {"job_id": job_id, "strategy": strategy}
+
+    # Goal 43 polish: which panel exports which validated artifact file.
+    _DOWNLOADABLE = {
+        "examples": "examples",
+        "counterexamples": "counterexamples",
+        "computations": "computation_checks",
+        "literature": "literature_review",
+        "strategies": "strategy_brief",
+    }
+
+    def artifact_download(self, run_id: str, panel: str) -> tuple[str, bytes, str]:
+        """Return (artifact_name, bytes, filename) for a downloadable panel.
+
+        Read-only export of a VALIDATED artifact (the run is validated first, so
+        a download never serves a run that fails safety). Path-confined via
+        ``resolve_run`` and an allowlist of panel -> manifest artifact; a
+        missing artifact (panel not run) is an honest 404."""
+
+        from .io import read_yaml
+
+        name = self._DOWNLOADABLE.get(panel)
+        if name is None:
+            raise WorkbenchError(404, "no such artifact")
+        run_dir = self.resolve_run(run_id)
+        try:
+            validate_run(run_dir)
+        except Exception as exc:
+            raise WorkbenchError(
+                409,
+                "This run no longer passes Espresso's safety validation, so its "
+                "artifacts cannot be exported.",
+            ) from exc
+        manifest = read_yaml(run_dir / "run_manifest.yaml")
+        rel = manifest.get("artifacts", {}).get(name) or manifest.get(
+            "optional_artifacts", {}
+        ).get(name)
+        if not rel:
+            raise WorkbenchError(404, "this artifact has not been produced yet")
+        path = (run_dir / rel).resolve()
+        if run_dir.resolve() not in path.parents or not path.is_file():
+            raise WorkbenchError(404, "this artifact has not been produced yet")
+        return name, path.read_bytes(), f"{run_id}-{name}.yaml"
 
     def record_research_note(self, run_id: str, body: dict[str, Any]) -> dict[str, Any]:
         """Goal 43F: bind one advisory research/chat note to a run object.
@@ -945,11 +1012,26 @@ def _make_handler(workbench: Workbench):
                 if parts == ["api", "health"]:
                     self._send_json({"ok": True})
                     return
+                if parts == ["api", "info"]:
+                    # display-only server info for the settings panel — no paths.
+                    self._send_json(
+                        {"provider": workbench.provider, "runs": len(workbench.list_runs())}
+                    )
+                    return
                 if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "snapshot":
                     self._send_json(workbench.snapshot(parts[2]))
                     return
                 if len(parts) == 5 and parts[:2] == ["api", "runs"] and parts[3] == "panel":
                     self._send_json(workbench.panel(parts[2], parts[4]))
+                    return
+                if len(parts) == 5 and parts[:2] == ["api", "runs"] and parts[3] == "artifact":
+                    name, body, fname = workbench.artifact_download(parts[2], parts[4])
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/x-yaml; charset=utf-8")
+                    self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
                     return
                 if len(parts) == 2 and parts[0] == "run":
                     self._send_html(workbench.dashboard_html(parts[1]))
@@ -1006,6 +1088,12 @@ def _make_handler(workbench: Workbench):
                     self._send_json(
                         workbench.skip(parts[2], body.get("agent", ""), reason=body.get("reason"))
                     )
+                    return
+                if len(parts) == 4 and parts[:2] == ["api", "jobs"] and parts[3] == "cancel":
+                    # mutating POST: enforce the loopback CSRF guard so another
+                    # origin cannot cancel a local run's jobs.
+                    self._require_loopback_origin()
+                    self._send_json(workbench.cancel_job(parts[2]))
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "strategy-feedback":
                     # new mutating endpoint: enforce the loopback CSRF guard.

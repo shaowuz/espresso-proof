@@ -94,9 +94,9 @@ export function ChatPanel({
 
   return (
     <section className="mt-4">
-      <h2 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-stone-500">
+      <h2 className="mb-1.5 flex items-center gap-1.5 text-[14px] font-semibold uppercase tracking-wide text-stone-500">
         <MessageSquare className="h-3.5 w-3.5" aria-hidden /> Conversation
-        <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-stone-200 bg-stone-50 px-1.5 py-0.5 text-[10px] font-normal normal-case tracking-normal text-stone-500">
+        <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-stone-200 bg-stone-50 px-1.5 py-0.5 text-[12px] font-normal normal-case tracking-normal text-stone-500">
           <Sparkles className="h-2.5 w-2.5" aria-hidden /> preview — not evidence
         </span>
       </h2>
@@ -104,14 +104,14 @@ export function ChatPanel({
       <div className="rounded-lg border border-stone-200 bg-white">
         <div className="max-h-64 space-y-2 overflow-y-auto p-3">
           {messages.length === 0 ? (
-            <p className="text-xs text-stone-400">
+            <p className="text-[14px] text-stone-400">
               Ask about this run — strategies, examples, what is missing. Replies are a
               conversational preview of the current artifacts and never change evidence.
             </p>
           ) : (
             messages.map((m) => (
               <FadeIn key={m.id} motionKey={`${m.id}-${m.text.length}`}>
-                <div className="text-xs leading-relaxed">
+                <div className="text-[14px] leading-relaxed">
                   <span
                     className={
                       m.role === "you"
@@ -149,7 +149,7 @@ export function ChatPanel({
             rows={1}
             placeholder="Ask about this run (⌘↵)…"
             disabled={streaming}
-            className="min-h-[34px] flex-1 resize-none text-xs"
+            className="min-h-[34px] flex-1 resize-none text-[14px]"
             aria-label="Ask Espresso about this run"
           />
           <Button
@@ -170,11 +170,11 @@ export function ChatPanel({
             <button
               type="button"
               onClick={() => void pinToRoute()}
-              className="inline-flex items-center gap-1 rounded-md border border-stone-200 bg-white px-1.5 py-0.5 text-[11px] font-medium text-stone-600 hover:bg-stone-50"
+              className="inline-flex items-center gap-1 rounded-md border border-stone-200 bg-white px-1.5 py-0.5 text-[13px] font-medium text-stone-600 hover:bg-stone-50"
             >
               <Pin className="h-3 w-3" aria-hidden /> Note on selected route
             </button>
-            {pinned && <span className="text-[11px] text-stone-400">{pinned}</span>}
+            {pinned && <span className="text-[13px] text-stone-400">{pinned}</span>}
           </div>
         )}
       </div>

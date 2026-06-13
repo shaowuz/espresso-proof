@@ -153,7 +153,7 @@ export interface RunListItem {
   project?: string;
 }
 
-export type JobState = "queued" | "running" | "done" | "failed";
+export type JobState = "queued" | "running" | "done" | "failed" | "cancelled";
 
 export interface JobInfo {
   state: JobState;

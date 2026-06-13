@@ -20,7 +20,7 @@ import type {
  * Errors surface as Error objects whose message is the server's friendly
  * "error" string when available — never a traceback.
  */
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, init);
@@ -253,4 +253,9 @@ export function postResearchNote(
   note: { target_kind: string; target_id: string; text: string },
 ): Promise<{ ok: boolean; target_kind: string; target_id: string }> {
   return post(`/api/runs/${encodeURIComponent(runId)}/research-note`, note);
+}
+
+/** POST /api/jobs/{job_id}/cancel — best-effort stop of a queued/running job. */
+export function cancelJob(jobId: string): Promise<{ ok: boolean; state: string }> {
+  return post(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, {});
 }

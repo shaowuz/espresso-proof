@@ -3,9 +3,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { BookOpen, FlaskConical, MessageSquare } from "lucide-react";
 import { fetchRuns } from "./lib/api";
 import type { RunListItem } from "./lib/types";
-import { useClaimPanel, useStatus } from "./hooks/useCockpit";
+import { useClaimPanel, useStatus, useStrategiesPanel } from "./hooks/useCockpit";
 import { Header } from "./components/Header";
 import { Composer } from "./components/Composer";
+import { SettingsButton } from "./components/SettingsButton";
 import { EvidenceRail } from "./components/EvidenceRail";
 import { Workspace } from "./components/Workspace";
 import { LiteratureRail } from "./components/LiteratureRail";
@@ -27,6 +28,9 @@ export default function App() {
 
   const status = useStatus(selectedRunId);
   const claim = useClaimPanel(selectedRunId);
+  // shared (cached) strategies query — also feeds the bottom-left settings the
+  // latest-round detail, so the main workspace can stay minimal.
+  const strategies = useStrategiesPanel(selectedRunId);
   const hasRun = selectedRunId !== null;
 
   const loadRuns = useCallback(async (selectLatest: boolean) => {
@@ -62,16 +66,10 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col bg-stone-50 text-stone-800">
-      <Header
-        claim={claim.data?.claim}
-        status={status.data}
-        runs={runs}
-        selectedRunId={selectedRunId}
-        onSelectRun={setSelectedRunId}
-      />
+      <Header claim={claim.data?.claim} status={status.data} />
 
       {status.isError && hasRun && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-800">
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-[14px] text-amber-800">
           {status.error instanceof Error ? status.error.message : "Could not load this run."}
         </div>
       )}
@@ -89,7 +87,7 @@ export default function App() {
             type="button"
             onClick={() => setPane(key)}
             className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 px-2 py-2 text-xs font-medium",
+              "flex flex-1 items-center justify-center gap-1.5 px-2 py-2 text-[14px] font-medium",
               pane === key
                 ? "border-b-2 border-sage-600 text-stone-800"
                 : "text-stone-500",
@@ -133,14 +131,24 @@ export default function App() {
         </aside>
       </main>
 
-      <Composer onRunCreated={onRunCreated} />
+      <div className="flex shrink-0 items-end gap-2 border-t border-stone-200 bg-white/90 px-3 py-3">
+        <SettingsButton
+          runs={runs}
+          selectedRunId={selectedRunId}
+          onSelectRun={setSelectedRunId}
+          latestRound={strategies.data?.latest_round}
+        />
+        <div className="min-w-0 flex-1">
+          <Composer onRunCreated={onRunCreated} />
+        </div>
+      </div>
     </div>
   );
 }
 
 function ShellPlaceholder() {
   return (
-    <div className="p-4 text-xs text-stone-400">
+    <div className="p-4 text-[14px] text-stone-400">
       This panel fills in once a run is selected.
     </div>
   );
@@ -150,15 +158,15 @@ function EmptyWorkspace({ hasRuns }: { hasRuns: boolean }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
       <div className="w-full max-w-2xl rounded-xl border border-stone-200 bg-white p-6">
-        <h1 className="text-base font-semibold text-stone-800">
+        <h1 className="text-[18px] font-semibold text-stone-800">
           Mathematical research cockpit
         </h1>
-        <p className="mt-1 text-sm text-stone-600">
+        <p className="mt-1 text-[15px] text-stone-600">
           {hasRuns
             ? "Pick a run from the header, or state a new claim below."
             : "State a mathematical claim in the composer below to start."}
         </p>
-        <ul className="mt-4 grid gap-2 text-[13px] text-stone-600 sm:grid-cols-3">
+        <ul className="mt-4 grid gap-2 text-[15px] text-stone-600 sm:grid-cols-3">
           <li className="rounded-lg border border-stone-100 bg-stone-50 p-3">
             <span className="font-medium text-stone-700">Left:</span> examples,
             counterexamples, and computation checks.

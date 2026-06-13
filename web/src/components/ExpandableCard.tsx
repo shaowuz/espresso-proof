@@ -50,10 +50,10 @@ export function ExpandableCard({
 export function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="mb-1.5 last:mb-0">
-      <div className="text-[10.5px] font-semibold uppercase tracking-wide text-stone-400">
+      <div className="text-[12px] font-semibold uppercase tracking-wide text-stone-400">
         {label}
       </div>
-      <div className="text-xs leading-relaxed text-stone-700">{children}</div>
+      <div className="text-[14px] leading-relaxed text-stone-700">{children}</div>
     </div>
   );
 }
@@ -61,7 +61,7 @@ export function DetailRow({ label, children }: { label: string; children: ReactN
 /** Explicit placeholder — missing panels are never blank, never implied success. */
 export function PanelPlaceholder({ text }: { text: string }) {
   return (
-    <div className="rounded-lg border border-dashed border-stone-300 bg-stone-50/60 px-3 py-3 text-xs text-stone-500">
+    <div className="rounded-lg border border-dashed border-stone-300 bg-stone-50/60 px-3 py-3 text-[14px] text-stone-500">
       {text}
     </div>
   );

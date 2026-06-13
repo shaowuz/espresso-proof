@@ -30,8 +30,8 @@ export function Composer({ onRunCreated }: { onRunCreated: (runId: string) => vo
   };
 
   return (
-    <div className="shrink-0 border-t border-stone-200 bg-white/90 px-4 py-3">
-      <div className="mx-auto flex w-full max-w-4xl items-end gap-2">
+    <div className="w-full">
+      <div className="flex w-full items-end gap-2">
         <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}

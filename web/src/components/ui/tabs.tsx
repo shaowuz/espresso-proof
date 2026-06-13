@@ -27,7 +27,7 @@ export function TabsTrigger({
       role="tab"
       aria-selected={active}
       className={cn(
-        "flex-1 rounded-md px-3 py-1 text-xs font-medium transition-colors",
+        "flex-1 rounded-md px-3 py-1 text-[14px] font-medium transition-colors",
         active
           ? "bg-white text-stone-800 shadow-[0_1px_2px_rgba(28,25,23,0.06)]"
           : "text-stone-500 hover:text-stone-700",

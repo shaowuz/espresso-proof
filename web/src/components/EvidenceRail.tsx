@@ -14,7 +14,7 @@ import { MathText } from "./MathText";
 function ItemHeader({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <span className="flex min-w-0 flex-col gap-0.5">
-      <span className="truncate text-xs font-medium text-stone-800"><MathText inline>{title}</MathText></span>
+      <span className="truncate text-[14px] font-medium text-stone-800"><MathText inline>{title}</MathText></span>
       {children}
     </span>
   );
@@ -43,6 +43,8 @@ export function EvidenceRail({ runId }: { runId: string }) {
       <PanelSection
         icon={FlaskConical}
         title="Examples"
+        download={{ runId, panel: "examples", label: "examples" }}
+        run={{ runId, agent: "examples", onRan: () => void examples.refetch() }}
         count={examples.data && !examples.data.missing ? exItems.length : null}
         agentState={examples.data?.agent_state}
         isPending={examples.isPending}
@@ -62,7 +64,7 @@ export function EvidenceRail({ runId }: { runId: string }) {
                 <ItemHeader title={ex.name || ex.id}>
                   <span className="flex flex-wrap items-center gap-1">
                     <ToneBadge tone={ex.tone} phrase={ex.result_phrase} />
-                    <span className="text-[11px] text-stone-500">{ex.admissibility}</span>
+                    <span className="text-[13px] text-stone-500">{ex.admissibility}</span>
                   </span>
                 </ItemHeader>
               }
@@ -82,13 +84,15 @@ export function EvidenceRail({ runId }: { runId: string }) {
       <PanelSection
         icon={ShieldAlert}
         title="Counterexamples"
+        download={{ runId, panel: "counterexamples", label: "counterexamples" }}
+        run={{ runId, agent: "counterexamples", onRan: () => void counter.refetch() }}
         count={counter.data && !counter.data.missing ? ceItems.length : null}
         agentState={counter.data?.agent_state}
         isPending={counter.isPending}
         isError={counter.isError}
         errorText={errorText(counter.error)}
         hasData={ceItems.length > 0}
-        emptyText="No counterexamples recorded. This is not a proof of safety — needs check."
+        emptyText="No counterexamples recorded."
         onRetry={() => void counter.refetch()}
       >
         <div className="flex flex-col gap-1.5">
@@ -121,6 +125,7 @@ export function EvidenceRail({ runId }: { runId: string }) {
       <PanelSection
         icon={Calculator}
         title="Computations"
+        download={{ runId, panel: "computations", label: "computations" }}
         count={comps.data && !comps.data.missing ? coItems.length : null}
         agentState={comps.data?.agent_state}
         isPending={comps.isPending}
@@ -140,7 +145,7 @@ export function EvidenceRail({ runId }: { runId: string }) {
                 <ItemHeader title={co.quantity || co.id}>
                   <span className="flex flex-wrap items-center gap-1">
                     <ToneBadge tone={co.tone} phrase={co.phrase} />
-                    <span className="text-[11px] text-stone-500">{co.method}</span>
+                    <span className="text-[13px] text-stone-500">{co.method}</span>
                   </span>
                 </ItemHeader>
               }
