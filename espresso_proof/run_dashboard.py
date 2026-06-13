@@ -262,7 +262,42 @@ def _load_run_state(run_dir: Path) -> dict[str, Any]:
         "machine_checks": machine_checks,
         "state_label": _state_label(current_state, repair_needed),
         "proof_label": _proof_label(grade, repair_needed),
+        # Goal 54C: advisory human steering per route (score/priority/allocation).
+        # Display only — it orders attention, never evidence.
+        "time_allocation": _time_allocation_by_route(run_dir),
     }
+
+
+_PRIORITY_WORDS = {
+    "focus": "asked to focus here",
+    "reduce": "asked to de-prioritise",
+    "repair": "asked to repair",
+    "normal": "normal priority",
+}
+_ALLOCATION_WORDS = {
+    "expand": "expand next",
+    "repair": "repair next",
+    "cheap_check": "low-budget check next",
+}
+
+
+def _time_allocation_by_route(run_dir: Path) -> dict[str, dict[str, Any]]:
+    """Advisory steering per strategy id, derived live (Goal 54C). Fail-closed to
+    empty so a feedback fault never breaks the dashboard."""
+    try:
+        from .human_time_allocation import build_time_allocation_context
+
+        context = build_time_allocation_context(run_dir)
+        return {
+            route.strategy_id: {
+                "priority": route.priority,
+                "advisory_score": route.advisory_score,
+                "recommended_allocation": route.recommended_allocation,
+            }
+            for route in context.routes
+        }
+    except Exception:  # noqa: BLE001 - advisory display must never break the page
+        return {}
 
 
 def _route_data(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -277,6 +312,16 @@ def _route_data(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
         why = str(route.get("why_this_route") or "")
         risk = str(route.get("main_risk") or "")
         next_plan = str(route.get("next_loop_plan") or "")
+        steer = (state.get("time_allocation") or {}).get(route_id)
+        steer_line = ""
+        if steer:
+            priority_word = _PRIORITY_WORDS.get(steer.get("priority"), "normal priority")
+            alloc_word = _ALLOCATION_WORDS.get(steer.get("recommended_allocation"), "expand next")
+            steer_line = (
+                f"Human steering (advisory): {priority_word}; advisory score "
+                f"{steer.get('advisory_score')}/100; {alloc_word}. Steers search "
+                f"only, never evidence."
+            )
         details = [
             item
             for item in (
@@ -284,6 +329,7 @@ def _route_data(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
                 why,
                 risk and f"Risk: {risk}",
                 next_plan and f"Next: {next_plan}",
+                steer_line,
             )
             if item
         ]

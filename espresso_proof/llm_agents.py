@@ -11,6 +11,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+from .human_time_allocation import (
+    only_valid_route as _only_valid_route,
+    priority_for_strategy,
+    recommended_allocation_for_priority,
+    time_allocation_prompt_context,
+    write_time_allocation_context,
+)
 from .io import read_yaml, write_yaml
 from .models import LLMAgentRunReport, ProverLoopReport, ProverRoundIndex, ProverRoundReport
 from .research_bank import load_bankable_dict
@@ -1111,6 +1118,9 @@ def append_prover_loop_round(
         # ONLY — the round's outputs are re-validated by the kernel, so this can
         # never upgrade proof/source/evidence/grade/claim status.
         "human_feedback_advisory": _human_feedback_advisory(run_dir),
+        # Goal 54C: structured human strategy feedback (score/priority/note) +
+        # the derived advisory allocation hint, as prompt context. Advisory only.
+        "human_time_allocation": time_allocation_prompt_context(run_dir, selected_strategy_id),
     }
     created_at = datetime.now(UTC).isoformat()
     prover_raw = client.complete_json(
@@ -1166,7 +1176,18 @@ def append_prover_loop_round(
     blockers = blockers[:12]
     reviewer_pointers = [_review_pointer(review) for review in verifier_reviews]
     selected_strategy_id = parent_attempt["strategy_id"]
-    allocation = "repair" if blockers else "expand"
+    # Goal 54C: the selected route's human priority deterministically sets the
+    # allocation. Reviewer blockers always force 'repair' (objections outrank
+    # taste); otherwise focus/normal -> expand, repair -> repair, reduce ->
+    # cheap_check unless it is the only valid route. Scheduling only — it never
+    # sets or upgrades any proof/source/evidence/grade/claim status. The advisory
+    # context sidecar is (re)written so the dashboard + replay can audit it.
+    allocation_context = write_time_allocation_context(run_dir)
+    allocation = recommended_allocation_for_priority(
+        priority_for_strategy(allocation_context, selected_strategy_id),
+        has_blockers=bool(blockers),
+        only_valid_route=_only_valid_route(allocation_context),
+    )
     new_attempt = {
         "attempt_id": f"attempt_round_{next_round:03d}_{selected_strategy_id}",
         "round_index": next_round,

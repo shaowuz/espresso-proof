@@ -2531,6 +2531,58 @@ class AgentRunStatusReport(StrictBaseModel):
         return self
 
 
+class RouteAllocationEntry(StrictBaseModel):
+    """Goal 54C: one candidate route's advisory scheduling line.
+
+    Pure scheduling arithmetic derived from the human's strategy feedback +
+    choice + the brief's score. ``advisory_score`` orders attention/budget; it is
+    NOT a proof/grade/evidence score and never upgrades any status."""
+
+    strategy_id: str
+    base_score: int = Field(ge=0, le=100)
+    priority: Literal["focus", "normal", "reduce", "repair"] = "normal"
+    is_selected: bool = False
+    is_most_recent_feedback: bool = False
+    advisory_score: int = Field(ge=0, le=100)
+    unresolved_blockers: int = Field(ge=0, default=0)
+    recommended_allocation: Literal["expand", "repair", "cheap_check"] = "expand"
+
+
+class HumanTimeAllocationContext(StrictBaseModel):
+    """Goal 54C: deterministic, advisory-only time-allocation context derived from
+    human strategy feedback.
+
+    It can reorder candidate routes, recommend a per-route allocation mode, and
+    feed prompt context. It can NEVER set proof/source/evidence/grade/claim
+    status. ``advisory_only`` is locked True and ``forbidden_status_effect`` names
+    the statuses this layer must never touch (documentation + a structural check
+    that the model carries no such field)."""
+
+    schema_version: int = 1
+    advisory_only: Literal[True] = True
+    selected_strategy: str | None = None
+    routes: list[RouteAllocationEntry] = Field(default_factory=list)
+    derived_allocation_hint: str = ""
+    forbidden_status_effect: list[str] = Field(
+        default_factory=lambda: ["proof", "source", "evidence", "grade", "claim"]
+    )
+
+    @model_validator(mode="after")
+    def validate_advisory(self) -> HumanTimeAllocationContext:
+        # The ranking is advisory: routes are ordered by (selected first, then
+        # higher advisory_score, then fewer blockers, then stable id). Enforce the
+        # selected-route-first invariant so the packet can never bury the human's
+        # explicit pick behind a computed score.
+        selected_positions = [
+            i for i, route in enumerate(self.routes) if route.is_selected
+        ]
+        if selected_positions and selected_positions[0] != 0:
+            raise ValueError("the human-selected route must rank first")
+        if len({route.strategy_id for route in self.routes}) != len(self.routes):
+            raise ValueError("routes must have unique strategy_id values")
+        return self
+
+
 MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "claim": Claim,
     "agent_contracts": AgentContracts,
@@ -2577,6 +2629,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "prover_round": ProverRoundReport,
     "prover_round_index": ProverRoundIndex,
     "proof_goal_graph": ProofGoalGraph,
+    "human_time_allocation_context": HumanTimeAllocationContext,
     "front_half_run": FrontHalfRunReport,
     "agent_run_status": AgentRunStatusReport,
     "memory_entry": MemoryEntry,
