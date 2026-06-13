@@ -682,15 +682,7 @@ def build_prover_loop_report(
             }
         ]
     verifier_reviews = agent_report.get("verifier_reviews", [])
-    reviewer_pointers = [
-        {
-            "verifier_id": review["verifier_id"],
-            "verdict": review["verdict"],
-            "objection_count": len(review.get("objections", [])),
-            "recommended_human_action": review["recommended_human_action"],
-        }
-        for review in verifier_reviews
-    ]
+    reviewer_pointers = [_review_pointer(review) for review in verifier_reviews]
     blockers = sorted(
         {
             item
@@ -1144,6 +1136,7 @@ def append_prover_loop_round(
             created_at=datetime.now(UTC).isoformat(),
             index=index,
             reviewer_role=reviewer_role,
+            target_subgoal_id=target_subgoal.get("id"),  # Goal 54B: bind objections to the attacked subgoal
         )
         review["verifier_id"] = f"round_{next_round:03d}_{review['verifier_id']}"
         verifier_reviews.append(review)
@@ -1171,15 +1164,7 @@ def append_prover_loop_round(
         },
     )
     blockers = blockers[:12]
-    reviewer_pointers = [
-        {
-            "verifier_id": review["verifier_id"],
-            "verdict": review["verdict"],
-            "objection_count": len(review.get("objections", [])),
-            "recommended_human_action": review["recommended_human_action"],
-        }
-        for review in verifier_reviews
-    ]
+    reviewer_pointers = [_review_pointer(review) for review in verifier_reviews]
     selected_strategy_id = parent_attempt["strategy_id"]
     allocation = "repair" if blockers else "expand"
     new_attempt = {
@@ -1309,6 +1294,119 @@ def make_prover_attempt(raw: dict, *, client: LLMClient, created_at: str) -> dic
     }
 
 
+_OBJECTION_KINDS = {
+    "missing_source", "hypothesis_gap", "definition_gap", "logical_gap",
+    "computation_needed", "counterexample_pressure", "unclear_claim",
+    "reviewer_disagreement", "other",
+}
+_OBJECTION_SEVERITIES = {"P0", "P1", "P2", "P3"}
+
+
+def _pointer_scope_from_review(review: dict) -> tuple[str, str | None]:
+    """Goal 54B: derive a ProverLoopReviewPointer's (scope, subgoal_id) from the
+    review's scoped objections. Only when every subgoal-scoped objection names the
+    SAME subgoal does the pointer claim that subgoal; otherwise it stays 'route'
+    (honest default — provenance only, never reconciled against the renumbering graph)."""
+    sos = review.get("scoped_objections") or []
+    subgoal_ids = {
+        s.get("subgoal_id") for s in sos
+        if isinstance(s, dict) and s.get("scope") == "subgoal" and s.get("subgoal_id")
+    }
+    if len(subgoal_ids) == 1:
+        return "subgoal", next(iter(subgoal_ids))
+    return "route", None
+
+
+def _review_pointer(review: dict) -> dict:
+    """Goal 54B: build one ProverLoopReviewPointer dict, carrying the scope/subgoal_id
+    derived from the review's scoped objections (advisory provenance)."""
+    scope, subgoal_id = _pointer_scope_from_review(review)
+    return {
+        "verifier_id": review["verifier_id"],
+        "verdict": review["verdict"],
+        "objection_count": len(review.get("objections", [])),
+        "recommended_human_action": review["recommended_human_action"],
+        "scope": scope,
+        "subgoal_id": subgoal_id,
+    }
+
+
+def _normalize_scoped_objections(
+    raw: dict, *, verifier_id: str, target_subgoal_id: str | None
+) -> list[dict]:
+    """Goal 54B: structured scoped objections for one reviewer review (advisory only).
+
+    1. Explicit well-formed reviewer ``scoped_objections`` (a subgoal/proof_step scope
+       must name its target or it is downgraded to ``route`` — never falsely specific).
+    2. Otherwise legacy free-text ``risks`` -> objections; bound to this round's target
+       as ``inferred_target`` (honestly marked + reasoned) when a subgoal was attacked,
+       else a plain ``route`` ``legacy_fallback``.
+    Never raises; malformed entries are dropped.
+    """
+
+    def _coerce_explicit(entry: dict, idx: int) -> dict | None:
+        if not isinstance(entry, dict):
+            return None
+        text = str(entry.get("text", "")).strip()
+        if not text:
+            return None
+        scope = entry.get("scope")
+        if scope not in {"subgoal", "proof_step", "route", "global"}:
+            scope = "route"
+        subgoal_id = entry.get("subgoal_id")
+        proof_step_id = entry.get("proof_step_id")
+        if scope == "subgoal" and not subgoal_id:
+            scope = "route"
+        if scope == "proof_step" and not proof_step_id:
+            scope = "route"
+        if scope != "subgoal":
+            subgoal_id = None
+        if scope != "proof_step":
+            proof_step_id = None
+        return {
+            "id": f"{verifier_id}_obj_{idx:03d}",
+            "text": text[:600],
+            "scope": scope,
+            "scope_source": "explicit",
+            "scope_inferred": False,
+            "inference_reason": "",
+            "subgoal_id": subgoal_id,
+            "proof_step_id": proof_step_id,
+            "kind": entry.get("kind") if entry.get("kind") in _OBJECTION_KINDS else "other",
+            "severity": entry.get("severity") if entry.get("severity") in _OBJECTION_SEVERITIES else "P2",
+            "suggested_next_action": str(entry.get("suggested_next_action", ""))[:300],
+        }
+
+    explicit = raw.get("scoped_objections")
+    if isinstance(explicit, list) and explicit:
+        return [c for i, e in enumerate(explicit) if (c := _coerce_explicit(e, i)) is not None]
+
+    out: list[dict] = []
+    for i, text in enumerate(safe_list(raw.get("risks", []))):
+        text = str(text).strip()
+        if not text:
+            continue
+        if target_subgoal_id:
+            out.append({
+                "id": f"{verifier_id}_obj_{i:03d}", "text": text[:600], "scope": "subgoal",
+                "scope_source": "inferred_target", "scope_inferred": True,
+                "inference_reason": (
+                    "reviewer objection on the round's attacked subgoal; no explicit scope "
+                    "was given, bound to the prover round's target_subgoal_id"
+                ),
+                "subgoal_id": target_subgoal_id, "proof_step_id": None,
+                "kind": "other", "severity": "P2", "suggested_next_action": "",
+            })
+        else:
+            out.append({
+                "id": f"{verifier_id}_obj_{i:03d}", "text": text[:600], "scope": "route",
+                "scope_source": "legacy_fallback", "scope_inferred": False, "inference_reason": "",
+                "subgoal_id": None, "proof_step_id": None,
+                "kind": "other", "severity": "P2", "suggested_next_action": "",
+            })
+    return out
+
+
 def make_verifier_review(
     raw: dict,
     *,
@@ -1316,12 +1414,14 @@ def make_verifier_review(
     created_at: str,
     index: int,
     reviewer_role: str,
+    target_subgoal_id: str | None = None,
 ) -> dict:
     unsafe_language = collect_unsafe_language(raw)
     verdict = normalize_verdict(raw.get("verdict", "needs_revision"))
     action = normalize_action(raw.get("recommended_human_action", "revise"))
+    verifier_id = f"{reviewer_role}_{index:03d}"
     return {
-        "verifier_id": f"{reviewer_role}_{index:03d}",
+        "verifier_id": verifier_id,
         "provider": client.provider,
         "model": client.model,
         "created_at": created_at,
@@ -1330,6 +1430,9 @@ def make_verifier_review(
         "missing_hypotheses": safe_list(raw.get("missing_hypotheses", [])),
         "source_requests": safe_list(raw.get("source_requests", [])),
         "unsafe_language": unsafe_language,
+        "scoped_objections": _normalize_scoped_objections(
+            raw, verifier_id=verifier_id, target_subgoal_id=target_subgoal_id
+        ),
         "recommended_human_action": action,
         "status": "needs_human" if verdict != "blocked" else "blocked",
     }
@@ -1385,6 +1488,12 @@ def verifier_system_prompt(index: int, *, reviewer_role: str = "verifier") -> st
     return (
         f"{role_guidance} "
         "Flag missing hypotheses, source gaps, unsafe proof-like language, and counterexample pressure. "
+        "When you are reviewing work on a NAMED target subgoal or proof step, return a "
+        "'scoped_objections' list: each item with text, scope (subgoal|proof_step|route|global), "
+        "the matching subgoal_id or proof_step_id, kind (missing_source|hypothesis_gap|definition_gap|"
+        "logical_gap|computation_needed|counterexample_pressure|unclear_claim|reviewer_disagreement|other), "
+        "severity (P0|P1|P2|P3), and a suggested_next_action. An objection only blocks or prioritizes "
+        "repair; it never proves, refutes, or closes anything. "
         "Do not upgrade proof, evidence, source, or grade status. Return JSON only."
     )
 

@@ -150,6 +150,7 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
     prover_loop = optional_artifact("prover_loop")
     proof_verification = optional_artifact("proof_verification")
     computation_verification = optional_artifact("computation_verification")
+    llm_agent_run = optional_artifact("llm_agent_run")  # Goal 54B: scoped reviewer objections
 
     strategies = {
         str(strategy.get("id")): strategy
@@ -319,6 +320,28 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
                     "remaining_risk": "Checked only in this finite or computational scope, not the universal claim.",
                 }
             )
+
+    # --- Goal 54B: attach subgoal-scoped reviewer objections to matching nodes ---
+    # Attach-if-matches: an objection naming a node that exists gets placed on it;
+    # one naming a stale/unknown subgoal_id is simply not placed (never a fabricated
+    # node, never a state change). Dedup keeps rebuilds idempotent. An objection can
+    # only block/prioritize repair — it never closes or upgrades a subgoal.
+    objections_by_subgoal: dict[str, list[str]] = {}
+    for review in llm_agent_run.get("verifier_reviews") or []:
+        for so in review.get("scoped_objections") or []:
+            if isinstance(so, dict) and so.get("scope") == "subgoal" and so.get("subgoal_id"):
+                tag = _scrub(f"[{so.get('severity', 'P2')}] {so.get('kind', 'other')}: {so.get('text', '')}")
+                objections_by_subgoal.setdefault(str(so["subgoal_id"]), []).append(tag)
+    if objections_by_subgoal:
+        node_by_id = {node["id"]: node for node in nodes}
+        for sid, texts in objections_by_subgoal.items():
+            node = node_by_id.get(sid)
+            if node is None:
+                continue
+            existing = node.setdefault("reviewer_objections", [])
+            for tag in texts:
+                if tag not in existing:
+                    existing.append(tag)
 
     # --- wire dependencies: every subgoal is needed for the main goal --------
     main["depends_on"] = list(child_ids)
