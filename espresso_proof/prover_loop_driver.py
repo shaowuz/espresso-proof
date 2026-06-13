@@ -16,6 +16,8 @@ from pathlib import Path
 
 from .io import read_yaml, write_yaml
 from .llm_agents import LLMClient, append_prover_loop_round
+from .observability import append_agent_event, monotonic_ms, now_iso
+from .run_events import append_event
 from .run_lock import run_writer_lock
 from .validators import validate_run
 
@@ -267,7 +269,14 @@ def _continue_prover_loop_locked(
             )
 
         # --- append exactly one round; fail closed AND roll back on error ---
+        # Goal 54A: bracket each prover-loop round with provenance so a stall in a
+        # deep proof-search round (model call vs validation) is visible. _snapshot_run
+        # does not capture agent_events.jsonl, so a failed round's record survives.
         snapshot = _snapshot_run(run_dir)
+        _round_started = now_iso()
+        _round_t0 = monotonic_ms()
+        round_index = rounds_run + 1
+        append_event(run_dir, "agent_call_started", stage="prover_loop_round", detail=f"round {round_index}")
         try:
             append_prover_loop_round(
                 run_dir=run_dir,
@@ -283,9 +292,25 @@ def _continue_prover_loop_locked(
             # Restore the last valid state so a mid-loop failure never leaves a
             # partially-mutated / invalid run on disk.
             _restore_run(run_dir, snapshot)
+            append_agent_event(
+                run_dir, agent_name="prover_round", provider=provider, adapter=provider,
+                model=model, stage="prover_loop_round", agent_status="failed",
+                started_at=_round_started, finished_at=now_iso(),
+                duration_ms=monotonic_ms() - _round_t0, round_index=round_index,
+                error_summary=str(exc),
+            )
+            append_event(run_dir, "agent_call_failed", stage="prover_loop_round", detail=str(exc))
             stop_reason = "validation_error"
             notes.append(str(exc))
             break
+        append_agent_event(
+            run_dir, agent_name="prover_round", provider=provider, adapter=provider,
+            model=model, stage="prover_loop_round", agent_status="finished",
+            started_at=_round_started, finished_at=now_iso(),
+            duration_ms=monotonic_ms() - _round_t0, round_index=round_index,
+            output_artifact_path="prover_loop.yaml",
+        )
+        append_event(run_dir, "agent_call_finished", stage="prover_loop_round", detail=f"round {round_index}")
         rounds_run += 1
         summary = _failure_summary(run_dir)
         if summary:

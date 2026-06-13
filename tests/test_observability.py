@@ -178,3 +178,28 @@ def test_no_observability_record_carries_status_upgrade(tmp_path: Path):
     for line in (run_dir / obs.AGENT_EVENTS_FILENAME).read_text().splitlines():
         rec = json.loads(line)
         assert not (set(rec) & set(forbidden))
+
+
+# --- deep paths: prover pass + resume rounds are instrumented too (54A coverage) ---
+
+def test_orchestrate_prover_pass_emits_agent_event(tmp_path: Path):
+    run_dir = _stub_run(tmp_path)
+    stages = {a.get("stage") for a in obs.read_agent_events(run_dir)}
+    # not only front-half stages — the deep Prover+Reviewers pass is recorded too.
+    assert "llm_prover_reviewers" in stages
+
+
+def test_resume_prover_rounds_emit_agent_events(tmp_path: Path):
+    from espresso_proof.orchestrator import resume_run
+    from espresso_proof.io import read_yaml as _ry
+    from tests.test_prover_loop_continuation import _ProverClient
+    run_dir = _stub_run(tmp_path)
+    brief = _ry(run_dir / _ry(run_dir / "run_manifest.yaml")["artifacts"]["strategy_brief"])
+    selected = brief["top_strategies"][0]["id"]
+    resume_run(run_dir=run_dir, selected_strategy=selected, effort="normal_pass",
+               prover_client=_ProverClient(objections=["loc X", "hyp Y"]))
+    validate_run(run_dir)
+    rounds = [a for a in obs.read_agent_events(run_dir) if a.get("stage") == "prover_loop_round"]
+    assert rounds, "prover-loop rounds must emit agent_events for stall diagnosis"
+    assert all(isinstance(a.get("duration_ms"), int) for a in rounds)
+    assert all(isinstance(a.get("round_index"), int) for a in rounds)

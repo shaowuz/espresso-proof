@@ -21,6 +21,16 @@ Artifacts produced (all OPTIONAL — old runs validate without them):
                             only enriches it with monotonic timing + new kinds).
 - ``agent_events.jsonl``  — one record per agent/model call.
 - ``timings.yaml``        — aggregated stage/agent durations + stall signals.
+
+Deliberate, backward-compatible scope note on ``events.jsonl``: the Goal-54A spec
+sketches a rich per-event schema (event_id, event_type, validation_status, state
+labels, ...). The existing ``events.jsonl`` is intentionally the *minimal canonical
+timeline* (kind/stage/detail) that ``loop_harness`` already parses; rewriting it to
+the full schema would break that consumer. Instead, this layer (a) adds
+``monotonic_ms`` + the agent_call_*/server_job/replay/note kinds to ``events.jsonl``,
+and (b) carries the rich per-call fields (provider/adapter/model/duration/status/
+fallback/validation/timeout/run_id/...) in ``agent_events.jsonl``. Correlation across
+the three files is by run directory + stage + ``monotonic_ms`` (+ best-effort run_id).
 """
 
 from __future__ import annotations

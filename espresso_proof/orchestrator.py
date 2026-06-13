@@ -30,7 +30,14 @@ from .llm_agents import (
     write_initial_prover_round_artifacts,
 )
 from .mock_pipeline import run_mock_critique
-from .observability import register_observability_artifacts, write_timings
+from .observability import (
+    append_agent_event,
+    monotonic_ms,
+    now_iso,
+    register_observability_artifacts,
+    write_timings,
+)
+from .run_events import append_event
 from .prover_loop_driver import continue_prover_loop
 from .run_dashboard import write_run_dashboard
 from .run_lock import run_writer_lock
@@ -261,15 +268,37 @@ def orchestrate_run(
     # Stage 3 — live Prover + Reviewers; stop at the human gate.
     if not _reached(run_dir, "WAITING_LLM_AGENT_HUMAN_GATE"):
         def _llm_prover_reviewers() -> None:
-            agent_report = run_llm_agent_pass(
-                run_dir=run_dir,
-                provider=provider,
-                model=model,
-                api_key_env=api_key_env,
-                external_agent_command_env=external_agent_command_env,
-                reviewer_set=reviewer_set,
-                provider_diagnostic=provider_diagnostic,
+            # Goal 54A: bracket the deep Prover+Reviewers model pass with provenance
+            # so a stall in the model call (vs validation/rendering) is visible.
+            _started = now_iso()
+            _t0 = monotonic_ms()
+            append_event(run_dir, "agent_call_started", stage="llm_prover_reviewers")
+            try:
+                agent_report = run_llm_agent_pass(
+                    run_dir=run_dir,
+                    provider=provider,
+                    model=model,
+                    api_key_env=api_key_env,
+                    external_agent_command_env=external_agent_command_env,
+                    reviewer_set=reviewer_set,
+                    provider_diagnostic=provider_diagnostic,
+                )
+            except Exception as exc:  # noqa: BLE001 - record provenance, then re-raise
+                append_agent_event(
+                    run_dir, agent_name="llm_prover_reviewers", provider=provider,
+                    adapter=provider, model=model, stage="llm_prover_reviewers",
+                    agent_status="failed", started_at=_started, finished_at=now_iso(),
+                    duration_ms=monotonic_ms() - _t0, error_summary=str(exc),
+                )
+                append_event(run_dir, "agent_call_failed", stage="llm_prover_reviewers", detail=str(exc))
+                raise
+            append_agent_event(
+                run_dir, agent_name="llm_prover_reviewers", provider=provider, adapter=provider,
+                model=model, stage="llm_prover_reviewers", agent_status="finished",
+                started_at=_started, finished_at=now_iso(), duration_ms=monotonic_ms() - _t0,
+                output_artifact_path="llm_agent_run.yaml",
             )
+            append_event(run_dir, "agent_call_finished", stage="llm_prover_reviewers")
             LLMAgentRunReport.model_validate(agent_report)
             loop_report = build_prover_loop_report(
                 agent_report=agent_report,

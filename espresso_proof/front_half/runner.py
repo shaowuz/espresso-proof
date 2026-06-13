@@ -32,6 +32,12 @@ def run_front_half_agent_pass(
     stage_list = list(stages) if stages is not None else list(FRONT_HALF_STAGES)
     generated_at = datetime.now(UTC).isoformat()
     results: list[dict] = []
+    # Goal 54A: best-effort run_id for agent_event correlation (None when absent;
+    # the artifacts are co-located in the run dir, so this is a convenience).
+    try:
+        _run_id = (read_yaml(run_dir / "run_manifest.yaml") or {}).get("run_id")
+    except Exception:  # noqa: BLE001 - never break the pass on a manifest read
+        _run_id = None
 
     for stage in stage_list:
         normalizer = _STAGE_REGISTRY.get(stage)
@@ -58,7 +64,7 @@ def run_front_half_agent_pass(
             validate_run(run_dir)
         except Exception as exc:  # noqa: BLE001 - fail closed, record, optionally re-raise
             append_agent_event(
-                run_dir, agent_name=stage, provider=provider, adapter=provider, stage=stage,
+                run_dir, agent_name=stage, provider=provider, adapter=provider, stage=stage, run_id=_run_id,
                 agent_status="failed", started_at=started_at, finished_at=now_iso(),
                 duration_ms=monotonic_ms() - _t0, model=getattr(client, "model", None),
                 validation_status="failed", error_summary=str(exc),
@@ -77,7 +83,7 @@ def run_front_half_agent_pass(
                 raise
             continue
         append_agent_event(
-            run_dir, agent_name=stage, provider=provider, adapter=provider, stage=stage,
+            run_dir, agent_name=stage, provider=provider, adapter=provider, stage=stage, run_id=_run_id,
             agent_status="finished", started_at=started_at, finished_at=now_iso(),
             duration_ms=monotonic_ms() - _t0, model=getattr(client, "model", None),
             validation_status="passed",
