@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronDown,
@@ -33,6 +33,8 @@ import { PanelPlaceholder } from "./ExpandableCard";
 import { PanelSection } from "./PanelSection";
 import { cn } from "../lib/cn";
 import { MathText } from "./MathText";
+import { Collapse, FadeIn } from "./motion";
+import { formatDuration, timeAgo, useElapsed } from "../lib/time";
 
 function ClaimCard({ claim, missing }: { claim: ClaimView | undefined; missing: boolean }) {
   if (missing || !claim || claim.text === "") {
@@ -297,6 +299,10 @@ function RatingBlock({
     priority !== (isFeedbackPriority(saved?.priority) ? saved!.priority : "normal") ||
     note.trim() !== (saved?.note ?? "");
 
+  // clear the "saved" → "idle" timer on unmount (no setState after unmount).
+  const savedTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(savedTimer.current), []);
+
   async function handleSave() {
     setSaving("saving");
     setServerError(null);
@@ -310,7 +316,8 @@ function RatingBlock({
       await postStrategyFeedback(runId, body);
       setSaving("saved");
       onChanged();
-      setTimeout(() => setSaving("idle"), 2500);
+      window.clearTimeout(savedTimer.current);
+      savedTimer.current = window.setTimeout(() => setSaving("idle"), 2500);
     } catch (err) {
       setSaving("error");
       setServerError(err instanceof Error ? err.message : "Could not save feedback.");
@@ -431,7 +438,13 @@ function StrategyCard({
   const job = useJob();
   const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
-    <Card className={cn(strategy.selected && "border-sage-300 ring-1 ring-sage-200")}>
+    <Card
+      className={cn(
+        // a smooth, layout-stable selection emphasis (no jump/reflow).
+        "transition-[box-shadow,border-color] duration-200",
+        strategy.selected && "border-sage-300 ring-1 ring-sage-200",
+      )}
+    >
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -443,10 +456,12 @@ function StrategyCard({
           <span className="flex flex-wrap items-center gap-1.5">
             <span className="text-sm font-semibold text-stone-800"><MathText>{strategy.title}</MathText></span>
             {strategy.selected && (
-              <Badge className="border-sage-200 bg-sage-50 text-sage-800">
-                <Route className="h-3 w-3" aria-hidden />
-                selected route
-              </Badge>
+              <FadeIn>
+                <Badge className="border-sage-200 bg-sage-50 text-sage-800">
+                  <Route className="h-3 w-3" aria-hidden />
+                  selected route
+                </Badge>
+              </FadeIn>
             )}
             {strategy.score !== null && (
               <Badge title="Advisory score — display only">
@@ -462,7 +477,7 @@ function StrategyCard({
           )}
         </span>
       </button>
-      {expanded && (
+      <Collapse open={expanded}>
         <div className="border-t border-stone-100 px-3 py-2 pl-8 text-xs leading-relaxed text-stone-700">
           {strategy.status_sentence !== "" && (
             <p className="mb-1.5"><MathText>{strategy.status_sentence}</MathText></p>
@@ -491,7 +506,7 @@ function StrategyCard({
             </>
           )}
         </div>
-      )}
+      </Collapse>
       <div className="flex flex-wrap items-center gap-2 border-t border-stone-100 px-3 py-1.5 pl-8">
         <Button
           size="sm"
@@ -535,6 +550,8 @@ function AgentRow({
 }) {
   const job = useJob();
   const activity = agentActivity(agent.status);
+  // a running agent shows a live elapsed timer so it never feels frozen.
+  const liveElapsed = useElapsed(activity === "active");
   return (
     <div className="flex flex-wrap items-center gap-2 px-3 py-2">
       <span className="min-w-0 flex-1 truncate text-xs font-medium text-stone-700">
@@ -551,11 +568,17 @@ function AgentRow({
         )}
         {agent.status_word !== "" ? agent.status_word : "not run yet"}
       </Badge>
-      {agent.duration_seconds !== null && (
-        <span className="text-[11px] tabular-nums text-stone-400">
-          {Math.round(agent.duration_seconds)}s
+      {activity === "active" ? (
+        <span className="text-[11px] tabular-nums text-amber-700" aria-live="polite">
+          {formatDuration(liveElapsed)}
         </span>
-      )}
+      ) : agent.duration_seconds !== null ? (
+        <span className="text-[11px] tabular-nums text-stone-400">
+          {formatDuration(agent.duration_seconds)}
+        </span>
+      ) : agent.last_updated ? (
+        <span className="text-[11px] text-stone-400">{timeAgo(agent.last_updated, Date.now())}</span>
+      ) : null}
       <Button
         size="sm"
         variant="outline"
