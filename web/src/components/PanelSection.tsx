@@ -4,6 +4,7 @@ import { Loader2, RefreshCw } from "lucide-react";
 import type { AgentState } from "../lib/types";
 import { cn } from "../lib/cn";
 import { PanelPlaceholder } from "./ExpandableCard";
+import { FadeIn } from "./motion";
 
 /** Honest per-panel process chip. NEVER green: process state is not evidence. */
 export function AgentStateChip({ state }: { state: AgentState }) {
@@ -93,7 +94,9 @@ export function PanelSection({
       ) : !hasData ? (
         <PanelPlaceholder text={emptyText} />
       ) : (
-        children
+        // fade content in when it first arrives (skeleton -> content); a poll
+        // refresh with the same hasData does not re-trigger it.
+        <FadeIn motionKey="loaded">{children}</FadeIn>
       )}
     </section>
   );

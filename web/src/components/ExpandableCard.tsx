@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Card } from "./ui/card";
+import { Collapse } from "./motion";
 import { cn } from "../lib/cn";
 
 /**
@@ -35,9 +36,9 @@ export function ExpandableCard({
         <Chevron className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" aria-hidden />
         <span className="min-w-0 flex-1">{header}</span>
       </button>
-      {expanded && (
+      <Collapse open={expanded}>
         <div className="border-t border-stone-100 px-2.5 py-2 pl-7">{detail}</div>
-      )}
+      </Collapse>
       {footer !== undefined && (
         <div className="border-t border-stone-100 px-2.5 py-1.5 pl-7">{footer}</div>
       )}
