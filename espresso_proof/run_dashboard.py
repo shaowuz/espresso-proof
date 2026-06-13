@@ -318,9 +318,9 @@ def _route_data(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
             priority_word = _PRIORITY_WORDS.get(steer.get("priority"), "normal priority")
             alloc_word = _ALLOCATION_WORDS.get(steer.get("recommended_allocation"), "expand next")
             steer_line = (
-                f"Human steering (advisory): {priority_word}; advisory score "
-                f"{steer.get('advisory_score')}/100; {alloc_word}. Steers search "
-                f"only, never evidence."
+                f"Human steering (advisory): {priority_word}; attention score "
+                f"{steer.get('advisory_score')}/100 (compute priority, not proof "
+                f"quality); {alloc_word}. Steers search only, never evidence."
             )
         details = [
             item
