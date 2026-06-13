@@ -34,6 +34,7 @@ import { PanelSection } from "./PanelSection";
 import { cn } from "../lib/cn";
 import { MathText } from "./MathText";
 import { Collapse, FadeIn } from "./motion";
+import { ChatPanel } from "./ChatPanel";
 import { formatDuration, timeAgo, useElapsed } from "../lib/time";
 
 function ClaimCard({ claim, missing }: { claim: ClaimView | undefined; missing: boolean }) {
@@ -678,6 +679,8 @@ export function Workspace({
           evidence labels.
         </p>
       )}
+
+      <ChatPanel runId={runId} selectedRoute={status?.selected_route ?? null} />
     </div>
   );
 }
