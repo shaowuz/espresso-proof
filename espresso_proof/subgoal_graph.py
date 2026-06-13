@@ -67,6 +67,22 @@ def _scrub(text: Any) -> str:
     return value
 
 
+def _objection_tag(so: dict) -> str:
+    """Goal 54B: render one scoped objection as a single advisory free-text tag for
+    a subgoal node. Surfaces the reviewer's repairable instruction
+    (``suggested_next_action``) and honestly marks an attribution that was INFERRED
+    from the round's attacked subgoal (not explicitly scoped). All text is scrubbed
+    so an embedded objection can never read as a finished proof. Never a status."""
+
+    tag = f"[{so.get('severity', 'P2')}] {so.get('kind', 'other')}: {so.get('text', '')}"
+    next_action = str(so.get("suggested_next_action", "")).strip()
+    if next_action:
+        tag += f" → next: {next_action}"
+    if so.get("scope_source") == "inferred_target":
+        tag += " (inferred from round target)"
+    return _scrub(tag)
+
+
 def _claim_statement(claim: dict) -> str:
     return str(
         claim.get("normalized_statement")
@@ -150,6 +166,7 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
     prover_loop = optional_artifact("prover_loop")
     proof_verification = optional_artifact("proof_verification")
     computation_verification = optional_artifact("computation_verification")
+    llm_agent_run = optional_artifact("llm_agent_run")  # Goal 54B: scoped reviewer objections
 
     strategies = {
         str(strategy.get("id")): strategy
@@ -319,6 +336,32 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
                     "remaining_risk": "Checked only in this finite or computational scope, not the universal claim.",
                 }
             )
+
+    # --- Goal 54B: attach subgoal-scoped reviewer objections to matching nodes ---
+    # Attach-if-matches: an objection naming a node that exists gets placed on it;
+    # one naming a stale/unknown subgoal_id is simply not placed (never a fabricated
+    # node, never a state change). Dedup keeps rebuilds idempotent. An objection can
+    # only block/prioritize repair — it never closes or upgrades a subgoal.
+    # ``proof_step``-scoped objections are provenance-only for now (no proof_step
+    # node exists to attach to); only ``subgoal`` scope is rendered downstream.
+    # ``llm_agent_run`` is absent on refuted/early runs — guard the None.
+    objections_by_subgoal: dict[str, list[str]] = {}
+    for review in (llm_agent_run or {}).get("verifier_reviews") or []:
+        if not isinstance(review, dict):
+            continue
+        for so in review.get("scoped_objections") or []:
+            if isinstance(so, dict) and so.get("scope") == "subgoal" and so.get("subgoal_id"):
+                objections_by_subgoal.setdefault(str(so["subgoal_id"]), []).append(_objection_tag(so))
+    if objections_by_subgoal:
+        node_by_id = {node["id"]: node for node in nodes}
+        for sid, texts in objections_by_subgoal.items():
+            node = node_by_id.get(sid)
+            if node is None:
+                continue
+            existing = node.setdefault("reviewer_objections", [])
+            for tag in texts:
+                if tag not in existing:
+                    existing.append(tag)
 
     # --- wire dependencies: every subgoal is needed for the main goal --------
     main["depends_on"] = list(child_ids)
@@ -512,12 +555,24 @@ def render_proof_search_lines(graph: dict | None, *, statement_limit: int = 200)
             return text[: statement_limit - 1].rstrip() + "…"
         return text
 
+    # Goal 54B: a node may carry scoped reviewer objections attached at build time.
+    # Echo them (advisory free text only) under the node they name, so the memo
+    # shows *which* subgoal a reviewer objected to — never a status change.
+    def objection_lines(node: dict, indent: str) -> list[str]:
+        out: list[str] = []
+        for objection in (node.get("reviewer_objections") or [])[:3]:
+            text = short(objection)
+            if text:
+                out.append(f"{indent}· reviewer objection: {text}")
+        return out
+
     lines = ["Proof-search state (a map of the search, not a proof):"]
     main = groups["main"]
     if main is not None:
         lines.append(
             f"  Main goal [{state_words(main.get('state', ''))}]: {short(main.get('statement'))}"
         )
+        lines.extend(objection_lines(main, "      "))
 
     for label, key in (
         ("Open subgoals", "open"),
@@ -534,6 +589,7 @@ def render_proof_search_lines(graph: dict | None, *, statement_limit: int = 200)
             lines.append(
                 f"    - {short(node.get('statement'))} [{state_words(node.get('state', ''))}]"
             )
+            lines.extend(objection_lines(node, "        "))
 
     nxt = groups["next"]
     if nxt is not None:
