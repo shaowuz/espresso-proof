@@ -535,12 +535,24 @@ def render_proof_search_lines(graph: dict | None, *, statement_limit: int = 200)
             return text[: statement_limit - 1].rstrip() + "…"
         return text
 
+    # Goal 54B: a node may carry scoped reviewer objections attached at build time.
+    # Echo them (advisory free text only) under the node they name, so the memo
+    # shows *which* subgoal a reviewer objected to — never a status change.
+    def objection_lines(node: dict, indent: str) -> list[str]:
+        out: list[str] = []
+        for objection in (node.get("reviewer_objections") or [])[:3]:
+            text = short(objection)
+            if text:
+                out.append(f"{indent}· reviewer objection: {text}")
+        return out
+
     lines = ["Proof-search state (a map of the search, not a proof):"]
     main = groups["main"]
     if main is not None:
         lines.append(
             f"  Main goal [{state_words(main.get('state', ''))}]: {short(main.get('statement'))}"
         )
+        lines.extend(objection_lines(main, "      "))
 
     for label, key in (
         ("Open subgoals", "open"),
@@ -557,6 +569,7 @@ def render_proof_search_lines(graph: dict | None, *, statement_limit: int = 200)
             lines.append(
                 f"    - {short(node.get('statement'))} [{state_words(node.get('state', ''))}]"
             )
+            lines.extend(objection_lines(node, "        "))
 
     nxt = groups["next"]
     if nxt is not None:

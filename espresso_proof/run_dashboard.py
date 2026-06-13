@@ -830,12 +830,26 @@ def _proof_state_section(state: dict[str, Any], *, route_shown: bool = False) ->
     grouped = _group_subgoals(graph)
     rows: list[str] = []
 
+    def _objections_html(node: dict[str, Any]) -> str:
+        # Goal 54B: echo scoped reviewer objections under the subgoal they name
+        # (advisory free text only; never a status). Limited + escaped.
+        objections = node.get("reviewer_objections") or []
+        if not objections:
+            return ""
+        items = "".join(
+            f"<li>{_h(str(text))}</li>" for text in objections[:3] if str(text).strip()
+        )
+        if not items:
+            return ""
+        return f"<ul class=\"sg-obj\"><li class=\"sg-obj-head\">Reviewer objections (advisory):</li>{items}</ul>"
+
     def add_row(label: str, nodes_for_row: list[dict[str, Any]]) -> None:
         if not nodes_for_row:
             return
         items = "".join(
             f"<li>{_h(node.get('statement', ''))}"
-            f"<span class=\"sg-state\">{_h(_state_words(node.get('state', '')))}</span></li>"
+            f"<span class=\"sg-state\">{_h(_state_words(node.get('state', '')))}</span>"
+            f"{_objections_html(node)}</li>"
             for node in nodes_for_row
         )
         rows.append(f"<div class=\"sg-group\"><b>{_h(label)}</b><ul class=\"sg-list\">{items}</ul></div>")
@@ -1762,6 +1776,11 @@ pre.cmd{margin:10px 0 0;padding:14px 16px;background:#221a12;color:#f3ead9;borde
 .sg-list li:before{content:"";position:absolute;left:2px;top:.66em;width:6px;height:6px;border-radius:50%;background:var(--esp)}
 .sg-state{display:inline-block;margin-left:8px;padding:2px 9px;border-radius:999px;background:var(--gray-soft);
   color:var(--muted);font-size:11.5px}
+.sg-obj{margin:5px 0 0;padding:0 0 0 4px;list-style:none;display:grid;gap:3px}
+.sg-obj li{padding-left:13px;position:relative;font-size:12px;color:var(--muted)}
+.sg-obj li:before{content:"–";position:absolute;left:2px;top:0}
+.sg-obj li.sg-obj-head{font-style:italic;color:var(--muted)}
+.sg-obj li.sg-obj-head:before{content:""}
 .sg-next{margin-top:14px;padding:12px 15px;border:1px solid var(--esp-line);border-radius:10px;background:var(--esp-soft);font-size:13.5px}
 .sg-notes{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--gray-soft)}
 .sg-notes b{display:block;margin-bottom:6px}
