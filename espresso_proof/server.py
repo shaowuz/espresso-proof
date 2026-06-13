@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from .agent_runner import ON_DEMAND_AGENTS, run_single_agent, skip_agent
+from .cockpit_view import build_snapshot
 from .orchestrator import orchestrate_run, resume_run
 from .run_events import append_event
 from .run_dashboard import (
@@ -37,6 +38,23 @@ from .run_dashboard import (
     status_summary,
 )
 from .validators import validate_run
+
+# Goal 43A: the built React cockpit (web/dist). When the build exists the
+# server serves it at "/" (the legacy index stays at /legacy and remains the
+# automatic fallback when no build is present, e.g. in CI). Static assets are
+# confined to this directory and to a fixed content-type allowlist.
+_WEB_DIST = Path(__file__).resolve().parents[1] / "web" / "dist"
+_STATIC_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+    ".png": "image/png",
+    ".woff2": "font/woff2",
+    ".map": "application/json; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+}
 
 # A run_id may contain only these characters — no path separators or dots-dots.
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -461,6 +479,39 @@ class Workbench:
                 self._status_cache.pop(next(iter(self._status_cache)))
         return summary
 
+    def snapshot(self, run_id: str) -> dict[str, Any]:
+        """Goal 43A: the typed cockpit view model (display-only, fail closed).
+
+        Same validation + digest-cache contract as ``status``: a snapshot is
+        served only for a run that currently passes safety validation, and a
+        stale entry is never served after the artifacts change."""
+
+        run_dir = self.resolve_run(run_id)
+        digest = self._run_digest(run_dir)
+        key = f"{run_id}::snapshot"
+        with self._status_cache_lock:
+            cached = self._status_cache.get(key)
+            if cached is not None and cached[0] == digest:
+                return json.loads(cached[1])
+        try:
+            validate_run(run_dir)
+        except Exception as exc:
+            with self._status_cache_lock:
+                self._status_cache.pop(key, None)
+            raise WorkbenchError(
+                409,
+                "This run no longer passes Espresso's safety validation, so its "
+                "status cannot be shown. Existing results on disk are untouched.",
+            ) from exc
+        summary = status_summary(run_dir)
+        summary["run_id"] = run_id
+        snap = build_snapshot(run_dir, run_id, summary)
+        with self._status_cache_lock:
+            self._status_cache[key] = (digest, json.dumps(snap, ensure_ascii=False))
+            while len(self._status_cache) > 32:
+                self._status_cache.pop(next(iter(self._status_cache)))
+        return snap
+
     def debug_info(self, run_id: str) -> dict[str, Any]:
         """Confined technical log for the advanced/debug path (Goal 33 §7).
 
@@ -590,14 +641,48 @@ def _make_handler(workbench: Workbench):
             return [p for p in path.split("/") if p]
 
         # -- routing ---------------------------------------------------------
+        def _serve_web_asset(self, parts: list[str]) -> bool:
+            """Serve a built cockpit asset from web/dist, confined to that
+            directory and to the static content-type allowlist. Returns False
+            (caller 404s) for anything else — fail closed."""
+
+            if not _WEB_DIST.is_dir():
+                return False
+            try:
+                candidate = _WEB_DIST.joinpath(*parts).resolve()
+            except Exception:  # noqa: BLE001
+                return False
+            if _WEB_DIST.resolve() not in candidate.parents:
+                return False
+            ctype = _STATIC_TYPES.get(candidate.suffix.lower())
+            if ctype is None or not candidate.is_file():
+                return False
+            body = candidate.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+
         def do_GET(self) -> None:  # noqa: N802
             try:
                 parts = self._parts()
                 if not parts:
+                    index = _WEB_DIST / "index.html"
+                    if index.is_file():
+                        self._send_html(index.read_text(encoding="utf-8"))
+                    else:
+                        self._send_html(_index_page(workbench))
+                    return
+                if parts == ["legacy"]:
                     self._send_html(_index_page(workbench))
                     return
                 if parts == ["api", "health"]:
                     self._send_json({"ok": True})
+                    return
+                if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "snapshot":
+                    self._send_json(workbench.snapshot(parts[2]))
                     return
                 if len(parts) == 2 and parts[0] == "run":
                     self._send_html(workbench.dashboard_html(parts[1]))
@@ -613,6 +698,8 @@ def _make_handler(workbench: Workbench):
                     return
                 if parts == ["api", "runs"]:
                     self._send_json({"runs": workbench.list_runs()})
+                    return
+                if parts[0] != "api" and self._serve_web_asset(parts):
                     return
                 raise WorkbenchError(404, "not found")
             except WorkbenchError as exc:
