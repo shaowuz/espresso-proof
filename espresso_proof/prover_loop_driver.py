@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .io import read_yaml
+from .io import read_yaml, write_yaml
 from .llm_agents import LLMClient, append_prover_loop_round
 from .run_lock import run_writer_lock
 from .validators import validate_run
@@ -112,6 +112,30 @@ def _failure_summary(run_dir: Path) -> str | None:
     return None
 
 
+def _grant_escalation_round(run_dir: Path, loop_path: str, attempts: list[dict]) -> None:
+    """Grant exactly one extra targeted repair round by bumping the prover-loop
+    budget caps by one round's worth.
+
+    ``ProverLoopBudget`` requires ``rounds_used <= max_rounds`` and
+    ``agent_calls_used <= max_agent_calls``; a ``quick_test`` budget (1 round, 4
+    agent calls) is fully spent after round 1, so the caps must be raised before the
+    extra round is appended or the artifact would be invalid. This is a scheduling /
+    time-allocation grant ONLY -- it cannot and does not upgrade any
+    proof/source/evidence/grade/refutation/claim status, and ``validate_run``
+    re-checks the run after the bump and again after the appended round.
+    """
+    loop = read_yaml(run_dir / loop_path)
+    budget = loop["budget"]
+    # One round costs 1 prover call + N reviewer calls; size the headroom from the
+    # most recent attempt's reviewer set (default 3 = the Espresso reviewer trio).
+    n_reviewers = len((attempts[-1].get("reviewer_ids") if attempts else None) or []) or 3
+    budget["max_rounds"] = budget["max_rounds"] + 1
+    budget["max_agent_calls"] = budget["max_agent_calls"] + 1 + n_reviewers
+    loop["budget"] = budget
+    write_yaml(run_dir / loop_path, loop)
+    validate_run(run_dir)
+
+
 def continue_prover_loop(
     *,
     run_dir: Path,
@@ -168,6 +192,7 @@ def _continue_prover_loop_locked(
     notes: list[str] = []
     rounds_run = 0
     stop_reason = "clean"
+    escalated = False  # Goals 44-53 option A: at most one budget-granted repair round
 
     while True:
         loop = read_yaml(run_dir / loop_path)
@@ -175,31 +200,71 @@ def _continue_prover_loop_locked(
         decision = loop.get("loop_decision")
         attempts = loop.get("attempts", [])
 
+        # Blocker state per round (drives the clean / no-progress / escalation stops).
+        by_round = _round_blockers(attempts)
+        latest = max(by_round) if by_round else None
+        latest_has_blockers = latest is not None and bool(by_round[latest])
+        window = sorted(by_round)[-NO_PROGRESS_WINDOW:] if by_round else []
+        no_progress = (
+            latest is not None
+            and len(window) >= NO_PROGRESS_WINDOW
+            and all(by_round[r] == by_round[latest] for r in window)
+        )
+
         # --- STOP checks (before appending another round) ---
         if decision in {"ask_human", "stop"}:
             stop_reason = f"loop_decision_{decision}"
             break
+
         cap = budget["max_rounds"] if max_rounds is None else min(max_rounds, budget["max_rounds"])
-        if budget["rounds_used"] >= cap:
-            stop_reason = "budget_rounds"
-            break
-        if budget["agent_calls_used"] >= budget["max_agent_calls"]:
-            stop_reason = "budget_agent_calls"
+        budget_rounds_hit = budget["rounds_used"] >= cap
+        budget_calls_hit = budget["agent_calls_used"] >= budget["max_agent_calls"]
+
+        # Goals 44-53 option A: when the round/agent-call budget is the ONLY thing
+        # stopping a loop that still has unresolved blocking objections (which have
+        # become blocked_* subgoals), grant EXACTLY ONE more targeted round to attack
+        # the highest-value blocked subgoal -- append_prover_loop_round selects and
+        # NAMES that subgoal. The grant only bumps the time-allocation budget (never
+        # a math status); the kernel re-validates the appended round.
+        escalate_now = (
+            (budget_rounds_hit or budget_calls_hit)
+            and not escalated
+            and latest_has_blockers
+            and not no_progress
+            # Only to REACH round 2 (where the named-subgoal attack happens): a
+            # quick_test-style 1-round effort budget. Never beyond round 2, so
+            # normal_pass+ (which already reaches round 2) is unaffected.
+            and budget["rounds_used"] < 2
+            # Only when the EFFORT budget is the cap -- never override an explicit
+            # caller-supplied max_rounds (e.g. a deliberate single-round probe).
+            and max_rounds is None
+        )
+        if (budget_rounds_hit or budget_calls_hit) and not escalate_now:
+            stop_reason = "budget_rounds" if budget_rounds_hit else "budget_agent_calls"
             break
 
-        by_round = _round_blockers(attempts)
-        if by_round:
-            latest = max(by_round)
-            if not by_round[latest]:
-                stop_reason = "clean"
+        if latest is not None and not by_round[latest]:
+            stop_reason = "clean"
+            break
+        if no_progress:
+            stop_reason = "no_progress"
+            break
+
+        if escalate_now:
+            # Fail closed: if granting the round's budget cannot keep the run valid,
+            # stop the loop cleanly rather than propagate (the run is never left
+            # over-budget / invalid by a partial grant).
+            try:
+                _grant_escalation_round(run_dir, loop_path, attempts)
+            except Exception as exc:  # noqa: BLE001
+                stop_reason = "budget_rounds"
+                notes.append(f"escalation grant aborted, stopping: {exc}")
                 break
-            # no-progress: the last NO_PROGRESS_WINDOW rounds share one blocker set.
-            window = sorted(by_round)[-NO_PROGRESS_WINDOW:]
-            if len(window) >= NO_PROGRESS_WINDOW and all(
-                by_round[r] == by_round[latest] for r in window
-            ):
-                stop_reason = "no_progress"
-                break
+            escalated = True
+            notes.append(
+                "escalated one targeted repair round: unresolved blocking objections "
+                "remained at the effort budget (Goals 44-53 option A)"
+            )
 
         # --- append exactly one round; fail closed AND roll back on error ---
         snapshot = _snapshot_run(run_dir)
