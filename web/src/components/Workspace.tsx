@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronDown,
@@ -299,6 +299,10 @@ function RatingBlock({
     priority !== (isFeedbackPriority(saved?.priority) ? saved!.priority : "normal") ||
     note.trim() !== (saved?.note ?? "");
 
+  // clear the "saved" → "idle" timer on unmount (no setState after unmount).
+  const savedTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(savedTimer.current), []);
+
   async function handleSave() {
     setSaving("saving");
     setServerError(null);
@@ -312,7 +316,8 @@ function RatingBlock({
       await postStrategyFeedback(runId, body);
       setSaving("saved");
       onChanged();
-      setTimeout(() => setSaving("idle"), 2500);
+      window.clearTimeout(savedTimer.current);
+      savedTimer.current = window.setTimeout(() => setSaving("idle"), 2500);
     } catch (err) {
       setSaving("error");
       setServerError(err instanceof Error ? err.message : "Could not save feedback.");
