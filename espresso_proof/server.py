@@ -455,7 +455,12 @@ class Workbench:
         brief = self._strategy_ids(run_dir)
         if strategy_id not in brief:
             raise WorkbenchError(400, f"unknown route id: {strategy_id}")
-        claim = read_yaml(run_dir / read_yaml(run_dir / "run_manifest.yaml")["artifacts"]["locked_claim"])
+        try:
+            claim = read_yaml(
+                run_dir / read_yaml(run_dir / "run_manifest.yaml")["artifacts"]["locked_claim"]
+            )
+        except Exception as exc:  # noqa: BLE001 — corrupt/missing manifest fails closed
+            raise WorkbenchError(404, "run is not in a feedback-ready state") from exc
         try:
             item = StrategyFeedback.model_validate(
                 {
@@ -471,19 +476,23 @@ class Workbench:
                 }
             )
         except ValidationError as exc:
-            # never partially write on a bad payload; the prior run is untouched.
+            # never write on a bad payload; the prior run is untouched.
             raise WorkbenchError(400, "invalid feedback") from exc
-        append_feedback(run_dir, item)
-        # confirm the kernel run still validates after the sidecar write.
-        try:
-            validate_run(run_dir)
-        except Exception as exc:
-            raise WorkbenchError(
-                409,
-                "This run no longer passes Espresso's safety validation; the "
-                "feedback was advisory and the run on disk is untouched.",
-            ) from exc
-        latest = latest_by_strategy(run_dir).get(strategy_id)
+        # serialize the read-modify-write append under the per-run lock so two
+        # concurrent POSTs cannot lose an item (the sidecar append is a
+        # load->append->write cycle, not a single atomic op).
+        with self._run_lock(run_id):
+            append_feedback(run_dir, item)
+            # confirm the kernel run still validates after the sidecar write.
+            try:
+                validate_run(run_dir)
+            except Exception as exc:
+                raise WorkbenchError(
+                    409,
+                    "This run no longer passes Espresso's safety validation; the "
+                    "feedback is advisory and changed no mathematical status.",
+                ) from exc
+            latest = latest_by_strategy(run_dir).get(strategy_id)
         return {
             "ok": True,
             "strategy_id": strategy_id,

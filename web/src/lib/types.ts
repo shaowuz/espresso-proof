@@ -52,6 +52,8 @@ export interface StrategyView {
   next_step: string;
   selected: boolean;
   my_feedback: { score: number; priority: string; note: string } | null;
+  /** Efforts the kernel allows for this route; the continue action sends one. */
+  allowed_efforts: string[];
 }
 
 export interface LedgerContext {

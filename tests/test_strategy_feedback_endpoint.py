@@ -317,3 +317,28 @@ def test_loopback_lookalike_origins_blocked(client, origin) -> None:
         headers={"Origin": origin},
     )
     assert status == 403, (origin, status, body)
+
+
+def test_concurrent_feedback_posts_preserve_all_items(client) -> None:
+    # the append is a load->append->write cycle; under the per-run lock,
+    # concurrent POSTs must not lose an item.
+    import concurrent.futures as cf
+
+    wb, call, _ = client
+    run_id = _create(call)
+    sid = _first_strategy(call, run_id)
+
+    def post(i: int):
+        return call(
+            "POST",
+            f"/api/runs/{run_id}/strategy-feedback",
+            {"strategy_id": sid, "score": i, "note": f"n{i}"},
+        )[0]
+
+    with cf.ThreadPoolExecutor(max_workers=8) as ex:
+        statuses = list(ex.map(post, range(12)))
+    assert all(s == 200 for s in statuses)
+    from espresso_proof.strategy_feedback import load_feedback
+
+    run_dir = wb.resolve_run(run_id)
+    assert len(load_feedback(run_dir).items) == 12  # none dropped

@@ -139,10 +139,11 @@ export function runAgent(runId: string, agent: string): Promise<{ job_id: string
 export function continueRoute(
   runId: string,
   strategyId: string,
+  effort?: string,
 ): Promise<{ job_id: string }> {
   return post<{ job_id: string }>(
     `/api/runs/${encodeURIComponent(runId)}/continue`,
-    { strategy: strategyId, effort: "normal_pass" },
+    { strategy: strategyId, effort: effort ?? "normal_pass" },
   );
 }
 

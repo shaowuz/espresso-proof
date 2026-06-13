@@ -75,7 +75,9 @@ const PRIORITY_OPTIONS: {
     value: "focus",
     label: "Focus",
     icon: Target,
-    activeClass: "border-sage-400 bg-sage-100 text-sage-900",
+    // indigo, not sage: a priority pill must read as a preference, never as
+    // earned evidence-green.
+    activeClass: "border-indigo-300 bg-indigo-50 text-indigo-800",
   },
   {
     value: "normal",
@@ -288,6 +290,12 @@ function RatingBlock({
   const [saving, setSaving] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [serverError, setServerError] = useState<string | null>(null);
 
+  // the controls differ from the last saved feedback → a save would change it.
+  const dirty =
+    score !== (saved?.score ?? 50) ||
+    priority !== (isFeedbackPriority(saved?.priority) ? saved!.priority : "normal") ||
+    note.trim() !== (saved?.note ?? "");
+
   async function handleSave() {
     setSaving("saving");
     setServerError(null);
@@ -366,26 +374,26 @@ function RatingBlock({
         aria-label="Optional feedback note"
       />
 
-      {/* Existing saved feedback summary */}
-      {saved !== null && saved !== undefined && (
-        <p className="mb-2 text-[11px] text-stone-400">
-          Saved: score {saved.score}, {saved.priority}
-          {saved.note ? ` — ${saved.note}` : ""}
-        </p>
-      )}
-
-      {/* Save button + status chip */}
+      {/* Save button + status chip. The saved value itself is shown once, in
+          the time-allocation ledger row ("Your score / priority"); here we only
+          surface unsaved/saving/saved/error transitions. */}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           size="sm"
           variant="outline"
           onClick={() => void handleSave()}
-          disabled={saving === "saving"}
+          disabled={saving === "saving" || !dirty}
           className="h-6 px-2.5 text-[11px]"
         >
           {saving === "saving" && <Loader2 className="h-3 w-3 animate-spin" aria-hidden />}
           {saving === "saving" ? "Saving…" : "Save feedback"}
         </Button>
+        {dirty && saving !== "saving" && (
+          <span className="text-[11px] text-amber-700">unsaved changes</span>
+        )}
+        {!dirty && saving === "idle" && saved && (
+          <span className="text-[11px] text-stone-400">saved</span>
+        )}
         {saving === "saved" && (
           <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
             saved
@@ -489,7 +497,11 @@ function StrategyCard({
           variant="outline"
           disabled={job.busy}
           onClick={() =>
-            job.start(() => continueRoute(runId, strategy.id), () => onChanged())
+            job.start(
+              // send an effort the kernel actually allows for this route.
+              () => continueRoute(runId, strategy.id, strategy.allowed_efforts?.[0]),
+              () => onChanged(),
+            )
           }
         >
           <Play className="h-3 w-3" aria-hidden />
