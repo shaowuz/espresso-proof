@@ -1,29 +1,14 @@
 import { useState, type ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
 import { Calculator, FlaskConical, ShieldAlert } from "lucide-react";
-import type { Snapshot } from "../lib/types";
+import {
+  useComputationsPanel,
+  useCounterexamplesPanel,
+  useExamplesPanel,
+} from "../hooks/useCockpit";
 import { ToneBadge } from "./ToneBadge";
-import { DetailRow, ExpandableCard, PanelPlaceholder } from "./ExpandableCard";
-
-function SectionHeader({
-  icon: Icon,
-  title,
-  count,
-}: {
-  icon: LucideIcon;
-  title: string;
-  count: number | null;
-}) {
-  return (
-    <div className="mb-1.5 flex items-center gap-1.5">
-      <Icon className="h-3.5 w-3.5 text-stone-400" aria-hidden />
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-stone-500">
-        {title}
-      </h2>
-      {count !== null && <span className="text-[11px] text-stone-400">{count}</span>}
-    </div>
-  );
-}
+import { DetailRow, ExpandableCard } from "./ExpandableCard";
+import { PanelSection } from "./PanelSection";
+import { errorText } from "../lib/api";
 
 function ItemHeader({ title, children }: { title: string; children?: ReactNode }) {
   return (
@@ -35,148 +20,134 @@ function ItemHeader({ title, children }: { title: string; children?: ReactNode }
 }
 
 /**
- * LEFT rail: Examples / Counterexamples / Computations.
- * Expanded state is keyed by item id so it survives snapshot polling.
+ * LEFT rail: Examples / Counterexamples / Computations — three independent
+ * queries (Goal 43B). Each section loads, refreshes, and fails on its own;
+ * a slow examples fetch never blocks counterexamples or computations, and
+ * expanded state is keyed by item id so it survives polling.
  */
-export function EvidenceRail({ snapshot }: { snapshot: Snapshot }) {
+export function EvidenceRail({ runId }: { runId: string }) {
+  const examples = useExamplesPanel(runId);
+  const counter = useCounterexamplesPanel(runId);
+  const comps = useComputationsPanel(runId);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const toggle = (id: string) =>
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
 
-  const { examples, counterexamples, computations, missing } = snapshot;
+  const exItems = examples.data && !examples.data.missing ? examples.data.items : [];
+  const ceItems = counter.data && !counter.data.missing ? counter.data.items : [];
+  const coItems = comps.data && !comps.data.missing ? comps.data.items : [];
 
   return (
     <div className="flex flex-col gap-4 p-3">
-      <section>
-        <SectionHeader
-          icon={FlaskConical}
-          title="Examples"
-          count={missing.examples ? null : examples.length}
-        />
-        {missing.examples ? (
-          <PanelPlaceholder text="Not run yet — no examples have been tried." />
-        ) : examples.length === 0 ? (
-          <PanelPlaceholder text="The example pass finished without recording examples." />
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            {examples.map((ex) => (
-              <ExpandableCard
-                key={ex.id}
-                expanded={expanded[ex.id] === true}
-                onToggle={() => toggle(ex.id)}
-                header={
-                  <ItemHeader title={ex.name !== "" ? ex.name : ex.id}>
+      <PanelSection
+        icon={FlaskConical}
+        title="Examples"
+        count={examples.data && !examples.data.missing ? exItems.length : null}
+        agentState={examples.data?.agent_state}
+        isPending={examples.isPending}
+        isError={examples.isError}
+        errorText={errorText(examples.error)}
+        hasData={exItems.length > 0}
+        emptyText="No examples recorded yet."
+        onRetry={() => void examples.refetch()}
+      >
+        <div className="flex flex-col gap-1.5">
+          {exItems.map((ex) => (
+            <ExpandableCard
+              key={ex.id}
+              expanded={Boolean(expanded[ex.id])}
+              onToggle={() => toggle(ex.id)}
+              header={
+                <ItemHeader title={ex.name || ex.id}>
+                  <span className="flex flex-wrap items-center gap-1">
                     <ToneBadge tone={ex.tone} phrase={ex.result_phrase} />
-                  </ItemHeader>
-                }
-                detail={
-                  <>
-                    {ex.behavior !== "" && (
-                      <DetailRow label="Behavior">{ex.behavior}</DetailRow>
-                    )}
-                    {ex.admissibility !== "" && (
-                      <DetailRow label="Admissibility">{ex.admissibility}</DetailRow>
-                    )}
-                    {ex.tests.length > 0 && (
-                      <DetailRow label="Tests">
-                        <ul className="list-disc space-y-0.5 pl-4">
-                          {ex.tests.map((t, i) => (
-                            <li key={i}>{t}</li>
-                          ))}
-                        </ul>
-                      </DetailRow>
-                    )}
-                  </>
-                }
-              />
-            ))}
-          </div>
-        )}
-      </section>
+                    <span className="text-[11px] text-stone-500">{ex.admissibility}</span>
+                  </span>
+                </ItemHeader>
+              }
+              detail={
+                <div className="flex flex-col gap-1.5">
+                  {ex.behavior !== "" && <DetailRow label="Behavior">{ex.behavior}</DetailRow>}
+                  {ex.tests.length > 0 && (
+                    <DetailRow label="Tests">{ex.tests.join(" · ")}</DetailRow>
+                  )}
+                </div>
+              }
+            />
+          ))}
+        </div>
+      </PanelSection>
 
-      <section>
-        <SectionHeader
-          icon={ShieldAlert}
-          title="Counterexamples"
-          count={missing.counterexamples ? null : counterexamples.length}
-        />
-        {missing.counterexamples ? (
-          <PanelPlaceholder text="Not run yet — no counterexample search so far." />
-        ) : counterexamples.length === 0 ? (
-          <PanelPlaceholder text="No counterexamples recorded. This is not a proof of safety — needs check." />
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            {counterexamples.map((cx) => (
-              <ExpandableCard
-                key={cx.id}
-                expanded={expanded[cx.id] === true}
-                onToggle={() => toggle(cx.id)}
-                header={
-                  <ItemHeader title={cx.example !== "" ? cx.example : cx.id}>
-                    <ToneBadge tone={cx.tone} phrase={cx.phrase} />
-                  </ItemHeader>
-                }
-                detail={
-                  <>
-                    {cx.explanation !== "" && (
-                      <DetailRow label="Explanation">{cx.explanation}</DetailRow>
-                    )}
-                    {cx.admissibility !== "" && (
-                      <DetailRow label="Admissibility">{cx.admissibility}</DetailRow>
-                    )}
-                    {cx.repair !== "" && (
-                      <DetailRow label="Suggested repair">{cx.repair}</DetailRow>
-                    )}
-                  </>
-                }
-              />
-            ))}
-          </div>
-        )}
-      </section>
+      <PanelSection
+        icon={ShieldAlert}
+        title="Counterexamples"
+        count={counter.data && !counter.data.missing ? ceItems.length : null}
+        agentState={counter.data?.agent_state}
+        isPending={counter.isPending}
+        isError={counter.isError}
+        errorText={errorText(counter.error)}
+        hasData={ceItems.length > 0}
+        emptyText="No counterexamples recorded. This is not a proof of safety — needs check."
+        onRetry={() => void counter.refetch()}
+      >
+        <div className="flex flex-col gap-1.5">
+          {ceItems.map((ce) => (
+            <ExpandableCard
+              key={ce.id}
+              expanded={Boolean(expanded[ce.id])}
+              onToggle={() => toggle(ce.id)}
+              header={
+                <ItemHeader title={ce.example || ce.id}>
+                  <ToneBadge tone={ce.tone} phrase={ce.phrase} />
+                </ItemHeader>
+              }
+              detail={
+                <div className="flex flex-col gap-1.5">
+                  {ce.explanation !== "" && (
+                    <DetailRow label="Explanation">{ce.explanation}</DetailRow>
+                  )}
+                  <DetailRow label="Admissibility">{ce.admissibility}</DetailRow>
+                  {ce.repair !== "" && (
+                    <DetailRow label="Repaired claim">{ce.repair}</DetailRow>
+                  )}
+                </div>
+              }
+            />
+          ))}
+        </div>
+      </PanelSection>
 
-      <section>
-        <SectionHeader
-          icon={Calculator}
-          title="Computations"
-          count={missing.computations ? null : computations.length}
-        />
-        {missing.computations ? (
-          <PanelPlaceholder text="Not run yet — no computations have been attempted." />
-        ) : computations.length === 0 ? (
-          <PanelPlaceholder text="The computation pass finished without recording results." />
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            {computations.map((c) => (
-              <ExpandableCard
-                key={c.id}
-                expanded={expanded[c.id] === true}
-                onToggle={() => toggle(c.id)}
-                header={
-                  <ItemHeader title={c.quantity !== "" ? c.quantity : c.id}>
-                    {c.result !== "" && (
-                      <span className="truncate font-mono text-[11px] text-stone-600">
-                        {c.result}
-                      </span>
-                    )}
-                    <ToneBadge tone={c.tone} phrase={c.phrase} />
-                  </ItemHeader>
-                }
-                detail={
-                  <>
-                    {c.method !== "" && <DetailRow label="Method">{c.method}</DetailRow>}
-                    {c.result !== "" && (
-                      <DetailRow label="Result">
-                        <span className="font-mono">{c.result}</span>
-                      </DetailRow>
-                    )}
-                  </>
-                }
-              />
-            ))}
-          </div>
-        )}
-      </section>
+      <PanelSection
+        icon={Calculator}
+        title="Computations"
+        count={comps.data && !comps.data.missing ? coItems.length : null}
+        agentState={comps.data?.agent_state}
+        isPending={comps.isPending}
+        isError={comps.isError}
+        errorText={errorText(comps.error)}
+        hasData={coItems.length > 0}
+        emptyText="No computation checks recorded yet."
+        onRetry={() => void comps.refetch()}
+      >
+        <div className="flex flex-col gap-1.5">
+          {coItems.map((co) => (
+            <ExpandableCard
+              key={co.id}
+              expanded={Boolean(expanded[co.id])}
+              onToggle={() => toggle(co.id)}
+              header={
+                <ItemHeader title={co.quantity || co.id}>
+                  <span className="flex flex-wrap items-center gap-1">
+                    <ToneBadge tone={co.tone} phrase={co.phrase} />
+                    <span className="text-[11px] text-stone-500">{co.method}</span>
+                  </span>
+                </ItemHeader>
+              }
+              detail={<DetailRow label="Result">{co.result}</DetailRow>}
+            />
+          ))}
+        </div>
+      </PanelSection>
     </div>
   );
 }

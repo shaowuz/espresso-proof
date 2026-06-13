@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { BookOpen, FlaskConical, MessageSquare } from "lucide-react";
 import { fetchRuns } from "./lib/api";
 import type { RunListItem } from "./lib/types";
-import { useSnapshot } from "./hooks/useSnapshot";
+import { useClaimPanel, useStatus } from "./hooks/useCockpit";
 import { Header } from "./components/Header";
 import { Composer } from "./components/Composer";
 import { EvidenceRail } from "./components/EvidenceRail";
@@ -13,15 +14,20 @@ import { cn } from "./lib/cn";
 type Pane = "evidence" | "workspace" | "literature";
 
 /**
- * The one-page cockpit shell: header, three work zones, bottom composer.
- * Desktop: three columns, each independently scrollable. Narrow: tabbed
- * single column. The shell renders server-computed display copy only.
+ * One-page cockpit shell. Goal 43B: every panel is its own TanStack Query, so
+ * the workspace opens on fast-core (claim/strategies/status) before the
+ * evidence agents finish, and examples/counterexamples/literature refresh
+ * independently. A Continue/Run pass invalidates only the affected queries.
  */
 export default function App() {
+  const queryClient = useQueryClient();
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [pane, setPane] = useState<Pane>("workspace");
-  const { snapshot, error, refresh } = useSnapshot(selectedRunId);
+
+  const status = useStatus(selectedRunId);
+  const claim = useClaimPanel(selectedRunId);
+  const hasRun = selectedRunId !== null;
 
   const loadRuns = useCallback(async (selectLatest: boolean) => {
     try {
@@ -39,6 +45,13 @@ export default function App() {
     void loadRuns(true);
   }, [loadRuns]);
 
+  // refresh the affected queries after a pass — no full page reload.
+  const refreshRun = useCallback(() => {
+    if (selectedRunId === null) return;
+    void queryClient.invalidateQueries({ queryKey: ["status", selectedRunId] });
+    void queryClient.invalidateQueries({ queryKey: ["panel", selectedRunId] });
+  }, [queryClient, selectedRunId]);
+
   const onRunCreated = useCallback(
     (runId: string) => {
       setSelectedRunId(runId);
@@ -50,19 +63,19 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col bg-stone-50 text-stone-800">
       <Header
-        snapshot={snapshot}
+        claim={claim.data?.claim}
+        status={status.data}
         runs={runs}
         selectedRunId={selectedRunId}
         onSelectRun={setSelectedRunId}
       />
 
-      {error !== null && (
+      {status.isError && hasRun && (
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-800">
-          {error}
+          {status.error instanceof Error ? status.error.message : "Could not load this run."}
         </div>
       )}
 
-      {/* narrow-screen pane tabs */}
       <nav className="flex shrink-0 border-b border-stone-200 bg-white lg:hidden">
         {(
           [
@@ -94,7 +107,7 @@ export default function App() {
             pane === "evidence" ? "block" : "hidden",
           )}
         >
-          {snapshot ? <EvidenceRail snapshot={snapshot} /> : <ShellPlaceholder />}
+          {hasRun ? <EvidenceRail runId={selectedRunId} /> : <ShellPlaceholder />}
         </aside>
 
         <section
@@ -103,8 +116,8 @@ export default function App() {
             pane === "workspace" ? "block" : "hidden",
           )}
         >
-          {snapshot ? (
-            <Workspace snapshot={snapshot} onChanged={refresh} />
+          {hasRun ? (
+            <Workspace runId={selectedRunId} status={status.data} onChanged={refreshRun} />
           ) : (
             <EmptyWorkspace hasRuns={runs.length > 0} />
           )}
@@ -116,7 +129,7 @@ export default function App() {
             pane === "literature" ? "block" : "hidden",
           )}
         >
-          {snapshot ? <LiteratureRail snapshot={snapshot} /> : <ShellPlaceholder />}
+          {hasRun ? <LiteratureRail runId={selectedRunId} /> : <ShellPlaceholder />}
         </aside>
       </main>
 

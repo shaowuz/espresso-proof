@@ -1,24 +1,26 @@
 import { FlaskConical } from "lucide-react";
-import type { RunListItem, Snapshot } from "../lib/types";
+import type { ClaimView, RunListItem, StatusView } from "../lib/types";
 
 /**
  * App header: brand, claim summary, run state, evidence readout, run picker.
- * All sentences are server copy; the evidence counts come from the snapshot's
- * status block (computed server-side from validated artifacts).
+ * All sentences are server copy; the evidence counts come from the status
+ * query (computed server-side from validated artifacts).
  */
 export function Header({
-  snapshot,
+  claim,
+  status,
   runs,
   selectedRunId,
   onSelectRun,
 }: {
-  snapshot: Snapshot | null;
+  claim: ClaimView | undefined;
+  status: StatusView | undefined;
   runs: RunListItem[];
   selectedRunId: string | null;
   onSelectRun: (runId: string) => void;
 }) {
-  const claimText = snapshot?.claim.text ?? "";
-  const evidence = snapshot?.status.evidence;
+  const claimText = claim?.text ?? "";
+  const evidence = status?.evidence;
   return (
     <header className="flex shrink-0 items-center gap-3 border-b border-stone-200 bg-white/80 px-4 py-2">
       <div className="flex items-center gap-1.5 text-stone-800">
@@ -34,17 +36,15 @@ export function Header({
         ) : (
           <p className="text-[13px] text-stone-400">No claim selected yet</p>
         )}
-        {snapshot && (
-          <p className="truncate text-[11px] text-stone-500">
-            {snapshot.claim.status_sentence}
-          </p>
+        {claim && claim.status_sentence !== "" && (
+          <p className="truncate text-[11px] text-stone-500">{claim.status_sentence}</p>
         )}
       </div>
 
-      {snapshot && (
+      {status && (
         <div className="hidden shrink-0 items-center gap-2 text-[11px] text-stone-500 md:flex">
           <span className="rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5">
-            {snapshot.status.state}
+            {status.state}
           </span>
           {evidence && (
             <span>

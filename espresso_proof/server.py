@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from .agent_runner import ON_DEMAND_AGENTS, run_single_agent, skip_agent
-from .cockpit_view import build_snapshot
+from .cockpit_view import PANELS, build_panel, build_snapshot
 from .orchestrator import orchestrate_run, resume_run
 from .run_events import append_event
 from .run_dashboard import (
@@ -512,6 +512,42 @@ class Workbench:
                 self._status_cache.pop(next(iter(self._status_cache)))
         return snap
 
+    def panel(self, run_id: str, panel: str) -> dict[str, Any]:
+        """Goal 43B: one validated cockpit panel slice (display-only, fail
+        closed). Each panel reads its own artifact so panels refresh
+        independently; the same validate-then-digest-cache contract applies, so
+        a cached slice is never served after the run stops validating, and a
+        missing artifact is an honest ``missing``/``not_run`` placeholder —
+        never fabricated evidence."""
+
+        if panel not in PANELS:
+            raise WorkbenchError(404, "no such panel")
+        run_dir = self.resolve_run(run_id)
+        digest = self._run_digest(run_dir)
+        key = f"{run_id}::panel::{panel}"
+        with self._status_cache_lock:
+            cached = self._status_cache.get(key)
+            if cached is not None and cached[0] == digest:
+                return json.loads(cached[1])
+        try:
+            validate_run(run_dir)
+        except Exception as exc:
+            with self._status_cache_lock:
+                self._status_cache.pop(key, None)
+            raise WorkbenchError(
+                409,
+                "This run no longer passes Espresso's safety validation, so its "
+                "status cannot be shown. Existing results on disk are untouched.",
+            ) from exc
+        summary = status_summary(run_dir)
+        summary["run_id"] = run_id
+        slice_ = build_panel(run_dir, run_id, summary, panel)
+        with self._status_cache_lock:
+            self._status_cache[key] = (digest, json.dumps(slice_, ensure_ascii=False))
+            while len(self._status_cache) > 64:
+                self._status_cache.pop(next(iter(self._status_cache)))
+        return slice_
+
     def debug_info(self, run_id: str) -> dict[str, Any]:
         """Confined technical log for the advanced/debug path (Goal 33 §7).
 
@@ -683,6 +719,9 @@ def _make_handler(workbench: Workbench):
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "snapshot":
                     self._send_json(workbench.snapshot(parts[2]))
+                    return
+                if len(parts) == 5 and parts[:2] == ["api", "runs"] and parts[3] == "panel":
+                    self._send_json(workbench.panel(parts[2], parts[4]))
                     return
                 if len(parts) == 2 and parts[0] == "run":
                     self._send_html(workbench.dashboard_html(parts[1]))

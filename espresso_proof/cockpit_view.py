@@ -251,3 +251,92 @@ def build_snapshot(run_dir: Path, run_id: str, status: dict) -> dict:
         },
     }
     return snapshot
+
+
+# Goal 43B: each cockpit panel reads its own validated slice so panels refresh
+# independently. The panel agent_state is honest process state, never evidence:
+# it is read from the matching agent's process row (done/running/failed/
+# skipped), falls back to "not_run" when no artifact and no row exist, and is
+# "ready" once the artifact is present. A cache/poll can never turn a missing
+# panel into earned evidence — the tones inside each slice still come only from
+# the validated artifact status.
+PANELS = ("claim", "strategies", "examples", "counterexamples", "computations", "literature")
+
+# Which on-demand agent backs each panel (for honest per-panel process state).
+_PANEL_AGENT = {
+    "examples": "examples",
+    "counterexamples": "counterexamples",
+    "literature": "literature",
+}
+
+_AGENT_PROCESS_WORDS = {"done", "running", "failed", "skipped", "queued"}
+
+
+def _panel_agent_state(panel: str, present: bool, status: dict) -> str:
+    """Honest process state for a panel — never an evidence signal."""
+
+    agent = _PANEL_AGENT.get(panel)
+    if agent is not None:
+        for row in status.get("agents", []) or []:
+            if row.get("agent") == agent:
+                word = str(row.get("status") or "")
+                if word in _AGENT_PROCESS_WORDS:
+                    # "done" only means the process finished; whether evidence
+                    # was earned is decided by the slice's own status tones.
+                    return word
+    return "ready" if present else "not_run"
+
+
+def build_panel(run_dir: Path, run_id: str, status: dict, panel: str) -> dict:
+    """One bounded, display-safe panel slice. ``panel`` must be in ``PANELS``;
+    the caller validates the run first (same contract as the snapshot)."""
+
+    if panel not in PANELS:
+        raise KeyError(panel)
+    out: dict = {"run_id": run_id, "panel": panel}
+
+    if panel == "claim":
+        claim = _artifact(run_dir, "locked_claim")
+        grade = _artifact(run_dir, "idea_grade")
+        out["claim"] = {
+            "text": _clip((claim or {}).get("normalized_statement"), 600),
+            "status_sentence": describe_grade(
+                status=(grade or {}).get("status"),
+                proof_language_status=(grade or {}).get("proof_language_status"),
+            ),
+            "human_review_required": bool((grade or {}).get("human_review_required", True)),
+        }
+        out["missing"] = claim is None
+        out["agent_state"] = _panel_agent_state(panel, claim is not None, status)
+        return out
+
+    if panel == "strategies":
+        brief = _artifact(run_dir, "strategy_brief")
+        selected = (status.get("selected_route") or {}).get("id")
+        out["strategies"] = _strategies(brief, selected)
+        out["missing"] = brief is None
+        out["agent_state"] = _panel_agent_state(panel, brief is not None, status)
+        return out
+
+    artifact_name = {
+        "examples": "examples",
+        "counterexamples": "counterexamples",
+        "computations": "computation_checks",
+        "literature": "literature_review",
+    }[panel]
+    builder = {
+        "examples": _examples,
+        "counterexamples": _counterexamples,
+        "computations": _computations,
+        "literature": _literature,
+    }[panel]
+    data = _artifact(run_dir, artifact_name)
+    out["items"] = builder(data)
+    out["missing"] = data is None
+    out["agent_state"] = _panel_agent_state(panel, data is not None, status)
+    if panel == "literature":
+        grade = _artifact(run_dir, "idea_grade")
+        out["source_gaps"] = [
+            _clip(g, 160) for g in ((grade or {}).get("source_gaps") or [])[:8]
+        ]
+    return out

@@ -1,4 +1,14 @@
-import type { JobInfo, RunListItem, Snapshot } from "./types";
+import type {
+  AgentState,
+  ClaimView,
+  JobInfo,
+  PanelBase,
+  PanelName,
+  RunListItem,
+  Snapshot,
+  StatusView,
+  StrategyView,
+} from "./types";
 
 /**
  * Plain-fetch API client. Same origin as the Python server in production
@@ -49,10 +59,11 @@ export async function fetchRuns(): Promise<RunListItem[]> {
   const runs: RunListItem[] = [];
   for (const item of data.runs) {
     if (item !== null && typeof item === "object") {
-      const raw = item as { run_id?: unknown; claim?: unknown; project?: unknown };
+      const raw = item as { run_id?: unknown; statement?: unknown; claim?: unknown; project?: unknown };
       if (typeof raw.run_id === "string" && raw.run_id !== "") {
         runs.push({
           run_id: raw.run_id,
+          statement: typeof raw.statement === "string" ? raw.statement : undefined,
           claim: typeof raw.claim === "string" ? raw.claim : undefined,
           project: typeof raw.project === "string" ? raw.project : undefined,
         });
@@ -135,4 +146,86 @@ export function continueRoute(
 /** GET /api/jobs/{job_id} */
 export function fetchJob(jobId: string): Promise<JobInfo> {
   return request<JobInfo>(`/api/jobs/${encodeURIComponent(jobId)}`);
+}
+
+/**
+ * GET /api/runs/{id}/status — the fast-core header/agent state. Drops the
+ * never-rendered HTML fields and normalizes defensively.
+ */
+export async function fetchStatus(runId: string): Promise<StatusView> {
+  const status = await request<Partial<StatusView>>(
+    `/api/runs/${encodeURIComponent(runId)}/status`,
+  );
+  return {
+    state: status.state ?? "",
+    proof_status: status.proof_status ?? "",
+    completed: status.completed ?? false,
+    routes_preliminary: status.routes_preliminary ?? false,
+    selected_route: status.selected_route ?? null,
+    evidence: status.evidence ?? { reference_supported_steps: 0, machine_checks: 0 },
+    budget: status.budget ?? {},
+    agents: Array.isArray(status.agents) ? status.agents : [],
+    run_id: status.run_id ?? runId,
+  };
+}
+
+/**
+ * GET /api/runs/{id}/panel/{name} — one validated panel slice. The caller
+ * passes the expected panel; the response is normalized so a panel never
+ * crashes the page, and a missing artifact stays an honest empty/not_run slice.
+ */
+export async function fetchPanel<T extends PanelBase>(
+  runId: string,
+  panel: PanelName,
+): Promise<T> {
+  const raw = await request<Record<string, unknown>>(
+    `/api/runs/${encodeURIComponent(runId)}/panel/${encodeURIComponent(panel)}`,
+  );
+  const base = {
+    run_id: typeof raw.run_id === "string" ? raw.run_id : runId,
+    panel,
+    missing: raw.missing !== false,
+    agent_state: isAgentState(raw.agent_state) ? raw.agent_state : "not_run",
+  };
+  if (panel === "claim") {
+    const claim = raw.claim as ClaimView | undefined;
+    return {
+      ...base,
+      claim: claim ?? { text: "", status_sentence: "", human_review_required: false },
+    } as unknown as T;
+  }
+  if (panel === "strategies") {
+    return {
+      ...base,
+      strategies: Array.isArray(raw.strategies) ? (raw.strategies as StrategyView[]) : [],
+    } as unknown as T;
+  }
+  const items = Array.isArray(raw.items) ? raw.items : [];
+  if (panel === "literature") {
+    return {
+      ...base,
+      items,
+      source_gaps: Array.isArray(raw.source_gaps) ? (raw.source_gaps as string[]) : [],
+    } as unknown as T;
+  }
+  return { ...base, items } as unknown as T;
+}
+
+function isAgentState(value: unknown): value is AgentState {
+  return (
+    value === "ready" ||
+    value === "not_run" ||
+    value === "running" ||
+    value === "queued" ||
+    value === "failed" ||
+    value === "skipped" ||
+    value === "done"
+  );
+}
+
+/** Friendly message for a query error (server copy when present). */
+export function errorText(err: unknown): string {
+  return err instanceof Error && err.message !== ""
+    ? err.message
+    : "This panel could not load.";
 }
