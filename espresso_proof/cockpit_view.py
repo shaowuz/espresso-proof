@@ -20,8 +20,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .descriptions import describe_grade, evidence_phrase
+from .descriptions import describe_grade, effort_phrase, evidence_phrase, objection_phrase
 from .io import read_yaml
+from .latest_round import load_latest_round
 
 # The ONLY statuses whose evidence the kernel has actually earned. Everything
 # else — candidate, unverified, not_found, running agents, literature
@@ -75,13 +76,93 @@ def _clip(text: object, limit: int = 280) -> str:
     return str(text or "").strip()[:limit]
 
 
-def _strategies(brief: dict | None, selected_id: str | None) -> list[dict]:
+def _my_feedback_map(run_dir: Path) -> dict:
+    """Latest advisory feedback per strategy (Goal 43C). Display-only; a score
+    is never evidence and never changes a tone."""
+
+    from .strategy_feedback import latest_by_strategy
+
+    out: dict[str, dict] = {}
+    try:
+        for sid, item in latest_by_strategy(run_dir).items():
+            out[sid] = {
+                "score": item.score,
+                "priority": item.priority,
+                "note": item.safe_note,
+            }
+    except Exception:  # noqa: BLE001 — advisory; absence is fine
+        pass
+    return out
+
+
+def _ledger_context(run_dir: Path, grade: dict | None) -> dict:
+    """Shared, honest evidence/time-allocation context for the strategy ledgers.
+
+    Every count is pressure or gap, NEVER earned support: a surviving example
+    is not counted as evidence, and reviewer objections are advisory. Target
+    subgoal and effort are search/scheduling state, not status."""
+
+    examples = _artifact(run_dir, "examples") or {}
+    counter = _artifact(run_dir, "counterexamples") or {}
+    audit = _artifact(run_dir, "failure_pattern_audit") or {}
+
+    example_pressure = sum(
+        1 for e in examples.get("examples", [])
+        if str(e.get("result_for_current_idea")) == "failed"
+    )
+    counterexample_pressure = sum(
+        1 for c in counter.get("tests", [])
+        if c.get("refutes_claim") or c.get("exposes_missing_hypothesis")
+        or str(c.get("result")) == "failed"
+    )
+    objections = []
+    for entry in (audit.get("findings") or audit.get("patterns") or [])[:6]:
+        tier = entry.get("tier") if isinstance(entry, dict) else None
+        objections.append(objection_phrase(tier))
+
+    target = {}
+    try:
+        from .subgoal_graph import assemble_subgoal_graph, select_next_subgoal
+
+        target = select_next_subgoal(assemble_subgoal_graph(run_dir)) or {}
+    except Exception:  # noqa: BLE001
+        target = {}
+
+    effort = ""
+    loop = _artifact(run_dir, "prover_loop") or {}
+    if loop:
+        effort = effort_phrase((loop.get("budget") or {}).get("approved_effort"))
+
+    return {
+        "source_gaps": len([g for g in ((grade or {}).get("source_gaps") or []) if str(g).strip()]),
+        "example_pressure": example_pressure,
+        "counterexample_pressure": counterexample_pressure,
+        "reviewer_objections": objections,
+        "target_subgoal_id": target.get("id"),
+        "target_local_claim": _clip(target.get("statement"), 200) if target.get("statement") else "",
+        "effort": effort,
+        "next_cheapest_test": _clip((grade or {}).get("next_cheapest_test"), 200),
+    }
+
+
+def _strategies(
+    brief: dict | None,
+    selected_id: str | None,
+    feedback: dict | None = None,
+) -> list[dict]:
+    feedback = feedback or {}
+    allowed_efforts = {
+        str(c.get("strategy_id")): [str(e) for e in (c.get("effort_options") or [])]
+        for c in (brief or {}).get("allowed_human_choices", [])
+        if c.get("strategy_id")
+    }
     items = []
     for raw in (brief or {}).get("top_strategies", [])[:8]:
         source_status = raw.get("source_status")
+        sid = _clip(raw.get("id"), 80)
         items.append(
             {
-                "id": _clip(raw.get("id"), 80),
+                "id": sid,
                 "title": _clip(raw.get("title"), 140),
                 "one_line": _clip(raw.get("why_this_route")),
                 "score": raw.get("score") if isinstance(raw.get("score"), int) else None,
@@ -91,6 +172,10 @@ def _strategies(brief: dict | None, selected_id: str | None) -> list[dict]:
                 "main_risk": _clip(raw.get("main_risk")),
                 "next_step": _clip(raw.get("next_loop_plan")),
                 "selected": bool(selected_id) and raw.get("id") == selected_id,
+                # advisory: the user's latest feedback for this route, or null.
+                "my_feedback": feedback.get(sid),
+                # efforts the kernel allows for this route (for the continue action).
+                "allowed_efforts": allowed_efforts.get(sid, []),
             }
         )
     return items
@@ -234,7 +319,9 @@ def build_snapshot(run_dir: Path, run_id: str, status: dict) -> dict:
             "human_review_required": bool((grade or {}).get("human_review_required", True)),
         },
         "status": status,
-        "strategies": _strategies(brief, selected),
+        "strategies": _strategies(brief, selected, _my_feedback_map(run_dir)),
+        "ledger_context": _ledger_context(run_dir, grade),
+        "latest_round": load_latest_round(run_dir),
         "examples": _examples(examples),
         "counterexamples": _counterexamples(counterexamples),
         "computations": _computations(computations),
@@ -312,8 +399,11 @@ def build_panel(run_dir: Path, run_id: str, status: dict, panel: str) -> dict:
 
     if panel == "strategies":
         brief = _artifact(run_dir, "strategy_brief")
+        grade = _artifact(run_dir, "idea_grade")
         selected = (status.get("selected_route") or {}).get("id")
-        out["strategies"] = _strategies(brief, selected)
+        out["strategies"] = _strategies(brief, selected, _my_feedback_map(run_dir))
+        out["ledger_context"] = _ledger_context(run_dir, grade)
+        out["latest_round"] = load_latest_round(run_dir)
         out["missing"] = brief is None
         out["agent_state"] = _panel_agent_state(panel, brief is not None, status)
         return out
