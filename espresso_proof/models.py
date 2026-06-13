@@ -1786,6 +1786,64 @@ class LLMAgentAttempt(StrictBaseModel):
     status: Literal["candidate", "needs_human", "blocked", "error"]
 
 
+class ScopedObjection(StrictBaseModel):
+    """Goal 54B: a reviewer objection bound to a named proof-search target so it
+    becomes repairable state, not just prose.
+
+    Kernel-safety contract (advisory only):
+    - an objection can only BLOCK or PRIORITIZE repair; it can never prove,
+      refute, close, or upgrade any proof/source/evidence/grade/claim status;
+    - ``counterexample_pressure`` is unchecked pressure, never a refutation;
+    - ``subgoal_id`` / ``proof_step_id`` are UNVERIFIED provenance, deliberately
+      NOT hard-reconciled against the live proof graph in ``validate_run`` (Goal-39
+      precedent: blocker-derived node ids renumber across rebuilds). Reconciliation
+      is done at graph-build time (attach-if-matches); falsely-subgoal-specific free
+      text is recorded as route/global instead.
+    """
+
+    id: str
+    text: str
+    scope: Literal["subgoal", "proof_step", "route", "global"]
+    scope_source: Literal["explicit", "inferred_target", "legacy_fallback"]
+    scope_inferred: bool = False
+    inference_reason: str = ""
+    subgoal_id: str | None = None
+    proof_step_id: str | None = None
+    kind: Literal[
+        "missing_source",
+        "hypothesis_gap",
+        "definition_gap",
+        "logical_gap",
+        "computation_needed",
+        "counterexample_pressure",
+        "unclear_claim",
+        "reviewer_disagreement",
+        "other",
+    ]
+    severity: Literal["P0", "P1", "P2", "P3"]
+    suggested_next_action: str = ""
+
+    @model_validator(mode="after")
+    def validate_scope_binding(self) -> ScopedObjection:
+        # Structural fail-closed: an id may attach only to its matching scope, a
+        # subgoal/proof_step scope must name its target, and an inferred scope must
+        # justify itself. This is the "bogus scoped id" validate_run catches —
+        # without reconciling the id against a renumbering graph.
+        if self.subgoal_id is not None and self.scope != "subgoal":
+            raise ValueError("scoped_objection subgoal_id requires scope='subgoal'")
+        if self.proof_step_id is not None and self.scope != "proof_step":
+            raise ValueError("scoped_objection proof_step_id requires scope='proof_step'")
+        if self.scope == "subgoal" and not self.subgoal_id:
+            raise ValueError("scoped_objection scope='subgoal' requires a subgoal_id")
+        if self.scope == "proof_step" and not self.proof_step_id:
+            raise ValueError("scoped_objection scope='proof_step' requires a proof_step_id")
+        if self.scope_inferred and not self.inference_reason.strip():
+            raise ValueError("an inferred scope requires a non-empty inference_reason")
+        if self.scope_source == "inferred_target" and not self.scope_inferred:
+            raise ValueError("scope_source='inferred_target' requires scope_inferred=true")
+        return self
+
+
 class LLMAgentVerifierReview(StrictBaseModel):
     verifier_id: str
     provider: Literal["openai", "stub", "external"]
@@ -1796,6 +1854,11 @@ class LLMAgentVerifierReview(StrictBaseModel):
     missing_hypotheses: list[str] = Field(default_factory=list)
     source_requests: list[str] = Field(default_factory=list)
     unsafe_language: list[str] = Field(default_factory=list)
+    # Goal 54B: additive structured objections bound to proof-search targets.
+    # Legacy free-text fields above are preserved; the normalizer also mirrors them
+    # into route/global scoped_objections (scope_source='legacy_fallback') so older
+    # producers stay valid and downstream has one structured surface.
+    scoped_objections: list[ScopedObjection] = Field(default_factory=list)
     recommended_human_action: Literal["continue", "revise", "stop"]
     status: Literal["candidate", "needs_human", "blocked"]
 
