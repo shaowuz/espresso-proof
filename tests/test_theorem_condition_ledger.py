@@ -13,7 +13,11 @@ from espresso_proof.models import (
     TheoremConditionLedgerEntry,
 )
 from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.theorem_condition_ledger import build_theorem_condition_ledger
+from espresso_proof.theorem_applicability import audit_theorem_applicability
+from espresso_proof.theorem_condition_ledger import (
+    LEDGER_FILENAME,
+    build_theorem_condition_ledger,
+)
 from espresso_proof.validators import validate_run
 
 # A reviewer's verbatim source requests + the conditions to check against the claim.
@@ -227,3 +231,109 @@ def test_entry_requires_at_least_one_condition() -> None:
             conditions=[],
             repair_subgoal_id="subgoal_tcl_1",
         )
+
+
+# ---------------------------------------------------------------------------
+# Goal 57A slice-2: theorem applicability audit is default-deny against the ledger
+# (fixes the 56C dogfood bug: an empty grounding-derived audit defaulted
+# all_applicable, hiding an inapplicable theorem).
+# ---------------------------------------------------------------------------
+def _audit_with_ledger(run_dir: Path, *, condition_overrides=None, locator=None) -> dict:
+    """Build the ledger, optionally tamper a single entry's condition match_status
+    / locator, re-register it, and run the applicability audit. Returns the audit
+    report dict."""
+    build_theorem_condition_ledger(run_dir)
+    if condition_overrides is not None or locator is not None:
+        ledger = read_yaml(run_dir / LEDGER_FILENAME)
+        assert ledger["entries"], "expected a non-empty ledger to tamper"
+        entry = ledger["entries"][0]
+        if condition_overrides is not None:
+            for condition, status in zip(entry["conditions"], condition_overrides):
+                condition["match_status"] = status
+        if locator is not None:
+            entry["locator_status"], entry["locator"] = locator
+        write_yaml(run_dir / LEDGER_FILENAME, ledger)
+    return audit_theorem_applicability(run_dir)
+
+
+def test_unknown_ledger_conditions_are_nonempty_and_not_all_applicable(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _inject_reviewer_requests(run_dir, _SOURCE_REQUESTS, _MISSING_HYPOTHESES)
+    report = _audit_with_ledger(run_dir)  # slice-1 default: every condition unknown
+
+    assert report["ledger_usages"], "ledger present => audit must be NON-EMPTY"
+    assert report["overall_status"] != "all_applicable"
+    for usage in report["ledger_usages"]:
+        assert usage["applicability_status"] != "applicable"
+        assert usage["source_status"] != "source_backed"
+        assert usage["blocks_source_backed"] is True
+        assert all(c["status"] == "not_checked" for c in usage["conditions"])
+
+
+def test_unknown_does_not_yield_all_applicable_or_source_backed(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _inject_reviewer_requests(run_dir, ["Some theorem"], _MISSING_HYPOTHESES)
+    report = _audit_with_ledger(run_dir)
+    assert report["overall_status"] != "all_applicable"
+    # ledger usages never carry source_backed by default
+    assert all(u["source_status"] != "source_backed" for u in report["ledger_usages"])
+
+
+def test_matched_without_exact_locator_is_not_applicable(tmp_path: Path) -> None:
+    """An agent-asserted ``matched`` condition WITHOUT an exact locator must not
+    produce all_applicable or source_backed (the locator gate fails closed)."""
+    run_dir = _resumed_run(tmp_path)
+    _inject_reviewer_requests(run_dir, ["Cauchy theorem"], ["G is finite"])
+    report = _audit_with_ledger(run_dir, condition_overrides=["matched"])  # locator still needs_exact
+
+    assert report["overall_status"] != "all_applicable"
+    usage = report["ledger_usages"][0]
+    assert usage["applicability_status"] != "applicable"  # blocked: no exact locator
+    assert usage["source_status"] != "source_backed"
+    assert usage["blocks_source_backed"] is True
+
+
+def test_unmatched_condition_yields_nonapplicable_and_overall_not_all(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _inject_reviewer_requests(run_dir, ["Cauchy theorem"], ["G is finite", "p is prime"])
+    report = _audit_with_ledger(run_dir, condition_overrides=["unmatched"])
+
+    assert report["overall_status"] != "all_applicable"
+    usage = report["ledger_usages"][0]
+    assert usage["applicability_status"] != "applicable"
+    assert usage["source_status"] != "source_backed"
+    assert any(c["status"] == "mismatched" for c in usage["conditions"])
+
+
+def test_matched_and_exact_locator_never_earns_source_backed(tmp_path: Path) -> None:
+    """Even the only 'ok' shape (all conditions matched + exact locator) earns NO
+    source_backed from the ledger — that stays the grounding gate's job."""
+    run_dir = _resumed_run(tmp_path)
+    _inject_reviewer_requests(run_dir, ["Cauchy theorem"], ["G is finite"])
+    report = _audit_with_ledger(
+        run_dir,
+        condition_overrides=["matched"],
+        locator=("exact", "Cauchy 1845, Thm 1"),
+    )
+    usage = report["ledger_usages"][0]
+    # An all-matched + exact-locator entry may read applicable (advisory only)...
+    # ...but it must NEVER carry source_backed.
+    assert usage["source_status"] != "source_backed"
+
+
+def test_no_ledger_audit_unchanged(tmp_path: Path) -> None:
+    """Regression: with NO theorem_condition_ledger present, the audit behaves
+    exactly as before — no ledger usages, and overall is computed only from the
+    grounding-derived usages."""
+    run_dir = _resumed_run(tmp_path)
+    # de-register and delete any auto-built ledger so the audit sees none
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    optional = manifest.get("optional_artifacts", {})
+    optional.pop("theorem_condition_ledger", None)
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+    (run_dir / LEDGER_FILENAME).unlink(missing_ok=True)
+
+    report = audit_theorem_applicability(run_dir)
+    assert report["ledger_usages"] == []
+    # overall depends only on grounding usages; must validate as a real report
+    assert report["overall_status"] in {"all_applicable", "blocked", "misapplied", "unclear"}

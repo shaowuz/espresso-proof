@@ -1420,6 +1420,14 @@ class TheoremApplicabilityReport(StrictBaseModel):
     source_grounding_artifact: str
     literature_review_agent_artifact: str | None = None
     usages: list[TheoremApplicabilityUsage]
+    # Goal 57A slice-2: default-deny usages derived from the advisory theorem
+    # condition ledger (reviewer source_requests). These are NOT source-grounding
+    # usages: they never map to a proof step, never earn source_backed, and (being
+    # default-deny) are NEVER ``applicable`` unless a condition is explicitly
+    # ``matched`` AND the locator is exact. Their only safety effect is to forbid
+    # ``all_applicable`` while any ledger obligation is unresolved. Additive and
+    # optional — absent/empty means behaviour is unchanged.
+    ledger_usages: list[TheoremApplicabilityUsage] = Field(default_factory=list)
     overall_status: Literal["all_applicable", "blocked", "misapplied", "unclear"]
     notes: list[str] = Field(default_factory=list)
     # Goal 41: sha256 of source_grounding.yaml's bytes AT AUDIT TIME. Optional/
@@ -1436,6 +1444,13 @@ class TheoremApplicabilityReport(StrictBaseModel):
         if self.overall_status == "all_applicable":
             if any(usage.applicability_status != "applicable" for usage in self.usages):
                 raise ValueError("all_applicable requires every theorem usage applicable")
+            # Goal 57A: a ledger obligation that is not fully resolved (non-exact
+            # locator or any non-satisfied condition surfaces as a non-applicable
+            # ledger usage) must forbid all_applicable. Default-deny, fail closed.
+            if any(usage.applicability_status != "applicable" for usage in self.ledger_usages):
+                raise ValueError(
+                    "all_applicable requires every theorem condition ledger usage applicable"
+                )
         if any(usage.applicability_status == "misapplied" for usage in self.usages):
             if self.overall_status != "misapplied":
                 raise ValueError("misapplied theorem usage requires overall_status=misapplied")
