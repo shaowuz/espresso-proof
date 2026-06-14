@@ -700,6 +700,110 @@ class StopGate(LoopBaseModel):
         return self
 
 
+# --------------------------------------------------------------------------
+# Goal 54D: loop-closure scorecard — evaluation only, NEVER evidence.
+#
+# Machine-checkable answers to "did the human-in-the-loop loop actually close?"
+# computed from the durable 54A/B/C artifacts. Passing the scorecard is a
+# WORKFLOW replay pass, never a proof of any theorem; the scorecard can never set
+# or upgrade proof/source/evidence/grade/claim status.
+# --------------------------------------------------------------------------
+
+
+class ScorecardSafety(LoopBaseModel):
+    """Counts of UNAUTHORIZED status upgrades / proof-language leaks. Every field
+    must be 0 for a closed, honest loop."""
+
+    unauthorized_proved_count: int = 0
+    unauthorized_source_backed_count: int = 0
+    unauthorized_refuted_count: int = 0
+    unauthorized_checked_count: int = 0
+    unauthorized_evidence_count: int = 0
+    unauthorized_grade_count: int = 0
+    unauthorized_claim_status_count: int = 0
+    unauthorized_human_confirmed_count: int = 0
+    proof_complete_language_count: int = 0
+    validation_failed: bool = False
+
+    @property
+    def total(self) -> int:
+        # unauthorized_evidence_count is a derived display-only rollup of
+        # source_backed + checked; it is NOT summed here (that would double-count).
+        return (
+            self.unauthorized_proved_count
+            + self.unauthorized_source_backed_count
+            + self.unauthorized_refuted_count
+            + self.unauthorized_checked_count
+            + self.unauthorized_grade_count
+            + self.unauthorized_claim_status_count
+            + self.unauthorized_human_confirmed_count
+            + self.proof_complete_language_count
+        )
+
+    @property
+    def clean(self) -> bool:
+        return self.total == 0 and not self.validation_failed
+
+
+class ScorecardHandoffs(LoopBaseModel):
+    """Did each agent handoff actually happen (structured state, not prose)?"""
+
+    human_feedback_recorded: bool = False
+    human_feedback_used_in_next_round: bool = False
+    target_subgoal_selected: bool = False
+    prover_round_bound_to_subgoal: bool = False
+    reviewer_objection_bound_to_subgoal: bool = False
+    reviewer_objection_written_to_graph: bool = False
+    next_subgoal_changed_after_round: bool = False
+    source_gap_localized: bool = False
+    computation_scope_preserved: bool = True
+
+
+class ScorecardObservability(LoopBaseModel):
+    events_present: bool = False
+    timings_present: bool = False
+    agent_events_present: bool = False
+    max_silent_gap_ms: int | None = None
+
+
+class ScorecardBeforeAfter(LoopBaseModel):
+    original_gap: str = ""
+    selected_workflow_gap_fixed_or_improved: bool | None = None
+    regression_found: bool = False
+    new_p0_p1_count: int = 0
+
+
+class LoopClosureCaseScorecard(LoopBaseModel):
+    case_id: str
+    run_dir: str
+    # A refuted run closes by an admissible checked refutation, not by subgoal
+    # targeting (select_next_subgoal returns None on a contradicted main goal), so
+    # the gate applies the refutation-closure rule to it instead of the subgoal
+    # handoffs.
+    refuted: bool = False
+    safety: ScorecardSafety
+    handoffs: ScorecardHandoffs
+    observability: ScorecardObservability
+    notes: list[str] = Field(default_factory=list)
+
+
+class LoopClosureScorecard(LoopBaseModel):
+    """Cycle-level loop-closure scorecard. ``advisory_only`` is locked True: this
+    is evaluation, never a mathematical status."""
+
+    schema_version: int = 1
+    cycle_id: str
+    cycle_dir: str = ""
+    workflow_gate_passed: bool
+    required_handoffs: list[str] = Field(default_factory=list)
+    gate_failures: list[str] = Field(default_factory=list)
+    cases: list[LoopClosureCaseScorecard] = Field(default_factory=list)
+    safety: ScorecardSafety
+    before_after: ScorecardBeforeAfter | None = None
+    advisory_only: Literal[True] = True
+    notes: list[str] = Field(default_factory=list)
+
+
 __all__ = [
     name
     for name, value in list(globals().items())

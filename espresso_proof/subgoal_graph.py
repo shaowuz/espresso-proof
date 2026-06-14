@@ -135,6 +135,25 @@ def _review_objections(review: dict) -> list[str]:
     return objections[:5]
 
 
+def _scoped_objection_reviews(run_dir: Path, llm_agent_run: dict | None) -> list[dict]:
+    """Every verifier review that can carry a subgoal-scoped objection: the
+    gate-time ``llm_agent_run`` plus every continuation round file. Round files are
+    where the inferred-target subgoal objections live (gate-time reviews are
+    route-scoped before any subgoal exists), so the Goal-54B attach must read both
+    or a round's subgoal objection never reaches its node."""
+    reviews: list[dict] = list((llm_agent_run or {}).get("verifier_reviews") or [])
+    rounds = Path(run_dir) / "prover_rounds"
+    if rounds.is_dir():
+        for round_path in sorted(rounds.glob("round_*.yaml")):
+            try:
+                data = read_yaml(round_path)
+            except Exception:  # noqa: BLE001
+                continue
+            if isinstance(data, dict):
+                reviews.extend(data.get("verifier_reviews") or [])
+    return reviews
+
+
 def assemble_subgoal_graph(run_dir: Path) -> dict:
     """Read a run's validated artifacts and return a graph dict (no I/O).
 
@@ -344,9 +363,11 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
     # only block/prioritize repair — it never closes or upgrades a subgoal.
     # ``proof_step``-scoped objections are provenance-only for now (no proof_step
     # node exists to attach to); only ``subgoal`` scope is rendered downstream.
-    # ``llm_agent_run`` is absent on refuted/early runs — guard the None.
+    # Reviews come from the gate-time ``llm_agent_run`` (absent on refuted/early
+    # runs) AND every continuation round file, since a round's inferred-target
+    # subgoal objection lives there, not in the gate-time route-scoped review.
     objections_by_subgoal: dict[str, list[str]] = {}
-    for review in (llm_agent_run or {}).get("verifier_reviews") or []:
+    for review in _scoped_objection_reviews(run_dir, llm_agent_run):
         if not isinstance(review, dict):
             continue
         for so in review.get("scoped_objections") or []:

@@ -2172,6 +2172,43 @@ def loop_cycle(
     typer.echo(f"Campaign files updated under {out}")
 
 
+@app.command("loop-closure-scorecard")
+def loop_closure_scorecard_cmd(
+    cycle: Path = typer.Option(..., "--cycle", exists=True, file_okay=False, help="A recorded loop cycle directory."),
+    before: Path | None = typer.Option(None, "--before", exists=True, file_okay=False, help="A baseline cycle dir to compare against (before/after replay)."),
+    require: list[str] = typer.Option(None, "--require", help="Extra handoff predicate(s) the gate must satisfy (repeatable), e.g. --require reviewer_objection_bound_to_subgoal."),
+) -> None:
+    """Goal 54D: machine-check whether the human-in-the-loop loop CLOSED.
+
+    Reads a recorded dogfood cycle and writes loop_closure_scorecard.yaml +
+    loop_closure_summary.md: SAFETY (no unauthorized proof/source/evidence/grade/
+    claim/human_confirmed upgrade, no proof-complete language), HANDOFFS (human
+    feedback used, subgoal targeted + bound, reviewer objection bound to a subgoal
+    and written to the graph, ...), OBSERVABILITY (events/timings/agent_events),
+    and optional before/after replay. This is a WORKFLOW REPLAY check only — it is
+    NOT a proof of any theorem and upgrades no mathematical status. Exits non-zero
+    when the workflow gate fails so it can be used as a CI/replay gate.
+
+    Canonical replay command:
+        espresso loop-cycle --out <root> --mode smoke      # baseline cycle
+        # apply the selected fix, then:
+        espresso loop-cycle --out <root> --mode smoke      # replay cycle
+        espresso loop-closure-scorecard --cycle <replay_cycle> --before <baseline_cycle>
+    """
+    from .loop_closure_scorecard import write_loop_closure_scorecard
+
+    required = list(require) if require else None
+    scorecard = write_loop_closure_scorecard(cycle, required_handoffs=required, before_cycle_dir=before)
+    verdict = "PASSED" if scorecard.workflow_gate_passed else "FAILED"
+    typer.echo(f"Loop-closure workflow replay {verdict}: {cycle}")
+    typer.echo(f"  scorecard: {cycle / 'loop_closure_scorecard.yaml'}")
+    typer.echo(f"  summary:   {cycle / 'loop_closure_summary.md'}")
+    for failure in scorecard.gate_failures:
+        typer.echo(f"  - FAIL: {failure}")
+    if not scorecard.workflow_gate_passed:
+        raise typer.Exit(code=1)
+
+
 @app.command("loop-review")
 def loop_review(
     cycle: Path = typer.Option(..., "--cycle", exists=True, file_okay=False, help="A recorded loop cycle directory."),
