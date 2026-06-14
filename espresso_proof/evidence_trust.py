@@ -23,6 +23,7 @@ TRUST_LABELS: dict[str, str] = {
     "reference_backed": "Reference-backed step",
     "scope_checked": "Checked in this finite/computational scope",
     "smoke_checked": "Smoke-checked",
+    "ai_reviewed": "AI-reviewed — no blocking objection (advisory, not a verification)",
     "candidate": "Candidate",
     "needs_check": "Needs check",
     "running": "Running",
@@ -38,6 +39,10 @@ TRUST_TONE: dict[str, str] = {
     "reference_backed": "earned",
     "scope_checked": "earned",
     "smoke_checked": "candidate",
+    # AI-review signal: independent reviewers found no blocking objection. It is
+    # ADVISORY ONLY (amber) and must NEVER be in EARNED_LEVELS / render green:
+    # absence of an objection is not a verification, a proof, or checked evidence.
+    "ai_reviewed": "candidate",
     "candidate": "candidate",
     "needs_check": "missing",
     "running": "running",

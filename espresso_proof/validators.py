@@ -14,6 +14,7 @@ from .research_bank import (
 from .models import (
     AgentContracts,
     AgentRunStatusReport,
+    AIReviewAssessment,
     AttemptStatus,
     AutonomousLiteratureRetrievalReport,
     Claim,
@@ -134,6 +135,7 @@ def validate_run(run_dir: Path) -> None:
     proof_goal_graph = _load_optional_proof_goal_graph(run_dir, manifest)
     theorem_condition_ledger = _load_optional_theorem_condition_ledger(run_dir, manifest)
     agent_run_status = _load_optional_agent_run_status(run_dir, manifest)
+    _load_optional_ai_review(run_dir, manifest, claim)
     human_feedback, feedback_summary = _load_optional_human_feedback(run_dir, manifest)
 
     _validate_claim_id_consistency(
@@ -981,6 +983,55 @@ def _load_optional_proof_goal_graph(
         run_dir / optional["proof_goal_graph"],
         ProofGoalGraph,
     )
+
+
+def _load_optional_ai_review(
+    run_dir: Path,
+    manifest: RunManifest,
+    claim: Claim,
+) -> AIReviewAssessment | None:
+    """Advisory "AI review passed" signal. Fails closed.
+
+    ``AIReviewAssessment`` (StrictBaseModel) carries NO proof/source/evidence/
+    grade/checked/trust/status field of any kind, so a malformed assessment — or
+    one trying to smuggle such a field — is rejected here at load. The signal is
+    advisory only: it never earns, sets, or upgrades any status. Light binding:
+    claim_id / run_id must match the run.
+    """
+
+    optional = manifest.optional_artifacts
+    if "ai_review" not in optional:
+        return None
+    assessment = validate_yaml_model(
+        run_dir / optional["ai_review"],
+        AIReviewAssessment,
+    )
+    if assessment.claim_id != claim.id:
+        raise KernelValidationError(
+            f"ai_review claim_id {assessment.claim_id!r} does not match the run "
+            f"claim {claim.id!r}"
+        )
+    if assessment.run_id != manifest.run_id:
+        raise KernelValidationError(
+            f"ai_review run_id {assessment.run_id!r} does not match the run "
+            f"{manifest.run_id!r}"
+        )
+    try:
+        from .ai_review import assess_ai_review
+
+        expected = assess_ai_review(run_dir)
+    except Exception as exc:  # noqa: BLE001 - malformed dependencies must fail closed
+        raise KernelValidationError(
+            f"ai_review cannot be validated against current run artifacts: {exc}"
+        ) from exc
+    actual = assessment.model_dump(mode="json")
+    actual["generated_at"] = ""
+    if actual != expected:
+        raise KernelValidationError(
+            "ai_review does not match current reviewer/refutation/grade artifacts; "
+            "rebuild ai_review.yaml before rendering the advisory signal"
+        )
+    return assessment
 
 
 def _validate_subgoal_graph(

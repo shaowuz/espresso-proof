@@ -365,6 +365,29 @@ def build_concise_memo(run_dir: Path) -> str:
             lines.append("")
             lines.extend(graph_lines)
 
+    # AI review signal (advisory): independent AI reviewers checked the run
+    # against the kernel-locked checklist. ADVISORY ONLY — never a verification, a
+    # proof, or checked evidence, and it never changes any status. The raw verdict
+    # enum is never printed; only the human sentence below is rendered.
+    if "ai_review" in optional:
+        ai_review = read_yaml(run_dir / optional["ai_review"])
+        verdict = ai_review.get("verdict")
+        count = ai_review.get("reviewer_count", 0)
+        if verdict == "no_blocking_objection":
+            lines.append("")
+            lines.append(
+                f"AI review: {count} independent reviewers found no blocking "
+                "objection (advisory — not a verification)."
+            )
+        elif verdict == "objections_found":
+            lines.append("")
+            lines.append("AI review: open objections remain — see blocked subgoals.")
+        elif verdict == "insufficient_review":
+            lines.append("")
+            lines.append(
+                "AI review: not enough independent reviewers to assess."
+            )
+
     # Mathematical judgment (advisory): risks / next checks only. Never a status
     # upgrade and never proof-complete language.
     if "mathematical_judgment" in optional:

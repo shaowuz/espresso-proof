@@ -2754,8 +2754,54 @@ class TheoremConditionLedger(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class AIReviewVerdict(str, Enum):
+    """The advisory outcome of the AI-review signal.
+
+    None of these values is a verification, a proof, or checked evidence:
+    ``no_blocking_objection`` records only that >=2 independent AI reviewers
+    checked the run against the kernel-locked checklist and recorded NO blocking
+    objection. Absence of an objection is never proof.
+    """
+
+    no_blocking_objection = "no_blocking_objection"
+    objections_found = "objections_found"
+    insufficient_review = "insufficient_review"
+
+
+class AIReviewAssessment(StrictBaseModel):
+    """Advisory "AI review passed" signal (Goal: advisory AI-review signal).
+
+    Records that N independent AI reviewers checked a run against the kernel-
+    locked checklist and the absence (or presence) of any blocking objection. It
+    is ADVISORY ONLY by construction:
+
+    - it has NO proof / source / evidence / grade / checked / trust status field
+      of any kind (and StrictBaseModel forbids extras), so it can never set or
+      upgrade idea_grade / proof / source / evidence / claim status;
+    - the ``ai_reviewed`` trust level it maps to is amber and NEVER in
+      EARNED_LEVELS, so the signal can never render green;
+    - ``verdict`` is DERIVED only from reviewer artifacts + kernel checks; prose,
+      memory, or a human cannot set it, and extra fields are rejected at load.
+
+    Absence of a blocking objection is not a verification, a proof, or checked
+    evidence.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    verdict: AIReviewVerdict
+    reviewer_count: int = Field(ge=0)
+    dimensions_reviewed: list[str] = Field(default_factory=list)
+    unresolved_objection_count: int = Field(ge=0)
+    disclaimer: str
+    notes: list[str] = Field(default_factory=list)
+
+
 MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "claim": Claim,
+    "ai_review": AIReviewAssessment,
     "agent_contracts": AgentContracts,
     "admission_check": AdmissionCheck,
     "hypothesis_ledger": HypothesisLedger,
