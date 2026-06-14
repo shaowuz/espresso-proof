@@ -30,6 +30,7 @@ from ...strategy_rules import (
     HIGH_SCORE_THRESHOLD,
     STANDARD_SCORE_LIFT_LIMIT,
     collect_strategy_rule_violations,
+    score_lift_limit,
 )
 from ...validators import validate_run
 from ..registry import register_stage
@@ -172,9 +173,6 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
         s.get("status") == "source_backed" for s in source.get("steps", [])
     )
     source_gap = (not source_backed_steps) or bool(current.get("source_gaps"))
-    missing_hyps = bool(current.get("missing_hypotheses")) or bool(
-        ledger.get("missing_or_unclear")
-    )
     counterexample_pressure = len(counterexamples) > 0
     # A refutation requires an admissible all-hypotheses counterexample that is
     # actually checked/refuting — the front half never produces one.
@@ -182,7 +180,7 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
         c.get("satisfies_all_claim_hypotheses") is True and c.get("refutes_claim") is True
         for c in counterexamples
     )
-    theorem_applicability_failure = False  # no theorem-applicability artifact in the front half
+    theorem_applicability_failure = _has_theorem_applicability_failure(run_dir, context)
 
     review_note = None
     if precision != "precise":
@@ -191,10 +189,16 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     elif admissible_refutation:
         status = "refuted"
     else:
-        serious = sum(
-            [bool(missing_hyps), counterexample_pressure, theorem_applicability_failure]
+        # likely_false requires real negative pressure, not merely missing
+        # support. A confirmed machine check vetoes likely_false, but never
+        # upgrades this front-half grade beyond fragile.
+        has_confirmed_machine_check = _has_confirmed_machine_check(run_dir, context)
+        negative_evidence = counterexample_pressure or theorem_applicability_failure
+        status = (
+            "likely_false"
+            if negative_evidence and not has_confirmed_machine_check
+            else "fragile"
         )
-        status = "likely_false" if serious >= 2 else "fragile"
         # Precise claim: relax the placeholder failed review so meaningful routes
         # can activate (real reviewers still run later), and scrub stale
         # "too vague to test" placeholder text that no longer applies.
@@ -207,7 +211,7 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     reason = {
         "unclear": "Recomputed from live artifacts: the claim is not precise enough to study safely.",
         "fragile": "Recomputed from live artifacts: the claim is precise, but the route has source gaps / missing hypotheses / counterexample pressure and no checked proof.",
-        "likely_false": "Recomputed from live artifacts: the claim is precise but faces multiple serious pressures; no checked counterexample has been verified.",
+        "likely_false": "Recomputed from live artifacts: the claim is precise but faces unchecked counterexample pressure or theorem misuse; no confirming machine check or checked counterexample has been verified.",
         "refuted": "Recomputed from live artifacts: an admissible, checked counterexample violates the conclusion.",
     }[status]
 
@@ -234,48 +238,136 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     IdeaGrade.model_validate(grade)
     write_yaml(run_dir / artifacts["idea_grade"], grade)
 
-    # SAFETY/CONSISTENCY: recomputing the grade can invalidate a seeded
-    # strategy_synthesis/brief whose routes were scored against the OLD grade
-    # (e.g. the hodge_atoms mock seeds high-scoring non-lock routes). The
-    # post-stage validate_run would then trip strategy_rules before the strategy
-    # stage rewrites them. Reconcile to the single safe claim-lock route, which is
-    # valid under the strategy rules for ANY grade; the strategy stage (next)
-    # regenerates the real routes. This never invents support or upgrades status.
-    run_id = context["manifest"]["run_id"]
-    lock_route = _safe_lock_route(grade)
-    synthesis = {
-        "claim_id": claim_id,
-        "synthesized_from": [
-            run_id,
-            "literature_review.yaml",
-            "tests.yaml",
-            "counterexamples.yaml",
-            "source_grounding.yaml",
-            "review.yaml",
-            "idea_grade.yaml",
-            "loop_control.yaml",
-        ],
-        "routes": [lock_route],
-        "discarded_routes": [],
-        "synthesis_note": "Strategy routes reset to claim-locking pending the strategy stage after regrade.",
-    }
-    brief = {
-        "claim_id": claim_id,
-        "generated_after_runs": [run_id],
-        "top_strategies": [lock_route],
-        "also_considered": [],
-        "question_for_mathematician": "Which route should receive time, if any?",
-        "allowed_human_choices": [
-            {"strategy_id": lock_route["id"], "effort_options": [lock_route["estimated_effort"]]},
-            {"strategy_id": "none", "effort_options": ["quick_test"]},
-        ],
-    }
-    StrategySynthesis.model_validate(synthesis)
-    StrategyBrief.model_validate(brief)
-    write_yaml(run_dir / artifacts["strategy_synthesis"], synthesis)
-    write_yaml(run_dir / artifacts["strategy_brief"], brief)
+    reconciled = _reconcile_strategy_after_regrade(run_dir, artifacts, grade)
 
     notes = [f"regrade: precision={precision} -> status={status} (score {score})"]
+    if reconciled:
+        notes.append(f"reconciled {reconciled} scaffold strategy artifact(s)")
     if review_note:
         notes.append(review_note)
     return {"unsafe_language": [], "notes": notes}
+
+
+def _has_theorem_applicability_failure(run_dir: Path, context: dict) -> bool:
+    theorem_applicability = context.get("theorem_applicability")
+    if theorem_applicability is None:
+        optional = (context.get("manifest") or {}).get("optional_artifacts", {})
+        rel_path = optional.get("theorem_applicability")
+        if rel_path:
+            theorem_applicability = read_yaml(run_dir / rel_path)
+    if not isinstance(theorem_applicability, dict):
+        return False
+    if theorem_applicability.get("overall_status") in {"blocked", "misapplied"}:
+        return True
+    usages = list(theorem_applicability.get("usages") or []) + list(
+        theorem_applicability.get("ledger_usages") or []
+    )
+    return any(
+        isinstance(usage, dict)
+        and usage.get("applicability_status") in {"blocked", "misapplied"}
+        for usage in usages
+    )
+
+
+def _has_confirmed_machine_check(run_dir: Path, context: dict) -> bool:
+    current_claim_id = (context.get("claim") or {}).get("id")
+    if not current_claim_id:
+        return False
+    checks = (context.get("computation_checks") or {}).get("checks", [])
+    checked_specs = {
+        check.get("id"): (check.get("machine_check") or {})
+        for check in checks
+        if check.get("id")
+        and check.get("machine_check") is not None
+        and check.get("status") == "checked"
+        and check.get("claim_id") == current_claim_id
+    }
+    if not checked_specs:
+        return False
+
+    verification = context.get("computation_verification")
+    if verification is None:
+        optional = (context.get("manifest") or {}).get("optional_artifacts", {})
+        rel_path = optional.get("computation_verification")
+        if rel_path:
+            verification = read_yaml(run_dir / rel_path)
+    if not isinstance(verification, dict):
+        return False
+
+    for result in verification.get("results", []):
+        if not isinstance(result, dict):
+            continue
+        check_id = result.get("check_id")
+        spec = checked_specs.get(check_id)
+        if (
+            spec is not None
+            and result.get("verdict") == "confirmed"
+            and result.get("executed") is True
+            and result.get("claim_id") == current_claim_id
+            and result.get("kind") == spec.get("kind")
+            and result.get("expression") == spec.get("expression")
+            and result.get("expected") == spec.get("expected")
+        ):
+            return True
+    return False
+
+
+_STRATEGY_ROUTE_ARTIFACTS = (
+    ("strategy_synthesis", "routes"),
+    ("strategy_brief", "top_strategies"),
+)
+_STRATEGY_MODEL_BY_ARTIFACT = {
+    "strategy_synthesis": StrategySynthesis,
+    "strategy_brief": StrategyBrief,
+}
+
+
+def _reconcile_strategy_after_regrade(run_dir: Path, artifacts: dict, grade: dict) -> int:
+    """Keep scaffold strategy artifacts valid after the grade is recomputed."""
+    status = grade.get("status", "unclear")
+    idea_score = int(grade.get("score", 0) or 0)
+    changed_artifacts = 0
+
+    if status == "unclear":
+        lock_route = _safe_lock_route(grade)
+        allowed = [
+            {"strategy_id": lock_route["id"], "effort_options": [lock_route["estimated_effort"]]},
+            {"strategy_id": "none", "effort_options": ["quick_test"]},
+        ]
+        for artifact_key, routes_key in _STRATEGY_ROUTE_ARTIFACTS:
+            path = run_dir / artifacts[artifact_key]
+            if not path.exists():
+                continue
+            doc = read_yaml(path) or {}
+            doc[routes_key] = [dict(lock_route)]
+            if artifact_key == "strategy_synthesis":
+                doc["discarded_routes"] = []
+                doc["synthesis_note"] = (
+                    "Strategy routes reset to claim-locking pending the strategy stage after regrade."
+                )
+            else:
+                doc["also_considered"] = []
+                doc["allowed_human_choices"] = allowed
+            _STRATEGY_MODEL_BY_ARTIFACT[artifact_key].model_validate(doc)
+            write_yaml(path, doc)
+            changed_artifacts += 1
+        return changed_artifacts
+
+    for artifact_key, routes_key in _STRATEGY_ROUTE_ARTIFACTS:
+        path = run_dir / artifacts[artifact_key]
+        if not path.exists():
+            continue
+        doc = read_yaml(path) or {}
+        changed = False
+        for route in doc.get(routes_key, []):
+            if not isinstance(route, dict):
+                continue
+            cap = idea_score + score_lift_limit(route)
+            if int(route.get("score", 0) or 0) > cap:
+                route["score"] = max(0, cap)
+                changed = True
+        if changed:
+            _STRATEGY_MODEL_BY_ARTIFACT[artifact_key].model_validate(doc)
+            write_yaml(path, doc)
+            changed_artifacts += 1
+    return changed_artifacts

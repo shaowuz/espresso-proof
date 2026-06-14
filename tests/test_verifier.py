@@ -74,6 +74,91 @@ def test_verify_check_unsafe_is_error_not_executed():
     assert result["executed"] is False
 
 
+def test_finite_enumeration_confirms_true_sum_identity():
+    result = verify_check(
+        _check(
+            "fe1",
+            "checked",
+            "finite_enumeration",
+            "@n[1:1000] sum(1,n)",
+            "@n[1:1000] n*(n+1)/2",
+        )
+    )
+    assert result["verdict"] == "confirmed"
+    assert result["executed"] is True
+    assert result["backend"] == "stdlib_finite_enumeration"
+
+
+def test_finite_enumeration_confirms_prod_identity():
+    result = verify_check(
+        _check(
+            "fe2",
+            "checked",
+            "finite_enumeration",
+            "@k[0:0] prod(1,5)",
+            "@k[0:0] 120",
+        )
+    )
+    assert result["verdict"] == "confirmed"
+
+
+def test_finite_enumeration_refutes_false_identity_with_counterexample():
+    result = verify_check(
+        _check("fe3", "checked", "finite_enumeration", "@n[1:50] n**2", "@n[1:50] 2*n")
+    )
+    assert result["verdict"] == "refuted"
+    assert "counterexample" in result["computed"]
+
+
+def test_finite_enumeration_fails_closed_on_huge_range():
+    result = verify_check(
+        _check(
+            "fe4",
+            "checked",
+            "finite_enumeration",
+            "@n[1:99999999] n",
+            "@n[1:99999999] n",
+        )
+    )
+    assert result["verdict"] == "error"
+    assert result["executed"] is False
+
+
+def test_finite_enumeration_fails_closed_on_composed_work_budget():
+    result = verify_check(
+        _check(
+            "fe4b",
+            "checked",
+            "finite_enumeration",
+            "@n[1:100000] sum(1,100000)",
+            "@n[1:100000] 5000050000",
+        )
+    )
+    assert result["verdict"] == "error"
+    assert "work too large" in result["detail"]
+
+
+def test_finite_enumeration_rejects_mismatched_range():
+    result = verify_check(
+        _check("fe5", "checked", "finite_enumeration", "@n[1:10] n", "@n[1:20] n")
+    )
+    assert result["verdict"] == "error"
+
+
+def test_finite_enumeration_rejects_arbitrary_calls():
+    result = verify_check(
+        _check("fe6", "checked", "finite_enumeration", "@n[1:5] foo(n)", "@n[1:5] n")
+    )
+    assert result["verdict"] == "error"
+
+
+def test_finite_enumeration_rejects_unknown_names():
+    result = verify_check(
+        _check("fe7", "checked", "finite_enumeration", "@n[1:5] m", "@n[1:5] n")
+    )
+    assert result["verdict"] == "error"
+
+
 def test_verify_check_none_without_spec():
     check = _check("c4", "checked", "exact_arithmetic", "1", "1")
     check.pop("machine_check")
