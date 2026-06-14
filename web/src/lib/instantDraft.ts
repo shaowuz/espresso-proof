@@ -28,10 +28,34 @@ export async function streamInstantDraft(
   message: string,
   handlers: InstantDraftHandlers,
 ): Promise<void> {
+  await consumeInstantDraft(
+    `/api/runs/${encodeURIComponent(runId)}/instant-draft`,
+    message,
+    handlers,
+  );
+}
+
+/**
+ * Goal 55: the PRE-RUN instant lane. Answers the submitted claim text the moment
+ * it is sent, decoupled from run creation, so a slow workflow can never blank the
+ * page. Same contract as {@link streamInstantDraft} but with no run id.
+ */
+export async function streamInstantDraftTransient(
+  message: string,
+  handlers: InstantDraftHandlers,
+): Promise<void> {
+  await consumeInstantDraft("/api/instant-draft", message, handlers);
+}
+
+async function consumeInstantDraft(
+  url: string,
+  message: string,
+  handlers: InstantDraftHandlers,
+): Promise<void> {
   const { onAck, onLine, onDone } = handlers;
   let res: Response;
   try {
-    res = await fetch(`/api/runs/${encodeURIComponent(runId)}/instant-draft`, {
+    res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),

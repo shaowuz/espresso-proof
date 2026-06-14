@@ -32,6 +32,10 @@ export default function App() {
   const [chatLastNote, setChatLastNote] = useState("");
   const [chatStreaming, setChatStreaming] = useState(false);
   const [activeObject, setActiveObject] = useState<ActiveObject>(null);
+  // Goal 55: the claim the user just submitted, captured the instant they hit
+  // send so the instant draft streams immediately — before (and decoupled from)
+  // run creation, so a slow workflow never blanks the page.
+  const [pendingClaim, setPendingClaim] = useState("");
   const chatNextId = useRef(0);
   const selectedRunRef = useRef<string | null>(null);
   const activeSeededRunRef = useRef<string | null>(null);
@@ -232,29 +236,37 @@ export default function App() {
             pane === "workspace" ? "block" : "hidden",
           )}
         >
-          {hasRun ? (
+          {hasRun || pendingClaim ? (
             <div className="space-y-4 p-3 lg:p-4">
-              <InstantDraft
-                runId={selectedRunId}
-                claimText={claim.data?.claim?.text ?? ""}
-                superseded={
-                  Boolean(status.data?.completed) ||
-                  (status.data?.evidence
-                    ? status.data.evidence.reference_supported_steps +
-                        status.data.evidence.machine_checks >
-                      0
-                    : false)
-                }
-              />
-              <Workspace
-                runId={selectedRunId}
-                status={status.data}
-                onChanged={refreshRun}
-                chatMessages={chatMessages}
-                chatLastNote={chatLastNote}
-                activeObject={activeObject}
-                onActiveObjectChange={setActiveObject}
-              />
+              {(claim.data?.claim?.text || pendingClaim) && (
+                <InstantDraft
+                  claimText={claim.data?.claim?.text || pendingClaim}
+                  superseded={
+                    Boolean(status.data?.completed) ||
+                    (status.data?.evidence
+                      ? status.data.evidence.reference_supported_steps +
+                          status.data.evidence.machine_checks >
+                        0
+                      : false)
+                  }
+                />
+              )}
+              {hasRun ? (
+                <Workspace
+                  runId={selectedRunId}
+                  status={status.data}
+                  onChanged={refreshRun}
+                  chatMessages={chatMessages}
+                  chatLastNote={chatLastNote}
+                  activeObject={activeObject}
+                  onActiveObjectChange={setActiveObject}
+                />
+              ) : (
+                <p className="px-1 text-[14px] text-stone-500">
+                  Preparing the full read — strategies and evidence panels will
+                  appear here as they are ready.
+                </p>
+              )}
             </div>
           ) : (
             <EmptyWorkspace hasRuns={runs.length > 0} />
@@ -290,6 +302,7 @@ export default function App() {
           <Composer
             runId={selectedRunId}
             onRunCreated={onRunCreated}
+            onSubmitClaim={setPendingClaim}
             onChatMessage={sendChat}
             chatBusy={chatStreaming}
             activeObject={activeObject}

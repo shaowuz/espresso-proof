@@ -102,6 +102,36 @@ def test_instant_draft_acks_then_streams_labeled_draft(client) -> None:
     assert metrics["background_run_started"] is True
 
 
+def test_transient_instant_draft_needs_no_run_and_persists_nothing(client) -> None:
+    # the PRE-RUN lane answers the claim with no run id, decoupled from creation.
+    wb, call = client
+    start = time.monotonic()
+    status, ctype, raw = call("POST", "/api/instant-draft", {"message": "is this true?"})
+    elapsed = time.monotonic() - start
+    assert status == 200 and "text/event-stream" in ctype
+    assert elapsed < 3.0
+
+    events = _parse_sse(raw)
+    assert events[0]["event"] == "ack"
+    drafts = [e["data"]["text"] for e in events if e["event"] == "draft"]
+    assert drafts and drafts[0].startswith("Draft only — not checked")
+    done = events[-1]
+    assert done["event"] == "done" and done["data"]["ok"] is True
+    # no run was created/touched: background_run_started is False and the runs
+    # root has no project runs.
+    assert done["data"]["instant_lane_metrics"]["background_run_started"] is False
+    assert not list((wb.root).glob("projects/*/runs/*"))
+
+
+def test_transient_instant_draft_blocks_cross_site_origin(client) -> None:
+    wb, call = client
+    status, _, raw = call(
+        "POST", "/api/instant-draft", {"message": "x"},
+        headers={"Origin": "http://evil.example.com"},
+    )
+    assert status == 403 and "cross-site" in json.loads(raw)["error"]
+
+
 def test_instant_draft_is_scrubbed_even_on_hostile_message(client) -> None:
     wb, call = client
     run_id = _create(call)

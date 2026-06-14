@@ -19,8 +19,10 @@ return a ``job_id`` immediately; the UI polls ``GET /api/jobs/{job_id}``.
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
+import time
 import uuid
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -323,6 +325,15 @@ class Workbench:
         """The actual fast-core run (runs inside the background job)."""
 
         provider = provider or self.provider
+        # Test-only hook: deliberately slow run creation to prove the instant lane
+        # is decoupled (the transient draft must still appear fast). Never set in
+        # production; bounded so a typo cannot hang the server.
+        delay_ms = os.environ.get("ESPRESSO_TEST_CREATE_DELAY_MS")
+        if delay_ms:
+            try:
+                time.sleep(min(20.0, max(0.0, float(delay_ms) / 1000.0)))
+            except ValueError:
+                pass
         inbox = self.root / "_inbox"
         inbox.mkdir(parents=True, exist_ok=True)
         input_path = inbox / f"{uuid.uuid4().hex}.md"
@@ -926,13 +937,13 @@ def _make_handler(workbench: Workbench):
                 except Exception:  # noqa: BLE001
                     pass
 
-        def _stream_instant_draft(self, run_id: str, message: str) -> None:
-            """Goal 55: the instant conversation lane as Server-Sent Events.
-
-            Acknowledges immediately, then streams an already-scrubbed labeled
-            DRAFT ("Draft only — not checked") built within a small latency
-            budget. It never blocks on a slow model. The draft is persisted as an
-            advisory SIDECAR the kernel never reads, and it upgrades no status."""
+        def _emit_instant_draft(self, message: str, run_dir: Path | None) -> None:
+            """Shared SSE core for the instant lane (Goal 55): ack immediately,
+            then stream an already-scrubbed labeled DRAFT built within a small
+            latency budget. It never blocks on a slow model and upgrades no
+            status. When ``run_dir`` is given the draft is persisted as an advisory
+            SIDECAR the kernel never reads; the transient (pre-run) path persists
+            nothing. The caller has already sent the SSE response headers."""
 
             from .instant_lane import (
                 build_instant_draft,
@@ -944,16 +955,6 @@ def _make_handler(workbench: Workbench):
 
             received = now_iso()
             t0 = monotonic_ms()
-            try:
-                run_dir = workbench.resolve_run(run_id)
-            except WorkbenchError as exc:
-                self._send_json({"error": exc.message}, status=exc.status)
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Connection", "close")
-            self.end_headers()
 
             def emit(event: str, data: dict) -> None:
                 chunk = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -966,20 +967,23 @@ def _make_handler(workbench: Workbench):
                 # client=None → friendly deterministic fallback draft: instant and
                 # safe, and never the deep xhigh adapter. A bounded fast-model
                 # profile can be injected here later without changing the contract.
-                draft = build_instant_draft(message, run_id=run_id, created_at=now_iso())
+                draft = build_instant_draft(
+                    message, run_id=run_dir.name if run_dir else "", created_at=now_iso()
+                )
                 draft_ms = monotonic_ms() - t0
                 for line in stream_instant_draft(draft):
                     emit("draft", {"text": line})
-                try:
-                    write_instant_conversation(run_dir, draft)
-                except Exception:  # noqa: BLE001 — persistence is advisory; never break the stream
-                    pass
+                if run_dir is not None:
+                    try:
+                        write_instant_conversation(run_dir, draft)
+                    except Exception:  # noqa: BLE001 — persistence is advisory; never break the stream
+                        pass
                 metrics = instant_lane_metrics(
                     request_received_at=received,
                     first_visible_ack_ms=ack_ms,
                     first_draft_visible_ms=draft_ms,
                     status=draft.status,
-                    background_run_started=True,
+                    background_run_started=run_dir is not None,
                 )
                 emit("done", {"ok": True, **metrics, "advisory": True})
             except Exception:  # noqa: BLE001 — a broken pipe / read error ends safely
@@ -987,6 +991,32 @@ def _make_handler(workbench: Workbench):
                     emit("done", {"ok": False, "advisory": True})
                 except Exception:  # noqa: BLE001
                     pass
+
+        def _begin_sse(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+
+        def _stream_instant_draft(self, run_id: str, message: str) -> None:
+            """Run-scoped instant draft: persists the advisory sidecar."""
+
+            try:
+                run_dir = workbench.resolve_run(run_id)
+            except WorkbenchError as exc:
+                self._send_json({"error": exc.message}, status=exc.status)
+                return
+            self._begin_sse()
+            self._emit_instant_draft(message, run_dir)
+
+        def _stream_instant_draft_transient(self, message: str) -> None:
+            """Pre-run instant draft (Goal 55): answers the claim text the instant
+            it is submitted — decoupled from run creation, so a slow workflow can
+            never delay or blank the draft. Persists nothing (no run id yet)."""
+
+            self._begin_sse()
+            self._emit_instant_draft(message, None)
 
         def _read_json(self) -> dict[str, Any]:
             length = int(self.headers.get("Content-Length") or 0)
@@ -1191,6 +1221,14 @@ def _make_handler(workbench: Workbench):
                     # persists an advisory sidecar only and upgrades no status.
                     self._require_loopback_origin()
                     self._stream_instant_draft(parts[2], str(body.get("message", "")))
+                    return
+                if len(parts) == 2 and parts == ["api", "instant-draft"]:
+                    # Goal 55: the PRE-RUN instant lane (SSE). Answers the submitted
+                    # claim immediately, decoupled from run creation, so a slow
+                    # workflow never blanks the page. Loopback-guarded; persists
+                    # nothing and upgrades no status.
+                    self._require_loopback_origin()
+                    self._stream_instant_draft_transient(str(body.get("message", "")))
                     return
                 raise WorkbenchError(404, "not found")
             except WorkbenchError as exc:

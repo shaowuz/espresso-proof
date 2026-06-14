@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { streamInstantDraft } from "./instantDraft";
+import { streamInstantDraft, streamInstantDraftTransient } from "./instantDraft";
 
 function sseResponse(blocks: string[], status = 200): Response {
   const enc = new TextEncoder();
@@ -57,6 +57,28 @@ describe("streamInstantDraft", () => {
       },
     });
     expect(done).toEqual({ ok: false, status: "failed" });
+  });
+
+  it("the transient variant posts to the pre-run endpoint and streams", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        'event: ack\ndata: {"working":true}\n\n',
+        'event: draft\ndata: {"text":"Draft only — not checked."}\n\n',
+        'event: done\ndata: {"ok":true,"instant_lane_metrics":{"instant_lane_status":"fallback"}}\n\n',
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const lines: string[] = [];
+    let done: { ok: boolean; status: string } | null = null;
+    await streamInstantDraftTransient("claim text", {
+      onLine: (t) => lines.push(t),
+      onDone: (ok, status) => {
+        done = { ok, status };
+      },
+    });
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/instant-draft");
+    expect(lines).toEqual(["Draft only — not checked."]);
+    expect(done).toEqual({ ok: true, status: "fallback" });
   });
 
   it("treats a non-ok response as a failed stream", async () => {

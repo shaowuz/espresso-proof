@@ -16,6 +16,7 @@ import type { ActiveObject } from "../lib/types";
 export function Composer({
   runId,
   onRunCreated,
+  onSubmitClaim,
   onChatMessage,
   chatBusy,
   activeObject,
@@ -23,6 +24,7 @@ export function Composer({
 }: {
   runId: string | null;
   onRunCreated: (runId: string) => void;
+  onSubmitClaim?: (claim: string) => void;
   onChatMessage: (message: string) => Promise<void>;
   chatBusy: boolean;
   activeObject: ActiveObject;
@@ -34,6 +36,9 @@ export function Composer({
   const hasRun = runId !== null;
 
   const startRun = (trimmed: string) => {
+    // Goal 55: fire the instant draft NOW, before run creation, so it is never
+    // gated on a slow workflow.
+    onSubmitClaim?.(trimmed);
     job.start(
       () => createRun(trimmed),
       (result) => {

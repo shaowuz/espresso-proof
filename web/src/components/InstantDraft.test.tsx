@@ -7,15 +7,13 @@ import { InstantDraft } from "./InstantDraft";
 // working state, and the superseded banner.
 
 describe("InstantDraft", () => {
-  it("renders nothing without a run", () => {
-    expect(
-      renderToStaticMarkup(<InstantDraft runId={null} claimText="c" />),
-    ).toBe("");
+  it("renders nothing without a claim", () => {
+    expect(renderToStaticMarkup(<InstantDraft claimText="" />)).toBe("");
   });
 
   it("shows the locked draft label and neutral styling, never earned-green", () => {
     const html = renderToStaticMarkup(
-      <InstantDraft runId="run-1" claimText="Show |G|=p^2 implies abelian." />,
+      <InstantDraft claimText="Show |G|=p^2 implies abelian." />,
     );
     expect(html).toContain("Draft only — not checked");
     expect(html).toContain("Instant draft");
@@ -30,7 +28,7 @@ describe("InstantDraft", () => {
 
   it("marks the draft superseded when the evidence panels are authoritative", () => {
     const html = renderToStaticMarkup(
-      <InstantDraft runId="run-1" claimText="c" superseded />,
+      <InstantDraft claimText="c" superseded />,
     );
     expect(html).toContain("supersede this draft");
     expect(html).toContain("opacity-60");

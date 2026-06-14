@@ -3,7 +3,7 @@ import { Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { FadeIn } from "./motion";
 import { MathText } from "./MathText";
-import { streamInstantDraft, type InstantStatus } from "../lib/instantDraft";
+import { streamInstantDraftTransient, type InstantStatus } from "../lib/instantDraft";
 import { cn } from "../lib/cn";
 
 const LABEL = "Draft only — not checked";
@@ -11,9 +11,10 @@ const LABEL = "Draft only — not checked";
 type Phase = "working" | "streaming" | "done";
 
 /**
- * Goal 55: the instant conversation lane panel. It fires the moment a run is
- * selected and shows a fast, labeled DRAFT while the evidence pipeline runs in
- * the background. The draft is conversation, NOT evidence:
+ * Goal 55: the instant conversation lane panel. It fires the moment a claim is
+ * submitted — DECOUPLED from run creation — so a slow workflow can never delay
+ * or blank the draft. It shows a fast, labeled DRAFT while the evidence pipeline
+ * runs in the background. The draft is conversation, NOT evidence:
  *
  * - it is visibly labeled "Draft only — not checked" and styled neutral
  *   (amber/stone) — NEVER the earned evidence-green;
@@ -22,53 +23,51 @@ type Phase = "working" | "streaming" | "done";
  * - once the run has earned evidence the panels are authoritative, so the draft
  *   is dimmed and marked superseded.
  *
- * `streamer` is injectable for tests; production uses the real SSE client.
+ * `streamer` is injectable for tests; production uses the pre-run SSE client.
  */
 export function InstantDraft({
-  runId,
   claimText,
   superseded = false,
-  streamer = streamInstantDraft,
+  streamer = streamInstantDraftTransient,
 }: {
-  runId: string | null;
   claimText: string;
   superseded?: boolean;
-  streamer?: typeof streamInstantDraft;
+  streamer?: typeof streamInstantDraftTransient;
 }) {
   const [lines, setLines] = useState<string[]>([]);
   const [phase, setPhase] = useState<Phase>("working");
   const [status, setStatus] = useState<InstantStatus>("draft");
-  const activeRun = useRef<string | null>(null);
+  const activeClaim = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!runId) return;
-    activeRun.current = runId;
+    if (!claimText) return;
+    activeClaim.current = claimText;
     setLines([]);
     setPhase("working");
     setStatus("draft");
-    const mine = runId;
-    void streamer(runId, claimText, {
+    const mine = claimText;
+    void streamer(claimText, {
       onAck: () => {
-        if (activeRun.current === mine) setPhase("working");
+        if (activeClaim.current === mine) setPhase("working");
       },
       onLine: (text) => {
-        if (activeRun.current !== mine) return;
+        if (activeClaim.current !== mine) return;
         setPhase("streaming");
         setLines((prev) => [...prev, text]);
       },
       onDone: (_ok, finalStatus) => {
-        if (activeRun.current !== mine) return;
+        if (activeClaim.current !== mine) return;
         setStatus(finalStatus);
         setPhase("done");
       },
     });
     return () => {
-      // a new run invalidates this stream's late callbacks.
-      if (activeRun.current === mine) activeRun.current = null;
+      // a new claim invalidates this stream's late callbacks.
+      if (activeClaim.current === mine) activeClaim.current = null;
     };
-  }, [runId, claimText, streamer]);
+  }, [claimText, streamer]);
 
-  if (!runId) return null;
+  if (!claimText) return null;
 
   const unavailable = phase === "done" && lines.length === 0;
 
