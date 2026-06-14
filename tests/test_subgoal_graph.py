@@ -11,7 +11,11 @@ from espresso_proof.cli import app
 from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.models import ProofGoalGraph, SubgoalNode
 from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.subgoal_graph import assemble_subgoal_graph, build_subgoal_graph
+from espresso_proof.subgoal_graph import (
+    assemble_subgoal_graph,
+    build_subgoal_graph,
+    render_proof_search_lines,
+)
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.validators import validate_run
 
@@ -312,6 +316,19 @@ def test_external_tool_blocker_is_typed_and_counted(tmp_path: Path) -> None:
     assert tool_nodes[0]["block_reason"] == "external_tool_blocked"
     assert graph["summary"]["blocked"] >= 1
     ProofGoalGraph.model_validate(graph)
+
+
+def test_blocked_node_renders_translated_reason_without_raw_enum(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _inject_blocker(run_dir, "The key lemma 'reflexive implies free' is false in general.")
+    graph = assemble_subgoal_graph(run_dir)
+    blob = "\n".join(render_proof_search_lines(graph))
+    # human wording + a concrete next step are shown
+    assert "A key step looks false" in blob
+    assert "suggested next step" in blob.lower()
+    # the raw enum value / field name never leaks to the user-facing surface
+    assert "false_key_lemma" not in blob
+    assert "block_reason" not in blob
 
 
 def test_block_reason_rejected_on_non_blocked_state() -> None:

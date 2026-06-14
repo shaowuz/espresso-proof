@@ -587,6 +587,15 @@ def state_words(state: str) -> str:
     return STATE_WORDING.get(state, "In progress")
 
 
+def block_reason_words(reason: str | None) -> str:
+    """Plain wording for a block_reason (Goal 57B; fail-safe default).
+
+    Raw enum values must never reach a user-facing surface; renderers translate
+    every block_reason through this map.
+    """
+    return BLOCK_REASON_WORDING.get(reason or "", "Blocked")
+
+
 def graph_notes(graph: dict | None) -> list[str]:
     """Return the graph's display notes (non-empty, stripped strings).
 
@@ -679,6 +688,19 @@ def render_proof_search_lines(graph: dict | None, *, statement_limit: int = 200)
                 out.append(f"{indent}· reviewer objection: {text}")
         return out
 
+    # Goal 57B: a blocked/conditional node may carry a typed reason and a plain
+    # suggested next step. Both are translated to human wording (never the raw
+    # enum) so the memo reads as a next-action row, not a status change.
+    def block_lines(node: dict, indent: str) -> list[str]:
+        out: list[str] = []
+        reason = node.get("block_reason")
+        if reason:
+            out.append(f"{indent}· why blocked: {block_reason_words(reason)}")
+        action = short(node.get("suggested_next_action"))
+        if action:
+            out.append(f"{indent}· suggested next step: {action}")
+        return out
+
     lines = ["Proof-search state (a map of the search, not a proof):"]
     main = groups["main"]
     if main is not None:
@@ -702,6 +724,8 @@ def render_proof_search_lines(graph: dict | None, *, statement_limit: int = 200)
             lines.append(
                 f"    - {short(node.get('statement'))} [{state_words(node.get('state', ''))}]"
             )
+            if key == "blocked":
+                lines.extend(block_lines(node, "        "))
             lines.extend(objection_lines(node, "        "))
 
     nxt = groups["next"]
