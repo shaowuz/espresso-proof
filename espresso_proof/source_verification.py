@@ -178,6 +178,11 @@ def check_hypothesis_applicability(
             )
         elif terms:
             matched_reasons.append(f'"{name}" terms found in the source statement')
+        else:
+            unclear = True
+            mismatches.append(
+                f"required hypothesis has no checkable terms or semantic match: {name}"
+            )
     if unclear:
         return {"matches": "unclear", "mismatches": mismatches, "matched": matched_reasons}
     return {"matches": True, "mismatches": [], "matched": matched_reasons}

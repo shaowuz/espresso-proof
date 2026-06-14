@@ -14,6 +14,7 @@ verbatim so source/evidence/proof separation stays visible.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .descriptions import (
@@ -48,6 +49,27 @@ PROOF_ROUTE_STEP_HEADINGS = (
     "Reviewer objections:",
     "Remaining risk:",
 )
+
+
+_FUTURE_TEST_STATUS_PATTERNS = (
+    r"\b(?:prove|proves|proved|proving|proof)\b",
+    r"\b(?:verify|verifies|verified|verifying|verification)\b",
+    r"\bchecked\b",
+    r"\bsource[- ]backed\b",
+    r"\bsource support\b",
+    r"\bsource-supported\b",
+    r"\b(?:refute|refutes|refuted|refuting|refutation)\b",
+)
+
+
+def _future_test_scope_note(text: str) -> str | None:
+    lowered = text.lower()
+    if any(re.search(pattern, lowered) for pattern in _FUTURE_TEST_STATUS_PATTERNS):
+        return (
+            "Scope: proposed next check only; not current evidence, source support, "
+            "proof, or refutation."
+        )
+    return None
 
 
 def _applicability_reason(proof_step_id: str, theorem_applicability: dict) -> str:
@@ -325,6 +347,9 @@ def build_concise_memo(run_dir: Path) -> str:
         lines.append("  none")
     lines.append("")
     lines.append(f"Next cheapest test: {next_test}")
+    future_scope_note = _future_test_scope_note(next_test)
+    if future_scope_note:
+        lines.append(future_scope_note)
 
     optional = manifest.get("optional_artifacts", {})
 

@@ -1334,6 +1334,11 @@ class CounterexampleTest(StrictBaseModel):
             )
         if self.satisfies_all_claim_hypotheses is False and self.refutes_claim:
             raise ValueError("dropped-hypothesis tests cannot refute the original claim")
+        if self.satisfies_all_claim_hypotheses is not True and self.refutes_claim:
+            raise ValueError(
+                "a counterexample can refute the claim only when every claim hypothesis "
+                "is explicitly satisfied; unclear admissibility cannot refute"
+            )
         if self.refutes_step_only and self.refutes_claim:
             raise ValueError("a proof-step attack cannot refute the original claim")
         return self

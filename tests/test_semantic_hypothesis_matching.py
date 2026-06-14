@@ -109,6 +109,18 @@ def test_applicability_extra_missing_hypothesis_stays_unclear() -> None:
     assert result["mismatches"]
 
 
+def test_symbolic_hypothesis_without_semantic_rule_stays_unclear() -> None:
+    result = check_hypothesis_applicability(
+        "Theorem. Let H be finite. Then H has a subgroup of prime order.",
+        [_hyp("|G| = q")],
+        [],
+    )
+    assert result["matches"] == "unclear"
+    assert result["mismatches"] == [
+        "required hypothesis has no checkable terms or semantic match: |G| = q"
+    ]
+
+
 def test_applicability_finite_does_not_match_infinite() -> None:
     result = check_hypothesis_applicability(
         "Let G be an infinite group with trivial center.",

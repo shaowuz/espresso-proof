@@ -30,7 +30,7 @@ from espresso_proof.memo import (
     render_proof_route_steps,
 )
 from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.io import read_yaml
+from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.proof_verification import verify_finite_groups
 
 FIXTURES = Path("tests/fixtures")
@@ -39,6 +39,11 @@ FIXTURES = Path("tests/fixtures")
 def _grade(run_dir: Path) -> dict:
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
     return read_yaml(run_dir / artifacts["idea_grade"])
+
+
+def _artifact_path(run_dir: Path, key: str) -> Path:
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    return run_dir / artifacts[key]
 
 # Internal enum tokens that must never appear verbatim in renderer-controlled
 # output (status fields the renderer formats into labels). The English word
@@ -349,6 +354,27 @@ def test_fragile_not_shown_as_raw_status_label(tmp_path: Path) -> None:
     labels = _grade_label_lines(build_concise_memo(run))
     assert "fragile" not in labels
     assert "missing hypotheses, source gaps, or counterexample pressure" in labels
+
+
+def test_next_cheapest_test_with_refutation_language_is_scoped(tmp_path: Path) -> None:
+    run = run_mock_critique(
+        "future-scope",
+        FIXTURES / "likely_false_multiple_pressures" / "input.md",
+        tmp_path,
+    )
+    grade_path = _artifact_path(run, "idea_grade")
+    grade = read_yaml(grade_path)
+    grade["next_cheapest_test"] = (
+        "Run a future computation refuting the universal claim if the obstruction persists."
+    )
+    write_yaml(grade_path, grade)
+
+    memo = build_concise_memo(run)
+    assert "Next cheapest test: Run a future computation refuting the universal claim" in memo
+    assert (
+        "Scope: proposed next check only; not current evidence, source support, "
+        "proof, or refutation."
+    ) in memo
 
 
 def test_rendering_does_not_mutate_persisted_artifacts(tmp_path: Path) -> None:

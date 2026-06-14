@@ -1580,6 +1580,18 @@ def test_counterexample_dropped_hypothesis_cannot_refute_claim() -> None:
         CounterexampleTest.model_validate(data)
 
 
+def test_counterexample_unclear_hypotheses_cannot_refute_claim() -> None:
+    # Unknown admissibility is still not all-hypotheses evidence. It may be
+    # counterexample pressure, but it cannot carry terminal claim refutation.
+    data = _counterexample_test(
+        satisfies_all_claim_hypotheses="unclear",
+        result="failed",
+        refutes_claim=True,
+    )
+    with pytest.raises(ValueError, match="unclear admissibility cannot refute"):
+        CounterexampleTest.model_validate(data)
+
+
 def test_counterexample_not_tested_cannot_refute_claim() -> None:
     # An asserted-but-UNCHECKED counterexample (result=not_tested) cannot carry a
     # refutation, even when it satisfies all claim hypotheses. refutes_claim
