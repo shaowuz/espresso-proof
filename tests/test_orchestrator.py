@@ -75,11 +75,14 @@ def test_orchestrate_resume_to_memo_is_honest(tmp_path: Path) -> None:
 
 def test_orchestrate_resume_rejects_unknown_strategy(tmp_path: Path) -> None:
     run_dir = _orchestrate(tmp_path, CLAIMS["m23"], "m23")
+    before = read_yaml(run_dir / "human_choice.yaml")
     # a human choice for a strategy not in the brief must be blocked by the kernel.
     with pytest.raises(KernelValidationError):
         resume_run(
             run_dir=run_dir, selected_strategy="totally_made_up_route", effort="quick_test"
         )
+    assert read_yaml(run_dir / "human_choice.yaml") == before
+    validate_run(run_dir)
 
 
 def test_orchestrate_resume_before_gate_is_blocked(tmp_path: Path) -> None:

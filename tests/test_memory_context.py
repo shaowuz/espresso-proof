@@ -46,6 +46,11 @@ def test_matches_prior_failed_attempt_with_avoid(tmp_path: Path) -> None:
     _write_mem(run_dir, mid="m1", mtype="failed_attempt",
                summary=f"Route via {_claim_terms(run_dir)[:50]} failed: missing hypothesis.")
     ctx = build_memory_context(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim = read_yaml(run_dir / "locked_claim.yaml")
+    assert ctx["claim_id"] == claim["id"]
+    assert ctx["run_id"] == manifest["run_id"]
+    assert ctx["advisory_only"] is True
     avoid = [m for m in ctx["matched_entries"] if m["id"] == "m1"]
     assert avoid and avoid[0]["type"] == "failed_attempt"
     assert avoid[0]["recommended_use"] == "avoid"
@@ -109,6 +114,8 @@ def test_model_rejects_status_field() -> None:
     with pytest.raises(Exception):
         MemoryContext.model_validate({
             "claim_id": "c",
+            "run_id": "r",
+            "advisory_only": True,
             "matched_entries": [{"id": "x", "type": "failed_attempt", "relevance_reason": "r",
                                  "recommended_use": "avoid", "summary": "s", "source_backed": True}],
         })
@@ -123,6 +130,18 @@ def test_hand_edited_status_in_memory_context_rejected_by_validate_run(tmp_path:
     mc["matched_entries"][0]["source_backed"] = True  # smuggle a trusted field
     write_yaml(run_dir / "memory_context.yaml", mc)
     with pytest.raises(KernelValidationError):
+        validate_run(run_dir)
+
+
+def test_hand_edited_memory_context_run_binding_rejected(tmp_path: Path) -> None:
+    run_dir = _run(tmp_path)
+    _write_mem(run_dir, mid="m1", mtype="failed_attempt",
+               summary=f"Route via {_claim_terms(run_dir)[:50]} failed.")
+    build_memory_context(run_dir)
+    mc = read_yaml(run_dir / "memory_context.yaml")
+    mc["run_id"] = "other_run"
+    write_yaml(run_dir / "memory_context.yaml", mc)
+    with pytest.raises(KernelValidationError, match="memory_context run_id mismatch"):
         validate_run(run_dir)
 
 

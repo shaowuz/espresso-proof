@@ -84,6 +84,8 @@ def build_memory_context(run_dir: Path, *, generated_at: str | None = None) -> d
     report = {
         "schema_version": 1,
         "claim_id": claim_id,
+        "run_id": manifest["run_id"],
+        "advisory_only": True,
         "generated_at": generated_at or datetime.now(UTC).isoformat(),
         "matched_entries": matched,
         "constraints": [

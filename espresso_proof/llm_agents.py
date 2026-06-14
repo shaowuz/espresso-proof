@@ -903,6 +903,8 @@ def _human_feedback_advisory(run_dir: Path) -> str:
 
 def _selected_strategy_from_choice(human_choice: dict | None, strategies: list[dict]) -> str | None:
     strategy_ids = [strategy.get("id") for strategy in strategies]
+    if human_choice and human_choice.get("selected_strategy") == "none":
+        return None
     if (
         human_choice
         and human_choice.get("status") == "selected"
@@ -959,6 +961,8 @@ def _next_action_for_strategy(*, index: int, strategy: dict, gate: dict, blocker
         if index == 1:
             return f"Ask mathematician whether to spend the next round on {title}."
         return f"Keep {title} as a low-budget alternative until human preference is resolved."
+    if gate.get("decision") == "stop":
+        return f"Stop before spending another prover round on {title}."
     if blockers:
         return f"Repair {title} against reviewer blockers before expanding proof text."
     return f"Expand {title} with source matching and checked examples."

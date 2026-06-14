@@ -123,7 +123,9 @@ def validate_run(run_dir: Path) -> None:
     _load_optional_autonomous_literature_retrieval(run_dir, manifest)
     _load_optional_literature_candidates(run_dir, manifest)
     _load_optional_retrieval_resolution(run_dir, manifest)
-    _load_optional_memory_context(run_dir, manifest)
+    memory_context = _load_optional_memory_context(run_dir, manifest)
+    if memory_context is not None:
+        _validate_memory_context(memory_context, claim, manifest)
     # Phase 03: content-validate the durable front_half_run audit artifact when
     # present (claim/run ids, stage names, no error-as-ok, path confinement). A
     # run without it still validates (old-run compatible).
@@ -622,6 +624,21 @@ def _load_optional_memory_context(
         run_dir / optional["memory_context"],
         MemoryContext,
     )
+
+
+def _validate_memory_context(
+    memory_context: MemoryContext,
+    claim: Claim,
+    manifest: RunManifest,
+) -> None:
+    if memory_context.claim_id != claim.id:
+        raise KernelValidationError(
+            f"memory_context claim_id mismatch: {memory_context.claim_id!r} != {claim.id!r}"
+        )
+    if memory_context.run_id != manifest.run_id:
+        raise KernelValidationError(
+            f"memory_context run_id mismatch: {memory_context.run_id!r} != {manifest.run_id!r}"
+        )
 
 
 def _validate_literature_retrieval(

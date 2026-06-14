@@ -42,6 +42,7 @@ from .prover_loop_driver import continue_prover_loop
 from .run_dashboard import write_run_dashboard
 from .run_lock import run_writer_lock
 from .stage_runner import StageRunner
+from .validation.errors import KernelValidationError
 from .models import (
     HumanChoice,
     LiteratureReviewReport,
@@ -457,6 +458,13 @@ def _resume_run_locked(
     if selected_strategy == "none" and effort is None:
         # the 'none' human-choice option only offers quick_test.
         effort = "quick_test"
+    strategy_brief = read_yaml(run_dir / artifacts["strategy_brief"])
+    _validate_resume_choice(
+        strategy_brief=strategy_brief,
+        selected_strategy=selected_strategy,
+        effort=effort,
+        continue_decision=continue_decision,
+    )
     human_choice = {
         "claim_id": claim["id"],
         "status": "selected",
@@ -496,6 +504,13 @@ def _resume_run_locked(
             client=prover_client,
         )
         loop_summary = (result["rounds_run"], result["stop_reason"])
+    elif continue_decision == "stop":
+        _resolve_and_build_loop(
+            run_dir,
+            decision="stop",
+            reason="human selected no strategy to continue",
+            human_choice=human_choice,
+        )
 
     # Mathematical Judgment Layer (advisory): record conservative risk findings
     # from the validated artifacts before rendering the memo. This NEVER upgrades
@@ -563,3 +578,38 @@ def _resume_run_locked(
                 f"stopped because {loop_stop_phrase(stop_reason)}."
             )
     return memo
+
+
+def _validate_resume_choice(
+    *,
+    strategy_brief: dict,
+    selected_strategy: str,
+    effort: str | None,
+    continue_decision: str,
+) -> None:
+    strategy_ids = {
+        str(strategy.get("id"))
+        for strategy in (strategy_brief.get("top_strategies") or [])
+        if strategy.get("id")
+    }
+    choices = {
+        str(choice.get("strategy_id")): {
+            str(option) for option in (choice.get("effort_options") or [])
+        }
+        for choice in (strategy_brief.get("allowed_human_choices") or [])
+        if choice.get("strategy_id")
+    }
+    if selected_strategy not in choices:
+        raise KernelValidationError(
+            f"human_choice selected strategy {selected_strategy!r} has no allowed choice option"
+        )
+    if selected_strategy != "none" and selected_strategy not in strategy_ids:
+        raise KernelValidationError(
+            f"human_choice selected unknown strategy {selected_strategy!r}"
+        )
+    if effort not in choices[selected_strategy]:
+        raise KernelValidationError(
+            f"human_choice effort {effort!r} is not allowed for {selected_strategy!r}"
+        )
+    if selected_strategy == "none" and continue_decision != "stop":
+        raise KernelValidationError("human_choice cannot continue with selected_strategy='none'")

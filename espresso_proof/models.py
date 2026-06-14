@@ -2401,6 +2401,8 @@ class MemoryContext(StrictBaseModel):
 
     schema_version: int = 1
     claim_id: str
+    run_id: str
+    advisory_only: Literal[True] = True
     generated_at: str = ""
     matched_entries: list[MemoryContextEntry] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)

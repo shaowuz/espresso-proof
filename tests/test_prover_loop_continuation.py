@@ -243,8 +243,19 @@ def test_resume_none_selection_runs_zero_rounds(tmp_path: Path) -> None:
         project="pml", input_path=claim, output_root=tmp_path,
         provider="stub", front_half="stub", front_half_client=FakeClaude(precision="precise"),
     )
-    memo = resume_run(run_dir=res["run_dir"], selected_strategy="none", effort="quick_test")
-    validate_run(res["run_dir"])
+    run_dir = res["run_dir"]
+    memo = resume_run(run_dir=run_dir, selected_strategy="none", effort="quick_test")
+    validate_run(run_dir)
+    agent_run = read_yaml(run_dir / "llm_agent_run.yaml")
+    loop = read_yaml(run_dir / "prover_loop.yaml")
+    assert agent_run["human_gate"]["status"] == "resolved"
+    assert agent_run["human_gate"]["decision"] == "stop"
+    assert loop["loop_decision"] == "stop"
+    assert loop["selected_strategy_id"] is None
+    for attempt in loop["attempts"]:
+        assert attempt["time_allocation"] == "stop"
+        assert attempt["status"] == "stopped"
+        assert attempt["next_action"].startswith("Stop before spending another prover round")
     assert "Loop:" not in memo  # no rounds ran for a 'none'/stop selection
 
 

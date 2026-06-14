@@ -38,7 +38,8 @@ def test_entry_page_is_a_wide_product_page(tmp_path: Path) -> None:
     wb = Workbench(tmp_path / "root", provider="stub")
     html = _index_page(wb)
     # a real product landing, not a tiny 760px debug form
-    assert "grid-template-columns:1.5fr 1fr" in html
+    assert "grid-template-columns:minmax(620px,1.15fr) minmax(500px,.85fr)" in html
+    assert "@media (max-width:1224px)" in html
     assert "max-width:760px" not in html
     # mode selector with human labels (no provider words on the surface)
     assert "Fast preview" in html and "Codex deep run" in html
