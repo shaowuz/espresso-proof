@@ -10,6 +10,7 @@ import { Composer } from "./components/Composer";
 import { SettingsButton } from "./components/SettingsButton";
 import { EvidenceRail } from "./components/EvidenceRail";
 import { Workspace } from "./components/Workspace";
+import { InstantDraft } from "./components/InstantDraft";
 import { LiteratureRail } from "./components/LiteratureRail";
 import { cn } from "./lib/cn";
 import type { ChatMessage } from "./components/ChatPanel";
@@ -232,15 +233,29 @@ export default function App() {
           )}
         >
           {hasRun ? (
-            <Workspace
-              runId={selectedRunId}
-              status={status.data}
-              onChanged={refreshRun}
-              chatMessages={chatMessages}
-              chatLastNote={chatLastNote}
-              activeObject={activeObject}
-              onActiveObjectChange={setActiveObject}
-            />
+            <div className="space-y-4 p-3 lg:p-4">
+              <InstantDraft
+                runId={selectedRunId}
+                claimText={claim.data?.claim?.text ?? ""}
+                superseded={
+                  Boolean(status.data?.completed) ||
+                  (status.data?.evidence
+                    ? status.data.evidence.reference_supported_steps +
+                        status.data.evidence.machine_checks >
+                      0
+                    : false)
+                }
+              />
+              <Workspace
+                runId={selectedRunId}
+                status={status.data}
+                onChanged={refreshRun}
+                chatMessages={chatMessages}
+                chatLastNote={chatLastNote}
+                activeObject={activeObject}
+                onActiveObjectChange={setActiveObject}
+              />
+            </div>
           ) : (
             <EmptyWorkspace hasRuns={runs.length > 0} />
           )}

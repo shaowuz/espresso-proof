@@ -1,0 +1,73 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { streamInstantDraft } from "./instantDraft";
+
+function sseResponse(blocks: string[], status = 200): Response {
+  const enc = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const b of blocks) controller.enqueue(enc.encode(b));
+      controller.close();
+    },
+  });
+  return new Response(stream, { status });
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("streamInstantDraft", () => {
+  it("acks, streams draft lines, and reports the final status from metrics", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        sseResponse([
+          'event: ack\ndata: {"label":"Draft only — not checked","working":true}\n\n',
+          'event: draft\ndata: {"text":"Draft only — not checked."}\n\n',
+          'event: draft\ndata: {"text":"Route 1: restate the claim precisely."}\n\n',
+          'event: done\ndata: {"ok":true,"instant_lane_metrics":{"instant_lane_status":"fallback"},"advisory":true}\n\n',
+        ]),
+      ),
+    );
+    const lines: string[] = [];
+    let acked = false;
+    let done: { ok: boolean; status: string } | null = null;
+    await streamInstantDraft("run-1", "is it true?", {
+      onAck: () => {
+        acked = true;
+      },
+      onLine: (t) => lines.push(t),
+      onDone: (ok, status) => {
+        done = { ok, status };
+      },
+    });
+    expect(acked).toBe(true);
+    expect(lines[0]).toBe("Draft only — not checked.");
+    expect(lines).toHaveLength(2);
+    expect(done).toEqual({ ok: true, status: "fallback" });
+  });
+
+  it("resolves through onDone(false, 'failed') on a transport error (never throws)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    let done: { ok: boolean; status: string } | null = null;
+    await streamInstantDraft("run-1", "x", {
+      onLine: () => {},
+      onDone: (ok, status) => {
+        done = { ok, status };
+      },
+    });
+    expect(done).toEqual({ ok: false, status: "failed" });
+  });
+
+  it("treats a non-ok response as a failed stream", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 403 })));
+    let done: { ok: boolean; status: string } | null = null;
+    await streamInstantDraft("run-1", "x", {
+      onLine: () => {},
+      onDone: (ok, status) => {
+        done = { ok, status };
+      },
+    });
+    expect(done).toEqual({ ok: false, status: "failed" });
+  });
+});
