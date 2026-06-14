@@ -911,3 +911,157 @@ def test_rendering_notes_does_not_mutate_graph_artifact(tmp_path: Path) -> None:
     render_run_dashboard(run_dir)
     after = (run_dir / "proof_goal_graph.yaml").read_bytes()
     assert before == after
+
+
+# ---------------------------------------------------------------------------
+# Goal 57A: theorem-condition ledger -> named repair subgoals
+# ---------------------------------------------------------------------------
+_TCL_SOURCE_REQUESTS = ["Cauchy theorem for finite groups", "Class equation argument"]
+_TCL_MISSING_HYPOTHESES = ["G is finite", "p is prime"]
+
+
+def _inject_reviewer_requests(
+    run_dir: Path, source_requests: list[str], missing_hypotheses: list[str]
+) -> None:
+    """Add verbatim source_requests + missing_hypotheses to the first verifier
+    review of the gate-time llm_agent_run, mirroring them into the matching
+    round_001 review so the run cross-checks still pass (mirrors the ledger
+    test helper)."""
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    optional = manifest["optional_artifacts"]
+
+    agent_path = run_dir / optional["llm_agent_run"]
+    agent = read_yaml(agent_path)
+    verifier_id = agent["verifier_reviews"][0]["verifier_id"]
+    agent["verifier_reviews"][0]["source_requests"] = source_requests
+    agent["verifier_reviews"][0]["missing_hypotheses"] = missing_hypotheses
+    write_yaml(agent_path, agent)
+
+    index = read_yaml(run_dir / optional["prover_round_index"])
+    round_one = next(r for r in index["rounds"] if r["round_index"] == 1)
+    round_path = run_dir / round_one["artifact_path"]
+    round_report = read_yaml(round_path)
+    for review in round_report["verifier_reviews"]:
+        if review["verifier_id"] == verifier_id:
+            review["source_requests"] = source_requests
+            review["missing_hypotheses"] = missing_hypotheses
+    write_yaml(round_path, round_report)
+
+
+def _ledger_run(tmp_path: Path) -> Path:
+    from espresso_proof.theorem_condition_ledger import build_theorem_condition_ledger
+
+    run_dir = _resumed_run(tmp_path)
+    _inject_reviewer_requests(run_dir, _TCL_SOURCE_REQUESTS, _TCL_MISSING_HYPOTHESES)
+    build_theorem_condition_ledger(run_dir)
+    return run_dir
+
+
+def test_ledger_entry_becomes_open_hypothesis_check_repair_node(tmp_path: Path) -> None:
+    run_dir = _ledger_run(tmp_path)
+    ledger = read_yaml(run_dir / "theorem_condition_ledger.yaml")
+    graph = assemble_subgoal_graph(run_dir)
+
+    tcl_nodes = [n for n in graph["nodes"] if n["id"].startswith("subgoal_tcl_")]
+    # one repair node per ledger entry, by ledger repair_subgoal_id (single writer)
+    assert {n["id"] for n in tcl_nodes} == {e["repair_subgoal_id"] for e in ledger["entries"]}
+    assert len(tcl_nodes) == len(ledger["entries"]) >= 2
+    for node in tcl_nodes:
+        assert node["role"] == "hypothesis_check"
+        # slice-1 conditions are all "unknown" -> open named repair target
+        assert node["state"] == "open"
+        assert "block_reason" not in node
+        # advisory search state only: never any earned support
+        assert not node.get("supported_by_source_steps")
+        assert not node.get("supported_by_computations")
+        assert not node.get("supported_by_scoped_checks")
+    ProofGoalGraph.model_validate(graph)
+    validate_run(run_dir)
+
+
+def test_ledger_repair_node_objection_attaches_to_that_node(tmp_path: Path) -> None:
+    run_dir = _ledger_run(tmp_path)
+    ledger = read_yaml(run_dir / "theorem_condition_ledger.yaml")
+    target_id = ledger["entries"][0]["repair_subgoal_id"]
+
+    # a reviewer scoped objection naming the ledger repair node (54B attach path)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    agent_path = run_dir / manifest["optional_artifacts"]["llm_agent_run"]
+    agent = read_yaml(agent_path)
+    agent["verifier_reviews"][0].setdefault("scoped_objections", []).append(
+        {
+            "id": "v1_obj_tcl",
+            "text": "This cited theorem's finiteness hypothesis is not justified.",
+            "scope": "subgoal",
+            "scope_source": "explicit",
+            "scope_inferred": False,
+            "inference_reason": "",
+            "subgoal_id": target_id,
+            "proof_step_id": None,
+            "kind": "missing_source",
+            "severity": "P1",
+            "suggested_next_action": "List the theorem's hypotheses and check each.",
+        }
+    )
+    write_yaml(agent_path, agent)
+
+    graph = assemble_subgoal_graph(run_dir)
+    node_by_id = {n["id"]: n for n in graph["nodes"]}
+    target = node_by_id[target_id]
+    assert any("finiteness hypothesis" in o for o in target.get("reviewer_objections", []))
+    # it landed on the repair node, NOT the main goal
+    main = next(n for n in graph["nodes"] if n["role"] == "main_goal")
+    assert not any("finiteness hypothesis" in o for o in main.get("reviewer_objections", []))
+
+
+def test_unmatched_condition_makes_repair_node_blocked_with_translated_wording(
+    tmp_path: Path,
+) -> None:
+    run_dir = _ledger_run(tmp_path)
+    # hand-set one condition to unmatched -> theorem_condition_gap repair node
+    ledger_path = run_dir / "theorem_condition_ledger.yaml"
+    ledger = read_yaml(ledger_path)
+    ledger["entries"][0]["conditions"][0]["match_status"] = "unmatched"
+    write_yaml(ledger_path, ledger)
+
+    graph = assemble_subgoal_graph(run_dir)
+    target_id = ledger["entries"][0]["repair_subgoal_id"]
+    node = next(n for n in graph["nodes"] if n["id"] == target_id)
+    assert node["state"] == "blocked_missing_source"
+    assert node["block_reason"] == "theorem_condition_gap"
+    assert node["suggested_next_action"]
+    assert not node.get("supported_by_source_steps")
+    ProofGoalGraph.model_validate(graph)
+
+    text = "\n".join(render_proof_search_lines(graph))
+    # translated wording is shown, no raw enum strings leak
+    assert "A cited theorem's hypotheses are not met" in text
+    for raw in ("theorem_condition_gap", "unmatched", "needs_exact_locator", "block_reason"):
+        assert raw not in text
+
+
+def test_ledger_entries_prevent_open_blocked_collapse(tmp_path: Path) -> None:
+    run_dir = _ledger_run(tmp_path)
+    graph = assemble_subgoal_graph(run_dir)
+    # named repair subgoals exist -> not a {open:1, blocked:0}-only collapse
+    tcl_nodes = [n for n in graph["nodes"] if n["id"].startswith("subgoal_tcl_")]
+    assert tcl_nodes
+    assert graph["summary"]["open"] >= len(tcl_nodes)
+    # every ledger repair node id is wired into the main goal's depends_on
+    main = next(n for n in graph["nodes"] if n["role"] == "main_goal")
+    for node in tcl_nodes:
+        assert node["id"] in main["depends_on"]
+
+
+def test_no_double_repair_node_from_blocker_and_ledger(tmp_path: Path) -> None:
+    """The ledger is the single writer of subgoal_tcl_* nodes; 57B's blocker path
+    only writes subgoal_block_* ids, so the two never collide."""
+    run_dir = _ledger_run(tmp_path)
+    _inject_blocker(run_dir, "Need a source/theorem for the class equation")
+    graph = assemble_subgoal_graph(run_dir)
+    ids = [n["id"] for n in graph["nodes"]]
+    assert len(ids) == len(set(ids))  # no duplicate node ids
+    tcl = [i for i in ids if i.startswith("subgoal_tcl_")]
+    block = [i for i in ids if i.startswith("subgoal_block_")]
+    assert tcl and block
+    assert set(tcl).isdisjoint(block)

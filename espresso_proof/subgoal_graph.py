@@ -36,6 +36,8 @@ GRAPH_FILENAME = "proof_goal_graph.yaml"
 _MAX_CANDIDATE_SUBGOALS = 4
 # How many blocked external-tool obligations to surface (Goal 57B).
 _MAX_EXTERNAL_TOOL_SUBGOALS = 4
+# How many theorem-condition ledger repair subgoals to surface (Goal 57A).
+_MAX_LEDGER_SUBGOALS = 4
 
 # Free text copied from other artifacts is scrubbed so the graph can never read
 # as a proof-completion claim. Replacements are case-insensitive and applied in
@@ -265,6 +267,7 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
     computation_verification = optional_artifact("computation_verification")
     llm_agent_run = optional_artifact("llm_agent_run")  # Goal 54B: scoped reviewer objections
     external_tool_runs = optional_artifact("external_tool_runs")  # Goal 57B: blocked tool obligations
+    theorem_condition_ledger = optional_artifact("theorem_condition_ledger")  # Goal 57A: named repair subgoals
 
     strategies = {
         str(strategy.get("id")): strategy
@@ -475,6 +478,59 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
                 }
             )
             tool_budget -= 1
+
+    # --- Goal 57A: theorem-condition ledger repair subgoals ------------------
+    # The ledger is the SINGLE WRITER of theorem-condition repair nodes: their ids
+    # come from the ledger's ``repair_subgoal_id`` (``subgoal_tcl_*``), disjoint
+    # from 57B's ``subgoal_block_*`` blocker nodes, so the two paths never create a
+    # duplicate node for the same obligation. A ledger node is advisory SEARCH
+    # state only: it never carries ``supported_by_*`` (so it can never earn
+    # source_backed/checked), never sets/refutes any status. ``match_status`` is
+    # consumed verbatim from the ledger (which never infers it from claim text).
+    if theorem_condition_ledger is not None:
+        ledger_budget = _MAX_LEDGER_SUBGOALS
+        for entry in theorem_condition_ledger.get("entries") or []:
+            if ledger_budget <= 0:
+                notes.append(
+                    "Some cited-theorem repair subgoals are not shown (display is capped)."
+                )
+                break
+            conditions = entry.get("conditions") or []
+            unmatched = sum(1 for c in conditions if c.get("match_status") == "unmatched")
+            unknown = sum(1 for c in conditions if c.get("match_status") == "unknown")
+            if unmatched:
+                risk = (
+                    f"{unmatched} of {len(conditions)} cited-theorem condition(s) do not "
+                    "match the claim; the rest still need checking."
+                )
+            else:
+                risk = (
+                    f"{unknown} of {len(conditions)} cited-theorem condition(s) are still "
+                    "unchecked against the claim."
+                )
+            ledger_node = {
+                "id": str(entry["repair_subgoal_id"]),
+                "statement": _scrub("Check the cited theorem: " + str(entry["requested_theorem"])),
+                "role": "hypothesis_check",
+                # Any unmatched condition => a real theorem-condition gap to repair;
+                # otherwise the hypotheses simply still need checking (open target).
+                "state": "blocked_missing_source" if unmatched else "open",
+                "closure_contract": (
+                    "List this theorem's hypotheses and match each against the claim; "
+                    "find an exact locator before reusing it."
+                ),
+                "depends_on": [],
+                "reviewer_objections": [],
+                "counterexample_pressure": [],
+                "remaining_risk": risk,
+            }
+            if unmatched:
+                ledger_node["block_reason"] = "theorem_condition_gap"
+                ledger_node["suggested_next_action"] = _NEXT_ACTION_BY_REASON[
+                    "theorem_condition_gap"
+                ]
+            add_child(ledger_node)
+            ledger_budget -= 1
 
     # --- Goal 54B: attach subgoal-scoped reviewer objections to matching nodes ---
     # Attach-if-matches: an objection naming a node that exists gets placed on it;

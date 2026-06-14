@@ -429,8 +429,13 @@ def _resume_run_locked(
         # re-validates through the kernel and only reflects already-earned evidence.
         if (run_dir / "proof_goal_graph.yaml").exists():
             from .subgoal_graph import build_subgoal_graph, remove_subgoal_graph
+            from .theorem_condition_ledger import build_theorem_condition_ledger
 
             try:
+                # Goal 57A: ensure the advisory theorem-condition ledger exists
+                # before the graph reads it (idempotent; writes an empty ledger
+                # when there is no llm_agent_run).
+                build_theorem_condition_ledger(run_dir)
                 build_subgoal_graph(run_dir)
                 validate_run(run_dir)
             except Exception:  # noqa: BLE001 - advisory view must fail closed
@@ -524,8 +529,13 @@ def _resume_run_locked(
     # the full run validation, drop it (rather than leave an invalid artifact) and
     # continue — the memo/dashboard simply render without a graph.
     from .subgoal_graph import build_subgoal_graph, remove_subgoal_graph
+    from .theorem_condition_ledger import build_theorem_condition_ledger
 
     try:
+        # Goal 57A: build the advisory theorem-condition ledger first so the
+        # graph can turn its entries into named repair subgoals. Idempotent and
+        # writes an empty ledger when there is no llm_agent_run.
+        build_theorem_condition_ledger(run_dir)
         build_subgoal_graph(run_dir)
         validate_run(run_dir)
     except Exception:  # noqa: BLE001 - advisory layer must fail closed, not block resume
