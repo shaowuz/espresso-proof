@@ -378,6 +378,22 @@ class VerificationVerdict(str, Enum):
     unsupported = "unsupported"
 
 
+class PolynomialWitness(StrictBaseModel):
+    """A durable rational witness that a polynomial identity is FALSE over Q.
+
+    Records an exact assignment of the declared variables and the exact lhs / rhs
+    values plus their nonzero difference (all rationals serialized as strings, so
+    no float rounding ever enters). This witness refutes ONLY the exact identity
+    (the proof step); the scope flags on the persisted ``CounterexampleTest``
+    enforce that it can never refute the broader claim.
+    """
+
+    assignment: dict[str, str]
+    lhs_value: str
+    rhs_value: str
+    difference: str
+
+
 class ComputationVerificationResult(StrictBaseModel):
     check_id: str
     claim_id: str
@@ -388,6 +404,8 @@ class ComputationVerificationResult(StrictBaseModel):
     computed: str
     expected: str
     detail: str = ""
+    # Present only for a refuted polynomial_identity that yielded a witness.
+    witness: PolynomialWitness | None = None
 
 
 class ComputationVerificationReport(StrictBaseModel):
