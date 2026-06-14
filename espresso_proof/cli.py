@@ -531,6 +531,11 @@ def build_subgoal_graph_command(
     proved, and a node may carry source_supported / scoped_checked only when it
     references support the kernel already earned. The validators remain the gate.
     """
+    from .theorem_condition_ledger import build_theorem_condition_ledger
+
+    # Goal 57A: ensure the advisory theorem-condition ledger exists before the
+    # graph reads it (idempotent; empty ledger when there is no llm_agent_run).
+    build_theorem_condition_ledger(run)
     graph = build_subgoal_graph(run)
     validate_run(run)
     summary = graph["summary"]
@@ -785,9 +790,12 @@ def _refresh_derived_views(run: Path) -> None:
     earned.
     """
     from .subgoal_graph import build_subgoal_graph, remove_subgoal_graph
+    from .theorem_condition_ledger import build_theorem_condition_ledger
 
     if (run / "proof_goal_graph.yaml").exists():
         try:
+            # Goal 57A: refresh the advisory ledger before the graph reads it.
+            build_theorem_condition_ledger(run)
             build_subgoal_graph(run)
             validate_run(run)
         except Exception:  # noqa: BLE001 - advisory view must fail closed, not block

@@ -203,6 +203,13 @@ def _matrix_determinant(rows: list[list[Fraction]]) -> Fraction:
 _MAX_POLY_TERMS = 5000        # bound the normal-form size
 _MAX_POLY_EXPONENT = 100      # bound ** exponent
 
+# Bounds for the FALSE-identity rational-witness search (fail closed). A real
+# counterexample for a non-identity must be cheap to find; anything beyond these
+# bounds earns NO status (verdict ``error``), never a witness.
+_MAX_WITNESS_VARS = 6         # cap declared/used variable count
+_MAX_WITNESS_TOTAL_DEGREE = 50  # cap total degree across the combined polynomials
+_WITNESS_GRID = (Fraction(0), Fraction(1), Fraction(-1), Fraction(2), Fraction(1, 2))
+
 
 def _poly_normalize(poly: dict[tuple, Fraction]) -> dict[tuple, Fraction]:
     return {mono: coeff for mono, coeff in poly.items() if coeff != 0}
@@ -318,6 +325,83 @@ def _poly_str(poly: dict[tuple, Fraction]) -> str:
     return " + ".join(parts)
 
 
+def _poly_variables(poly: dict[tuple, Fraction]) -> set[str]:
+    """Variable names occurring in a polynomial's normal form."""
+    return {var for mono in poly for var, _exp in mono}
+
+
+def _poly_total_degree(poly: dict[tuple, Fraction]) -> int:
+    """Maximum total degree of any monomial (0 for the zero/constant polynomial)."""
+    return max((sum(exp for _v, exp in mono) for mono in poly), default=0)
+
+
+def _poly_eval_at(poly: dict[tuple, Fraction], assignment: dict[str, Fraction]) -> Fraction:
+    """Evaluate a polynomial at an exact rational assignment of all its variables."""
+    total = Fraction(0)
+    for mono, coeff in poly.items():
+        term = coeff
+        for var, exp in mono:
+            term *= assignment[var] ** exp
+        total += term
+    return total
+
+
+def find_polynomial_counterexample(
+    lhs: dict[tuple, Fraction], rhs: dict[tuple, Fraction]
+) -> dict | None:
+    """Find a durable rational witness that ``lhs != rhs`` as functions over Q.
+
+    Searches a small bounded grid (each variable over {0, 1, -1, 2, 1/2}) and
+    returns the first assignment where the exact values differ, recording the
+    assignment plus exact ``lhs``, ``rhs`` and nonzero ``difference``.
+
+    Fails closed via :class:`VerifierError` when the inputs exceed the witness
+    caps (too many variables / too high total degree); the caller turns that into
+    verdict ``error`` so an over-limit input earns NO status. Returns ``None``
+    only if no grid point separated the two polynomials (the caller still has the
+    exact ``refuted`` verdict from the normal-form comparison).
+    """
+    variables = sorted(_poly_variables(lhs) | _poly_variables(rhs))
+    if len(variables) > _MAX_WITNESS_VARS:
+        raise VerifierError(
+            f"too many variables for safe witness search (max {_MAX_WITNESS_VARS})"
+        )
+    total_degree = max(_poly_total_degree(lhs), _poly_total_degree(rhs))
+    if total_degree > _MAX_WITNESS_TOTAL_DEGREE:
+        raise VerifierError(
+            f"polynomial total degree too high for safe witness search "
+            f"(max {_MAX_WITNESS_TOTAL_DEGREE})"
+        )
+    if not variables:
+        # Constant polynomials: a single (empty) assignment decides it.
+        lhs_val = _poly_eval_at(lhs, {})
+        rhs_val = _poly_eval_at(rhs, {})
+        if lhs_val != rhs_val:
+            return {
+                "assignment": {},
+                "lhs_value": _frac_str(lhs_val),
+                "rhs_value": _frac_str(rhs_val),
+                "difference": _frac_str(lhs_val - rhs_val),
+            }
+        return None
+    # Grid size is bounded by len(_WITNESS_GRID) ** _MAX_WITNESS_VARS, which is
+    # 5**6 = 15625 evaluations in the worst case — cheap and terminating.
+    import itertools
+
+    for combo in itertools.product(_WITNESS_GRID, repeat=len(variables)):
+        assignment = dict(zip(variables, combo))
+        lhs_val = _poly_eval_at(lhs, assignment)
+        rhs_val = _poly_eval_at(rhs, assignment)
+        if lhs_val != rhs_val:
+            return {
+                "assignment": {var: _frac_str(val) for var, val in assignment.items()},
+                "lhs_value": _frac_str(lhs_val),
+                "rhs_value": _frac_str(rhs_val),
+                "difference": _frac_str(lhs_val - rhs_val),
+            }
+    return None
+
+
 def verify_check(check: dict) -> dict | None:
     """Verify one computation check. Returns a result dict, or None if it has no machine spec."""
     spec = check.get("machine_check")
@@ -332,6 +416,7 @@ def verify_check(check: dict) -> dict | None:
         "kind": kind,
         "expected": expected,
     }
+    witness = None
     try:
         if kind == "exact_arithmetic":
             computed = _eval_arith(expression)
@@ -367,6 +452,13 @@ def verify_check(check: dict) -> dict | None:
             computed_str = _poly_str(lhs)
             verdict = "confirmed" if lhs == rhs else "refuted"
             backend = "stdlib_polynomial"
+            if verdict == "refuted":
+                # The identity is FALSE over Q. Produce a durable rational witness
+                # (the search caps fail closed to verdict ``error`` on over-limit
+                # input — never a witness). The witness refutes ONLY this exact
+                # identity; persistence (see persist_polynomial_witness) records it
+                # with conservative scope flags so it can never refute the claim.
+                witness = find_polynomial_counterexample(lhs, rhs)
         else:
             return {
                 **base,
@@ -385,7 +477,7 @@ def verify_check(check: dict) -> dict | None:
             "computed": "",
             "detail": str(exc),
         }
-    return {
+    result = {
         **base,
         "backend": backend,
         "executed": True,
@@ -393,6 +485,89 @@ def verify_check(check: dict) -> dict | None:
         "computed": computed_str,
         "detail": f"executed {expression!r}",
     }
+    if witness is not None:
+        result["witness"] = witness
+    return result
+
+
+def _polynomial_witness_test(check: dict, result: dict) -> dict:
+    """Build a CounterexampleTest dict for a refuted polynomial identity witness.
+
+    Scope flags are conservative and deterministic (never agent prose): the
+    witness refutes ONLY this exact polynomial identity (``refutes_step_only``),
+    never the broader claim. It drops the claim's hypotheses
+    (``satisfies_all_claim_hypotheses=False``), so the existing
+    ``CounterexampleTest.validate_refutation_scope`` would reject any attempt to
+    set ``refutes_claim``.
+    """
+    witness = result["witness"]
+    assignment = witness["assignment"]
+    pretty = ", ".join(f"{var}={val}" for var, val in sorted(assignment.items())) or "(constants)"
+    explanation = (
+        f"Polynomial identity {result['kind']} is FALSE over Q: "
+        f"lhs={check['machine_check']['expression']!r} != "
+        f"rhs={check['machine_check']['expected']!r}. "
+        f"At {pretty}: lhs={witness['lhs_value']}, rhs={witness['rhs_value']}, "
+        f"difference={witness['difference']} (nonzero). "
+        f"Refutes ONLY this exact identity (the proof step), not the claim."
+    )
+    return {
+        "id": f"polywitness_{check['id']}",
+        "operator_id": "polynomial_identity_witness",
+        "example_id": check["id"],
+        # The witness is a bare rational point; it does not satisfy the claim's
+        # hypotheses, which is exactly why it can refute only the step.
+        "satisfies_all_claim_hypotheses": False,
+        "target": "proof_step",
+        "result": "failed",
+        "refutes_claim": False,
+        "refutes_step_only": True,
+        "exposes_missing_hypothesis": False,
+        "support": (
+            f"stdlib_polynomial exact rational evaluation; witness {witness['assignment']}"
+        ),
+        "explanation": explanation,
+    }
+
+
+def persist_polynomial_witness(run_dir: Path, check: dict, result: dict) -> Path | None:
+    """Persist a refuted polynomial identity's rational witness as a durable
+    CounterexampleTest through the EXISTING counterexamples persistence path.
+
+    Reuses the existing ``CounterexampleTest`` model + counterexamples artifact
+    (single-file ``counterexamples.yaml`` or a per-item bank directory). Returns
+    the path written, or ``None`` if the result carries no witness (confirmed
+    identity, or an over-limit search that failed closed to verdict ``error``).
+    Idempotent: a witness whose id already exists is not re-appended.
+    """
+    if result.get("verdict") != "refuted" or "witness" not in result:
+        return None
+
+    from .models import CounterexampleReport, CounterexampleTest
+    from .research_bank import append_bank_item, bankable_artifact_path, is_bank_dir
+
+    test = _polynomial_witness_test(check, result)
+    CounterexampleTest.model_validate(test)  # fail closed on the scope guard
+
+    cx_path = bankable_artifact_path(run_dir, "counterexamples")
+    if is_bank_dir(cx_path):
+        existing_ids = {
+            read_yaml(p).get("id")
+            for p in cx_path.glob("*.yaml")
+            if p.name != "_meta.yaml"
+        }
+        if test["id"] in existing_ids:
+            return cx_path
+        return append_bank_item(cx_path, test)
+
+    bank = read_yaml(cx_path) if cx_path.exists() else {"claim_id": check["claim_id"], "tests": []}
+    bank.setdefault("tests", [])
+    if any(t.get("id") == test["id"] for t in bank["tests"]):
+        return cx_path
+    bank["tests"].append(test)
+    CounterexampleReport.model_validate(bank)  # fail closed
+    write_yaml(cx_path, bank)
+    return cx_path
 
 
 def build_verification_report(computations: dict) -> dict:
@@ -454,7 +629,7 @@ def audit_evidence(run_dir: Path) -> dict:
     from .validators import validate_run  # local import to avoid an import cycle
 
     report = verify_computation_checks(run_dir)
-    verdict_by_check = {r["check_id"]: r["verdict"] for r in report["results"]}
+    result_by_check = {r["check_id"]: r for r in report["results"]}
 
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     comp_path = run_dir / manifest["artifacts"]["computation_checks"]
@@ -462,12 +637,17 @@ def audit_evidence(run_dir: Path) -> dict:
     for check in computations.get("checks", []):
         if not check.get("machine_check"):
             continue
-        verdict = verdict_by_check.get(check["id"])
+        result = result_by_check.get(check["id"], {})
+        verdict = result.get("verdict")
         if verdict == "confirmed":
             check["status"] = "checked"
             check["method"] = "exact_arithmetic"
         elif verdict == "refuted":
             check["status"] = "wrong"  # the computed value is wrong (computation-scoped)
+            # A FALSE polynomial identity yields a durable rational witness,
+            # persisted ONLY as a step-only counterexample (never claim-level).
+            if "witness" in result:
+                persist_polynomial_witness(run_dir, check, result)
         else:  # error / unsupported / not run
             check["status"] = "human_needed"
             check["method"] = "manual_review_needed"

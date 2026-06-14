@@ -378,6 +378,22 @@ class VerificationVerdict(str, Enum):
     unsupported = "unsupported"
 
 
+class PolynomialWitness(StrictBaseModel):
+    """A durable rational witness that a polynomial identity is FALSE over Q.
+
+    Records an exact assignment of the declared variables and the exact lhs / rhs
+    values plus their nonzero difference (all rationals serialized as strings, so
+    no float rounding ever enters). This witness refutes ONLY the exact identity
+    (the proof step); the scope flags on the persisted ``CounterexampleTest``
+    enforce that it can never refute the broader claim.
+    """
+
+    assignment: dict[str, str]
+    lhs_value: str
+    rhs_value: str
+    difference: str
+
+
 class ComputationVerificationResult(StrictBaseModel):
     check_id: str
     claim_id: str
@@ -388,6 +404,8 @@ class ComputationVerificationResult(StrictBaseModel):
     computed: str
     expected: str
     detail: str = ""
+    # Present only for a refuted polynomial_identity that yielded a witness.
+    witness: PolynomialWitness | None = None
 
 
 class ComputationVerificationReport(StrictBaseModel):
@@ -1402,6 +1420,14 @@ class TheoremApplicabilityReport(StrictBaseModel):
     source_grounding_artifact: str
     literature_review_agent_artifact: str | None = None
     usages: list[TheoremApplicabilityUsage]
+    # Goal 57A slice-2: default-deny usages derived from the advisory theorem
+    # condition ledger (reviewer source_requests). These are NOT source-grounding
+    # usages: they never map to a proof step, never earn source_backed, and (being
+    # default-deny) are NEVER ``applicable`` unless a condition is explicitly
+    # ``matched`` AND the locator is exact. Their only safety effect is to forbid
+    # ``all_applicable`` while any ledger obligation is unresolved. Additive and
+    # optional — absent/empty means behaviour is unchanged.
+    ledger_usages: list[TheoremApplicabilityUsage] = Field(default_factory=list)
     overall_status: Literal["all_applicable", "blocked", "misapplied", "unclear"]
     notes: list[str] = Field(default_factory=list)
     # Goal 41: sha256 of source_grounding.yaml's bytes AT AUDIT TIME. Optional/
@@ -1418,6 +1444,13 @@ class TheoremApplicabilityReport(StrictBaseModel):
         if self.overall_status == "all_applicable":
             if any(usage.applicability_status != "applicable" for usage in self.usages):
                 raise ValueError("all_applicable requires every theorem usage applicable")
+            # Goal 57A: a ledger obligation that is not fully resolved (non-exact
+            # locator or any non-satisfied condition surfaces as a non-applicable
+            # ledger usage) must forbid all_applicable. Default-deny, fail closed.
+            if any(usage.applicability_status != "applicable" for usage in self.ledger_usages):
+                raise ValueError(
+                    "all_applicable requires every theorem condition ledger usage applicable"
+                )
         if any(usage.applicability_status == "misapplied" for usage in self.usages):
             if self.overall_status != "misapplied":
                 raise ValueError("misapplied theorem usage requires overall_status=misapplied")
@@ -2118,6 +2151,10 @@ class SubgoalState(str, Enum):
       deterministic verifier.
     - ``blocked_missing_source``: cannot progress without a missing source.
     - ``blocked_reviewer_objection``: held open by a reviewer objection.
+    - ``blocked_external_tool``: needs an external tool/verifier that is
+      unavailable or was refused (Goal 57B). A non-evidence state.
+    - ``conditional``: progress is contingent on an unresolved gap or a research
+      blocker (Goal 57B). A non-evidence state.
     - ``contradicted``: refuted/rejected under the current hypotheses by an
       existing counterexample/refutation validator (never by prose).
     """
@@ -2128,11 +2165,39 @@ class SubgoalState(str, Enum):
     scoped_checked = "scoped_checked"
     blocked_missing_source = "blocked_missing_source"
     blocked_reviewer_objection = "blocked_reviewer_objection"
+    blocked_external_tool = "blocked_external_tool"
+    conditional = "conditional"
     contradicted = "contradicted"
 
 
 # States a subgoal may carry only when matching EARNED evidence is referenced.
 _SUBGOAL_EVIDENCE_STATES = {SubgoalState.source_supported, SubgoalState.scoped_checked}
+
+# Non-evidence "blocked/conditional" repair states. A node in one of these
+# states is advisory search-management only: it may carry a typed ``block_reason``
+# and a ``suggested_next_action``, but it can NEVER reference earned support
+# (source/computation/scoped checks) -- that would smuggle trusted status into a
+# blocked node. The run validator and the node validator both fail closed.
+_SUBGOAL_BLOCKED_STATES = {
+    SubgoalState.blocked_missing_source,
+    SubgoalState.blocked_reviewer_objection,
+    SubgoalState.blocked_external_tool,
+    SubgoalState.conditional,
+}
+
+
+class BlockReason(str, Enum):
+    """Why a subgoal is blocked/conditional (advisory typing only, Goal 57B).
+
+    Pure search-management metadata. A ``block_reason`` NEVER sets or upgrades
+    any trusted status; a node carrying it is still just blocked repair state.
+    The set is closed -- an unknown reason fails closed at parse time.
+    """
+
+    false_key_lemma = "false_key_lemma"
+    theorem_condition_gap = "theorem_condition_gap"
+    hard_research_blocker = "hard_research_blocker"
+    external_tool_blocked = "external_tool_blocked"
 
 # Tokens that must never appear in a subgoal graph (it cannot claim proof
 # completion). Mirrors the final-report proof-language guard.
@@ -2177,6 +2242,31 @@ class SubgoalNode(StrictBaseModel):
     reviewer_objections: list[str] = Field(default_factory=list)
     counterexample_pressure: list[str] = Field(default_factory=list)
     remaining_risk: str = ""
+    # Goal 57B: advisory blocked/conditional typing. Optional + default so every
+    # pre-57B graph still validates unchanged.
+    block_reason: BlockReason | None = None
+    suggested_next_action: str = ""
+
+    @model_validator(mode="after")
+    def _validate_block_typing(self) -> SubgoalNode:
+        # A typed block_reason only makes sense on a blocked/conditional node.
+        if self.block_reason is not None and self.state not in _SUBGOAL_BLOCKED_STATES:
+            raise ValueError(
+                f"block_reason is only allowed on a blocked/conditional subgoal "
+                f"state, not {self.state.value!r}"
+            )
+        # Non-evidence repair states can never reference earned support: that
+        # would let a blocked node smuggle trusted source/checked status.
+        if self.state in _SUBGOAL_BLOCKED_STATES and (
+            self.supported_by_source_steps
+            or self.supported_by_computations
+            or self.supported_by_scoped_checks
+        ):
+            raise ValueError(
+                f"{self.state.value} is a non-evidence repair state and cannot "
+                "reference earned source/computation/scoped-check support"
+            )
+        return self
 
 
 class SubgoalEdge(StrictBaseModel):
@@ -2583,6 +2673,82 @@ class HumanTimeAllocationContext(StrictBaseModel):
         return self
 
 
+# ---------------------------------------------------------------------------
+# Goal 57A: Theorem Condition Ledger (slice 1 — model only).
+#
+# A durable, advisory ledger of the theorems a reviewer asked for (the verbatim
+# ``source_requests``) together with the conditions/hypotheses that still have to
+# be checked against the current claim before any such theorem could be reused.
+#
+# SAFETY: this ledger is NOT proof/source/evidence. It carries NO
+# ``source_backed`` / ``checked`` / ``proof`` / ``grade`` / ``status`` field of
+# any kind. ``match_status`` is a bare bookkeeping state that starts ``unknown``
+# and must NEVER be inferred from claim text — only a real downstream hypothesis-
+# match step (a later slice) may move it, and even then it earns no trusted
+# status. ``locator_status`` starts ``needs_exact_locator``; a candidate/exact
+# locator here is a search-management hint, not source grounding. Being a
+# ``StrictBaseModel`` (``extra='forbid'``), the model rejects any smuggled
+# status-bearing field at validation time.
+# ---------------------------------------------------------------------------
+class LocatorStatus(str, Enum):
+    needs_exact_locator = "needs_exact_locator"
+    candidate = "candidate"
+    exact = "exact"
+
+
+class MatchStatus(str, Enum):
+    matched = "matched"
+    unmatched = "unmatched"
+    unknown = "unknown"
+
+
+class SourceRequestOrigin(str, Enum):
+    prover = "prover"
+    reviewer = "reviewer"
+
+
+class LedgerCondition(StrictBaseModel):
+    """One condition/hypothesis recorded verbatim, with a bare match-bookkeeping
+    state. ``match_status`` defaults to ``unknown`` and is never inferred from the
+    claim — it carries no trusted status."""
+
+    text: str
+    claim_value: str = ""
+    match_status: MatchStatus = MatchStatus.unknown
+
+
+class TheoremConditionLedgerEntry(StrictBaseModel):
+    """A reviewer's request for a theorem plus the conditions to check against the
+    claim. Carries no proof/source/evidence/grade/status field."""
+
+    id: str
+    requested_theorem: str
+    locator_status: LocatorStatus = LocatorStatus.needs_exact_locator
+    locator: str | None = None
+    conditions: list[LedgerCondition]
+    drift_kind: str = ""  # open advisory free-text tag; never a trusted status
+    repair_subgoal_id: str
+    source_request_origin: SourceRequestOrigin = SourceRequestOrigin.reviewer
+
+    @model_validator(mode="after")
+    def validate_conditions(self) -> TheoremConditionLedgerEntry:
+        if not self.conditions:
+            raise ValueError("a ledger entry requires at least one condition")
+        return self
+
+
+class TheoremConditionLedger(StrictBaseModel):
+    """Advisory ledger of requested theorems + conditions to check. NOT proof
+    evidence: it sets no source/evidence/grade/claim status."""
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    entries: list[TheoremConditionLedgerEntry] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "claim": Claim,
     "agent_contracts": AgentContracts,
@@ -2629,6 +2795,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "prover_round": ProverRoundReport,
     "prover_round_index": ProverRoundIndex,
     "proof_goal_graph": ProofGoalGraph,
+    "theorem_condition_ledger": TheoremConditionLedger,
     "human_time_allocation_context": HumanTimeAllocationContext,
     "front_half_run": FrontHalfRunReport,
     "agent_run_status": AgentRunStatusReport,

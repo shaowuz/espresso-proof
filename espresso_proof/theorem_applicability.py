@@ -27,7 +27,13 @@ def audit_theorem_applicability(run_dir: Path) -> dict:
         usages.append(
             _usage_for_step(step, source_grounding, literature_report, claim_hypotheses)
         )
-    overall = _overall_status(usages)
+    # Goal 57A slice-2: in ADDITION to the grounding-derived usages, read the
+    # optional theorem condition ledger and emit one DEFAULT-DENY usage per
+    # ledger entry. These never earn source_backed and never flip overall to
+    # all_applicable unless a condition is explicitly matched with an exact
+    # locator. Absent/empty ledger => no ledger usages => behaviour unchanged.
+    ledger_usages = _ledger_usages(run_dir, optional)
+    overall = _overall_status(usages, ledger_usages)
     report = {
         "schema_version": 1,
         "claim_id": source_grounding.claim_id,
@@ -41,6 +47,7 @@ def audit_theorem_applicability(run_dir: Path) -> dict:
         ).hexdigest(),
         "literature_review_agent_artifact": optional.get("literature_review_agent"),
         "usages": usages,
+        "ledger_usages": ledger_usages,
         "overall_status": overall,
         "notes": [
             "Theorem Applicability Auditor records condition checks for theorem usage.",
@@ -50,6 +57,117 @@ def audit_theorem_applicability(run_dir: Path) -> dict:
     TheoremApplicabilityReport.model_validate(report)
     write_yaml(run_dir / "theorem_applicability.yaml", report)
     return report
+
+
+# Goal 57A slice-2: map a ledger condition's match_status onto the existing
+# applicability condition status vocabulary. DEFAULT-DENY: only an explicit
+# ``matched`` is ever "satisfied"; the slice-1 default ``unknown`` is "not_checked"
+# (a bad/blocking status), and ``unmatched`` is "mismatched" (misapplied).
+_LEDGER_CONDITION_STATUS = {
+    "matched": "satisfied",
+    "unmatched": "mismatched",
+    "unknown": "not_checked",
+}
+
+
+def _ledger_usages(run_dir: Path, optional: dict) -> list[dict]:
+    """Build DEFAULT-DENY theorem-applicability usages from the optional theorem
+    condition ledger (reviewer ``source_requests``).
+
+    SAFETY (Goal 57A): a ledger-derived usage NEVER earns ``source_backed`` and is
+    NEVER ``applicable`` unless a condition is explicitly ``matched`` AND the
+    locator is exact. The slice-1 default (``match_status == "unknown"``) maps to a
+    ``not_checked`` condition, which is a blocking status — so an unresolved ledger
+    can never read ``all_applicable``. An agent-asserted ``matched`` without an
+    exact locator still maps to ``blocked`` (the locator gate fails). This audit
+    does NO matching of its own; it only surfaces the ledger's recorded state.
+    """
+
+    name = optional.get("theorem_condition_ledger")
+    if not name:
+        return []
+    ledger = read_yaml(run_dir / name)
+    if not isinstance(ledger, dict):
+        return []
+    usages: list[dict] = []
+    for entry in ledger.get("entries", []) or []:
+        usages.append(_ledger_usage_for_entry(entry))
+    return usages
+
+
+def _ledger_usage_for_entry(entry: dict) -> dict:
+    entry_id = str(entry.get("id", "ledger_entry"))
+    locator_status = entry.get("locator_status", "needs_exact_locator")
+    locator_value = entry.get("locator")
+    locator_is_exact = locator_status == "exact" and bool(locator_value)
+    locator = (
+        {"kind": "theorem", "value": str(locator_value)}
+        if locator_is_exact
+        else {"kind": "unknown", "value": entry_id}
+    )
+
+    conditions: list[dict] = []
+    for index, condition in enumerate(entry.get("conditions", []) or [], start=1):
+        match_status = condition.get("match_status", "unknown")
+        conditions.append(
+            {
+                "id": f"cond_{index:03d}",
+                "text": str(condition.get("text", "")),
+                "condition_type": _condition_type(str(condition.get("text", ""))),
+                # DEFAULT-DENY mapping; unknown/unmatched are blocking statuses.
+                "status": _LEDGER_CONDITION_STATUS.get(match_status, "not_checked"),
+                "evidence": (
+                    "Theorem condition ledger (advisory, reviewer source_request). "
+                    f"match_status={match_status}; the audit does no matching itself "
+                    "and earns no source_backed from this entry."
+                ),
+                "definition_locator": None,
+            }
+        )
+    if not conditions:
+        conditions.append(
+            {
+                "id": "cond_001",
+                "text": "Hypotheses to check against the claim",
+                "condition_type": "other",
+                "status": "not_checked",
+                "evidence": "Ledger entry carried no conditions; default-deny.",
+                "definition_locator": None,
+            }
+        )
+
+    # Reuse the existing applicability mapping. With source_status="unverified"
+    # and conclusion_status="unclear", the only way to reach "applicable" is every
+    # condition satisfied (all matched) AND the locator gate below being exact.
+    applicability_status = _applicability_status(conditions, "unclear", "unverified")
+    if applicability_status == "applicable" and not locator_is_exact:
+        # needs-locator: a matched-but-not-located entry is still default-denied.
+        applicability_status = "blocked"
+    return {
+        "proof_step_id": f"ledger:{entry_id}",
+        "source_ref_id": "missing_source_ref",
+        "theorem_id": None,
+        "theorem_label": None,
+        "theorem_statement": str(entry.get("requested_theorem", "")),
+        "locator": locator,
+        # NEVER source_backed: a ledger usage is unverified by construction.
+        "source_status": "unverified",
+        "conclusion_status": "unclear",
+        "conditions": conditions,
+        "applicability_status": applicability_status,
+        # The usage model requires applicable => not blocks_source_backed; this
+        # flag is internal to the usage shape and does NOT grant source_backed
+        # (the validator only earns source_backed from source-grounding usages,
+        # never from ledger_usages). Default-deny: blocks unless fully applicable.
+        "blocks_source_backed": applicability_status != "applicable",
+        "notes": [
+            "Default-deny usage derived from the theorem condition ledger; advisory "
+            "search-management bookkeeping, not source grounding. Never earns "
+            "source_backed and never flips overall to all_applicable while "
+            "unresolved.",
+            f"locator_status={locator_status}.",
+        ],
+    }
 
 
 def _load_literature_report(run_dir: Path, optional: dict) -> LiteratureReviewAgentReport | None:
@@ -318,8 +436,13 @@ def _usage_notes(comparison, source_status: str) -> list[str]:
     return notes
 
 
-def _overall_status(usages: list[dict]) -> str:
+def _overall_status(usages: list[dict], ledger_usages: list[dict] | None = None) -> str:
     statuses = {usage["applicability_status"] for usage in usages}
+    # Goal 57A: ledger usages are default-deny; their applicability status (which
+    # is never "applicable" while an obligation is unresolved) participates in the
+    # overall verdict so a present-but-unresolved ledger can never read
+    # all_applicable.
+    statuses |= {usage["applicability_status"] for usage in ledger_usages or []}
     if "misapplied" in statuses:
         return "misapplied"
     if "blocked" in statuses:

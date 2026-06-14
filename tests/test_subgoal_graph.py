@@ -4,13 +4,18 @@ import copy
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
 from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.models import ProofGoalGraph
+from espresso_proof.models import ProofGoalGraph, SubgoalNode
 from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.subgoal_graph import assemble_subgoal_graph, build_subgoal_graph
+from espresso_proof.subgoal_graph import (
+    assemble_subgoal_graph,
+    build_subgoal_graph,
+    render_proof_search_lines,
+)
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.validators import validate_run
 
@@ -263,6 +268,140 @@ def test_selected_route_creates_route_specific_subgoal(tmp_path: Path) -> None:
     assert route_nodes
     assert route_nodes[0]["state"] == "sketched"
     assert graph["selected_strategy"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Goal 57B: typed route-death blockers (first slice)
+# ---------------------------------------------------------------------------
+def _prover_loop_path(run_dir: Path) -> Path:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    return run_dir / manifest["optional_artifacts"]["prover_loop"]
+
+
+def _inject_blocker(run_dir: Path, blocker: str) -> None:
+    """Prepend a blocker to the latest prover round so the graph builder sees it."""
+    path = _prover_loop_path(run_dir)
+    pl = read_yaml(path)
+    attempts = pl.get("attempts") or [
+        {"round_index": 0, "blockers": [], "reviewer_objections": []}
+    ]
+    latest = max(attempts, key=lambda a: a.get("round_index", 0))
+    latest["blockers"] = [blocker, *(latest.get("blockers") or [])]
+    pl["attempts"] = attempts
+    write_yaml(path, pl)
+
+
+def test_false_key_lemma_blocker_is_typed(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _inject_blocker(run_dir, "The key lemma 'reflexive implies free' is false in general.")
+    graph = assemble_subgoal_graph(run_dir)
+    typed = [n for n in graph["nodes"] if n.get("block_reason") == "false_key_lemma"]
+    assert typed, "false key-lemma blocker should be typed as a dead route"
+    node = typed[0]
+    assert node["state"] == "blocked_reviewer_objection"
+    assert node["suggested_next_action"]
+    assert graph["summary"]["blocked"] >= 1
+    # the typed graph still validates as a model (no smuggled status)
+    ProofGoalGraph.model_validate(graph)
+
+
+def test_external_tool_blocker_is_typed_and_counted(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _inject_blocker(
+        run_dir, "This step needs an external tool (computer algebra) that is unavailable."
+    )
+    graph = assemble_subgoal_graph(run_dir)
+    tool_nodes = [n for n in graph["nodes"] if n["state"] == "blocked_external_tool"]
+    assert tool_nodes
+    assert tool_nodes[0]["block_reason"] == "external_tool_blocked"
+    assert graph["summary"]["blocked"] >= 1
+    ProofGoalGraph.model_validate(graph)
+
+
+def test_blocked_node_renders_translated_reason_without_raw_enum(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _inject_blocker(run_dir, "The key lemma 'reflexive implies free' is false in general.")
+    graph = assemble_subgoal_graph(run_dir)
+    blob = "\n".join(render_proof_search_lines(graph))
+    # human wording + a concrete next step are shown
+    assert "A key step looks false" in blob
+    assert "suggested next step" in blob.lower()
+    # the raw enum value / field name never leaks to the user-facing surface
+    assert "false_key_lemma" not in blob
+    assert "block_reason" not in blob
+
+
+def _add_external_tool_run(run_dir: Path, tool_name: str, *, exit_code: int) -> None:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    etr = {
+        "schema_version": 1,
+        "claim_id": "claim_x",
+        "run_id": manifest["run_id"],
+        "generated_at": "2026-06-14T00:00:00+00:00",
+        "runs": [
+            {
+                "id": "tool_1",
+                "tool_name": tool_name,
+                "scope_note": "scoped tool run, not a universal proof",
+                "not_universal_proof": True,
+                "exit_code": exit_code,
+                "timed_out": False,
+            }
+        ],
+        "notes": [],
+    }
+    write_yaml(run_dir / "external_tool_runs.yaml", etr)
+    manifest.setdefault("optional_artifacts", {})["external_tool_runs"] = "external_tool_runs.yaml"
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+
+
+def test_failed_external_tool_run_becomes_blocked_node(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _add_external_tool_run(run_dir, "singular", exit_code=1)
+    graph = assemble_subgoal_graph(run_dir)
+    tool_nodes = [n for n in graph["nodes"] if n["id"].startswith("subgoal_tool_")]
+    assert tool_nodes, "a non-clean tool run should surface a durable blocked node"
+    node = tool_nodes[0]
+    assert node["state"] == "blocked_external_tool"
+    assert node["block_reason"] == "external_tool_blocked"
+    assert node["suggested_next_action"]
+    assert graph["summary"]["blocked"] >= 1
+    # no earned status smuggled in
+    assert not node.get("supported_by_source_steps")
+    ProofGoalGraph.model_validate(graph)
+
+
+def test_clean_external_tool_run_is_not_blocked(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _add_external_tool_run(run_dir, "lean", exit_code=0)  # clean exit
+    graph = assemble_subgoal_graph(run_dir)
+    assert not [n for n in graph["nodes"] if n["id"].startswith("subgoal_tool_")]
+
+
+def test_block_reason_rejected_on_non_blocked_state() -> None:
+    # a block_reason on an open (non-blocked) node smuggles dead-route typing
+    with pytest.raises(ValidationError):
+        SubgoalNode(
+            id="subgoal_x",
+            statement="An open subgoal.",
+            role="lemma",
+            state="open",
+            closure_contract="Provide a grounded step.",
+            block_reason="false_key_lemma",
+        )
+
+
+def test_non_evidence_state_cannot_reference_earned_support() -> None:
+    # a blocked/conditional node must never reference earned source/checked support
+    with pytest.raises(ValidationError):
+        SubgoalNode(
+            id="subgoal_x",
+            statement="A blocked subgoal.",
+            role="lemma",
+            state="blocked_external_tool",
+            closure_contract="Make the tool available.",
+            supported_by_source_steps=["step_1"],
+        )
 
 
 def test_reviewer_objection_is_attachment_not_refutation(tmp_path: Path) -> None:
@@ -772,3 +911,417 @@ def test_rendering_notes_does_not_mutate_graph_artifact(tmp_path: Path) -> None:
     render_run_dashboard(run_dir)
     after = (run_dir / "proof_goal_graph.yaml").read_bytes()
     assert before == after
+
+
+# ---------------------------------------------------------------------------
+# Goal 57A: theorem-condition ledger -> named repair subgoals
+# ---------------------------------------------------------------------------
+_TCL_SOURCE_REQUESTS = ["Cauchy theorem for finite groups", "Class equation argument"]
+_TCL_MISSING_HYPOTHESES = ["G is finite", "p is prime"]
+
+
+def _inject_reviewer_requests(
+    run_dir: Path, source_requests: list[str], missing_hypotheses: list[str]
+) -> None:
+    """Add verbatim source_requests + missing_hypotheses to the first verifier
+    review of the gate-time llm_agent_run, mirroring them into the matching
+    round_001 review so the run cross-checks still pass (mirrors the ledger
+    test helper)."""
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    optional = manifest["optional_artifacts"]
+
+    agent_path = run_dir / optional["llm_agent_run"]
+    agent = read_yaml(agent_path)
+    verifier_id = agent["verifier_reviews"][0]["verifier_id"]
+    agent["verifier_reviews"][0]["source_requests"] = source_requests
+    agent["verifier_reviews"][0]["missing_hypotheses"] = missing_hypotheses
+    write_yaml(agent_path, agent)
+
+    index = read_yaml(run_dir / optional["prover_round_index"])
+    round_one = next(r for r in index["rounds"] if r["round_index"] == 1)
+    round_path = run_dir / round_one["artifact_path"]
+    round_report = read_yaml(round_path)
+    for review in round_report["verifier_reviews"]:
+        if review["verifier_id"] == verifier_id:
+            review["source_requests"] = source_requests
+            review["missing_hypotheses"] = missing_hypotheses
+    write_yaml(round_path, round_report)
+
+
+def _ledger_run(tmp_path: Path) -> Path:
+    from espresso_proof.theorem_condition_ledger import build_theorem_condition_ledger
+
+    run_dir = _resumed_run(tmp_path)
+    _inject_reviewer_requests(run_dir, _TCL_SOURCE_REQUESTS, _TCL_MISSING_HYPOTHESES)
+    build_theorem_condition_ledger(run_dir)
+    return run_dir
+
+
+def test_ledger_entry_becomes_open_hypothesis_check_repair_node(tmp_path: Path) -> None:
+    run_dir = _ledger_run(tmp_path)
+    ledger = read_yaml(run_dir / "theorem_condition_ledger.yaml")
+    graph = assemble_subgoal_graph(run_dir)
+
+    tcl_nodes = [n for n in graph["nodes"] if n["id"].startswith("subgoal_tcl_")]
+    # one repair node per ledger entry, by ledger repair_subgoal_id (single writer)
+    assert {n["id"] for n in tcl_nodes} == {e["repair_subgoal_id"] for e in ledger["entries"]}
+    assert len(tcl_nodes) == len(ledger["entries"]) >= 2
+    for node in tcl_nodes:
+        assert node["role"] == "hypothesis_check"
+        # slice-1 conditions are all "unknown" -> open named repair target
+        assert node["state"] == "open"
+        assert "block_reason" not in node
+        # advisory search state only: never any earned support
+        assert not node.get("supported_by_source_steps")
+        assert not node.get("supported_by_computations")
+        assert not node.get("supported_by_scoped_checks")
+    ProofGoalGraph.model_validate(graph)
+    validate_run(run_dir)
+
+
+def test_ledger_repair_node_objection_attaches_to_that_node(tmp_path: Path) -> None:
+    run_dir = _ledger_run(tmp_path)
+    ledger = read_yaml(run_dir / "theorem_condition_ledger.yaml")
+    target_id = ledger["entries"][0]["repair_subgoal_id"]
+
+    # a reviewer scoped objection naming the ledger repair node (54B attach path)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    agent_path = run_dir / manifest["optional_artifacts"]["llm_agent_run"]
+    agent = read_yaml(agent_path)
+    agent["verifier_reviews"][0].setdefault("scoped_objections", []).append(
+        {
+            "id": "v1_obj_tcl",
+            "text": "This cited theorem's finiteness hypothesis is not justified.",
+            "scope": "subgoal",
+            "scope_source": "explicit",
+            "scope_inferred": False,
+            "inference_reason": "",
+            "subgoal_id": target_id,
+            "proof_step_id": None,
+            "kind": "missing_source",
+            "severity": "P1",
+            "suggested_next_action": "List the theorem's hypotheses and check each.",
+        }
+    )
+    write_yaml(agent_path, agent)
+
+    graph = assemble_subgoal_graph(run_dir)
+    node_by_id = {n["id"]: n for n in graph["nodes"]}
+    target = node_by_id[target_id]
+    assert any("finiteness hypothesis" in o for o in target.get("reviewer_objections", []))
+    # it landed on the repair node, NOT the main goal
+    main = next(n for n in graph["nodes"] if n["role"] == "main_goal")
+    assert not any("finiteness hypothesis" in o for o in main.get("reviewer_objections", []))
+
+
+def test_unmatched_condition_makes_repair_node_blocked_with_translated_wording(
+    tmp_path: Path,
+) -> None:
+    run_dir = _ledger_run(tmp_path)
+    # hand-set one condition to unmatched -> theorem_condition_gap repair node
+    ledger_path = run_dir / "theorem_condition_ledger.yaml"
+    ledger = read_yaml(ledger_path)
+    ledger["entries"][0]["conditions"][0]["match_status"] = "unmatched"
+    write_yaml(ledger_path, ledger)
+
+    graph = assemble_subgoal_graph(run_dir)
+    target_id = ledger["entries"][0]["repair_subgoal_id"]
+    node = next(n for n in graph["nodes"] if n["id"] == target_id)
+    assert node["state"] == "blocked_missing_source"
+    assert node["block_reason"] == "theorem_condition_gap"
+    assert node["suggested_next_action"]
+    assert not node.get("supported_by_source_steps")
+    ProofGoalGraph.model_validate(graph)
+
+    text = "\n".join(render_proof_search_lines(graph))
+    # translated wording is shown, no raw enum strings leak
+    assert "A cited theorem's hypotheses are not met" in text
+    for raw in ("theorem_condition_gap", "unmatched", "needs_exact_locator", "block_reason"):
+        assert raw not in text
+
+
+def test_ledger_entries_prevent_open_blocked_collapse(tmp_path: Path) -> None:
+    run_dir = _ledger_run(tmp_path)
+    graph = assemble_subgoal_graph(run_dir)
+    # named repair subgoals exist -> not a {open:1, blocked:0}-only collapse
+    tcl_nodes = [n for n in graph["nodes"] if n["id"].startswith("subgoal_tcl_")]
+    assert tcl_nodes
+    assert graph["summary"]["open"] >= len(tcl_nodes)
+    # every ledger repair node id is wired into the main goal's depends_on
+    main = next(n for n in graph["nodes"] if n["role"] == "main_goal")
+    for node in tcl_nodes:
+        assert node["id"] in main["depends_on"]
+
+
+def test_no_double_repair_node_from_blocker_and_ledger(tmp_path: Path) -> None:
+    """The ledger is the single writer of subgoal_tcl_* nodes; 57B's blocker path
+    only writes subgoal_block_* ids, so the two never collide."""
+    run_dir = _ledger_run(tmp_path)
+    _inject_blocker(run_dir, "Need a source/theorem for the class equation")
+    graph = assemble_subgoal_graph(run_dir)
+    ids = [n["id"] for n in graph["nodes"]]
+    assert len(ids) == len(set(ids))  # no duplicate node ids
+    tcl = [i for i in ids if i.startswith("subgoal_tcl_")]
+    block = [i for i in ids if i.startswith("subgoal_block_")]
+    assert tcl and block
+    assert set(tcl).isdisjoint(block)
+
+
+# ---------------------------------------------------------------------------
+# 56E (G56E-001): reviewer-named route/global gaps become blocked nodes
+# ---------------------------------------------------------------------------
+def _inject_scoped_objections(run_dir: Path, scoped: list[dict]) -> None:
+    """Append scoped_objections to the gate-time llm_agent_run's first verifier
+    review, mirroring them identically into the matching round_001 review so the
+    run cross-checks (initial-round body == llm_agent_run body) still pass.
+    Mirrors the ledger/source-request helper style."""
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    optional = manifest["optional_artifacts"]
+
+    agent_path = run_dir / optional["llm_agent_run"]
+    agent = read_yaml(agent_path)
+    verifier_id = agent["verifier_reviews"][0]["verifier_id"]
+    agent["verifier_reviews"][0].setdefault("scoped_objections", []).extend(
+        copy.deepcopy(scoped)
+    )
+    write_yaml(agent_path, agent)
+
+    index = read_yaml(run_dir / optional["prover_round_index"])
+    round_one = next(r for r in index["rounds"] if r["round_index"] == 1)
+    round_path = run_dir / round_one["artifact_path"]
+    round_report = read_yaml(round_path)
+    for review in round_report["verifier_reviews"]:
+        if review["verifier_id"] == verifier_id:
+            review.setdefault("scoped_objections", []).extend(copy.deepcopy(scoped))
+    write_yaml(round_path, round_report)
+
+
+def _route_objection(
+    obj_id: str, kind: str, text: str, *, suggested_next_action: str = ""
+) -> dict:
+    return {
+        "id": obj_id,
+        "text": text,
+        "scope": "route",
+        "scope_source": "explicit",
+        "scope_inferred": False,
+        "inference_reason": "",
+        "subgoal_id": None,
+        "proof_step_id": None,
+        "kind": kind,
+        "severity": "P1",
+        "suggested_next_action": suggested_next_action,
+    }
+
+
+def _global_objection(obj_id: str, kind: str, text: str) -> dict:
+    return {**_route_objection(obj_id, kind, text), "scope": "global"}
+
+
+def _subgoal_objection(obj_id: str, kind: str, text: str, subgoal_id: str) -> dict:
+    return {
+        "id": obj_id,
+        "text": text,
+        "scope": "subgoal",
+        "scope_source": "explicit",
+        "scope_inferred": False,
+        "inference_reason": "",
+        "subgoal_id": subgoal_id,
+        "proof_step_id": None,
+        "kind": kind,
+        "severity": "P1",
+        "suggested_next_action": "",
+    }
+
+
+def test_route_objections_become_blocked_nodes(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    # a real existing subgoal id to name with the subgoal-scoped objection
+    pre = assemble_subgoal_graph(run_dir)
+    real_id = next(n["id"] for n in pre["nodes"] if n["role"] != "main_goal")
+
+    _inject_scoped_objections(
+        run_dir,
+        [
+            _route_objection(
+                "v1_route",
+                "logical_gap",
+                "The reduction skips a case where the order is a prime square.",
+                suggested_next_action="Cover the missing case explicitly.",
+            ),
+            _route_objection(
+                "v1_missing",
+                "missing_source",
+                "No cited source establishes the structure theorem invoked here.",
+            ),
+            _subgoal_objection(
+                "v1_sub",
+                "hypothesis_gap",
+                "This subgoal omits the finiteness hypothesis.",
+                real_id,
+            ),
+        ],
+    )
+
+    graph = assemble_subgoal_graph(run_dir)
+    main_node = next(n for n in graph["nodes"] if n["role"] == "main_goal")
+    obj_nodes = {n["id"]: n for n in graph["nodes"] if n["id"].startswith("subgoal_obj_")}
+    # the injected route gaps each became a first-class blocked node
+    missing = next(
+        n for n in obj_nodes.values() if "structure theorem" in n["statement"]
+    )
+    logical = next(n for n in obj_nodes.values() if "reduction skips" in n["statement"])
+    for node in (missing, logical):
+        assert node["state"] == "blocked_reviewer_objection"
+        assert node["reviewer_objections"]
+        assert not node.get("supported_by_source_steps")
+        assert not node.get("supported_by_computations")
+        assert not node.get("supported_by_scoped_checks")
+        assert node["id"] in main_node["depends_on"]
+
+    assert missing["block_reason"] == "theorem_condition_gap"
+    assert missing["role"] == "hypothesis_check"
+
+    assert "block_reason" not in logical  # logical_gap is not a typed dead route
+    assert logical["role"] == "lemma"
+
+    # the subgoal-scoped objection still attaches to its node (54B) and does NOT
+    # also create a subgoal_obj_* duplicate
+    node_by_id = {n["id"]: n for n in graph["nodes"]}
+    assert any(
+        "finiteness hypothesis" in o
+        for o in node_by_id[real_id].get("reviewer_objections", [])
+    )
+    assert not any("finiteness hypothesis" in n["statement"] for n in obj_nodes.values())
+
+    ProofGoalGraph.model_validate(graph)
+    validate_run(run_dir)
+
+
+def test_global_objection_does_not_become_a_blocked_node(tmp_path: Path) -> None:
+    # A "global" concern is about the whole claim, not a named route-death step:
+    # it stays advisory (54B / main goal) and never becomes its own subgoal_obj_*
+    # node. Only route-scoped named gaps are materialized.
+    run_dir = _resumed_run(tmp_path)
+    _inject_scoped_objections(
+        run_dir,
+        [
+            _global_objection(
+                "v1_only_global",
+                "missing_source",
+                "A global concern that is not a route-death step.",
+            )
+        ],
+    )
+    graph = assemble_subgoal_graph(run_dir)
+    obj_nodes = [n for n in graph["nodes"] if n["id"].startswith("subgoal_obj_")]
+    # the global objection's text is never materialized as its own route-death node
+    # (other route-scoped objections from the run may still legitimately appear)
+    assert not any(
+        "global concern that is not a route-death step" in n["statement"] for n in obj_nodes
+    )
+    ProofGoalGraph.model_validate(graph)
+    validate_run(run_dir)
+
+
+def test_route_objections_prevent_open_blocked_collapse_and_count(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    before_summary = assemble_subgoal_graph(run_dir)["summary"]
+    _inject_scoped_objections(
+        run_dir,
+        [
+            _route_objection(
+                "v1_route_unique",
+                "logical_gap",
+                "A brand-new route-death gap that needs its own node here.",
+            )
+        ],
+    )
+    after = assemble_subgoal_graph(run_dir)
+    after_summary = after["summary"]
+    # injecting one new route gap adds exactly one blocked node to the count
+    assert after_summary["blocked"] == before_summary["blocked"] + 1
+    # graph is not the {open:1, blocked:0} collapse
+    assert not (after_summary["open"] == 1 and after_summary["blocked"] == 0)
+
+    main = next(n for n in after["nodes"] if n["role"] == "main_goal")
+    assert any(i.startswith("subgoal_obj_") for i in main["depends_on"])
+
+
+def test_reviewer_named_node_build_is_idempotent_and_dedups_across_rounds(
+    tmp_path: Path,
+) -> None:
+    run_dir = _resumed_run(tmp_path)
+    same_text = "The same route-death gap reported in two rounds."
+    # the identical objection lands on BOTH the gate review and round_001 review
+    _inject_scoped_objections(
+        run_dir, [_route_objection("v1_dup", "logical_gap", same_text)]
+    )
+    first = assemble_subgoal_graph(run_dir)
+    obj_for_text = [
+        n
+        for n in first["nodes"]
+        if n["id"].startswith("subgoal_obj_") and same_text in n["statement"]
+    ]
+    # dedup by text -> exactly one node despite the objection appearing twice
+    # (once on the gate review and once on the mirrored round_001 review)
+    assert len(obj_for_text) == 1
+
+    build_subgoal_graph(run_dir)
+    rebuilt = build_subgoal_graph(run_dir)
+    obj_ids_1 = [n["id"] for n in first["nodes"] if n["id"].startswith("subgoal_obj_")]
+    obj_ids_2 = [n["id"] for n in rebuilt["nodes"] if n["id"].startswith("subgoal_obj_")]
+    assert obj_ids_1 == obj_ids_2  # same ids / count on rebuild
+    ProofGoalGraph.model_validate(rebuilt)
+    validate_run(run_dir)
+
+
+def test_counterexample_pressure_objection_blocks_but_never_refutes(
+    tmp_path: Path,
+) -> None:
+    run_dir = _resumed_run(tmp_path)
+    cx_text = "A small example looks like it might break the route."
+    _inject_scoped_objections(
+        run_dir,
+        [_route_objection("v1_cx", "counterexample_pressure", cx_text)],
+    )
+    graph = assemble_subgoal_graph(run_dir)
+    obj = next(
+        n
+        for n in graph["nodes"]
+        if n["id"].startswith("subgoal_obj_") and cx_text in n["statement"]
+    )
+    assert obj["state"] == "blocked_reviewer_objection"
+    # unchecked pressure is not a typed dead route -> no block_reason
+    assert "block_reason" not in obj
+    # pressure never becomes a refutation: no contradicted node, claim not refuted
+    assert obj["state"] != "contradicted"
+    assert not obj["counterexample_pressure"]
+    main = next(n for n in graph["nodes"] if n["role"] == "main_goal")
+    assert main["state"] != "contradicted"
+    ProofGoalGraph.model_validate(graph)
+    validate_run(run_dir)
+
+
+def test_reviewer_named_node_renders_translated_wording_no_raw_enum(
+    tmp_path: Path,
+) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _inject_scoped_objections(
+        run_dir,
+        [
+            _route_objection(
+                "v1_g",
+                "missing_source",
+                "No cited source backs the invoked structure result.",
+            )
+        ],
+    )
+    graph = assemble_subgoal_graph(run_dir)
+    blob = "\n".join(render_proof_search_lines(graph))
+    assert "Reviewer-named gap" in blob
+    assert "Blocked by a reviewer objection" in blob
+    assert "A cited theorem's hypotheses are not met" in blob
+    # no raw enum / field names leak to the user-facing surface
+    for raw in ("theorem_condition_gap", "block_reason", "blocked_reviewer_objection"):
+        assert raw not in blob
