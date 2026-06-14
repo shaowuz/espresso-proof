@@ -44,6 +44,7 @@ from .research_timeline import build_timeline
 from .route_table import ROUTE_TABLE_COLUMNS, build_route_step_rows
 from .subgoal_graph import (
     PROOF_SEARCH_NOTE as _PROOF_SEARCH_NOTE,
+    block_reason_words as _block_reason_words,
     graph_notes as _graph_notes,
     group_subgoals as _group_subgoals,
     state_words as _state_words,
@@ -889,12 +890,31 @@ def _proof_state_section(state: dict[str, Any], *, route_shown: bool = False) ->
             return ""
         return f"<ul class=\"sg-obj\"><li class=\"sg-obj-head\">Reviewer objections (advisory):</li>{items}</ul>"
 
-    def add_row(label: str, nodes_for_row: list[dict[str, Any]]) -> None:
+    def _block_html(node: dict[str, Any]) -> str:
+        # Goal 57B parity with the memo: a blocked/conditional node may carry a
+        # typed reason ("why blocked") and a plain suggested next step. The reason
+        # is TRANSLATED through block_reason_words (never the raw enum); both are
+        # advisory next-action rows, never a status. Escaped.
+        out: list[str] = []
+        reason = node.get("block_reason")
+        if reason:
+            out.append(
+                f"<li>Why blocked: {_h(_block_reason_words(str(reason)))}</li>"
+            )
+        action = str(node.get("suggested_next_action") or "").strip()
+        if action:
+            out.append(f"<li>Suggested next step: {_h(action)}</li>")
+        if not out:
+            return ""
+        return f"<ul class=\"sg-block\">{''.join(out)}</ul>"
+
+    def add_row(label: str, nodes_for_row: list[dict[str, Any]], *, blocked: bool = False) -> None:
         if not nodes_for_row:
             return
         items = "".join(
             f"<li>{_h(node.get('statement', ''))}"
             f"<span class=\"sg-state\">{_h(_state_words(node.get('state', '')))}</span>"
+            f"{_block_html(node) if blocked else ''}"
             f"{_objections_html(node)}</li>"
             for node in nodes_for_row
         )
@@ -902,7 +922,7 @@ def _proof_state_section(state: dict[str, Any], *, route_shown: bool = False) ->
 
     add_row("Open subgoals", grouped["open"])
     add_row("Only sketched", grouped["sketched"])
-    add_row("Blocked subgoals", grouped["blocked"])
+    add_row("Blocked subgoals", grouped["blocked"], blocked=True)
     add_row("Supported by reference (not a proof of the claim)", grouped["reference"])
     add_row("Checked only in a finite/computational scope", grouped["scoped"])
 

@@ -182,6 +182,12 @@ def test_builder_writes_empty_ledger_without_requests(tmp_path: Path) -> None:
 
     ledger = build_theorem_condition_ledger(run_dir)
     assert ledger["entries"] == []
+    # The orchestrator always rebuilds the subgoal graph right after the ledger, so
+    # the two stay consistent (Goal 57A cap-aware id check). Mirror that here: with
+    # an empty ledger the rebuilt graph carries no subgoal_tcl_* nodes.
+    from espresso_proof.subgoal_graph import build_subgoal_graph
+
+    build_subgoal_graph(run_dir)
     validate_run(run_dir)
 
 

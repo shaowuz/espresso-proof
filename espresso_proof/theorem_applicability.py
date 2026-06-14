@@ -74,13 +74,22 @@ def _ledger_usages(run_dir: Path, optional: dict) -> list[dict]:
     """Build DEFAULT-DENY theorem-applicability usages from the optional theorem
     condition ledger (reviewer ``source_requests``).
 
-    SAFETY (Goal 57A): a ledger-derived usage NEVER earns ``source_backed`` and is
-    NEVER ``applicable`` unless a condition is explicitly ``matched`` AND the
-    locator is exact. The slice-1 default (``match_status == "unknown"``) maps to a
-    ``not_checked`` condition, which is a blocking status — so an unresolved ledger
-    can never read ``all_applicable``. An agent-asserted ``matched`` without an
-    exact locator still maps to ``blocked`` (the locator gate fails). This audit
-    does NO matching of its own; it only surfaces the ledger's recorded state.
+    SAFETY (Goal 57A): a ledger-derived usage NEVER earns ``source_backed`` and, in
+    THIS slice, is UNCONDITIONALLY non-applicable (default-deny). The reason is
+    structural, not data-dependent: ``_ledger_usage_for_entry`` hardcodes
+    ``conclusion_status="unclear"``, and ``_applicability_status`` returns
+    ``"unclear"`` whenever the conclusion is ``unclear`` regardless of the
+    conditions. So even an all-``matched`` ledger entry can never reach
+    ``applicable`` today, and the exact-locator gate below is therefore currently
+    UNREACHABLE (dead-but-correct: it is the second, stricter line of defence).
+
+    FUTURE SLICE: if a later slice sets ``conclusion_status`` from the ledger
+    (rather than hardcoding ``unclear``), an all-``matched`` entry could reach
+    ``applicable`` and the locator gate becomes LIVE — a matched-but-not-located
+    entry would then still be default-denied to ``blocked``. That change MUST be
+    re-reviewed, because it moves the applicability decision off the unconditional
+    default-deny path. This audit does NO matching of its own; it only surfaces the
+    ledger's recorded state.
     """
 
     name = optional.get("theorem_condition_ledger")
@@ -136,12 +145,17 @@ def _ledger_usage_for_entry(entry: dict) -> dict:
             }
         )
 
-    # Reuse the existing applicability mapping. With source_status="unverified"
-    # and conclusion_status="unclear", the only way to reach "applicable" is every
-    # condition satisfied (all matched) AND the locator gate below being exact.
+    # Reuse the existing applicability mapping. Because conclusion_status is
+    # hardcoded "unclear", _applicability_status returns "unclear" for EVERY ledger
+    # entry in this slice — so a ledger usage is UNCONDITIONALLY non-applicable
+    # (default-deny), even when all conditions are matched. The locator gate just
+    # below is consequently UNREACHABLE today; it stays as a stricter second
+    # defence that only becomes live if a future slice sets conclusion_status from
+    # the ledger (which must then be re-reviewed — see _ledger_usages docstring).
     applicability_status = _applicability_status(conditions, "unclear", "unverified")
     if applicability_status == "applicable" and not locator_is_exact:
         # needs-locator: a matched-but-not-located entry is still default-denied.
+        # (Unreachable while conclusion_status is hardcoded "unclear", above.)
         applicability_status = "blocked"
     return {
         "proof_step_id": f"ledger:{entry_id}",

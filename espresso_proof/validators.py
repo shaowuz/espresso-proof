@@ -61,6 +61,7 @@ from .models import (
     StrategySynthesis,
     TestReport,
     TheoremApplicabilityReport,
+    TheoremConditionLedger,
     TheoremExtractionReport,
 )
 from .strategy_rules import validate_strategy_rules
@@ -130,6 +131,7 @@ def validate_run(run_dir: Path) -> None:
     prover_loop = _load_optional_prover_loop(run_dir, manifest)
     prover_round_index = _load_optional_prover_round_index(run_dir, manifest)
     proof_goal_graph = _load_optional_proof_goal_graph(run_dir, manifest)
+    theorem_condition_ledger = _load_optional_theorem_condition_ledger(run_dir, manifest)
     agent_run_status = _load_optional_agent_run_status(run_dir, manifest)
     human_feedback, feedback_summary = _load_optional_human_feedback(run_dir, manifest)
 
@@ -174,6 +176,7 @@ def validate_run(run_dir: Path) -> None:
         computation_verification,
         idea_grade,
         strategy_brief,
+        theorem_condition_ledger,
     )
     _validate_example_evidence(computations, counterexamples, idea_grade)
     _validate_source_backing(source_grounding)
@@ -900,6 +903,21 @@ def _load_optional_theorem_applicability(
     )
 
 
+def _load_optional_theorem_condition_ledger(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> TheoremConditionLedger | None:
+    optional = manifest.optional_artifacts
+    if "theorem_condition_ledger" not in optional:
+        return None
+    # The ledger model (StrictBaseModel) carries no source/evidence/proof/grade
+    # status field; validating here fails closed if one were ever smuggled in.
+    return validate_yaml_model(
+        run_dir / optional["theorem_condition_ledger"],
+        TheoremConditionLedger,
+    )
+
+
 def _load_optional_llm_agent_run(
     run_dir: Path,
     manifest: RunManifest,
@@ -961,6 +979,7 @@ def _validate_subgoal_graph(
     computation_verification: ComputationVerificationReport | None,
     idea_grade: IdeaGrade,
     strategy_brief: StrategyBrief,
+    theorem_condition_ledger: TheoremConditionLedger | None = None,
 ) -> None:
     """Subgoal-graph proof-search state (advisory). Fails closed.
 
@@ -1061,6 +1080,30 @@ def _validate_subgoal_graph(
                 "(idea_grade.status=refuted); a reviewer objection or dropped-hypothesis "
                 "counterexample cannot close a subgoal as refuted"
             )
+
+    # Goal 57A cap-aware ledger/graph id consistency. The theorem-condition ledger
+    # is the SINGLE WRITER of ``subgoal_tcl_*`` repair nodes (their ids come from a
+    # ledger entry's ``repair_subgoal_id``). When BOTH artifacts exist, every such
+    # node in the graph MUST correspond to a real ledger entry — this catches a
+    # hallucinated / stale ledger repair node smuggled into the graph.
+    #
+    # CAP-SAFE (does NOT break under _MAX_LEDGER_SUBGOALS): the builder caps how
+    # many ledger entries become graph nodes, so the graph only ever holds a SUBSET
+    # of the ledger's repair ids — never an extra one. We therefore check
+    # "every graph tcl node ⊆ ledger ids", NOT "every ledger entry has a node"
+    # (the latter would falsely fail a capped graph). Goal 54B's advisory
+    # ``target_subgoal_id`` is a different, unverified field and is untouched here.
+    if theorem_condition_ledger is not None:
+        ledger_repair_ids = {
+            entry.repair_subgoal_id for entry in theorem_condition_ledger.entries
+        }
+        for node in proof_goal_graph.nodes:
+            if node.id.startswith("subgoal_tcl_") and node.id not in ledger_repair_ids:
+                raise KernelValidationError(
+                    f"{node.id}: a subgoal_tcl_* repair node has no matching "
+                    "theorem_condition_ledger entry (hallucinated or stale ledger "
+                    "repair node)"
+                )
 
 
 def _validate_manifest_paths(run_dir: Path, manifest: RunManifest) -> None:

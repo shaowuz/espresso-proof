@@ -27,6 +27,7 @@ from typing import Any
 from .external_tool_runner import run_completed_cleanly
 from .io import read_yaml, write_yaml
 from .models import ProofGoalGraph
+from .research_bank import load_counterexamples_artifact
 
 GRAPH_FILENAME = "proof_goal_graph.yaml"
 
@@ -249,6 +250,44 @@ def _scoped_objection_reviews(run_dir: Path, llm_agent_run: dict | None) -> list
     return reviews
 
 
+def _step_only_counterexample_pressure(run_dir: Path, artifacts: dict) -> list[str]:
+    """Goal 57C residual: advisory pressure text for each TRUSTED step-only CHECKED
+    counterexample in the counterexamples artifact (e.g. the 57C polynomial
+    witness).
+
+    A test qualifies only when it refutes a proof STEP and explicitly NOT the claim
+    (``refutes_step_only is True`` and ``refutes_claim is False``) and was actually
+    CHECKED (``result == failed``). Every line is scrubbed and clearly scoped:
+    "refutes a proof step, not the claim". This NEVER refutes the claim and NEVER
+    sets any node to ``contradicted`` — it only returns advisory text. Fail-safe:
+    a missing / malformed artifact yields no pressure (returns ``[]``).
+    """
+
+    rel = artifacts.get("counterexamples")
+    if not rel or not (run_dir / rel).exists():
+        return []
+    try:
+        report = load_counterexamples_artifact(run_dir / rel)
+    except Exception:  # noqa: BLE001 - advisory pressure must never break the build
+        return []
+    lines: list[str] = []
+    for test in report.tests:
+        # Step-only AND not-claim AND checked-as-failed. The model already forbids
+        # refutes_step_only with refutes_claim, and forbids refutes_claim without a
+        # checked failed result; this is the conservative read of those guards.
+        if not test.refutes_step_only or test.refutes_claim:
+            continue
+        if test.result.value != "failed":
+            continue
+        detail = _scrub(str(test.explanation or test.id))
+        lines.append(
+            f"Step-only counterexample (refutes a proof step, not the claim): {detail}"
+        )
+        if len(lines) >= 5:
+            break
+    return lines
+
+
 def assemble_subgoal_graph(run_dir: Path) -> dict:
     """Read a run's validated artifacts and return a graph dict (no I/O).
 
@@ -316,6 +355,25 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
         ],
         "remaining_risk": "",
     }
+
+    # --- Goal 57C residual: surface step-only checked counterexamples ---------
+    # In ADDITION to idea_grade.counterexample_candidates, read the counterexamples
+    # artifact (e.g. the 57C polynomial witness) and surface each TRUSTED step-only
+    # CHECKED counterexample as advisory pressure text on the main node, clearly
+    # labelled as refuting ONLY a proof step, never the claim.
+    #
+    # HARD SAFETY: a step-only counterexample is NEVER a refutation of the claim.
+    # It can only ever ADD advisory pressure text — it must NEVER set the main (or
+    # any) node to ``contradicted`` and NEVER cause ``claim_refuted``. The
+    # ``contradicted`` state stays gated on ``idea_grade.status == refuted`` ONLY
+    # (see ``claim_refuted`` above and the validator), which step-only witnesses
+    # cannot set: the CounterexampleTest model forbids refutes_step_only together
+    # with refutes_claim, and ``refutes_claim`` requires a checked all-hypotheses
+    # failure. So this block only reads ``refutes_step_only`` cases.
+    for text in _step_only_counterexample_pressure(run_dir, artifacts):
+        if text not in main["counterexample_pressure"]:
+            main["counterexample_pressure"].append(text)
+
     nodes.append(main)
 
     if claim_refuted:
@@ -466,6 +524,12 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
     # it only surfaces an actionable blocker.
     if external_tool_runs is not None:
         tool_budget = _MAX_EXTERNAL_TOOL_SUBGOALS
+        # Two failed runs whose ids sanitize to the same string would otherwise
+        # produce duplicate node ids -> ProofGoalGraph.validate_graph_structure
+        # rejects the whole graph (the advisory view is silently dropped). Track
+        # the keys we have already emitted and append a 1-based suffix on a
+        # collision so every blocked tool node id stays unique.
+        seen_tool_keys: dict[str, int] = {}
         for run in external_tool_runs.get("runs") or []:
             if tool_budget <= 0:
                 notes.append("Some blocked external-tool runs are not shown (display is capped).")
@@ -474,6 +538,10 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
                 continue
             tool = str(run.get("tool_name") or "external tool")
             run_key = re.sub(r"[^A-Za-z0-9_]+", "_", str(run.get("id") or tool))
+            count = seen_tool_keys.get(run_key, 0) + 1
+            seen_tool_keys[run_key] = count
+            if count > 1:
+                run_key = f"{run_key}_{count}"
             add_child(
                 {
                     "id": f"subgoal_tool_{run_key}",
@@ -881,12 +949,25 @@ def render_proof_search_lines(graph: dict | None, *, statement_limit: int = 200)
             out.append(f"{indent}· suggested next step: {action}")
         return out
 
+    # Goal 57C residual: a node may carry advisory counterexample pressure (e.g. a
+    # step-only checked witness). Echo it scoped, never as a refutation — pressure
+    # text is advisory free text and never a status. Each line already states its
+    # own scope (e.g. "refutes a proof step, not the claim").
+    def pressure_lines(node: dict, indent: str) -> list[str]:
+        out: list[str] = []
+        for pressure in (node.get("counterexample_pressure") or [])[:5]:
+            text = short(pressure)
+            if text:
+                out.append(f"{indent}· counterexample pressure (advisory, not a refutation): {text}")
+        return out
+
     lines = ["Proof-search state (a map of the search, not a proof):"]
     main = groups["main"]
     if main is not None:
         lines.append(
             f"  Main goal [{state_words(main.get('state', ''))}]: {short(main.get('statement'))}"
         )
+        lines.extend(pressure_lines(main, "      "))
         lines.extend(objection_lines(main, "      "))
 
     for label, key in (

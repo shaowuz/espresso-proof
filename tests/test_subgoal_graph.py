@@ -453,6 +453,89 @@ def test_no_route_selected_builds_single_open_main_goal(tmp_path: Path) -> None:
     assert "route" in main["remaining_risk"].lower()
 
 
+def _write_ledger(run_dir: Path, n_entries: int) -> None:
+    """Write a theorem_condition_ledger with ``n_entries`` repair entries
+    (subgoal_tcl_1 .. subgoal_tcl_N) and register it as an optional artifact."""
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])
+    ledger = {
+        "schema_version": 1,
+        "claim_id": claim["id"],
+        "run_id": manifest["run_id"],
+        "generated_at": "2026-06-14T00:00:00+00:00",
+        "entries": [
+            {
+                "id": f"tcl_{i}",
+                "requested_theorem": f"Cited theorem {i}",
+                "locator_status": "needs_exact_locator",
+                "locator": None,
+                "conditions": [
+                    {"text": "G is finite", "claim_value": "", "match_status": "unknown"}
+                ],
+                "repair_subgoal_id": f"subgoal_tcl_{i}",
+                "source_request_origin": "reviewer",
+            }
+            for i in range(1, n_entries + 1)
+        ],
+        "notes": [],
+    }
+    write_yaml(run_dir / "theorem_condition_ledger.yaml", ledger)
+    manifest.setdefault("optional_artifacts", {})["theorem_condition_ledger"] = (
+        "theorem_condition_ledger.yaml"
+    )
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+
+
+def test_normal_ledger_built_graph_passes_validation(tmp_path: Path) -> None:
+    # Goal 57A residual (item 5): a graph built from a real ledger (every tcl node
+    # backed by a ledger entry) passes validate_run.
+    run_dir = _resumed_run(tmp_path)
+    _write_ledger(run_dir, 2)
+    build_subgoal_graph(run_dir)
+    graph = _graph(run_dir)
+    tcl_nodes = [n for n in graph["nodes"] if n["id"].startswith("subgoal_tcl_")]
+    assert tcl_nodes, "ledger entries should create subgoal_tcl_* nodes"
+    validate_run(run_dir)
+
+
+def test_hallucinated_tcl_node_without_ledger_entry_fails(tmp_path: Path) -> None:
+    # Goal 57A residual (item 5): a subgoal_tcl_X node with NO matching ledger
+    # entry is fail-closed rejected (stale/hallucinated repair node).
+    run_dir = _resumed_run(tmp_path)
+    _write_ledger(run_dir, 1)
+    build_subgoal_graph(run_dir)
+    graph = _graph(run_dir)
+    main = next(n for n in graph["nodes"] if n["role"] == "main_goal")
+    graph["nodes"].append(
+        {
+            "id": "subgoal_tcl_999",  # no ledger entry has this repair_subgoal_id
+            "statement": "Check a cited theorem nobody requested.",
+            "role": "hypothesis_check",
+            "state": "open",
+            "closure_contract": "List the theorem's hypotheses and match each.",
+            "depends_on": [],
+        }
+    )
+    main["depends_on"].append("subgoal_tcl_999")
+    _write_graph(run_dir, graph)
+    with pytest.raises(KernelValidationError):
+        validate_run(run_dir)
+
+
+def test_capped_ledger_graph_still_passes(tmp_path: Path) -> None:
+    # Goal 57A residual (item 5): a >5-entry ledger produces a CAPPED graph (fewer
+    # tcl nodes than ledger entries). The id-consistency check must not falsely
+    # fail — the graph holds a strict subset of the ledger's repair ids.
+    run_dir = _resumed_run(tmp_path)
+    _write_ledger(run_dir, 6)  # > _MAX_LEDGER_SUBGOALS (4)
+    build_subgoal_graph(run_dir)
+    graph = _graph(run_dir)
+    tcl_nodes = [n for n in graph["nodes"] if n["id"].startswith("subgoal_tcl_")]
+    # the cap means FEWER graph nodes than ledger entries, never extra
+    assert 0 < len(tcl_nodes) < 6
+    validate_run(run_dir)
+
+
 def test_source_backed_step_attaches_only_to_matching_subgoal(tmp_path: Path) -> None:
     run_dir = _resumed_run(tmp_path)
     sg = read_yaml(run_dir / "source_grounding.yaml")
@@ -533,7 +616,33 @@ def test_dashboard_renders_proof_state_section(tmp_path: Path) -> None:
         "scoped_checked",
         "source_supported",
         "main_goal",
+        # Goal 57 residual: new state/reason enum strings must also never leak.
+        "blocked_external_tool",
+        "conditional",
+        "false_key_lemma",
+        "theorem_condition_gap",
+        "hard_research_blocker",
+        "external_tool_blocked",
     ):
+        assert raw not in html
+
+
+def test_dashboard_blocked_row_shows_translated_reason_and_next_step(tmp_path: Path) -> None:
+    # Goal 57 residual (item 3): the dashboard's blocked rows reach memo parity —
+    # they render "why blocked" (translated, never the raw enum) and the suggested
+    # next step. Inject a typed external-tool blocker, rebuild, and render.
+    from espresso_proof.run_dashboard import render_run_dashboard
+
+    run_dir = _resumed_run(tmp_path)
+    _add_external_tool_run(run_dir, "singular", exit_code=1)
+    build_subgoal_graph(run_dir)
+    html = render_run_dashboard(run_dir)
+    # translated wording + a concrete next step are shown
+    assert "An external tool is unavailable" in html
+    assert "Why blocked" in html
+    assert "Suggested next step" in html
+    # the raw enum value / field name never leaks to the user-facing surface
+    for raw in ("external_tool_blocked", "blocked_external_tool", "block_reason"):
         assert raw not in html
 
 
@@ -715,6 +824,69 @@ def test_dropped_hypothesis_counterexample_does_not_close_the_claim(tmp_path: Pa
     _write_graph(run_dir, graph)
     with pytest.raises(KernelValidationError):
         validate_run(run_dir)
+
+
+def _add_step_only_counterexample(run_dir: Path, *, explanation: str) -> None:
+    """Append a TRUSTED step-only checked counterexample to the counterexamples
+    artifact (mirrors the 57C polynomial witness scope: refutes a proof step, not
+    the claim)."""
+    path = run_dir / "counterexamples.yaml"
+    bank = read_yaml(path)
+    bank.setdefault("tests", []).append(
+        {
+            "id": "polywitness_step_only",
+            "operator_id": "op_poly",
+            "example_id": "ex_poly",
+            "satisfies_all_claim_hypotheses": False,
+            "target": "proof_step",
+            "result": "failed",
+            "refutes_claim": False,
+            "refutes_step_only": True,
+            "exposes_missing_hypothesis": False,
+            "explanation": explanation,
+        }
+    )
+    write_yaml(path, bank)
+
+
+def test_step_only_counterexample_is_pressure_not_a_refutation(tmp_path: Path) -> None:
+    # Goal 57C residual (item 4): a TRUSTED step-only checked counterexample
+    # surfaces as advisory pressure on the main node, but it can NEVER refute the
+    # claim and NEVER set any node to "contradicted".
+    run_dir = _resumed_run(tmp_path)
+    _add_step_only_counterexample(
+        run_dir, explanation="(x+y)^3 != x^3 + y^3 at a rational point; a proof step fails."
+    )
+    graph = assemble_subgoal_graph(run_dir)
+    main = next(n for n in graph["nodes"] if n["role"] == "main_goal")
+
+    # the witness appears as advisory pressure text, clearly scoped to a step
+    assert any(
+        "refutes a proof step, not the claim" in p for p in main["counterexample_pressure"]
+    )
+    # HARD SAFETY: no node becomes contradicted, and the claim is not refuted
+    assert all(n["state"] != "contradicted" for n in graph["nodes"])
+    idea = read_yaml(run_dir / "idea_grade.yaml")
+    assert idea["status"] != "refuted"
+    # the typed graph still validates as a model
+    ProofGoalGraph.model_validate(graph)
+
+
+def test_step_only_counterexample_render_is_scoped(tmp_path: Path) -> None:
+    # Goal 57C residual (item 4): the render shows the step-only witness scoped to
+    # a proof step, never as a claim refutation.
+    run_dir = _resumed_run(tmp_path)
+    _add_step_only_counterexample(
+        run_dir, explanation="A proof step fails at a rational point."
+    )
+    build_subgoal_graph(run_dir)
+    graph = _graph(run_dir)
+    text = "\n".join(render_proof_search_lines(graph))
+    assert "refutes a proof step, not the claim" in text
+    # advisory framing, never a refutation of the claim
+    assert "not a refutation" in text.lower()
+    # the run still validates after persisting the step-only witness
+    validate_run(run_dir)
 
 
 def test_graph_does_not_upgrade_grade_or_status(tmp_path: Path) -> None:
