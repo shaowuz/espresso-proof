@@ -1,14 +1,28 @@
-name: CI
+name: CI (light)
 
+# Free-minute budget: this auto lane runs ONLY light checks, and ONLY for PRs
+# targeting main and pushes to main. Normal branch pushes (and PRs to other
+# branches) trigger nothing. The full test/build/eval/UI suite is manual —
+# see .github/workflows/full-ci.yml (workflow_dispatch only).
 on:
   pull_request:
+    branches: [main]
   push:
-    branches:
-      - main
+    branches: [main]
+
+# Cancel superseded runs on the same ref/PR so we never pay for stale work.
+concurrency:
+  group: ci-light-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  release-gate:
+  quick-checks:
+    name: Quick checks (schema drift + schema-only eval)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -17,45 +31,35 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install package
         run: |
           python -m pip install -U pip
           python -m pip install -e ".[dev]"
 
+      # Cheap, high-value gates: catch a model/schema mismatch and an invalid
+      # schema set. The full pytest/eval/benchmark/scorecard suite is manual.
       - name: Export schemas
         run: python scripts/export_schemas.py
 
       - name: Check generated schemas are committed
         run: git diff --exit-code
 
-      - name: Run pytest
-        run: python -m pytest -q
-
-      - name: Run mock eval fixtures
-        run: espresso eval --mode mock
-
       - name: Run schema-only eval
         run: espresso eval --schemas-only
 
-      - name: Check VS Code UI bridge
-        run: python scripts/check_vscode_ui.py
+  merge-policy:
+    name: Merge policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Only meaningful for pull requests (uses the PR head ref).
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+        run: |
+          exit 1
 
-      # Goal 40A autoprover baseline: deterministic conservative-behaviour
-      # benchmark + safety calibration over the mock fixtures. Both exit
-      # non-zero on any planted overconfidence regression.
-      - name: Run conservative-behaviour benchmark
-        run: espresso benchmark --out-root .benchmark_runs --json-out .benchmark_runs/benchmark.json
-
-      - name: Run safety calibration baseline
-        run: espresso calibration --out-root .benchmark_runs --json-out .benchmark_runs/calibration.json
-
-      # Goal 40B: full Autoprover Behavior Scorecard (safety + capability;
-      # seeded-gold-flaw reviewer recall; sanitized fixture dogfood replay).
-      - name: Run autoprover behavior scorecard
-        run: espresso scorecard --out-root .scorecard_runs --json-out .scorecard_runs/scorecard.json --markdown-out .scorecard_runs/scorecard.md
+      - name: Merge policy passed
+        run: |
+          echo "Merge policy passed for branch ${{ github.event.pull_request.head.ref }}."

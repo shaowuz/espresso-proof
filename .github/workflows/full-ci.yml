@@ -1,0 +1,106 @@
+name: Full CI (manual)
+
+# The complete, heavy suite — full pytest, mock eval, UI bridge, benchmark,
+# calibration, scorecard, and the web build/tests. It is MANUAL ONLY
+# (workflow_dispatch) to protect the free-minute budget: trigger it from the
+# Actions tab (or `gh workflow run "Full CI (manual)"`) before a release or when
+# a change needs the full gate. The auto lane (ci.yml) keeps PRs/pushes to main
+# cheap.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or SHA to run the full suite against
+        required: false
+        default: ''
+
+concurrency:
+  group: full-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python-suite:
+    name: Python suite (tests + eval + UI + benchmark + scorecard)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e ".[dev]"
+
+      - name: Export schemas
+        run: python scripts/export_schemas.py
+
+      - name: Check generated schemas are committed
+        run: git diff --exit-code
+
+      - name: Run pytest
+        run: python -m pytest -q
+
+      - name: Run mock eval fixtures
+        run: espresso eval --mode mock
+
+      - name: Run schema-only eval
+        run: espresso eval --schemas-only
+
+      - name: Check VS Code UI bridge
+        run: python scripts/check_vscode_ui.py
+
+      # Goal 40A autoprover baseline: deterministic conservative-behaviour
+      # benchmark + safety calibration over the mock fixtures. Both exit
+      # non-zero on any planted overconfidence regression.
+      - name: Run conservative-behaviour benchmark
+        run: espresso benchmark --out-root .benchmark_runs --json-out .benchmark_runs/benchmark.json
+
+      - name: Run safety calibration baseline
+        run: espresso calibration --out-root .benchmark_runs --json-out .benchmark_runs/calibration.json
+
+      # Goal 40B: full Autoprover Behavior Scorecard (safety + capability;
+      # seeded-gold-flaw reviewer recall; sanitized fixture dogfood replay).
+      - name: Run autoprover behavior scorecard
+        run: espresso scorecard --out-root .scorecard_runs --json-out .scorecard_runs/scorecard.json --markdown-out .scorecard_runs/scorecard.md
+
+  web-build:
+    name: Web build + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web deps
+        run: npm ci
+
+      - name: Run web tests
+        run: npm test
+
+      - name: Build web
+        run: npm run build
