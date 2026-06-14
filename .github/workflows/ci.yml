@@ -1,5 +1,11 @@
 name: CI (light)
 
+env:
+  # Opt into Node 24 for JS actions ahead of the 2026-06-16 forced switch
+  # (GitHub deprecates Node 20). checkout@v4 / setup-python@v5 already support
+  # Node 24; this makes the lane forward-safe and verifiable now.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 # Free-minute budget: this auto lane runs ONLY light checks, and ONLY for PRs
 # targeting main and pushes to main. Normal branch pushes (and PRs to other
 # branches) trigger nothing. The full test/build/eval/UI suite is manual —

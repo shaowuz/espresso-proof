@@ -1,5 +1,11 @@
 name: Full CI (manual)
 
+env:
+  # Opt into Node 24 for JS actions ahead of the 2026-06-16 forced switch
+  # (GitHub deprecates Node 20). checkout@v4 / setup-python@v5 / setup-node@v4
+  # already support Node 24; this makes the suite forward-safe and verifiable now.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 # The complete, heavy suite — full pytest, mock eval, UI bridge, benchmark,
 # calibration, scorecard, and the web build/tests. It is MANUAL ONLY
 # (workflow_dispatch) to protect the free-minute budget: trigger it from the
