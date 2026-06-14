@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -13,6 +14,31 @@ from .verification_request_probes import (
 from .io import read_text, write_text, write_yaml
 from .memory import write_run_memory
 from .validators import validate_run
+
+_ORDER_6_GROUPS_ABELIAN_EXACT = re.compile(
+    r"(?:every|all|each)\s+(?:finite\s+)?groups?\s+of\s+order\s+6\s+"
+    r"(?:is|are)\s+abelian\s*\.?",
+    re.IGNORECASE,
+)
+
+_ORDER_P_CUBED_ABELIAN_EXACT = re.compile(
+    r"(?:every|all|each)\s+(?:finite\s+)?groups?\s+of\s+order\s+p(?:\^3|³)\s*"
+    r",?\s*(?:where|for|with)\s+p\s+(?:is\s+)?(?:a\s+)?prime\s*,?\s*"
+    r"(?:is|are)\s+abelian\s*\.?",
+    re.IGNORECASE,
+)
+
+_FINITE_P_GROUP_CENTER_EXACT = re.compile(
+    r"(?:every|all|each)\s+nontrivial\s+finite\s+p-groups?\s+"
+    r"(?:has|have)\s+nontrivial\s+cent(?:er|re)\s*\.?",
+    re.IGNORECASE,
+)
+
+_CENTER_QUOTIENT_CYCLIC_EXACT = re.compile(
+    r"if\s+g\s*/\s*z\s*\(\s*g\s*\)\s+is\s+cyclic\s*,?\s*"
+    r"then\s+g\s+is\s+abelian\s*\.?",
+    re.IGNORECASE,
+)
 
 
 def run_mock_critique(project_id: str, input_path: Path, output_root: Path) -> Path:
@@ -189,7 +215,22 @@ def _detect_scenario(input_path: Path, text: str) -> str:
     # are DIFFERENT (false) claims and stay on the vague path.
     if _ORDER_P_SQUARED_ABELIAN_EXACT.fullmatch(" ".join(lowered.split()).strip()):
         return "true_theorem_classical_source"
+    if _finite_group_scenario_key(lowered):
+        return "finite_group_claim"
     return "vague_claim_unclear"
+
+
+def _finite_group_scenario_key(text: str) -> str | None:
+    normalized = " ".join(str(text).lower().split()).strip()
+    if _ORDER_6_GROUPS_ABELIAN_EXACT.fullmatch(normalized):
+        return "order6_false"
+    if _ORDER_P_CUBED_ABELIAN_EXACT.fullmatch(normalized):
+        return "p3_groups_false"
+    if _FINITE_P_GROUP_CENTER_EXACT.fullmatch(normalized):
+        return "center_pgroup_true"
+    if _CENTER_QUOTIENT_CYCLIC_EXACT.fullmatch(normalized):
+        return "cyclic_quotient_center_step"
+    return None
 
 
 def _base_claim(text: str, ambiguous_terms: list[str] | None = None) -> dict:
@@ -230,6 +271,8 @@ def _artifacts_for_scenario(scenario: str, text: str, run_id: str, project_id: s
         return _source_misapplication(text, run_id)
     if scenario == "true_theorem_classical_source":
         return _true_theorem_classical_source(text, run_id)
+    if scenario == "finite_group_claim":
+        return _finite_group_claim(text, run_id)
     if scenario in {
         "human_marks_example_interesting",
         "human_marks_example_misleading_not_evidence",
@@ -560,6 +603,179 @@ def _strategy_synthesis(
         "synthesis_note": (
             "Strategy Synthesizer organizes next routes; it does not generate a proof or change the grade."
         ),
+    }
+
+
+def _finite_group_strategy_routes(case: str, *, base_score: int, source_status: str = "candidate") -> list[dict]:
+    def score(delta: int) -> int:
+        return max(0, min(100, base_score + delta))
+
+    if case == "p2_groups_true":
+        return [
+            {
+                "id": "strategy_center_quotient_p2",
+                "title": "Use nontrivial center, then the cyclic quotient criterion",
+                "score": score(10),
+                "status": "promising",
+                "why_this_route": (
+                    "A group of order p^2 has nontrivial center; if the center has "
+                    "order p^2 we are done, and if it has order p then G/Z(G) is "
+                    "cyclic, forcing G abelian."
+                ),
+                "survived_tests": [],
+                "failed_tests": [],
+                "main_risk": "The center lemma and quotient-cyclic step still need source or line proof.",
+                "source_status": source_status,
+                "estimated_effort": "normal_pass",
+                "next_loop_plan": "Split into center-size and G/Z(G)-cyclic subgoals.",
+            }
+        ]
+    if case == "order6_false":
+        return [
+            {
+                "id": "strategy_admit_checked_s3_counterexample",
+                "title": "Check the S3/D3 counterexample against every hypothesis",
+                "score": score(14),
+                "status": "likely_false",
+                "why_this_route": (
+                    "A deterministic Cayley-table check can test the group of order 6 "
+                    "and decide whether it is an admissible all-hypotheses counterexample."
+                ),
+                "survived_tests": [],
+                "failed_tests": ["ce_probe_dihedral_group_D3"],
+                "main_risk": "The run must not mark refuted unless the locked hypotheses match the table exactly.",
+                "source_status": "not_found",
+                "estimated_effort": "quick_test",
+                "next_loop_plan": "Verify the D3/S3 table and bind the result to the locked order-6 claim.",
+            }
+        ]
+    if case == "p3_groups_false":
+        return [
+            {
+                "id": "strategy_test_nonabelian_order_8",
+                "title": "Test nonabelian order-8 groups before any p^2 analogy",
+                "score": score(12),
+                "status": "likely_false",
+                "why_this_route": (
+                    "The p^2 theorem does not extend to p^3; D4 or Q8 style groups "
+                    "are the cheapest pressure tests."
+                ),
+                "survived_tests": [],
+                "failed_tests": [],
+                "main_risk": "The concrete order-8 witness still needs an admissibility check.",
+                "source_status": "not_found",
+                "estimated_effort": "quick_test",
+                "next_loop_plan": "Run a finite-group table check for a nonabelian group of order 8.",
+            }
+        ]
+    if case == "center_pgroup_true":
+        return [
+            {
+                "id": "strategy_class_equation_center",
+                "title": "Use the class equation to force a nontrivial center",
+                "score": score(10),
+                "status": "promising",
+                "why_this_route": (
+                    "The standard route studies conjugacy classes in a finite p-group; "
+                    "class sizes off the center are divisible by p, forcing |Z(G)| > 1."
+                ),
+                "survived_tests": [],
+                "failed_tests": [],
+                "main_risk": "The class-equation lemma still needs an exact source or line proof.",
+                "source_status": source_status,
+                "estimated_effort": "normal_pass",
+                "next_loop_plan": "Pin the class equation and create a subgoal for nontriviality of Z(G).",
+            }
+        ]
+    return [
+        {
+            "id": "strategy_center_quotient_cosets",
+            "title": "Write every element as a central factor times one coset generator",
+            "score": score(10),
+            "status": "promising",
+            "why_this_route": (
+                "If G/Z(G) is generated by gZ(G), every element is z g^n; central "
+                "factors commute, so two such expressions commute."
+            ),
+            "survived_tests": [],
+            "failed_tests": [],
+            "main_risk": "The proof must explicitly use Z(G), not an arbitrary subgroup.",
+            "source_status": source_status,
+            "estimated_effort": "normal_pass",
+            "next_loop_plan": "Expand the coset representative calculation and check each commutation step.",
+        }
+    ]
+
+
+def _finite_group_strategy_synthesis(
+    claim_id: str,
+    run_id: str,
+    *,
+    case: str,
+    status: str,
+    base_score: int,
+    source_status: str = "candidate",
+) -> dict:
+    routes = _finite_group_strategy_routes(
+        case, base_score=base_score, source_status=source_status
+    )
+    return {
+        "claim_id": claim_id,
+        "synthesized_from": [
+            run_id,
+            "literature_review.yaml",
+            "tests.yaml",
+            "counterexamples.yaml",
+            "source_grounding.yaml",
+            "review.yaml",
+            "idea_grade.yaml",
+            "loop_control.yaml",
+        ],
+        "routes": routes,
+        "discarded_routes": ["Start formalization before locking finite-group lemmas"],
+        "synthesis_note": (
+            "Finite-group strategy synthesis selected domain-specific routes; "
+            "these are proof-search plans only and do not upgrade status."
+        ),
+    }
+
+
+def _finite_group_strategy_brief(
+    claim_id: str,
+    run_id: str,
+    *,
+    case: str,
+    status: str,
+    base_score: int,
+    source_status: str = "candidate",
+) -> dict:
+    routes = _finite_group_strategy_routes(
+        case, base_score=base_score, source_status=source_status
+    )
+    return {
+        "claim_id": claim_id,
+        "generated_after_runs": [run_id],
+        "top_strategies": routes[:3],
+        "also_considered": [
+            {
+                "title": "Generic claim-lock route",
+                "reason_not_top_three": (
+                    "The finite-group statement is already precise enough for "
+                    "domain-specific proof search."
+                ),
+            }
+        ],
+        "question_for_mathematician": (
+            "Which finite-group route should Espresso spend time on next?"
+        ),
+        "allowed_human_choices": [
+            {
+                "strategy_id": strategy["id"],
+                "effort_options": ["quick_test", "normal_pass", "deep_exploration"],
+            }
+            for strategy in routes[:3]
+        ]
+        + [{"strategy_id": "none", "effort_options": ["quick_test"]}],
     }
 
 
@@ -1532,16 +1748,18 @@ def _true_theorem_classical_source(text: str, run_id: str) -> dict[str, object]:
         "proof_language_status": "idea_sketch",
     }
     artifacts["loop_control.yaml"] = _loop_control(claim_id)
-    artifacts["strategy_synthesis.yaml"] = _strategy_synthesis(
+    artifacts["strategy_synthesis.yaml"] = _finite_group_strategy_synthesis(
         claim_id,
         run_id,
+        case="p2_groups_true",
         status="promising",
         base_score=70,
         source_status="candidate",
     )
-    artifacts["strategy_brief.yaml"] = _strategy_brief(
+    artifacts["strategy_brief.yaml"] = _finite_group_strategy_brief(
         claim_id,
         run_id,
+        case="p2_groups_true",
         status="promising",
         base_score=70,
         source_status="candidate",
@@ -1550,6 +1768,179 @@ def _true_theorem_classical_source(text: str, run_id: str) -> dict[str, object]:
         "Mock critique: the classical-source route is engaged and held at "
         "candidate pending real verification.\n"
     )
+    return artifacts
+
+
+def _finite_group_case_data(text: str) -> dict[str, object]:
+    key = _finite_group_scenario_key(text)
+    if key == "order6_false":
+        return {
+            "case": key,
+            "normalized": "Every group of order 6 is abelian.",
+            "objects": ["finite groups of order 6"],
+            "hypotheses": [
+                {"name": "G is a group of order 6", "status": "explicit", "source": "user"},
+            ],
+            "conclusion": "G is abelian.",
+            "status": "likely_false",
+            "score": 25,
+            "confidence": "medium",
+            "reasons": [
+                "A deterministic finite-group counterexample probe should test D3/S3 before any proof route."
+            ],
+            "source_gaps": [],
+            "next": "Run the checked finite-group counterexample admissibility test.",
+            "review": "A nonabelian order-6 table would refute this exact universal claim if admissible.",
+        }
+    if key == "p3_groups_false":
+        return {
+            "case": key,
+            "normalized": "For every prime p, every group of order p^3 is abelian.",
+            "objects": ["finite groups of order p^3", "prime numbers p"],
+            "hypotheses": [
+                {"name": "p is prime", "status": "explicit", "source": "user"},
+                {"name": "G is a group of order p^3", "status": "explicit", "source": "user"},
+            ],
+            "conclusion": "G is abelian.",
+            "status": "likely_false",
+            "score": 25,
+            "confidence": "medium",
+            "reasons": [
+                "The p^2 theorem does not automatically extend to p^3; nonabelian order-8 examples are expected pressure."
+            ],
+            "source_gaps": [],
+            "next": "Check a concrete nonabelian order-8 group against the locked hypotheses.",
+            "review": "The route should test D4/Q8-style examples instead of importing the p^2 proof.",
+        }
+    if key == "center_pgroup_true":
+        return {
+            "case": key,
+            "normalized": "Every nontrivial finite p-group has nontrivial center.",
+            "objects": ["nontrivial finite p-groups", "their centers"],
+            "hypotheses": [
+                {"name": "G is a finite p-group", "status": "explicit", "source": "user"},
+                {"name": "G is nontrivial", "status": "explicit", "source": "user"},
+            ],
+            "conclusion": "The center Z(G) is nontrivial.",
+            "status": "promising",
+            "score": 62,
+            "confidence": "medium",
+            "reasons": [
+                "The class-equation route is the natural finite-group proof strategy, pending source or line proof."
+            ],
+            "source_gaps": ["exact source or line proof for the class equation step"],
+            "next": "Pin the class equation and attack the Z(G) nontriviality subgoal.",
+            "review": "A class-equation proof route is plausible but not checked here.",
+        }
+    return {
+        "case": "cyclic_quotient_center_step",
+        "normalized": "If G/Z(G) is cyclic, then G is abelian.",
+        "objects": ["a group G", "the center Z(G)", "the quotient group G/Z(G)"],
+        "hypotheses": [
+            {"name": "G is a group", "status": "explicit", "source": "user"},
+            {"name": "G/Z(G) is cyclic", "status": "explicit", "source": "user"},
+        ],
+        "conclusion": "G is abelian.",
+        "status": "promising",
+        "score": 64,
+        "confidence": "medium",
+        "reasons": [
+            "The standard coset-representative route is available, pending line-by-line proof."
+        ],
+        "source_gaps": ["exact source or line proof for the cyclic center quotient lemma"],
+        "next": "Write the coset representative calculation against a named proof subgoal.",
+        "review": "The proof must use the center specifically; an arbitrary cyclic quotient is not enough.",
+    }
+
+
+def _finite_group_claim(text: str, run_id: str) -> dict[str, object]:
+    data = _finite_group_case_data(text)
+    claim = _base_claim(text, [])
+    claim["normalized_statement"] = data["normalized"]
+    claim["objects"] = data["objects"]
+    claim["hypotheses"] = data["hypotheses"]
+    claim["conclusion"] = data["conclusion"]
+    claim["ambiguous_terms"] = []
+    claim_id = claim["id"]
+    status = str(data["status"])
+    score = int(data["score"])
+    case = str(data["case"])
+    artifacts = {
+        "locked_claim.yaml": claim,
+        "hypothesis_ledger.yaml": {
+            "claim_id": claim_id,
+            "hypotheses": claim["hypotheses"],
+            "missing_or_unclear": [],
+            "notes": ["Finite-group claim matched by deterministic scaffold; no status is earned."],
+        },
+        "literature_review.yaml": {
+            "claim_id": claim_id,
+            "query_summary": f"Finite group theory route search for: {data['normalized']}",
+            "candidate_references": [],
+            "known_examples": [],
+            "known_counterexample_families": [],
+            "notes": ["No reference support is earned in the mock scaffold."],
+        },
+        "examples.yaml": {"claim_id": claim_id, "examples": []},
+        "computation_checks.yaml": {"claim_id": claim_id, "checks": []},
+        "counterexamples.yaml": {"claim_id": claim_id, "tests": []},
+        "tests.yaml": {
+            "claim_id": claim_id,
+            "target": "user_sketch",
+            "summary": "Finite-group smoke route selected; tests remain pending.",
+            "tests": [],
+        },
+        "source_grounding.yaml": {"claim_id": claim_id, "source_refs": [], "steps": []},
+        "review.yaml": _parallel_review(
+            claim_id,
+            attempt_status="unclear",
+            verdict="continue",
+            strategy_verdict="pass",
+            evidence_verdict="unclear",
+            line_verdict="unclear",
+            line_applicability="sketch_only",
+            strongest_objection=str(data["review"]),
+            source_risks=list(data["source_gaps"]),
+            downgrade_reasons=["No checked proof or source-backed step is available yet."],
+        ),
+        "idea_grade.yaml": {
+            "claim_id": claim_id,
+            "status": status,
+            "score": score,
+            "confidence": str(data["confidence"]),
+            "reasons": list(data["reasons"]),
+            "survived_tests": [],
+            "failed_tests": [],
+            "counterexample_candidates": [],
+            "missing_hypotheses": [],
+            "source_gaps": list(data["source_gaps"]),
+            "repair_options": [],
+            "next_cheapest_test": str(data["next"]),
+            "human_review_required": True,
+            "proof_language_status": "idea_sketch",
+        },
+        "loop_control.yaml": _loop_control(claim_id),
+        "strategy_synthesis.yaml": _finite_group_strategy_synthesis(
+            claim_id,
+            run_id,
+            case=case,
+            status=status,
+            base_score=score,
+            source_status="candidate",
+        ),
+        "strategy_brief.yaml": _finite_group_strategy_brief(
+            claim_id,
+            run_id,
+            case=case,
+            status=status,
+            base_score=score,
+            source_status="candidate",
+        ),
+        "final_report.md": (
+            "Mock critique: finite-group claim locked precisely; proof/search "
+            "status remains an unchecked idea sketch.\n"
+        ),
+    }
     return artifacts
 
 

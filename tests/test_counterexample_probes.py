@@ -161,8 +161,8 @@ def test_match_never_spans_statement_and_conclusion() -> None:
 def test_probe_wired_into_full_run_and_kernel_valid(tmp_path: Path) -> None:
     # End-to-end: the false-theorem dogfood case now produces a machine-checked
     # counterexample through the real runtime, the run stays kernel-valid, and
-    # — because the mock vague-claim path leaves hypotheses undetermined — the
-    # record is honestly downgraded (no refutation without admissibility).
+    # the finite-group scaffold locks the hypotheses precisely enough for the
+    # admissible table witness to refute this exact universal claim.
     from espresso_proof.io import write_text
     from espresso_proof.orchestrator import orchestrate_run
     from espresso_proof.validators import validate_run
@@ -186,10 +186,10 @@ def test_probe_wired_into_full_run_and_kernel_valid(tmp_path: Path) -> None:
     ]
     assert checked, "the order-6 run must carry a machine-checked counterexample"
     assert all(
-        t.get("refutes_claim") is False
-        and t.get("satisfies_all_claim_hypotheses") == "unclear"
+        t.get("refutes_claim") is True
+        and t.get("satisfies_all_claim_hypotheses") is True
         for t in checked
-    ), "undetermined mock hypotheses must never earn a refutation"
+    ), "the locked order-6 scaffold should let the checked witness refute the exact claim"
 
 
 def test_true_p2_run_unaffected(tmp_path: Path) -> None:
