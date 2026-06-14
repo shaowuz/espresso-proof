@@ -2640,6 +2640,82 @@ class HumanTimeAllocationContext(StrictBaseModel):
         return self
 
 
+# ---------------------------------------------------------------------------
+# Goal 57A: Theorem Condition Ledger (slice 1 — model only).
+#
+# A durable, advisory ledger of the theorems a reviewer asked for (the verbatim
+# ``source_requests``) together with the conditions/hypotheses that still have to
+# be checked against the current claim before any such theorem could be reused.
+#
+# SAFETY: this ledger is NOT proof/source/evidence. It carries NO
+# ``source_backed`` / ``checked`` / ``proof`` / ``grade`` / ``status`` field of
+# any kind. ``match_status`` is a bare bookkeeping state that starts ``unknown``
+# and must NEVER be inferred from claim text — only a real downstream hypothesis-
+# match step (a later slice) may move it, and even then it earns no trusted
+# status. ``locator_status`` starts ``needs_exact_locator``; a candidate/exact
+# locator here is a search-management hint, not source grounding. Being a
+# ``StrictBaseModel`` (``extra='forbid'``), the model rejects any smuggled
+# status-bearing field at validation time.
+# ---------------------------------------------------------------------------
+class LocatorStatus(str, Enum):
+    needs_exact_locator = "needs_exact_locator"
+    candidate = "candidate"
+    exact = "exact"
+
+
+class MatchStatus(str, Enum):
+    matched = "matched"
+    unmatched = "unmatched"
+    unknown = "unknown"
+
+
+class SourceRequestOrigin(str, Enum):
+    prover = "prover"
+    reviewer = "reviewer"
+
+
+class LedgerCondition(StrictBaseModel):
+    """One condition/hypothesis recorded verbatim, with a bare match-bookkeeping
+    state. ``match_status`` defaults to ``unknown`` and is never inferred from the
+    claim — it carries no trusted status."""
+
+    text: str
+    claim_value: str = ""
+    match_status: MatchStatus = MatchStatus.unknown
+
+
+class TheoremConditionLedgerEntry(StrictBaseModel):
+    """A reviewer's request for a theorem plus the conditions to check against the
+    claim. Carries no proof/source/evidence/grade/status field."""
+
+    id: str
+    requested_theorem: str
+    locator_status: LocatorStatus = LocatorStatus.needs_exact_locator
+    locator: str | None = None
+    conditions: list[LedgerCondition]
+    drift_kind: str = ""  # open advisory free-text tag; never a trusted status
+    repair_subgoal_id: str
+    source_request_origin: SourceRequestOrigin = SourceRequestOrigin.reviewer
+
+    @model_validator(mode="after")
+    def validate_conditions(self) -> TheoremConditionLedgerEntry:
+        if not self.conditions:
+            raise ValueError("a ledger entry requires at least one condition")
+        return self
+
+
+class TheoremConditionLedger(StrictBaseModel):
+    """Advisory ledger of requested theorems + conditions to check. NOT proof
+    evidence: it sets no source/evidence/grade/claim status."""
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    entries: list[TheoremConditionLedgerEntry] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "claim": Claim,
     "agent_contracts": AgentContracts,
@@ -2686,6 +2762,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "prover_round": ProverRoundReport,
     "prover_round_index": ProverRoundIndex,
     "proof_goal_graph": ProofGoalGraph,
+    "theorem_condition_ledger": TheoremConditionLedger,
     "human_time_allocation_context": HumanTimeAllocationContext,
     "front_half_run": FrontHalfRunReport,
     "agent_run_status": AgentRunStatusReport,
