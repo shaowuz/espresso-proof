@@ -4,11 +4,12 @@ import copy
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
 from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.models import ProofGoalGraph
+from espresso_proof.models import ProofGoalGraph, SubgoalNode
 from espresso_proof.orchestrator import orchestrate_run, resume_run
 from espresso_proof.subgoal_graph import assemble_subgoal_graph, build_subgoal_graph
 from espresso_proof.validation.errors import KernelValidationError
@@ -263,6 +264,80 @@ def test_selected_route_creates_route_specific_subgoal(tmp_path: Path) -> None:
     assert route_nodes
     assert route_nodes[0]["state"] == "sketched"
     assert graph["selected_strategy"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Goal 57B: typed route-death blockers (first slice)
+# ---------------------------------------------------------------------------
+def _prover_loop_path(run_dir: Path) -> Path:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    return run_dir / manifest["optional_artifacts"]["prover_loop"]
+
+
+def _inject_blocker(run_dir: Path, blocker: str) -> None:
+    """Prepend a blocker to the latest prover round so the graph builder sees it."""
+    path = _prover_loop_path(run_dir)
+    pl = read_yaml(path)
+    attempts = pl.get("attempts") or [
+        {"round_index": 0, "blockers": [], "reviewer_objections": []}
+    ]
+    latest = max(attempts, key=lambda a: a.get("round_index", 0))
+    latest["blockers"] = [blocker, *(latest.get("blockers") or [])]
+    pl["attempts"] = attempts
+    write_yaml(path, pl)
+
+
+def test_false_key_lemma_blocker_is_typed(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _inject_blocker(run_dir, "The key lemma 'reflexive implies free' is false in general.")
+    graph = assemble_subgoal_graph(run_dir)
+    typed = [n for n in graph["nodes"] if n.get("block_reason") == "false_key_lemma"]
+    assert typed, "false key-lemma blocker should be typed as a dead route"
+    node = typed[0]
+    assert node["state"] == "blocked_reviewer_objection"
+    assert node["suggested_next_action"]
+    assert graph["summary"]["blocked"] >= 1
+    # the typed graph still validates as a model (no smuggled status)
+    ProofGoalGraph.model_validate(graph)
+
+
+def test_external_tool_blocker_is_typed_and_counted(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _inject_blocker(
+        run_dir, "This step needs an external tool (computer algebra) that is unavailable."
+    )
+    graph = assemble_subgoal_graph(run_dir)
+    tool_nodes = [n for n in graph["nodes"] if n["state"] == "blocked_external_tool"]
+    assert tool_nodes
+    assert tool_nodes[0]["block_reason"] == "external_tool_blocked"
+    assert graph["summary"]["blocked"] >= 1
+    ProofGoalGraph.model_validate(graph)
+
+
+def test_block_reason_rejected_on_non_blocked_state() -> None:
+    # a block_reason on an open (non-blocked) node smuggles dead-route typing
+    with pytest.raises(ValidationError):
+        SubgoalNode(
+            id="subgoal_x",
+            statement="An open subgoal.",
+            role="lemma",
+            state="open",
+            closure_contract="Provide a grounded step.",
+            block_reason="false_key_lemma",
+        )
+
+
+def test_non_evidence_state_cannot_reference_earned_support() -> None:
+    # a blocked/conditional node must never reference earned source/checked support
+    with pytest.raises(ValidationError):
+        SubgoalNode(
+            id="subgoal_x",
+            statement="A blocked subgoal.",
+            role="lemma",
+            state="blocked_external_tool",
+            closure_contract="Make the tool available.",
+            supported_by_source_steps=["step_1"],
+        )
 
 
 def test_reviewer_objection_is_attachment_not_refutation(tmp_path: Path) -> None:

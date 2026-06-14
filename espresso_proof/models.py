@@ -2118,6 +2118,10 @@ class SubgoalState(str, Enum):
       deterministic verifier.
     - ``blocked_missing_source``: cannot progress without a missing source.
     - ``blocked_reviewer_objection``: held open by a reviewer objection.
+    - ``blocked_external_tool``: needs an external tool/verifier that is
+      unavailable or was refused (Goal 57B). A non-evidence state.
+    - ``conditional``: progress is contingent on an unresolved gap or a research
+      blocker (Goal 57B). A non-evidence state.
     - ``contradicted``: refuted/rejected under the current hypotheses by an
       existing counterexample/refutation validator (never by prose).
     """
@@ -2128,11 +2132,39 @@ class SubgoalState(str, Enum):
     scoped_checked = "scoped_checked"
     blocked_missing_source = "blocked_missing_source"
     blocked_reviewer_objection = "blocked_reviewer_objection"
+    blocked_external_tool = "blocked_external_tool"
+    conditional = "conditional"
     contradicted = "contradicted"
 
 
 # States a subgoal may carry only when matching EARNED evidence is referenced.
 _SUBGOAL_EVIDENCE_STATES = {SubgoalState.source_supported, SubgoalState.scoped_checked}
+
+# Non-evidence "blocked/conditional" repair states. A node in one of these
+# states is advisory search-management only: it may carry a typed ``block_reason``
+# and a ``suggested_next_action``, but it can NEVER reference earned support
+# (source/computation/scoped checks) -- that would smuggle trusted status into a
+# blocked node. The run validator and the node validator both fail closed.
+_SUBGOAL_BLOCKED_STATES = {
+    SubgoalState.blocked_missing_source,
+    SubgoalState.blocked_reviewer_objection,
+    SubgoalState.blocked_external_tool,
+    SubgoalState.conditional,
+}
+
+
+class BlockReason(str, Enum):
+    """Why a subgoal is blocked/conditional (advisory typing only, Goal 57B).
+
+    Pure search-management metadata. A ``block_reason`` NEVER sets or upgrades
+    any trusted status; a node carrying it is still just blocked repair state.
+    The set is closed -- an unknown reason fails closed at parse time.
+    """
+
+    false_key_lemma = "false_key_lemma"
+    theorem_condition_gap = "theorem_condition_gap"
+    hard_research_blocker = "hard_research_blocker"
+    external_tool_blocked = "external_tool_blocked"
 
 # Tokens that must never appear in a subgoal graph (it cannot claim proof
 # completion). Mirrors the final-report proof-language guard.
@@ -2177,6 +2209,31 @@ class SubgoalNode(StrictBaseModel):
     reviewer_objections: list[str] = Field(default_factory=list)
     counterexample_pressure: list[str] = Field(default_factory=list)
     remaining_risk: str = ""
+    # Goal 57B: advisory blocked/conditional typing. Optional + default so every
+    # pre-57B graph still validates unchanged.
+    block_reason: BlockReason | None = None
+    suggested_next_action: str = ""
+
+    @model_validator(mode="after")
+    def _validate_block_typing(self) -> SubgoalNode:
+        # A typed block_reason only makes sense on a blocked/conditional node.
+        if self.block_reason is not None and self.state not in _SUBGOAL_BLOCKED_STATES:
+            raise ValueError(
+                f"block_reason is only allowed on a blocked/conditional subgoal "
+                f"state, not {self.state.value!r}"
+            )
+        # Non-evidence repair states can never reference earned support: that
+        # would let a blocked node smuggle trusted source/checked status.
+        if self.state in _SUBGOAL_BLOCKED_STATES and (
+            self.supported_by_source_steps
+            or self.supported_by_computations
+            or self.supported_by_scoped_checks
+        ):
+            raise ValueError(
+                f"{self.state.value} is a non-evidence repair state and cannot "
+                "reference earned source/computation/scoped-check support"
+            )
+        return self
 
 
 class SubgoalEdge(StrictBaseModel):

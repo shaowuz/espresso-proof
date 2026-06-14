@@ -53,6 +53,67 @@ _SCRUB_REPLACEMENTS = [
 
 _SOURCE_KEYWORDS = ("source", "locator", "theorem", "reference", "cite", "citation", "literature")
 _HYPOTHESIS_KEYWORDS = ("hypothes", "condition", "genericity", "assumption", "smooth", "scope")
+# Goal 57B: typed route-death classification. Phrases are deliberately specific
+# so a math word (e.g. "singular variety") does not match a tool blocker.
+_EXTERNAL_TOOL_KEYWORDS = (
+    "external tool",
+    "computer algebra",
+    "tool unavailable",
+    "tool is unavailable",
+    "tool was refused",
+    "tool needed",
+    "needs an external",
+    "macaulay2",
+    "sage tool",
+    "magma tool",
+    "singular package",
+    "groebner tool",
+)
+_FALSE_LEMMA_KEYWORDS = (
+    "key lemma",
+    "lemma is false",
+    "false lemma",
+    "is false",
+    "does not hold",
+    "fails in general",
+    "not true in general",
+)
+_HARD_RESEARCH_KEYWORDS = (
+    "open problem",
+    "open question",
+    "research-level",
+    "research level",
+    "no known proof",
+    "major obstruction",
+)
+# Set of subgoal-state values counted as "blocked" and grouped together. Mirrors
+# models._SUBGOAL_BLOCKED_STATES (kept as plain strings since this module works
+# on dicts before model validation).
+_BLOCKED_STATE_VALUES = (
+    "blocked_missing_source",
+    "blocked_reviewer_objection",
+    "blocked_external_tool",
+    "conditional",
+)
+# Plain-language next action per block_reason (Goal 57B; never proof language).
+_NEXT_ACTION_BY_REASON = {
+    "false_key_lemma": (
+        "Reject the key lemma; add a hypothesis that excludes the obstruction or "
+        "restate the target."
+    ),
+    "theorem_condition_gap": (
+        "List the cited theorem's hypotheses and check each against the claim "
+        "before reusing it."
+    ),
+    "hard_research_blocker": (
+        "Queue a decisive experiment or a focused literature search; do not treat "
+        "the route as alive yet."
+    ),
+    "external_tool_blocked": (
+        "Make the external tool available and re-run it, or replace it with a "
+        "local derivation."
+    ),
+}
 
 
 def _scrub(text: Any) -> str:
@@ -110,16 +171,30 @@ def _latest_attempt(prover_loop: dict | None) -> dict:
     return max(attempts, key=lambda attempt: attempt.get("round_index", 0))
 
 
-def _classify_blocker(blocker: str, has_reviewer_objection: bool) -> tuple[str, str]:
-    """Return ``(role, state)`` for a blocker-derived subgoal (conservative)."""
+def _classify_blocker(
+    blocker: str, has_reviewer_objection: bool
+) -> tuple[str, str, str | None]:
+    """Return ``(role, state, block_reason)`` for a blocker-derived subgoal.
+
+    Conservative and advisory: a route-death blocker is typed into a search
+    state plus an optional ``block_reason``. None of this earns or refutes any
+    status -- it only makes the dead route visible and actionable (Goal 57B).
+    """
 
     low = blocker.lower()
     role = "hypothesis_check" if any(k in low for k in _HYPOTHESIS_KEYWORDS) else "lemma"
+    if any(k in low for k in _EXTERNAL_TOOL_KEYWORDS):
+        return role, "blocked_external_tool", "external_tool_blocked"
+    if any(k in low for k in _FALSE_LEMMA_KEYWORDS):
+        return role, "blocked_reviewer_objection", "false_key_lemma"
+    if any(k in low for k in _HARD_RESEARCH_KEYWORDS):
+        return role, "conditional", "hard_research_blocker"
     if any(k in low for k in _SOURCE_KEYWORDS):
-        return role, "blocked_missing_source"
+        reason = "theorem_condition_gap" if any(k in low for k in _HYPOTHESIS_KEYWORDS) else None
+        return role, "blocked_missing_source", reason
     if has_reviewer_objection:
-        return role, "blocked_reviewer_objection"
-    return role, "open"
+        return role, "blocked_reviewer_objection", None
+    return role, "open", None
 
 
 def _review_objections(review: dict) -> list[str]:
@@ -272,26 +347,32 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
             if candidate_budget <= 0:
                 notes.append("Some prover blockers are not shown (subgoal display is capped).")
                 break
-            role, state = _classify_blocker(str(blocker), has_reviewer_objection)
+            role, state, block_reason = _classify_blocker(str(blocker), has_reviewer_objection)
             if state == "blocked_missing_source":
                 contract = "Find and attribute the missing source, or replace it with a local derivation."
             elif state == "blocked_reviewer_objection":
                 contract = "Resolve the reviewer objection with a grounded step or a finite/computational check."
+            elif state == "blocked_external_tool":
+                contract = "Make the external tool available and re-run it, or replace it with a local derivation."
+            elif state == "conditional":
+                contract = "Resolve the conditional gap with a decisive experiment or a grounded step before relying on this route."
             else:
                 contract = "Provide a grounded step or a finite/computational check for this subgoal."
-            add_child(
-                {
-                    "id": f"subgoal_block_{index:03d}",
-                    "statement": _scrub("Resolve: " + str(blocker)),
-                    "role": role,
-                    "state": state,
-                    "closure_contract": contract,
-                    "depends_on": [],
-                    "reviewer_objections": [],
-                    "counterexample_pressure": [],
-                    "remaining_risk": _scrub(blocker),
-                }
-            )
+            block_node = {
+                "id": f"subgoal_block_{index:03d}",
+                "statement": _scrub("Resolve: " + str(blocker)),
+                "role": role,
+                "state": state,
+                "closure_contract": contract,
+                "depends_on": [],
+                "reviewer_objections": [],
+                "counterexample_pressure": [],
+                "remaining_risk": _scrub(blocker),
+            }
+            if block_reason is not None:
+                block_node["block_reason"] = block_reason
+                block_node["suggested_next_action"] = _NEXT_ACTION_BY_REASON.get(block_reason, "")
+            add_child(block_node)
             candidate_budget -= 1
 
     # --- evidence subgoals (only where the kernel already earned support) -----
@@ -396,9 +477,7 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
             1 for node in nodes if node["state"] == "scoped_checked"
         ),
         "blocked": sum(
-            1
-            for node in nodes
-            if node["state"] in {"blocked_missing_source", "blocked_reviewer_objection"}
+            1 for node in nodes if node["state"] in _BLOCKED_STATE_VALUES
         ),
     }
 
@@ -472,7 +551,18 @@ STATE_WORDING: dict[str, str] = {
     "scoped_checked": "Checked only in a finite/computational scope",
     "blocked_missing_source": "Blocked by a missing source",
     "blocked_reviewer_objection": "Blocked by a reviewer objection",
+    "blocked_external_tool": "Blocked: needs an external tool",
+    "conditional": "Conditional on an unresolved gap",
     "contradicted": "Contradicted under the current hypotheses",
+}
+
+# Plain-language wording for each block_reason (Goal 57B). Raw enum values must
+# never reach a user-facing surface; renderers translate through this map.
+BLOCK_REASON_WORDING: dict[str, str] = {
+    "false_key_lemma": "A key step looks false",
+    "theorem_condition_gap": "A cited theorem's hypotheses are not met",
+    "hard_research_blocker": "A research-level obstruction",
+    "external_tool_blocked": "An external tool is unavailable",
 }
 
 # Order in which to look for the next subgoal to attack (most actionable first).
@@ -480,6 +570,8 @@ NEXT_SUBGOAL_PRIORITY = (
     "open",
     "blocked_missing_source",
     "blocked_reviewer_objection",
+    "blocked_external_tool",
+    "conditional",
     "sketched",
 )
 
@@ -552,7 +644,7 @@ def group_subgoals(graph: dict | None) -> dict[str, Any]:
         "main": main,
         "open": by_state("open"),
         "sketched": by_state("sketched"),
-        "blocked": by_state("blocked_missing_source", "blocked_reviewer_objection"),
+        "blocked": by_state(*_BLOCKED_STATE_VALUES),
         "reference": by_state("source_supported"),
         "scoped": by_state("scoped_checked"),
         "next": select_next_subgoal(graph),
