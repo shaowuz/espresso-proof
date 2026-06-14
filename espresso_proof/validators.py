@@ -73,6 +73,7 @@ from .validation.evidence import (
     _validate_test_report_evidence,
 )
 from .validation.manifest import ManifestPathValidationError
+from .validation.manifest import validate_relative_artifact_path
 from .validation.manifest import validate_manifest_paths
 
 
@@ -277,7 +278,15 @@ def _validate_agent_run_status(
     run_root = run_dir.resolve()
     for entry in agent_run_status.agents:
         if entry.artifact_path is not None:
-            resolved = (run_dir / entry.artifact_path).resolve()
+            try:
+                raw_path = validate_relative_artifact_path(
+                    entry.agent,
+                    entry.artifact_path,
+                    path_name="agent_run_status artifact_path",
+                )
+            except ManifestPathValidationError as exc:
+                raise KernelValidationError(str(exc)) from exc
+            resolved = (run_dir / raw_path).resolve()
             if resolved != run_root and run_root not in resolved.parents:
                 raise KernelValidationError(
                     f"agent_run_status artifact_path escapes run directory: "
@@ -697,12 +706,16 @@ def _validate_external_tool_artifacts(
 
     def _confine(paths: list[str], where: str) -> None:
         for raw in paths:
-            p = Path(str(raw))
-            if p.is_absolute() or str(raw).startswith("/") or ".." in p.parts:
-                raise KernelValidationError(
-                    f"external_tool_runs {where} path must be relative to the run "
-                    f"directory (no absolute path, no '..'): {raw!r}"
+            try:
+                validate_relative_artifact_path(
+                    where,
+                    raw,
+                    path_name="external_tool_runs path",
                 )
+            except ManifestPathValidationError as exc:
+                raise KernelValidationError(
+                    f"external_tool_runs {str(exc)}"
+                ) from exc
 
     if candidates is not None:
         if candidates.claim_id != claim.id:
@@ -1796,11 +1809,14 @@ def _validate_prover_round_index(
 
     root = run_dir.resolve()
     for entry in prover_round_index.rounds:
-        raw_path = Path(entry.artifact_path)
-        if raw_path.is_absolute() or ".." in raw_path.parts:
-            raise KernelValidationError(
-                f"{entry.loop_attempt_id}: prover round artifact path must stay inside run dir"
+        try:
+            raw_path = validate_relative_artifact_path(
+                entry.loop_attempt_id,
+                entry.artifact_path,
+                path_name="prover round artifact path",
             )
+        except ManifestPathValidationError as exc:
+            raise KernelValidationError(str(exc)) from exc
         path = (run_dir / raw_path).resolve()
         try:
             path.relative_to(root)
@@ -1856,11 +1872,14 @@ def _validate_prover_round_index(
             )
         known_artifacts = set(manifest.artifacts.values()) | set(manifest.optional_artifacts.values())
         for artifact in report.input_artifacts:
-            artifact_path = Path(artifact)
-            if artifact_path.is_absolute() or ".." in artifact_path.parts:
-                raise KernelValidationError(
-                    f"{entry.loop_attempt_id}: prover round input_artifacts must stay inside manifest"
+            try:
+                validate_relative_artifact_path(
+                    entry.loop_attempt_id,
+                    artifact,
+                    path_name="prover round input_artifacts path",
                 )
+            except ManifestPathValidationError as exc:
+                raise KernelValidationError(str(exc)) from exc
             if artifact not in known_artifacts:
                 raise KernelValidationError(
                     f"{entry.loop_attempt_id}: prover round references unknown input artifact {artifact!r}"

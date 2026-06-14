@@ -87,7 +87,7 @@ def test_absolute_path_rejected(tmp_path: Path) -> None:
 def test_parent_escape_path_rejected(tmp_path: Path) -> None:
     run, _, _ = _run(tmp_path)
     _attach_runs(run, [_base_run(output_files=["../escape.txt"])])
-    with pytest.raises(KernelValidationError, match="must be relative"):
+    with pytest.raises(KernelValidationError, match="cannot contain"):
         validate_run(run)
 
 

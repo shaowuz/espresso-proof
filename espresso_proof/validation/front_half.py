@@ -20,6 +20,7 @@ from pathlib import Path
 from ..io import read_yaml
 from ..models import FrontHalfRunReport
 from .errors import KernelValidationError
+from .manifest import ManifestPathValidationError, validate_relative_artifact_path
 
 
 def validate_front_half_run(run_dir: Path) -> None:
@@ -62,7 +63,15 @@ def validate_front_half_run(run_dir: Path) -> None:
                 f"front_half_run stage {stage.stage!r}: error stage cannot validate as ok"
             )
         for artifact_path in (*stage.input_artifacts, *stage.output_artifacts):
-            candidate = (run_dir / artifact_path).resolve()
+            try:
+                rel_path = validate_relative_artifact_path(
+                    stage.stage,
+                    artifact_path,
+                    path_name="front_half_run artifact path",
+                )
+            except ManifestPathValidationError as exc:
+                raise KernelValidationError(str(exc)) from exc
+            candidate = (run_dir / rel_path).resolve()
             if run_dir.resolve() not in candidate.parents and candidate != run_dir.resolve():
                 raise KernelValidationError(
                     f"front_half_run stage {stage.stage!r} artifact escapes run dir: {artifact_path!r}"

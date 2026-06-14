@@ -5,6 +5,7 @@ from typing import Any
 
 from .diagnostics import current_capabilities
 from .io import read_yaml
+from .validation.manifest import ManifestPathValidationError, validate_relative_artifact_path
 
 try:
     from .validators import validate_run
@@ -238,11 +239,14 @@ def artifact_preview(path: Path, limit: int = 4000) -> str | None:
 
 
 def safe_run_path(run_dir: Path, raw_path: str) -> Path:
-    path = Path(raw_path)
-    if path.is_absolute():
-        raise KernelError(f"artifact path must be relative: {raw_path}")
-    if ".." in path.parts:
-        raise KernelError(f"artifact path cannot contain '..': {raw_path}")
+    try:
+        path = validate_relative_artifact_path(
+            "artifact",
+            raw_path,
+            path_name="artifact path",
+        )
+    except ManifestPathValidationError as exc:
+        raise KernelError(str(exc)) from exc
     root = run_dir.resolve()
     candidate = run_dir / path
     try:
