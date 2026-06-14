@@ -331,6 +331,53 @@ def test_blocked_node_renders_translated_reason_without_raw_enum(tmp_path: Path)
     assert "block_reason" not in blob
 
 
+def _add_external_tool_run(run_dir: Path, tool_name: str, *, exit_code: int) -> None:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    etr = {
+        "schema_version": 1,
+        "claim_id": "claim_x",
+        "run_id": manifest["run_id"],
+        "generated_at": "2026-06-14T00:00:00+00:00",
+        "runs": [
+            {
+                "id": "tool_1",
+                "tool_name": tool_name,
+                "scope_note": "scoped tool run, not a universal proof",
+                "not_universal_proof": True,
+                "exit_code": exit_code,
+                "timed_out": False,
+            }
+        ],
+        "notes": [],
+    }
+    write_yaml(run_dir / "external_tool_runs.yaml", etr)
+    manifest.setdefault("optional_artifacts", {})["external_tool_runs"] = "external_tool_runs.yaml"
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+
+
+def test_failed_external_tool_run_becomes_blocked_node(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _add_external_tool_run(run_dir, "singular", exit_code=1)
+    graph = assemble_subgoal_graph(run_dir)
+    tool_nodes = [n for n in graph["nodes"] if n["id"].startswith("subgoal_tool_")]
+    assert tool_nodes, "a non-clean tool run should surface a durable blocked node"
+    node = tool_nodes[0]
+    assert node["state"] == "blocked_external_tool"
+    assert node["block_reason"] == "external_tool_blocked"
+    assert node["suggested_next_action"]
+    assert graph["summary"]["blocked"] >= 1
+    # no earned status smuggled in
+    assert not node.get("supported_by_source_steps")
+    ProofGoalGraph.model_validate(graph)
+
+
+def test_clean_external_tool_run_is_not_blocked(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _add_external_tool_run(run_dir, "lean", exit_code=0)  # clean exit
+    graph = assemble_subgoal_graph(run_dir)
+    assert not [n for n in graph["nodes"] if n["id"].startswith("subgoal_tool_")]
+
+
 def test_block_reason_rejected_on_non_blocked_state() -> None:
     # a block_reason on an open (non-blocked) node smuggles dead-route typing
     with pytest.raises(ValidationError):

@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .external_tool_runner import run_completed_cleanly
 from .io import read_yaml, write_yaml
 from .models import ProofGoalGraph
 
@@ -33,6 +34,8 @@ GRAPH_FILENAME = "proof_goal_graph.yaml"
 # subgoals (earned source / scoped checks) are added on top of this cap because
 # they reflect real earned support, not candidate search work.
 _MAX_CANDIDATE_SUBGOALS = 4
+# How many blocked external-tool obligations to surface (Goal 57B).
+_MAX_EXTERNAL_TOOL_SUBGOALS = 4
 
 # Free text copied from other artifacts is scrubbed so the graph can never read
 # as a proof-completion claim. Replacements are case-insensitive and applied in
@@ -261,6 +264,7 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
     proof_verification = optional_artifact("proof_verification")
     computation_verification = optional_artifact("computation_verification")
     llm_agent_run = optional_artifact("llm_agent_run")  # Goal 54B: scoped reviewer objections
+    external_tool_runs = optional_artifact("external_tool_runs")  # Goal 57B: blocked tool obligations
 
     strategies = {
         str(strategy.get("id")): strategy
@@ -436,6 +440,41 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
                     "remaining_risk": "Checked only in this finite or computational scope, not the universal claim.",
                 }
             )
+
+    # --- Goal 57B: blocked external-tool obligations -------------------------
+    # A tool run that did not complete cleanly (unavailable / refused / errored /
+    # timed out) becomes a durable blocked node so the dead route is visible on a
+    # re-inspect. A tool run is raw evidence: a non-clean run NEVER earns status,
+    # it only surfaces an actionable blocker.
+    if external_tool_runs is not None:
+        tool_budget = _MAX_EXTERNAL_TOOL_SUBGOALS
+        for run in external_tool_runs.get("runs") or []:
+            if tool_budget <= 0:
+                notes.append("Some blocked external-tool runs are not shown (display is capped).")
+                break
+            if run_completed_cleanly(bool(run.get("timed_out")), run.get("exit_code")):
+                continue
+            tool = str(run.get("tool_name") or "external tool")
+            run_key = re.sub(r"[^A-Za-z0-9_]+", "_", str(run.get("id") or tool))
+            add_child(
+                {
+                    "id": f"subgoal_tool_{run_key}",
+                    "statement": _scrub(f"Blocked external tool: {tool}"),
+                    "role": "computation_check",
+                    "state": "blocked_external_tool",
+                    "closure_contract": _NEXT_ACTION_BY_REASON["external_tool_blocked"],
+                    "depends_on": [],
+                    "reviewer_objections": [],
+                    "counterexample_pressure": [],
+                    "remaining_risk": _scrub(
+                        run.get("scope_note")
+                        or f"{tool} did not complete cleanly; no status earned."
+                    ),
+                    "block_reason": "external_tool_blocked",
+                    "suggested_next_action": _NEXT_ACTION_BY_REASON["external_tool_blocked"],
+                }
+            )
+            tool_budget -= 1
 
     # --- Goal 54B: attach subgoal-scoped reviewer objections to matching nodes ---
     # Attach-if-matches: an objection naming a node that exists gets placed on it;
