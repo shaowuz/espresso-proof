@@ -1065,3 +1065,263 @@ def test_no_double_repair_node_from_blocker_and_ledger(tmp_path: Path) -> None:
     block = [i for i in ids if i.startswith("subgoal_block_")]
     assert tcl and block
     assert set(tcl).isdisjoint(block)
+
+
+# ---------------------------------------------------------------------------
+# 56E (G56E-001): reviewer-named route/global gaps become blocked nodes
+# ---------------------------------------------------------------------------
+def _inject_scoped_objections(run_dir: Path, scoped: list[dict]) -> None:
+    """Append scoped_objections to the gate-time llm_agent_run's first verifier
+    review, mirroring them identically into the matching round_001 review so the
+    run cross-checks (initial-round body == llm_agent_run body) still pass.
+    Mirrors the ledger/source-request helper style."""
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    optional = manifest["optional_artifacts"]
+
+    agent_path = run_dir / optional["llm_agent_run"]
+    agent = read_yaml(agent_path)
+    verifier_id = agent["verifier_reviews"][0]["verifier_id"]
+    agent["verifier_reviews"][0].setdefault("scoped_objections", []).extend(
+        copy.deepcopy(scoped)
+    )
+    write_yaml(agent_path, agent)
+
+    index = read_yaml(run_dir / optional["prover_round_index"])
+    round_one = next(r for r in index["rounds"] if r["round_index"] == 1)
+    round_path = run_dir / round_one["artifact_path"]
+    round_report = read_yaml(round_path)
+    for review in round_report["verifier_reviews"]:
+        if review["verifier_id"] == verifier_id:
+            review.setdefault("scoped_objections", []).extend(copy.deepcopy(scoped))
+    write_yaml(round_path, round_report)
+
+
+def _route_objection(
+    obj_id: str, kind: str, text: str, *, suggested_next_action: str = ""
+) -> dict:
+    return {
+        "id": obj_id,
+        "text": text,
+        "scope": "route",
+        "scope_source": "explicit",
+        "scope_inferred": False,
+        "inference_reason": "",
+        "subgoal_id": None,
+        "proof_step_id": None,
+        "kind": kind,
+        "severity": "P1",
+        "suggested_next_action": suggested_next_action,
+    }
+
+
+def _global_objection(obj_id: str, kind: str, text: str) -> dict:
+    return {**_route_objection(obj_id, kind, text), "scope": "global"}
+
+
+def _subgoal_objection(obj_id: str, kind: str, text: str, subgoal_id: str) -> dict:
+    return {
+        "id": obj_id,
+        "text": text,
+        "scope": "subgoal",
+        "scope_source": "explicit",
+        "scope_inferred": False,
+        "inference_reason": "",
+        "subgoal_id": subgoal_id,
+        "proof_step_id": None,
+        "kind": kind,
+        "severity": "P1",
+        "suggested_next_action": "",
+    }
+
+
+def test_route_objections_become_blocked_nodes(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    # a real existing subgoal id to name with the subgoal-scoped objection
+    pre = assemble_subgoal_graph(run_dir)
+    real_id = next(n["id"] for n in pre["nodes"] if n["role"] != "main_goal")
+
+    _inject_scoped_objections(
+        run_dir,
+        [
+            _route_objection(
+                "v1_route",
+                "logical_gap",
+                "The reduction skips a case where the order is a prime square.",
+                suggested_next_action="Cover the missing case explicitly.",
+            ),
+            _route_objection(
+                "v1_missing",
+                "missing_source",
+                "No cited source establishes the structure theorem invoked here.",
+            ),
+            _subgoal_objection(
+                "v1_sub",
+                "hypothesis_gap",
+                "This subgoal omits the finiteness hypothesis.",
+                real_id,
+            ),
+        ],
+    )
+
+    graph = assemble_subgoal_graph(run_dir)
+    main_node = next(n for n in graph["nodes"] if n["role"] == "main_goal")
+    obj_nodes = {n["id"]: n for n in graph["nodes"] if n["id"].startswith("subgoal_obj_")}
+    # the injected route gaps each became a first-class blocked node
+    missing = next(
+        n for n in obj_nodes.values() if "structure theorem" in n["statement"]
+    )
+    logical = next(n for n in obj_nodes.values() if "reduction skips" in n["statement"])
+    for node in (missing, logical):
+        assert node["state"] == "blocked_reviewer_objection"
+        assert node["reviewer_objections"]
+        assert not node.get("supported_by_source_steps")
+        assert not node.get("supported_by_computations")
+        assert not node.get("supported_by_scoped_checks")
+        assert node["id"] in main_node["depends_on"]
+
+    assert missing["block_reason"] == "theorem_condition_gap"
+    assert missing["role"] == "hypothesis_check"
+
+    assert "block_reason" not in logical  # logical_gap is not a typed dead route
+    assert logical["role"] == "lemma"
+
+    # the subgoal-scoped objection still attaches to its node (54B) and does NOT
+    # also create a subgoal_obj_* duplicate
+    node_by_id = {n["id"]: n for n in graph["nodes"]}
+    assert any(
+        "finiteness hypothesis" in o
+        for o in node_by_id[real_id].get("reviewer_objections", [])
+    )
+    assert not any("finiteness hypothesis" in n["statement"] for n in obj_nodes.values())
+
+    ProofGoalGraph.model_validate(graph)
+    validate_run(run_dir)
+
+
+def test_global_objection_does_not_become_a_blocked_node(tmp_path: Path) -> None:
+    # A "global" concern is about the whole claim, not a named route-death step:
+    # it stays advisory (54B / main goal) and never becomes its own subgoal_obj_*
+    # node. Only route-scoped named gaps are materialized.
+    run_dir = _resumed_run(tmp_path)
+    _inject_scoped_objections(
+        run_dir,
+        [
+            _global_objection(
+                "v1_only_global",
+                "missing_source",
+                "A global concern that is not a route-death step.",
+            )
+        ],
+    )
+    graph = assemble_subgoal_graph(run_dir)
+    obj_nodes = [n for n in graph["nodes"] if n["id"].startswith("subgoal_obj_")]
+    # the global objection's text is never materialized as its own route-death node
+    # (other route-scoped objections from the run may still legitimately appear)
+    assert not any(
+        "global concern that is not a route-death step" in n["statement"] for n in obj_nodes
+    )
+    ProofGoalGraph.model_validate(graph)
+    validate_run(run_dir)
+
+
+def test_route_objections_prevent_open_blocked_collapse_and_count(tmp_path: Path) -> None:
+    run_dir = _resumed_run(tmp_path)
+    before_summary = assemble_subgoal_graph(run_dir)["summary"]
+    _inject_scoped_objections(
+        run_dir,
+        [
+            _route_objection(
+                "v1_route_unique",
+                "logical_gap",
+                "A brand-new route-death gap that needs its own node here.",
+            )
+        ],
+    )
+    after = assemble_subgoal_graph(run_dir)
+    after_summary = after["summary"]
+    # injecting one new route gap adds exactly one blocked node to the count
+    assert after_summary["blocked"] == before_summary["blocked"] + 1
+    # graph is not the {open:1, blocked:0} collapse
+    assert not (after_summary["open"] == 1 and after_summary["blocked"] == 0)
+
+    main = next(n for n in after["nodes"] if n["role"] == "main_goal")
+    assert any(i.startswith("subgoal_obj_") for i in main["depends_on"])
+
+
+def test_reviewer_named_node_build_is_idempotent_and_dedups_across_rounds(
+    tmp_path: Path,
+) -> None:
+    run_dir = _resumed_run(tmp_path)
+    same_text = "The same route-death gap reported in two rounds."
+    # the identical objection lands on BOTH the gate review and round_001 review
+    _inject_scoped_objections(
+        run_dir, [_route_objection("v1_dup", "logical_gap", same_text)]
+    )
+    first = assemble_subgoal_graph(run_dir)
+    obj_for_text = [
+        n
+        for n in first["nodes"]
+        if n["id"].startswith("subgoal_obj_") and same_text in n["statement"]
+    ]
+    # dedup by text -> exactly one node despite the objection appearing twice
+    # (once on the gate review and once on the mirrored round_001 review)
+    assert len(obj_for_text) == 1
+
+    build_subgoal_graph(run_dir)
+    rebuilt = build_subgoal_graph(run_dir)
+    obj_ids_1 = [n["id"] for n in first["nodes"] if n["id"].startswith("subgoal_obj_")]
+    obj_ids_2 = [n["id"] for n in rebuilt["nodes"] if n["id"].startswith("subgoal_obj_")]
+    assert obj_ids_1 == obj_ids_2  # same ids / count on rebuild
+    ProofGoalGraph.model_validate(rebuilt)
+    validate_run(run_dir)
+
+
+def test_counterexample_pressure_objection_blocks_but_never_refutes(
+    tmp_path: Path,
+) -> None:
+    run_dir = _resumed_run(tmp_path)
+    cx_text = "A small example looks like it might break the route."
+    _inject_scoped_objections(
+        run_dir,
+        [_route_objection("v1_cx", "counterexample_pressure", cx_text)],
+    )
+    graph = assemble_subgoal_graph(run_dir)
+    obj = next(
+        n
+        for n in graph["nodes"]
+        if n["id"].startswith("subgoal_obj_") and cx_text in n["statement"]
+    )
+    assert obj["state"] == "blocked_reviewer_objection"
+    # unchecked pressure is not a typed dead route -> no block_reason
+    assert "block_reason" not in obj
+    # pressure never becomes a refutation: no contradicted node, claim not refuted
+    assert obj["state"] != "contradicted"
+    assert not obj["counterexample_pressure"]
+    main = next(n for n in graph["nodes"] if n["role"] == "main_goal")
+    assert main["state"] != "contradicted"
+    ProofGoalGraph.model_validate(graph)
+    validate_run(run_dir)
+
+
+def test_reviewer_named_node_renders_translated_wording_no_raw_enum(
+    tmp_path: Path,
+) -> None:
+    run_dir = _resumed_run(tmp_path)
+    _inject_scoped_objections(
+        run_dir,
+        [
+            _route_objection(
+                "v1_g",
+                "missing_source",
+                "No cited source backs the invoked structure result.",
+            )
+        ],
+    )
+    graph = assemble_subgoal_graph(run_dir)
+    blob = "\n".join(render_proof_search_lines(graph))
+    assert "Reviewer-named gap" in blob
+    assert "Blocked by a reviewer objection" in blob
+    assert "A cited theorem's hypotheses are not met" in blob
+    # no raw enum / field names leak to the user-facing surface
+    for raw in ("theorem_condition_gap", "block_reason", "blocked_reviewer_objection"):
+        assert raw not in blob

@@ -38,6 +38,21 @@ _MAX_CANDIDATE_SUBGOALS = 4
 _MAX_EXTERNAL_TOOL_SUBGOALS = 4
 # How many theorem-condition ledger repair subgoals to surface (Goal 57A).
 _MAX_LEDGER_SUBGOALS = 4
+# How many reviewer-named route/global objection blocked nodes to surface (56E).
+_MAX_OBJECTION_SUBGOALS = 4
+
+# 56E (G56E-001): map a route/global scoped-objection ``kind`` to a typed
+# BlockReason ONLY where it names a typed dead route. ``counterexample_pressure``
+# is deliberately absent: it is unchecked pressure, not a typed dead route, so it
+# stays a blocked node with no block_reason and can never read as a refutation.
+_OBJECTION_KIND_TO_BLOCK_REASON = {
+    "missing_source": "theorem_condition_gap",
+    "hypothesis_gap": "theorem_condition_gap",
+    "definition_gap": "theorem_condition_gap",
+}
+# Reviewer-named gap kinds that read as a hypothesis/definition/source check
+# (role hypothesis_check); everything else is a generic lemma obligation.
+_OBJECTION_HYPOTHESIS_KINDS = {"hypothesis_gap", "definition_gap", "missing_source"}
 
 # Free text copied from other artifacts is scrubbed so the graph can never read
 # as a proof-completion claim. Replacements are case-insensitive and applied in
@@ -559,6 +574,76 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
             for tag in texts:
                 if tag not in existing:
                     existing.append(tag)
+
+    # --- 56E (G56E-001): reviewer-named route gaps become blocked nodes ---
+    # A reviewer's NAMED route-scoped failed step (a gap in the CURRENT route, not
+    # the whole claim) previously only landed as advisory text on subgoal_main
+    # (or was dropped), so a route-death finding never became its own actionable
+    # blocked node. Here each such objection (with non-empty text + kind) becomes ONE
+    # first-class blocked_reviewer_objection node, disjoint from every other id family
+    # (subgoal_main/route/block_*/tool_*/tcl_*). 54B owns scope=="subgoal" objections;
+    # those are skipped here so no duplicate node is ever created. Dedup is by
+    # objection text so a rebuild — and the same objection echoed across rounds — is
+    # idempotent (one node). A reviewer-named node is advisory SEARCH state only: it
+    # never carries supported_by_* (so can never earn source/checked), never refutes
+    # the claim, never sets status. counterexample_pressure stays a blocked node with
+    # NO block_reason (unchecked pressure is not a typed dead route, not a refutation).
+    # Gated on a selected route: before a route is chosen there is no route to die,
+    # the graph stays a single open main goal (route-death is meaningless pre-route).
+    seen_objection_texts: set[str] = set()
+    objection_index = 0
+    capped_objections = False
+    for review in (
+        _scoped_objection_reviews(run_dir, llm_agent_run) if selected is not None else []
+    ):
+        if not isinstance(review, dict):
+            continue
+        for so in review.get("scoped_objections") or []:
+            if not isinstance(so, dict):
+                continue
+            if so.get("scope") != "route":
+                # 54B owns scope=="subgoal"; a "global" concern is about the whole
+                # claim and stays advisory on the main goal (it is not a named
+                # route-death step); proof_step scope is provenance-only. Only a
+                # route-scoped named gap becomes its own first-class blocked node.
+                continue
+            text = str(so.get("text") or "").strip()
+            kind = str(so.get("kind") or "").strip()
+            if not text or not kind:
+                continue
+            if text in seen_objection_texts:
+                continue  # dedup -> idempotent across rounds / rebuilds
+            seen_objection_texts.add(text)
+            if objection_index >= _MAX_OBJECTION_SUBGOALS:
+                capped_objections = True
+                continue
+            objection_index += 1
+            block_reason = _OBJECTION_KIND_TO_BLOCK_REASON.get(kind)
+            role = "hypothesis_check" if kind in _OBJECTION_HYPOTHESIS_KINDS else "lemma"
+            obj_node = {
+                "id": f"subgoal_obj_{objection_index:03d}",
+                "statement": _scrub("Reviewer-named gap: " + text),
+                "role": role,
+                "state": "blocked_reviewer_objection",
+                "closure_contract": (
+                    "Resolve the reviewer objection with a grounded step or a "
+                    "finite/computational check."
+                ),
+                "depends_on": [],
+                "reviewer_objections": [_objection_tag(so)],
+                "counterexample_pressure": [],
+                "remaining_risk": _scrub(text),
+            }
+            if block_reason is not None:
+                obj_node["block_reason"] = block_reason
+                obj_node["suggested_next_action"] = _NEXT_ACTION_BY_REASON.get(
+                    block_reason, ""
+                )
+            add_child(obj_node)
+    if capped_objections:
+        notes.append(
+            "Some reviewer-named blocked subgoals are not shown (display is capped)."
+        )
 
     # --- wire dependencies: every subgoal is needed for the main goal --------
     main["depends_on"] = list(child_ids)
