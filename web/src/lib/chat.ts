@@ -48,6 +48,7 @@ export function parseSSE(buffer: string): { events: SSEEvent[]; rest: string } {
 export async function streamChat(
   runId: string,
   message: string,
+  activeObject: ActiveObject,
   onLine: (text: string) => void,
   onDone: (ok: boolean) => void,
 ): Promise<void> {
@@ -56,7 +57,7 @@ export async function streamChat(
     res = await fetch(`/api/runs/${encodeURIComponent(runId)}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, active_object: activeObject }),
     });
   } catch {
     onDone(false);
@@ -88,3 +89,4 @@ export async function streamChat(
   }
   onDone(ok);
 }
+import type { ActiveObject } from "./types";

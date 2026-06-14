@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
 /**
@@ -58,6 +58,52 @@ export function FadeIn({
     >
       {children}
     </motion.div>
+  );
+}
+
+/**
+ * Stable-id entrance animation. A key animates only the first time this list
+ * observes it, so background polling with the same ids does not replay motion.
+ */
+export function AnimatedList<T>({
+  items,
+  getKey,
+  children,
+  className,
+}: {
+  items: T[];
+  getKey: (item: T) => string;
+  children: (item: T) => ReactNode;
+  className?: string;
+}) {
+  const reduce = useReducedMotion();
+  const seen = useRef<Set<string>>(new Set());
+
+  return (
+    <div className={className}>
+      {items.map((item, index) => {
+        const key = getKey(item);
+        const known = seen.current.has(key);
+        if (!known) seen.current.add(key);
+        if (reduce || known) {
+          return <div key={key}>{children(item)}</div>;
+        }
+        return (
+          <motion.div
+            key={key}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{
+              duration: 0.18,
+              delay: Math.min(index, 5) * 0.035,
+              ease: "easeOut",
+            }}
+          >
+            {children(item)}
+          </motion.div>
+        );
+      })}
+    </div>
   );
 }
 

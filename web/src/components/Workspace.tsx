@@ -1,22 +1,29 @@
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Code2,
+  Eye,
   Loader2,
   Minus,
   Play,
   Route,
+  ShieldAlert,
   Target,
   UserRound,
   Wrench,
+  X,
 } from "lucide-react";
 import type {
+  ActiveObject,
   ClaimView,
   FeedbackPriority,
   LatestRound,
   StatusView,
   StrategyView,
+  StrategyPanel,
 } from "../lib/types";
 import { continueRoute, errorText, postStrategyFeedback } from "../lib/api";
 import { useClaimPanel, useStrategiesPanel } from "../hooks/useCockpit";
@@ -30,11 +37,40 @@ import { PanelPlaceholder } from "./ExpandableCard";
 import { PanelSection } from "./PanelSection";
 import { cn } from "../lib/cn";
 import { MathText } from "./MathText";
-import { Collapse, FadeIn } from "./motion";
-import { ChatPanel } from "./ChatPanel";
+import { AnimatedList, Collapse, FadeIn } from "./motion";
+import { ChatPanel, type ChatMessage } from "./ChatPanel";
+import { analyzeClaimText, type ClaimTextWarning } from "../lib/claimText";
 
-function ClaimCard({ claim, missing }: { claim: ClaimView | undefined; missing: boolean }) {
-  if (missing || !claim || claim.text === "") {
+const CLAIM_WARNING_LABELS: Record<ClaimTextWarning, string> = {
+  unsafe_markup: "Unsafe markup hidden",
+  html_like_markup: "Raw markup hidden",
+  javascript_url: "JavaScript URL hidden",
+  dangerous_tex_command: "Unsafe TeX command hidden",
+  malformed_tex: "Malformed TeX hidden",
+  truncated: "Raw input summarized",
+};
+
+function analyzeClaimForDisplay(claim: ClaimView) {
+  const rawText = claim.raw_text ?? claim.text;
+  const rawAnalysis = analyzeClaimText(rawText);
+  if (!claim.raw_text) return rawAnalysis;
+  const cleanAnalysis = analyzeClaimText(claim.text);
+  const summary = claim.text.trim() === "" ? rawAnalysis.summary : cleanAnalysis.summary;
+  const warnings = [...new Set([...rawAnalysis.warnings, ...cleanAnalysis.warnings])];
+  return {
+    ...rawAnalysis,
+    summary,
+    warnings,
+    hasUnsafeMarkup: rawAnalysis.hasUnsafeMarkup || cleanAnalysis.hasUnsafeMarkup,
+    hasMalformedTex: rawAnalysis.hasMalformedTex || cleanAnalysis.hasMalformedTex,
+    isTruncated: rawAnalysis.isTruncated || cleanAnalysis.isTruncated,
+  };
+}
+
+export function ClaimCard({ claim, missing }: { claim: ClaimView | undefined; missing: boolean }) {
+  const [rawOpen, setRawOpen] = useState(false);
+  const rawText = claim?.raw_text ?? "";
+  if (missing || !claim || (claim.text === "" && rawText === "")) {
     return (
       <Card>
         <CardContent className="pt-2.5">
@@ -43,11 +79,31 @@ function ClaimCard({ claim, missing }: { claim: ClaimView | undefined; missing: 
       </Card>
     );
   }
+  const analysis = analyzeClaimForDisplay(claim);
+  const rawDiffers = analysis.raw !== analysis.summary;
+  const showRawControl = rawDiffers || analysis.warnings.length > 0;
   return (
     <Card>
       <CardHeader>
         <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-[17px] leading-relaxed"><MathText>{claim.text}</MathText></CardTitle>
+          <div className="min-w-0 flex-1">
+            <CardTitle className="text-[17px] leading-relaxed">
+              <MathText>{analysis.summary}</MathText>
+            </CardTitle>
+            {analysis.warnings.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {analysis.warnings.map((warning) => (
+                  <Badge
+                    key={warning}
+                    className="border-amber-200 bg-amber-50 text-amber-900"
+                  >
+                    <ShieldAlert className="h-3 w-3" aria-hidden />
+                    {CLAIM_WARNING_LABELS[warning]}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
           {claim.human_review_required && (
             <Badge className="shrink-0 border-violet-200 bg-violet-50 text-violet-800">
               <UserRound className="h-3 w-3" aria-hidden />
@@ -55,6 +111,45 @@ function ClaimCard({ claim, missing }: { claim: ClaimView | undefined; missing: 
             </Badge>
           )}
         </div>
+        {analysis.warnings.length > 0 && (
+          <p className="mt-2 text-[14px] leading-relaxed text-amber-800">
+            Unsafe or malformed markup was hidden from the main claim view.
+          </p>
+        )}
+        {showRawControl && (
+          <div className="mt-3 rounded-lg border border-stone-200 bg-stone-50/70">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setRawOpen((open) => !open)}
+              aria-expanded={rawOpen}
+              className="w-full justify-between rounded-lg px-2.5 text-stone-700"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Eye className="h-3.5 w-3.5" aria-hidden />
+                {rawOpen ? "Hide raw input" : "Show raw input"}
+              </span>
+              <ChevronDown
+                className={cn(
+                  "h-3.5 w-3.5 text-stone-400 transition-transform",
+                  rawOpen && "rotate-180",
+                )}
+                aria-hidden
+              />
+            </Button>
+            <Collapse open={rawOpen}>
+              <div className="border-t border-stone-200 p-3">
+                <p className="mb-1.5 inline-flex items-center gap-1 text-[13px] font-medium text-stone-500">
+                  <Code2 className="h-3.5 w-3.5" aria-hidden />
+                  Raw input
+                </p>
+                <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-amber-100 bg-amber-50/60 p-2.5 font-mono text-[13px] leading-relaxed text-stone-700">
+                  {analysis.raw}
+                </pre>
+              </div>
+            </Collapse>
+          </div>
+        )}
       </CardHeader>
     </Card>
   );
@@ -178,6 +273,7 @@ function RatingBlock({
   runId: string;
   onChanged: () => void;
 }) {
+  const queryClient = useQueryClient();
   const saved = strategy.my_feedback;
   const [priority, setPriority] = useState<FeedbackPriority>(
     isFeedbackPriority(saved?.priority) ? saved.priority : "normal",
@@ -200,6 +296,21 @@ function RatingBlock({
   async function handleSave() {
     setSaving("saving");
     setServerError(null);
+    const queryKey = ["panel", runId, "strategies"] as const;
+    const optimisticFeedback = { score, priority, note: note.trim() };
+    const previous = queryClient.getQueryData<StrategyPanel>(queryKey);
+    queryClient.setQueryData<StrategyPanel>(queryKey, (current) =>
+      current
+        ? {
+            ...current,
+            strategies: current.strategies.map((item) =>
+              item.id === strategy.id
+                ? { ...item, my_feedback: optimisticFeedback, score }
+                : item,
+            ),
+          }
+        : current,
+    );
     try {
       const body: { strategy_id: string; score: number; priority: FeedbackPriority; note?: string } = {
         strategy_id: strategy.id,
@@ -213,6 +324,7 @@ function RatingBlock({
       window.clearTimeout(savedTimer.current);
       savedTimer.current = window.setTimeout(() => setSaving("idle"), 2500);
     } catch (err) {
+      queryClient.setQueryData(queryKey, previous);
       setSaving("error");
       setServerError(err instanceof Error ? err.message : "Could not save feedback.");
     }
@@ -276,6 +388,12 @@ function RatingBlock({
         aria-label="Optional feedback note"
       />
 
+      <div className="mb-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-[13px] leading-relaxed text-slate-600">
+        <span className="font-medium text-slate-700">Next-round attention:</span>{" "}
+        score {score} / {priority}
+        {dirty ? " (draft, will affect next round after save)" : " (saved for next round)"}
+      </div>
+
       {/* Save button + status chip. The saved value itself is shown once, in
           the time-allocation ledger row ("Your score / priority"); here we only
           surface unsaved/saving/saved/error transitions. */}
@@ -291,19 +409,24 @@ function RatingBlock({
           {saving === "saving" ? "Saving…" : "Save feedback"}
         </Button>
         {dirty && saving !== "saving" && (
-          <span className="text-[13px] text-amber-700">unsaved changes</span>
+          <span className="text-[13px] text-amber-700">will affect next round</span>
+        )}
+        {saving === "saving" && (
+          <span className="text-[13px] text-amber-700">
+            saving advisory preference
+          </span>
         )}
         {!dirty && saving === "idle" && saved && (
-          <span className="text-[13px] text-stone-400">saved</span>
+          <span className="text-[13px] text-stone-400">saved for next round</span>
         )}
         {saving === "saved" && (
           <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[13px] text-slate-600">
-            saved
+            saved for next round
           </span>
         )}
         {saving === "error" && serverError && (
           <span className="inline-flex items-start gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[13px] leading-4 text-rose-700">
-            {serverError}
+            could not save, evidence unchanged — {serverError}
           </span>
         )}
       </div>
@@ -315,38 +438,94 @@ function isFeedbackPriority(value: string | undefined): value is FeedbackPriorit
   return value === "focus" || value === "normal" || value === "reduce" || value === "repair";
 }
 
+function ActiveObjectBanner({
+  activeObject,
+  onClear,
+}: {
+  activeObject: ActiveObject;
+  onClear: () => void;
+}) {
+  if (!activeObject) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-200 bg-indigo-50/70 px-3 py-2 text-[14px] text-indigo-900">
+      <p className="min-w-0">
+        <span className="font-semibold capitalize">Active {activeObject.kind}: </span>
+        <span className="break-words">
+          <MathText>{activeObject.title}</MathText>
+        </span>
+      </p>
+      {activeObject.kind === "strategy" && activeObject.source_phrase && (
+        <ToneBadge tone={activeObject.source_tone ?? "neutral"} phrase={activeObject.source_phrase} />
+      )}
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={onClear}
+        className="h-6 shrink-0 px-2 text-indigo-800 hover:bg-indigo-100"
+      >
+        <X className="h-3 w-3" aria-hidden />
+        Clear focus
+      </Button>
+    </div>
+  );
+}
+
 // ─── StrategyCard ─────────────────────────────────────────────────────────────
 
 function StrategyCard({
   strategy,
   runId,
   onChanged,
+  activeObject,
+  onSetActiveObject,
 }: {
   strategy: StrategyView;
   runId: string;
   onChanged: () => void;
+  activeObject: ActiveObject;
+  onSetActiveObject: (activeObject: ActiveObject) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const job = useJob();
   const Chevron = expanded ? ChevronDown : ChevronRight;
+  const active = activeObject?.kind === "strategy" && activeObject.id === strategy.id;
   return (
     <Card
       className={cn(
         // a smooth, layout-stable selection emphasis (no jump/reflow).
         "transition-[box-shadow,border-color] duration-200",
         strategy.selected && "border-sage-300 ring-1 ring-sage-200",
+        active && "border-indigo-300 ring-2 ring-indigo-200",
       )}
     >
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => {
+          onSetActiveObject({
+            kind: "strategy",
+            id: strategy.id,
+            title: strategy.title,
+            source_phrase: strategy.source_phrase,
+            source_tone: strategy.source_tone,
+          });
+          setExpanded((v) => !v);
+        }}
         aria-expanded={expanded}
+        aria-pressed={active}
         className="flex w-full items-start gap-1.5 px-3 py-2.5 text-left hover:bg-stone-50"
       >
         <Chevron className="mt-1 h-3.5 w-3.5 shrink-0 text-stone-400" aria-hidden />
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-1.5">
             <span className="text-[15px] font-semibold text-stone-800"><MathText>{strategy.title}</MathText></span>
+            {active && (
+              <FadeIn>
+                <Badge className="border-indigo-200 bg-indigo-50 text-indigo-800">
+                  <Target className="h-3 w-3" aria-hidden />
+                  Active route
+                </Badge>
+              </FadeIn>
+            )}
             {strategy.selected && (
               <FadeIn>
                 <Badge className="border-sage-200 bg-sage-50 text-sage-800">
@@ -424,10 +603,18 @@ export function Workspace({
   runId,
   status,
   onChanged,
+  chatMessages,
+  chatLastNote,
+  activeObject,
+  onActiveObjectChange,
 }: {
   runId: string;
   status: StatusView | undefined;
   onChanged: () => void;
+  chatMessages: ChatMessage[];
+  chatLastNote: string;
+  activeObject: ActiveObject;
+  onActiveObjectChange: (activeObject: ActiveObject) => void;
 }) {
   const claim = useClaimPanel(runId);
   const strat = useStrategiesPanel(runId);
@@ -436,6 +623,10 @@ export function Workspace({
   return (
     <div className="flex flex-col gap-4 p-4">
       <ClaimCard claim={claim.data?.claim} missing={claim.data?.missing ?? true} />
+      <ActiveObjectBanner
+        activeObject={activeObject}
+        onClear={() => onActiveObjectChange(null)}
+      />
 
       {/* The latest-round ledger now lives in the bottom-left settings control
           (Codex-style minimal workspace); see SettingsButton. */}
@@ -446,7 +637,9 @@ export function Workspace({
         download={{ runId, panel: "strategies", label: "strategies" }}
         count={strat.data && !strat.data.missing ? strategies.length : null}
         agentState={strat.data?.agent_state}
+        agent={status?.agents.find((agent) => agent.agent === "claim_understanding")}
         isPending={strat.isPending}
+        isRefetching={strat.isFetching}
         isError={strat.isError}
         errorText={errorText(strat.error)}
         hasData={strategies.length > 0}
@@ -459,14 +652,21 @@ export function Workspace({
               preliminary
             </Badge>
           )}
-          {strategies.map((s) => (
-            <StrategyCard
-              key={s.id}
-              strategy={s}
-              runId={runId}
-              onChanged={onChanged}
-            />
-          ))}
+          <AnimatedList
+            items={strategies}
+            getKey={(strategy) => strategy.id}
+            className="flex flex-col gap-2"
+          >
+            {(s) => (
+              <StrategyCard
+                strategy={s}
+                runId={runId}
+                onChanged={onChanged}
+                activeObject={activeObject}
+                onSetActiveObject={onActiveObjectChange}
+              />
+            )}
+          </AnimatedList>
         </div>
       </PanelSection>
 
@@ -481,7 +681,12 @@ export function Workspace({
         </p>
       )}
 
-      <ChatPanel runId={runId} selectedRoute={status?.selected_route ?? null} />
+      <ChatPanel
+        runId={runId}
+        activeObject={activeObject}
+        messages={chatMessages}
+        lastNote={chatLastNote}
+      />
     </div>
   );
 }

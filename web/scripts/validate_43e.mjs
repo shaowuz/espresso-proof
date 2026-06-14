@@ -32,7 +32,10 @@ await page.goto(base + "/", { waitUntil: "networkidle" });
 await page.waitForTimeout(1000);
 
 // expand a strategy card; it must stay expanded across a poll refresh (>3s).
-const strat = page.locator("section button[aria-expanded]").first();
+const strat = page
+  .locator("section button[aria-expanded]")
+  .filter({ hasNotText: /raw input/i })
+  .first();
 log((await strat.count()) > 0, "a strategy card is present");
 await strat.click();
 await page.waitForTimeout(400);
@@ -44,9 +47,18 @@ const expandedAfter = await strat.getAttribute("aria-expanded");
 const stillVisible = await page.getByText(/Advisory — affects how the next round/i).first().isVisible();
 log(expandedAfter === "true" && stillVisible, "expanded detail survives a poll refresh (no collapse)");
 
-// running progress / last-updated text is present on the agent board.
+// process feedback appears immediately on an action. The current smoke run may
+// have ready-but-empty panel artifacts, so this validates the visible job chip
+// rather than requiring static ready/done panel labels to be shown.
+const continueBtn = page.getByRole("button", { name: /continue this route/i }).first();
+log((await continueBtn.count()) > 0, "continue action is present");
+await continueBtn.click();
+await page.waitForTimeout(180);
 const bodyText = await page.evaluate(() => document.body.innerText);
-log(/\b\d+s\b|ago|just now|Done/.test(bodyText), "agent board shows elapsed/last-updated/done text");
+log(
+  /\b(queued · \d+s|running · \d+s|pass finished)\b/i.test(bodyText),
+  "action process feedback is visible within 200ms",
+);
 
 // no horizontal overflow and no earned-green from motion on an unearned run.
 const overflow = await page.evaluate(
@@ -64,7 +76,10 @@ await page.screenshot({ path: join(out, "motion.png"), fullPage: false });
 await page.emulateMedia({ reducedMotion: "reduce" });
 await page.reload({ waitUntil: "networkidle" });
 await page.waitForTimeout(800);
-const rStrat = page.locator("section button[aria-expanded]").first();
+const rStrat = page
+  .locator("section button[aria-expanded]")
+  .filter({ hasNotText: /raw input/i })
+  .first();
 await rStrat.click();
 await page.waitForTimeout(150); // reduced motion is instant
 const rVisible = await page.getByText(/Advisory — affects how the next round/i).first().isVisible();

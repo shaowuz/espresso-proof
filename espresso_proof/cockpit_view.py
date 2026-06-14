@@ -23,6 +23,7 @@ from pathlib import Path
 from .descriptions import describe_grade, effort_phrase, evidence_phrase, objection_phrase
 from .io import read_yaml
 from .latest_round import load_latest_round
+from .proof_language import scrub_proof_language
 
 # The ONLY statuses whose evidence the kernel has actually earned. Everything
 # else — candidate, unverified, not_found, running agents, literature
@@ -74,6 +75,10 @@ def _artifact(run_dir: Path, name: str) -> dict | None:
 
 def _clip(text: object, limit: int = 280) -> str:
     return str(text or "").strip()[:limit]
+
+
+def _clip_scrubbed(text: object, limit: int = 280) -> str:
+    return scrub_proof_language(_clip(text, limit))
 
 
 def _my_feedback_map(run_dir: Path) -> dict:
@@ -163,7 +168,7 @@ def _strategies(
         items.append(
             {
                 "id": sid,
-                "title": _clip(raw.get("title"), 140),
+                "title": _clip_scrubbed(raw.get("title"), 140),
                 "one_line": _clip(raw.get("why_this_route")),
                 "score": raw.get("score") if isinstance(raw.get("score"), int) else None,
                 "status_sentence": describe_grade(status=raw.get("status")),
@@ -312,6 +317,7 @@ def build_snapshot(run_dir: Path, run_id: str, status: dict) -> dict:
         "run_id": run_id,
         "claim": {
             "text": _clip((claim or {}).get("normalized_statement"), 600),
+            "raw_text": _clip((claim or {}).get("raw_text"), 1200),
             "status_sentence": describe_grade(
                 status=(grade or {}).get("status"),
                 proof_language_status=(grade or {}).get("proof_language_status"),
@@ -387,6 +393,7 @@ def build_panel(run_dir: Path, run_id: str, status: dict, panel: str) -> dict:
         grade = _artifact(run_dir, "idea_grade")
         out["claim"] = {
             "text": _clip((claim or {}).get("normalized_statement"), 600),
+            "raw_text": _clip((claim or {}).get("raw_text"), 1200),
             "status_sentence": describe_grade(
                 status=(grade or {}).get("status"),
                 proof_language_status=(grade or {}).get("proof_language_status"),

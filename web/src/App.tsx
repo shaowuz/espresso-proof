@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { BookOpen, FlaskConical, MessageSquare } from "lucide-react";
 import { fetchRuns } from "./lib/api";
-import type { RunListItem } from "./lib/types";
+import { streamChat } from "./lib/chat";
+import type { ActiveObject, RunListItem } from "./lib/types";
 import { useClaimPanel, useStatus, useStrategiesPanel } from "./hooks/useCockpit";
 import { Header } from "./components/Header";
 import { Composer } from "./components/Composer";
@@ -11,6 +12,7 @@ import { EvidenceRail } from "./components/EvidenceRail";
 import { Workspace } from "./components/Workspace";
 import { LiteratureRail } from "./components/LiteratureRail";
 import { cn } from "./lib/cn";
+import type { ChatMessage } from "./components/ChatPanel";
 
 type Pane = "evidence" | "workspace" | "literature";
 
@@ -25,6 +27,13 @@ export default function App() {
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [pane, setPane] = useState<Pane>("workspace");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatLastNote, setChatLastNote] = useState("");
+  const [chatStreaming, setChatStreaming] = useState(false);
+  const [activeObject, setActiveObject] = useState<ActiveObject>(null);
+  const chatNextId = useRef(0);
+  const selectedRunRef = useRef<string | null>(null);
+  const activeSeededRunRef = useRef<string | null>(null);
 
   const status = useStatus(selectedRunId);
   const claim = useClaimPanel(selectedRunId);
@@ -49,6 +58,49 @@ export default function App() {
     void loadRuns(true);
   }, [loadRuns]);
 
+  useEffect(() => {
+    selectedRunRef.current = selectedRunId;
+    chatNextId.current = 0;
+    setChatMessages([]);
+    setChatLastNote("");
+    setChatStreaming(false);
+    setActiveObject(null);
+    activeSeededRunRef.current = null;
+  }, [selectedRunId]);
+
+  useEffect(() => {
+    if (!selectedRunId || !strategies.data || strategies.data.missing) return;
+    const routeList = strategies.data.strategies;
+    const selectedRoute = status.data?.selected_route ?? null;
+    setActiveObject((current) => {
+      if (current?.kind === "strategy") {
+        const liveRoute = routeList.find((route) => route.id === current.id);
+        return liveRoute
+          ? {
+              ...current,
+              title: liveRoute.title,
+              source_phrase: liveRoute.source_phrase,
+              source_tone: liveRoute.source_tone,
+            }
+          : null;
+      }
+      if (current) return current;
+      if (!selectedRoute) return null;
+      if (activeSeededRunRef.current === selectedRunId) return null;
+      const routeExists = routeList.some((route) => route.id === selectedRoute.id);
+      if (!routeExists) return null;
+      activeSeededRunRef.current = selectedRunId;
+      const route = routeList.find((item) => item.id === selectedRoute.id);
+      return {
+        kind: "strategy",
+        id: selectedRoute.id,
+        title: route?.title ?? selectedRoute.title,
+        source_phrase: route?.source_phrase,
+        source_tone: route?.source_tone,
+      };
+    });
+  }, [selectedRunId, status.data?.selected_route, strategies.data]);
+
   // refresh the affected queries after a pass — no full page reload.
   const refreshRun = useCallback(() => {
     if (selectedRunId === null) return;
@@ -62,6 +114,63 @@ export default function App() {
       void loadRuns(false);
     },
     [loadRuns],
+  );
+
+  const appendChat = useCallback(
+    (role: ChatMessage["role"], text: string, context: ActiveObject): number => {
+      const id = chatNextId.current++;
+      setChatMessages((current) => [...current, { id, role, text, activeObject: context }]);
+      return id;
+    },
+    [],
+  );
+
+  const sendChat = useCallback(
+    async (message: string) => {
+      const runId = selectedRunId;
+      const msg = message.trim();
+      if (!runId || msg === "" || chatStreaming) return;
+      const context = activeObject;
+      setChatLastNote(msg);
+      appendChat("you", msg, context);
+      setChatStreaming(true);
+      const replyId = appendChat("espresso", "", null);
+      let any = false;
+      await streamChat(
+        runId,
+        msg,
+        context,
+        (line) => {
+          if (selectedRunRef.current !== runId) return;
+          any = true;
+          setChatMessages((current) =>
+            current.map((item) =>
+              item.id === replyId
+                ? { ...item, text: item.text === "" ? line : `${item.text}\n${line}` }
+                : item,
+            ),
+          );
+        },
+        (ok) => {
+          if (selectedRunRef.current !== runId) return;
+          if (!ok && !any) {
+            setChatMessages((current) =>
+              current.map((item) =>
+                item.id === replyId
+                  ? {
+                      ...item,
+                      text:
+                        "Streaming is unavailable right now — the panels above remain the source of truth. Try the agent buttons to update evidence.",
+                    }
+                  : item,
+              ),
+            );
+          }
+          setChatStreaming(false);
+        },
+      );
+    },
+    [activeObject, appendChat, chatStreaming, selectedRunId],
   );
 
   return (
@@ -105,7 +214,15 @@ export default function App() {
             pane === "evidence" ? "block" : "hidden",
           )}
         >
-          {hasRun ? <EvidenceRail runId={selectedRunId} /> : <ShellPlaceholder />}
+          {hasRun ? (
+            <EvidenceRail
+              runId={selectedRunId}
+              activeObject={activeObject}
+              agents={status.data?.agents ?? []}
+            />
+          ) : (
+            <ShellPlaceholder />
+          )}
         </aside>
 
         <section
@@ -115,7 +232,15 @@ export default function App() {
           )}
         >
           {hasRun ? (
-            <Workspace runId={selectedRunId} status={status.data} onChanged={refreshRun} />
+            <Workspace
+              runId={selectedRunId}
+              status={status.data}
+              onChanged={refreshRun}
+              chatMessages={chatMessages}
+              chatLastNote={chatLastNote}
+              activeObject={activeObject}
+              onActiveObjectChange={setActiveObject}
+            />
           ) : (
             <EmptyWorkspace hasRuns={runs.length > 0} />
           )}
@@ -127,7 +252,15 @@ export default function App() {
             pane === "literature" ? "block" : "hidden",
           )}
         >
-          {hasRun ? <LiteratureRail runId={selectedRunId} /> : <ShellPlaceholder />}
+          {hasRun ? (
+            <LiteratureRail
+              runId={selectedRunId}
+              activeObject={activeObject}
+              agents={status.data?.agents ?? []}
+            />
+          ) : (
+            <ShellPlaceholder />
+          )}
         </aside>
       </main>
 
@@ -139,7 +272,14 @@ export default function App() {
           latestRound={strategies.data?.latest_round}
         />
         <div className="min-w-0 flex-1">
-          <Composer onRunCreated={onRunCreated} />
+          <Composer
+            runId={selectedRunId}
+            onRunCreated={onRunCreated}
+            onChatMessage={sendChat}
+            chatBusy={chatStreaming}
+            activeObject={activeObject}
+            onClearActiveObject={() => setActiveObject(null)}
+          />
         </div>
       </div>
     </div>

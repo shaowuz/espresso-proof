@@ -1,6 +1,7 @@
 import { Loader2, CircleAlert, Check } from "lucide-react";
 import type { JobPhase } from "../hooks/useJob";
 import { cn } from "../lib/cn";
+import { formatDuration, useElapsed } from "../lib/time";
 
 /**
  * Inline job feedback. Queued/running/failed are NEVER green (kernel
@@ -16,6 +17,7 @@ export function JobChip({
   error: string | null;
   doneLabel?: string;
 }) {
+  const elapsed = useElapsed(phase === "queued" || phase === "running");
   if (phase === "idle") return null;
   if (phase === "failed") {
     return (
@@ -40,7 +42,11 @@ export function JobChip({
       ) : (
         <Check className="h-3 w-3" aria-hidden />
       )}
-      {phase === "queued" ? "queued…" : phase === "running" ? "running…" : doneLabel}
+      {phase === "queued"
+        ? `queued · ${formatDuration(elapsed)}`
+        : phase === "running"
+          ? `running · ${formatDuration(elapsed)}`
+          : doneLabel}
     </span>
   );
 }

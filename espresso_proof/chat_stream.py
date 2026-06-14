@@ -48,7 +48,11 @@ def _safe(line: str) -> str:
     return scrub_proof_language(line).strip()[:240]
 
 
-def chat_progress_lines(run_dir: Path, user_message: str = "") -> list[str]:
+def chat_progress_lines(
+    run_dir: Path,
+    user_message: str = "",
+    active_object: dict | None = None,
+) -> list[str]:
     """Build the ordered, already-scrubbed conversational lines for a run.
 
     Each line describes current state in advisory terms ("...remains
@@ -59,6 +63,10 @@ def chat_progress_lines(run_dir: Path, user_message: str = "") -> list[str]:
     msg = scrub_proof_language(str(user_message)).strip()[:200]
     if msg:
         lines.append(_safe(f'You asked: "{msg}"'))
+    if isinstance(active_object, dict) and active_object.get("kind") == "strategy":
+        title = str(active_object.get("title") or "").strip()[:120]
+        if title:
+            lines.append(_safe(f'Requested active route context: "{title}". This is advisory focus, not evidence.'))
 
     claim = _artifact(run_dir, "locked_claim")
     grade = _artifact(run_dir, "idea_grade")
@@ -75,9 +83,13 @@ def chat_progress_lines(run_dir: Path, user_message: str = "") -> list[str]:
     routes = (brief or {}).get("top_strategies") or []
     if routes:
         lines.append(_safe(f"I have {len(routes)} candidate route(s); all remain preliminary until evidence is earned."))
-        top = routes[0]
-        src = evidence_phrase(top.get("source_status"))
-        lines.append(_safe(f'Top route — "{str(top.get("title",""))[:80]}". Source standing: {src}.'))
+        route = routes[0]
+        if isinstance(active_object, dict) and active_object.get("kind") == "strategy":
+            active_id = str(active_object.get("id") or "")
+            route = next((r for r in routes if str(r.get("id") or "") == active_id), route)
+        src = evidence_phrase(route.get("source_status"))
+        label = "Requested route" if route is not routes[0] else "Top route"
+        lines.append(_safe(f'{label} — "{str(route.get("title",""))[:80]}". Source standing: {src}.'))
 
     examples = _artifact(run_dir, "examples")
     n_ex = len((examples or {}).get("examples") or [])
@@ -99,12 +111,16 @@ def chat_progress_lines(run_dir: Path, user_message: str = "") -> list[str]:
     return [ln for ln in lines if ln]
 
 
-def stream_chat(run_dir: Path, user_message: str = "") -> Iterator[str]:
+def stream_chat(
+    run_dir: Path,
+    user_message: str = "",
+    active_object: dict | None = None,
+) -> Iterator[str]:
     """Yield already-scrubbed conversational lines one at a time. Fails closed
     to a single safe line — never raises into the response."""
 
     try:
-        lines = chat_progress_lines(run_dir, user_message)
+        lines = chat_progress_lines(run_dir, user_message, active_object)
     except Exception:  # noqa: BLE001 — the stream is a preview; never break the page
         lines = []
     if not lines:

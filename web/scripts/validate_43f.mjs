@@ -31,23 +31,32 @@ await page.goto(base + "/", { waitUntil: "networkidle" });
 await page.waitForTimeout(1000);
 
 // the chat panel is present and labelled a preview, not evidence.
+const conversation = page.getByLabel("Conversation preview");
 const bodyBefore = await page.evaluate(() => document.body.innerText);
-log(/preview — not evidence/i.test(bodyBefore), "chat panel labelled 'preview — not evidence'");
+const conversationBefore = await conversation.innerText().catch(() => "");
+log(
+  /preview\s+—\s+not evidence/i.test(bodyBefore) ||
+    /preview\s+—\s+not evidence/i.test(conversationBefore),
+  "chat panel labelled 'preview — not evidence'",
+);
+const composerCount = await page.locator("textarea").count();
+log(composerCount === 1, `only the bottom composer is present (got ${composerCount})`);
 
 // the evidence panel counts before chatting (artifact-driven).
 const exHeaderBefore = await page.locator("text=Examples").first().isVisible();
 log(exHeaderBefore, "evidence rail present before chat");
 
-// send a chat message and read the streamed reply.
-const chatInput = page.getByLabel("Ask Espresso about this run");
-log((await chatInput.count()) > 0, "chat input present");
+// send a chat message from the single bottom command composer and read the
+// streamed reply from the conversation preview panel.
+const chatInput = page.locator("textarea").first();
+log(composerCount === 1, "single command composer present");
 await chatInput.fill("how is this route looking?");
-await page.getByLabel("Send chat message").click();
+await page.getByLabel("Send command to Espresso").click();
 
 let reply = "";
 for (let i = 0; i < 25; i++) {
   await page.waitForTimeout(400);
-  const t = await page.evaluate(() => document.body.innerText);
+  const t = await conversation.innerText();
   if (/Espresso:/.test(t) && /(preliminary|source of truth|preview of the current)/i.test(t)) {
     reply = t;
     break;

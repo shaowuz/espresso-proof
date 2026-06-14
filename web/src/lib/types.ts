@@ -11,9 +11,17 @@ export type Tone = "earned" | "warn" | "human" | "muted" | "neutral";
 
 export interface ClaimView {
   text: string;
+  raw_text?: string;
   status_sentence: string;
   human_review_required: boolean;
 }
+
+export type ActiveObject =
+  | { kind: "strategy"; id: string; title: string; source_phrase?: string; source_tone?: Tone }
+  | { kind: "literature"; id: string; title: string }
+  | { kind: "example"; id: string; title: string }
+  | { kind: "counterexample"; id: string; title: string }
+  | null;
 
 export interface AgentView {
   agent: string;
@@ -91,6 +99,9 @@ export interface ExampleView {
   admissibility: string;
   result_phrase: string;
   tone: Tone;
+  related_strategy_ids?: string[];
+  target_subgoal_id?: string | null;
+  route_relevance?: "direct" | "pressure" | "background" | "unknown";
 }
 
 export interface CounterexampleView {
@@ -101,6 +112,9 @@ export interface CounterexampleView {
   admissibility: string;
   repair: string;
   tone: Tone;
+  related_strategy_ids?: string[];
+  target_subgoal_id?: string | null;
+  route_relevance?: "direct" | "pressure" | "background" | "unknown";
 }
 
 export interface ComputationView {
@@ -110,6 +124,9 @@ export interface ComputationView {
   result: string;
   phrase: string;
   tone: Tone;
+  related_strategy_ids?: string[];
+  target_subgoal_id?: string | null;
+  route_relevance?: "direct" | "pressure" | "background" | "unknown";
 }
 
 export interface LiteratureView {
@@ -121,6 +138,9 @@ export interface LiteratureView {
   why: string;
   phrase: string;
   tone: Tone;
+  related_strategy_ids?: string[];
+  target_subgoal_id?: string | null;
+  route_relevance?: "direct" | "pressure" | "background" | "unknown";
 }
 
 export type MissingKey =

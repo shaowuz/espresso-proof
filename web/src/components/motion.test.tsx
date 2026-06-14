@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MotionConfig } from "motion/react";
 import { describe, expect, it } from "vitest";
-import { Collapse, FadeIn, PulseDot } from "./motion";
+import { AnimatedList, Collapse, FadeIn, PulseDot } from "./motion";
 
 /**
  * Goal 43E safety: motion is polish only. It must never gate information —
@@ -32,6 +32,26 @@ describe("FadeIn", () => {
   it("renders children with and without reduced motion", () => {
     expect(html(<FadeIn>{<span>arrived</span>}</FadeIn>)).toContain("arrived");
     expect(html(<FadeIn>{<span>arrived</span>}</FadeIn>, true)).toContain("arrived");
+  });
+});
+
+describe("AnimatedList", () => {
+  it("renders all items with and without reduced motion", () => {
+    const list = (
+      <AnimatedList
+        items={[
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+        ]}
+        getKey={(item) => item.id}
+      >
+        {(item) => <span>{item.label}</span>}
+      </AnimatedList>
+    );
+    expect(html(list)).toContain("Alpha");
+    expect(html(list)).toContain("Beta");
+    expect(html(list, true)).toContain("Alpha");
+    expect(html(list, true)).toContain("Beta");
   });
 });
 

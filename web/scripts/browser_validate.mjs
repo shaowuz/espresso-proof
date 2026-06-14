@@ -47,7 +47,7 @@ log(title.includes("Espresso"), `page title is the product ("${title}")`);
 const header = await page.locator("header").count();
 log(header === 1, "app header present");
 const composer = await page.locator("textarea").count();
-log(composer >= 1, "bottom composer textarea present");
+log(composer === 1, `single bottom composer textarea present (got ${composer})`);
 
 // three-column grid on desktop: the three panes are laid out side by side.
 const cols = await page.evaluate(() => {
@@ -109,7 +109,18 @@ const overflow = await page.evaluate(
 log(overflow <= 0, `no horizontal overflow at 390px (delta ${overflow}px)`);
 const tabs = await page.locator("nav button").count();
 log(tabs === 3, `narrow pane tabs present (got ${tabs})`);
-const composerVisible = await page.locator("textarea").isVisible();
+const composerVisible = await page.locator("textarea").first().evaluate((el) => {
+  const rect = el.getBoundingClientRect();
+  const style = window.getComputedStyle(el);
+  return (
+    rect.width > 0 &&
+    rect.height > 0 &&
+    rect.bottom > 0 &&
+    rect.top < window.innerHeight &&
+    style.visibility !== "hidden" &&
+    style.display !== "none"
+  );
+});
 log(composerVisible, "composer visible at narrow width");
 await page.locator("nav button", { hasText: "Evidence" }).click();
 await page.waitForTimeout(250);

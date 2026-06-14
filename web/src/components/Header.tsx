@@ -1,6 +1,7 @@
 import { FlaskConical } from "lucide-react";
 import { MathText } from "./MathText";
 import type { ClaimView, StatusView } from "../lib/types";
+import { analyzeClaimText } from "../lib/claimText";
 
 /**
  * App header: brand, claim summary, run state, evidence readout. The run picker
@@ -15,7 +16,7 @@ export function Header({
   claim: ClaimView | undefined;
   status: StatusView | undefined;
 }) {
-  const claimText = claim?.text ?? "";
+  const claimText = claim ? analyzeClaimText(claim.text).summary : "";
   return (
     <header className="flex shrink-0 items-center gap-3 border-b border-stone-200 bg-white/80 px-4 py-2">
       <div className="flex items-center gap-1.5 text-stone-800">

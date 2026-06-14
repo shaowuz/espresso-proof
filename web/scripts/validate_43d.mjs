@@ -82,9 +82,17 @@ const danger = await page.evaluate(() => {
 log(danger.scripts === 0, `no injected <script> nodes in content (got ${danger.scripts})`);
 log(danger.jsHref === false, "no javascript: href injected from the math field");
 
-// malformed TeX fell back to copyable text rather than crashing the panel.
+// Goal 57 refines 43D: malformed TeX is hidden from the main claim summary
+// but remains copyable in the raw-input panel.
 const bodyText = await page.evaluate(() => document.body.innerText);
-log(bodyText.includes("\\frac{") || bodyText.includes("frac"), "malformed TeX fell back to readable text");
+log(
+  /Malformed TeX hidden|Unsafe or malformed markup was hidden/i.test(bodyText),
+  "malformed TeX is flagged without dominating the main claim card",
+);
+await page.getByText("Show raw input").first().click();
+await page.waitForTimeout(200);
+const rawBodyText = await page.evaluate(() => document.body.innerText);
+log(rawBodyText.includes("\\frac{"), "malformed TeX remains readable in raw input");
 log(!/Traceback|Cannot read|undefined is not/.test(bodyText), "no error text leaked into the page");
 
 // the claim still reads (the surrounding prose is present as escaped text).

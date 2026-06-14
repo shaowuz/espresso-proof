@@ -82,33 +82,62 @@ function DownloadArtifact({
     </a>
   );
 }
-import type { AgentState } from "../lib/types";
+import type { AgentState, AgentView } from "../lib/types";
 import { cn } from "../lib/cn";
 import { PanelPlaceholder } from "./ExpandableCard";
 import { FadeIn } from "./motion";
+import { formatDuration, timeAgo } from "../lib/time";
 
 /** Honest per-panel process chip. NEVER green: process state is not evidence.
  * Only ACTIVE / notable states show a chip; the resting states (ready, not_run,
  * and a plain finished/done) are unlabelled — a finished panel needs no badge. */
-export function AgentStateChip({ state }: { state: AgentState }) {
+export function AgentStateChip({ state, agent }: { state: AgentState; agent?: AgentView }) {
   const map: Record<string, { label: string; cls: string; spin?: boolean }> = {
+    not_run: { label: "not run", cls: "border-stone-200 bg-stone-50 text-stone-500" },
     running: { label: "running", cls: "border-amber-300 bg-amber-50 text-amber-800", spin: true },
     queued: { label: "queued", cls: "border-stone-300 bg-stone-100 text-stone-600", spin: true },
+    done: { label: "done", cls: "border-slate-200 bg-slate-100 text-slate-600" },
     failed: { label: "agent failed", cls: "border-rose-200 bg-rose-50 text-rose-700" },
     skipped: { label: "skipped", cls: "border-stone-200 bg-stone-100 text-stone-500" },
   };
   const c = map[state];
   if (!c) return null;
+  const detail =
+    agent?.duration_seconds != null
+      ? formatDuration(agent.duration_seconds)
+      : agent?.last_updated
+        ? timeAgo(agent.last_updated, Date.now())
+        : "";
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[12px] font-medium",
-        c.cls,
-      )}
-    >
-      {c.spin && <Loader2 className="h-2.5 w-2.5 animate-spin" aria-hidden />}
-      {c.label}
-    </span>
+    <FadeIn motionKey={state}>
+      <span
+        className={cn(
+          "inline-flex min-h-5 min-w-[4.25rem] items-center justify-center gap-1 rounded-full border px-1.5 py-0.5 text-[12px] font-medium",
+          c.cls,
+        )}
+      >
+        {c.spin && <Loader2 className="h-2.5 w-2.5 animate-spin" aria-hidden />}
+        {c.label}
+        {detail !== "" && <span className="font-normal opacity-75">· {detail}</span>}
+      </span>
+    </FadeIn>
+  );
+}
+
+export function PanelSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="flex flex-col gap-1.5" aria-label="Panel skeleton">
+      {Array.from({ length: rows }).map((_, index) => (
+        <div
+          key={index}
+          className="rounded-lg border border-stone-200 bg-white px-3 py-2"
+        >
+          <div className="h-3 w-2/3 rounded bg-stone-200" />
+          <div className="mt-2 h-2.5 w-full rounded bg-stone-100" />
+          <div className="mt-1.5 h-2.5 w-1/2 rounded bg-stone-100" />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -123,7 +152,9 @@ export function PanelSection({
   title,
   count,
   agentState,
+  agent,
   isPending,
+  isRefetching = false,
   isError,
   errorText,
   hasData,
@@ -137,7 +168,9 @@ export function PanelSection({
   title: string;
   count?: number | null;
   agentState?: AgentState;
+  agent?: AgentView;
   isPending: boolean;
+  isRefetching?: boolean;
   isError: boolean;
   errorText?: string;
   hasData: boolean;
@@ -150,6 +183,8 @@ export function PanelSection({
   run?: { runId: string; agent: string; onRan: () => void };
   children?: ReactNode;
 }) {
+  const processPending =
+    agentState === "queued" || agentState === "running" || (isPending || isRefetching);
   return (
     <section>
       <div className="mb-1.5 flex items-center gap-1.5">
@@ -160,7 +195,7 @@ export function PanelSection({
         {count != null && <span className="text-[13px] text-stone-400">{count}</span>}
         {run && <RunToggle {...run} />}
         {download && <DownloadArtifact {...download} enabled={hasData} />}
-        {agentState && <AgentStateChip state={agentState} />}
+        {agentState && <AgentStateChip state={agentState} agent={agent} />}
         {isPending && !hasData && (
           <Loader2 className="h-3 w-3 animate-spin text-stone-300" aria-hidden />
         )}
@@ -179,14 +214,17 @@ export function PanelSection({
             </button>
           )}
         </div>
-      ) : isPending && !hasData ? (
-        <PanelPlaceholder text="Loading…" />
-      ) : !hasData ? (
-        <PanelPlaceholder text={emptyText} />
-      ) : (
+      ) : processPending && !hasData ? (
+        <PanelSkeleton />
+      ) : hasData ? (
         // fade content in when it first arrives (skeleton -> content); a poll
         // refresh with the same hasData does not re-trigger it.
-        <FadeIn motionKey="loaded">{children}</FadeIn>
+        <div className="flex flex-col gap-1.5">
+          {processPending && <PanelSkeleton rows={1} />}
+          <FadeIn motionKey="loaded">{children}</FadeIn>
+        </div>
+      ) : (
+        <PanelPlaceholder text={emptyText} />
       )}
     </section>
   );

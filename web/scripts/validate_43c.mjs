@@ -32,7 +32,10 @@ await page.goto(base + "/", { waitUntil: "networkidle" });
 await page.waitForTimeout(1000);
 
 // expand the first strategy card to reveal rating controls + ledgers.
-const stratToggle = page.locator("section button[aria-expanded]").first();
+const stratToggle = page
+  .locator("section button[aria-expanded]")
+  .filter({ hasNotText: /raw input/i })
+  .first();
 log((await stratToggle.count()) > 0, "a strategy card is present");
 await stratToggle.click();
 await page.waitForTimeout(300);
@@ -58,15 +61,18 @@ log((await saveBtn.count()) > 0, "save-feedback button present");
 
 // drive a feedback save and confirm it persists (my_feedback summary appears).
 const range = page.locator('input[type="range"]').first();
+let targetScore = "88";
 if ((await range.count()) > 0) {
-  await range.fill("88");
+  const currentScore = await range.inputValue();
+  targetScore = currentScore === "88" ? "73" : "88";
+  await range.fill(targetScore);
 }
 const focusBtn = page.getByRole("button", { name: /focus/i }).first();
 if ((await focusBtn.count()) > 0) await focusBtn.click();
 await saveBtn.click();
 await page.waitForTimeout(2500); // allow POST + panel invalidation/refetch
 txt = await body();
-log(txt.includes("88") || txt.includes("saved"), "feedback save reflected in UI (score/saved)");
+log(txt.includes(targetScore) || txt.includes("saved"), "feedback save reflected in UI (score/saved)");
 
 // kernel-safety: no earned-green badge anywhere, and the rating/saved chips
 // are not green (a score is not evidence).
@@ -82,7 +88,11 @@ await page.screenshot({ path: join(out, "feedback.png"), fullPage: false });
 const continueBtn = page.getByRole("button", { name: /continue this route/i }).first();
 if ((await continueBtn.count()) > 0) {
   await continueBtn.click();
-  // wait for the round to finish and the ledger to render (poll up to ~40s).
+  const settingsBtn = page.getByRole("button", { name: /run details and settings/i }).first();
+  if ((await settingsBtn.count()) > 0) {
+    await settingsBtn.click();
+  }
+  // wait for the round to finish and the settings ledger to render (poll up to ~40s).
   let sawLedger = false;
   for (let i = 0; i < 40; i++) {
     await page.waitForTimeout(1000);

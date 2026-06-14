@@ -885,7 +885,12 @@ def _make_handler(workbench: Workbench):
             self.end_headers()
             self.wfile.write(body)
 
-        def _stream_chat(self, run_id: str, message: str) -> None:
+        def _stream_chat(
+            self,
+            run_id: str,
+            message: str,
+            active_object: dict[str, Any] | None = None,
+        ) -> None:
             """Goal 43F: stream the conversational preview as Server-Sent Events.
 
             Read-only: it resolves the run (path-confined) and streams already-
@@ -912,7 +917,7 @@ def _make_handler(workbench: Workbench):
                 self.wfile.flush()
 
             try:
-                for line in stream_chat(run_dir, message):
+                for line in stream_chat(run_dir, message, active_object):
                     emit("message", {"text": line})
                 emit("done", {"ok": True})
             except Exception:  # noqa: BLE001 — a broken pipe / read error ends safely
@@ -1111,7 +1116,12 @@ def _make_handler(workbench: Workbench):
                     # guard still applies. Every line is proof-language-scrubbed
                     # server-side before it leaves the process.
                     self._require_loopback_origin()
-                    self._stream_chat(parts[2], str(body.get("message", "")))
+                    active_object = body.get("active_object")
+                    self._stream_chat(
+                        parts[2],
+                        str(body.get("message", "")),
+                        active_object if isinstance(active_object, dict) else None,
+                    )
                     return
                 raise WorkbenchError(404, "not found")
             except WorkbenchError as exc:
