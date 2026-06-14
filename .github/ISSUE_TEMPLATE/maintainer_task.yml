@@ -1,0 +1,82 @@
+name: espresso-proof task
+description: Track an artifact-backed product, runtime, source, UI, or hygiene task.
+title: "[module] Short task title"
+labels: ["status:ready"]
+body:
+  - type: dropdown
+    id: module
+    attributes:
+      label: Module
+      description: Match `.ai/project-outline.yaml` module ids.
+      options:
+        - math-product
+        - runtime
+        - ui
+        - research-source
+        - github-hygiene
+    validations:
+      required: true
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Phase
+      description: Match `.ai/project-outline.yaml` phase ids.
+      options:
+        - v0-local-kernel
+        - v0-proof-sketch-critique
+        - v1-ui-and-agent-runtime
+        - project-map-mvp
+    validations:
+      required: true
+  - type: dropdown
+    id: energy
+    attributes:
+      label: Energy level
+      options:
+        - high
+        - normal
+        - low
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Product behavior protected
+      description: State the user-visible or kernel behavior this issue protects.
+      placeholder: "Example: finite checks stay scoped and never become universal proof."
+    validations:
+      required: true
+  - type: textarea
+    id: affected
+    attributes:
+      label: Affected artifacts or files
+      description: List code paths, schemas, fixtures, docs, or UI surfaces.
+      placeholder: |
+        - espresso_proof/...
+        - tests/...
+        - schemas/...
+    validations:
+      required: true
+  - type: textarea
+    id: completion
+    attributes:
+      label: Completion standard
+      description: Use checkboxes for concrete done criteria.
+      value: |
+        - [ ] Implementation or document change is complete.
+        - [ ] Focused tests or review artifacts cover the protected behavior.
+        - [ ] Source/proof/evidence/status risk is called out.
+        - [ ] Release-gate commands run or a reason is recorded.
+    validations:
+      required: true
+  - type: textarea
+    id: release_gate
+    attributes:
+      label: Tests and evals to run
+      description: Prefer commands from `.ai/project-outline.yaml` release_gate when relevant.
+      value: |
+        - [ ] `.venv/bin/python -m pytest -q`
+        - [ ] `.venv/bin/espresso eval --mode mock`
+        - [ ] `.venv/bin/espresso eval --schemas-only`
+    validations:
+      required: false
