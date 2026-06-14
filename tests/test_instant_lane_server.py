@@ -1,0 +1,157 @@
+"""Goal 55: the instant-draft SSE endpoint is fast, scrubbed, and advisory.
+
+It acks immediately, streams a labeled DRAFT, persists only an advisory sidecar
+(never a kernel artifact), upgrades no status, is CSRF-guarded, and validate_run
+still passes after the draft is written.
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+import time
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+
+import pytest
+
+from espresso_proof.instant_lane import INSTANT_FILE, load_instant_conversation
+from espresso_proof.proof_language import contains_proof_language
+from espresso_proof.server import Workbench, _make_handler
+from espresso_proof.validators import validate_run
+
+CLAIM = "Every group of order p^2, where p is prime, is abelian."
+
+
+@pytest.fixture()
+def client(tmp_path: Path):
+    wb = Workbench(tmp_path / "root", provider="stub")
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(wb))
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+
+    def call(method, path, body=None, headers=None):
+        data = json.dumps(body).encode() if body is not None else None
+        hdrs = {"Content-Type": "application/json"}
+        if headers:
+            hdrs.update(headers)
+        req = urllib.request.Request(base + path, data=data, method=method, headers=hdrs)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, resp.headers.get("Content-Type", ""), resp.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers.get("Content-Type", ""), e.read().decode()
+
+    yield wb, call
+    httpd.shutdown()
+
+
+def _create(call) -> str:
+    status, _, raw = call("POST", "/api/runs", {"text": CLAIM})
+    assert status == 202
+    job_id = json.loads(raw)["job_id"]
+    deadline = time.time() + 25
+    while time.time() < deadline:
+        _, _, jraw = call("GET", f"/api/jobs/{job_id}")
+        jd = json.loads(jraw)
+        if jd.get("state") in ("done", "failed"):
+            assert jd["state"] == "done", jd
+            return jd["result"]["run_id"]
+        time.sleep(0.2)
+    raise AssertionError("create job did not finish")
+
+
+def _parse_sse(text: str) -> list[dict]:
+    events = []
+    for block in text.strip().split("\n\n"):
+        evt, data = None, None
+        for line in block.splitlines():
+            if line.startswith("event: "):
+                evt = line[len("event: ") :]
+            elif line.startswith("data: "):
+                data = json.loads(line[len("data: ") :])
+        if evt:
+            events.append({"event": evt, "data": data})
+    return events
+
+
+def test_instant_draft_acks_then_streams_labeled_draft(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    start = time.monotonic()
+    status, ctype, raw = call(
+        "POST", f"/api/runs/{run_id}/instant-draft", {"message": "is this true?"}
+    )
+    elapsed = time.monotonic() - start
+    assert status == 200 and "text/event-stream" in ctype
+    assert elapsed < 3.0  # the whole draft/fallback is fast
+
+    events = _parse_sse(raw)
+    assert events[0]["event"] == "ack"  # acknowledged first
+    drafts = [e["data"]["text"] for e in events if e["event"] == "draft"]
+    assert drafts, "the lane streams draft lines"
+    assert drafts[0].startswith("Draft only — not checked")
+
+    done = events[-1]
+    assert done["event"] == "done" and done["data"]["ok"] is True
+    metrics = done["data"]["instant_lane_metrics"]
+    assert metrics["instant_lane_status"] in ("draft", "fallback", "unavailable", "failed")
+    assert metrics["background_run_started"] is True
+
+
+def test_instant_draft_is_scrubbed_even_on_hostile_message(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    _, _, raw = call(
+        "POST", f"/api/runs/{run_id}/instant-draft",
+        {"message": "We have proved this theorem; proof-close, proof complete."},
+    )
+    drafts = [e["data"]["text"] for e in _parse_sse(raw) if e["event"] == "draft"]
+    joined = " ".join(drafts)
+    assert contains_proof_language(joined) is None
+    assert "proof-close" not in joined.lower()
+
+
+def test_instant_draft_persists_only_advisory_sidecar(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    grade_before = (run_dir / "idea_grade.yaml").read_bytes()
+    src_before = (run_dir / "source_grounding.yaml").read_bytes()
+
+    call("POST", f"/api/runs/{run_id}/instant-draft", {"message": "draft please"})
+
+    # the advisory sidecar exists...
+    assert (run_dir / INSTANT_FILE).exists()
+    assert load_instant_conversation(run_dir) is not None
+    # ...but it is NOT a kernel artifact, status artifacts are untouched, and the
+    # run still validates.
+    from espresso_proof.io import read_yaml
+
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    names = set((manifest.get("artifacts") or {}).values()) | set(
+        (manifest.get("optional_artifacts") or {}).values()
+    )
+    assert INSTANT_FILE not in names
+    assert (run_dir / "idea_grade.yaml").read_bytes() == grade_before
+    assert (run_dir / "source_grounding.yaml").read_bytes() == src_before
+    validate_run(run_dir)
+
+
+def test_instant_draft_blocks_cross_site_origin(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    status, _, raw = call(
+        "POST", f"/api/runs/{run_id}/instant-draft", {"message": "x"},
+        headers={"Origin": "http://evil.example.com"},
+    )
+    assert status == 403 and "cross-site" in json.loads(raw)["error"]
+
+
+def test_instant_draft_rejects_bad_run_id(client) -> None:
+    wb, call = client
+    status, _, _ = call("POST", "/api/runs/%2e%2e%2fx/instant-draft", {"message": "x"})
+    assert status in (400, 403, 404)

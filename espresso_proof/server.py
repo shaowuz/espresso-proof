@@ -926,6 +926,68 @@ def _make_handler(workbench: Workbench):
                 except Exception:  # noqa: BLE001
                     pass
 
+        def _stream_instant_draft(self, run_id: str, message: str) -> None:
+            """Goal 55: the instant conversation lane as Server-Sent Events.
+
+            Acknowledges immediately, then streams an already-scrubbed labeled
+            DRAFT ("Draft only — not checked") built within a small latency
+            budget. It never blocks on a slow model. The draft is persisted as an
+            advisory SIDECAR the kernel never reads, and it upgrades no status."""
+
+            from .instant_lane import (
+                build_instant_draft,
+                instant_lane_metrics,
+                stream_instant_draft,
+                write_instant_conversation,
+            )
+            from .observability import monotonic_ms, now_iso
+
+            received = now_iso()
+            t0 = monotonic_ms()
+            try:
+                run_dir = workbench.resolve_run(run_id)
+            except WorkbenchError as exc:
+                self._send_json({"error": exc.message}, status=exc.status)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+
+            def emit(event: str, data: dict) -> None:
+                chunk = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                self.wfile.write(chunk.encode("utf-8"))
+                self.wfile.flush()
+
+            try:
+                emit("ack", {"label": "Draft only — not checked", "working": True})
+                ack_ms = monotonic_ms() - t0
+                # client=None → friendly deterministic fallback draft: instant and
+                # safe, and never the deep xhigh adapter. A bounded fast-model
+                # profile can be injected here later without changing the contract.
+                draft = build_instant_draft(message, run_id=run_id, created_at=now_iso())
+                draft_ms = monotonic_ms() - t0
+                for line in stream_instant_draft(draft):
+                    emit("draft", {"text": line})
+                try:
+                    write_instant_conversation(run_dir, draft)
+                except Exception:  # noqa: BLE001 — persistence is advisory; never break the stream
+                    pass
+                metrics = instant_lane_metrics(
+                    request_received_at=received,
+                    first_visible_ack_ms=ack_ms,
+                    first_draft_visible_ms=draft_ms,
+                    status=draft.status,
+                    background_run_started=True,
+                )
+                emit("done", {"ok": True, **metrics, "advisory": True})
+            except Exception:  # noqa: BLE001 — a broken pipe / read error ends safely
+                try:
+                    emit("done", {"ok": False, "advisory": True})
+                except Exception:  # noqa: BLE001
+                    pass
+
         def _read_json(self) -> dict[str, Any]:
             length = int(self.headers.get("Content-Length") or 0)
             if length <= 0:
@@ -1122,6 +1184,13 @@ def _make_handler(workbench: Workbench):
                         str(body.get("message", "")),
                         active_object if isinstance(active_object, dict) else None,
                     )
+                    return
+                if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "instant-draft":
+                    # Goal 55: the instant conversation lane (SSE). Acks fast, then
+                    # streams an already-scrubbed labeled DRAFT; loopback-guarded;
+                    # persists an advisory sidecar only and upgrades no status.
+                    self._require_loopback_origin()
+                    self._stream_instant_draft(parts[2], str(body.get("message", "")))
                     return
                 raise WorkbenchError(404, "not found")
             except WorkbenchError as exc:
