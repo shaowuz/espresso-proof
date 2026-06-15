@@ -67,6 +67,7 @@ from .models import (
     TheoremConditionLedger,
     TheoremExtractionReport,
     TimeAllocationPlan,
+    UpdateInboxReport,
 )
 from .pressure_status import (
     artifact_revision_hash,
@@ -150,6 +151,7 @@ def validate_run(run_dir: Path) -> None:
     agent_run_status = _load_optional_agent_run_status(run_dir, manifest)
     pressure_status = _load_optional_pressure_status(run_dir, manifest)
     time_allocation = _load_optional_time_allocation(run_dir, manifest)
+    update_inbox = _load_optional_update_inbox(run_dir, manifest)
     _load_optional_ai_review(run_dir, manifest, claim)
     human_feedback, feedback_summary = _load_optional_human_feedback(run_dir, manifest)
 
@@ -263,6 +265,7 @@ def validate_run(run_dir: Path) -> None:
         strategy_synthesis,
         strategy_brief,
     )
+    _validate_update_inbox(update_inbox, claim, manifest, run_dir)
     _validate_final_report_language(run_dir / artifacts["final_report"], idea_grade)
 
 
@@ -302,6 +305,19 @@ def _load_optional_time_allocation(
     return validate_yaml_model(
         run_dir / optional["time_allocation"],
         TimeAllocationPlan,
+    )
+
+
+def _load_optional_update_inbox(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> UpdateInboxReport | None:
+    optional = manifest.optional_artifacts
+    if "update_inbox" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["update_inbox"],
+        UpdateInboxReport,
     )
 
 
@@ -583,6 +599,98 @@ def _contains_forbidden_allocation_token(value, forbidden: set[str]) -> bool:
         )
     if isinstance(value, (list, tuple, set)):
         return any(_contains_forbidden_allocation_token(item, forbidden) for item in value)
+    return False
+
+
+def _validate_update_inbox(
+    update_inbox: UpdateInboxReport | None,
+    claim: Claim,
+    manifest: RunManifest,
+    run_dir: Path,
+) -> None:
+    if "update_inbox" in manifest.artifacts:
+        raise KernelValidationError("update_inbox must be an optional scheduling artifact")
+    if update_inbox is None:
+        return
+    if manifest.optional_artifacts.get("update_inbox") != "update_inbox.yaml":
+        raise KernelValidationError("update_inbox optional artifact must be update_inbox.yaml")
+    if update_inbox.claim_id != claim.id:
+        raise KernelValidationError("update_inbox claim_id does not match locked claim")
+    if update_inbox.run_id != manifest.run_id:
+        raise KernelValidationError("update_inbox run_id does not match run manifest")
+
+    artifact_path = run_dir / manifest.optional_artifacts["update_inbox"]
+    raw = read_yaml(artifact_path)
+    forbidden_fields = {
+        "proof_status",
+        "source_backed",
+        "source_status",
+        "checked_evidence",
+        "example_checked",
+        "example_survived",
+        "example_failed",
+        "counterexample_refutes_claim",
+        "theorem_applicability_status",
+        "grade_status",
+        "verified",
+        "proved",
+        "complete_proof",
+        "final_status",
+        "memory_evidence",
+    }
+    if _contains_forbidden_update_inbox_token(raw, forbidden_fields):
+        raise KernelValidationError("update_inbox cannot write mathematical status fields")
+
+    for entry in update_inbox.entries:
+        if entry.locked_claim_id != claim.id:
+            raise KernelValidationError("update_inbox entry locked_claim_id does not match claim")
+        if entry.effect != "scheduling_only" or entry.advisory_only is not True:
+            raise KernelValidationError("update_inbox entries must be scheduling-only/advisory")
+        if entry.dedupe_key != _canonical_update_inbox_dedupe_key(entry):
+            raise KernelValidationError("update_inbox entry dedupe_key is not canonical")
+        validate_relative_artifact_path(
+            f"update_inbox.{entry.id}.origin_artifact",
+            entry.origin_artifact,
+            path_name="origin artifact",
+        )
+
+
+def _canonical_update_inbox_dedupe_key(entry) -> str:
+    route = entry.route_id_or_step_id
+    route_key = "whole_claim" if route is None else str(route)
+    return "|".join(
+        [
+            str(entry.type.value if hasattr(entry.type, "value") else entry.type),
+            str(entry.locked_claim_id),
+            str(entry.origin_artifact),
+            str(entry.origin_artifact_id_or_path),
+            str(entry.artifact_revision_or_hash),
+            route_key,
+        ]
+    )
+
+
+def _contains_forbidden_update_inbox_token(value, forbidden_fields: set[str]) -> bool:
+    if isinstance(value, str):
+        normalized = value.lower()
+        if _first_forbidden_proof_language(normalized):
+            return True
+        return any(
+            re.search(pattern, normalized)
+            for pattern in [
+                r"\bproof-close\b",
+                r"\bsettled\b",
+                r"\bverified\s+by\s+examples\b",
+            ]
+        )
+    if isinstance(value, dict):
+        return any(
+            str(key) in forbidden_fields
+            or _contains_forbidden_update_inbox_token(item, forbidden_fields)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_forbidden_update_inbox_token(item, forbidden_fields) for item in value)
     return False
 
 

@@ -1736,6 +1736,82 @@ class TimeAllocationPlan(StrictBaseModel):
         return self
 
 
+UpdateInboxType = Literal[
+    "source_gap",
+    "source_status_signal",
+    "theorem_condition_blocker",
+    "example_pressure",
+    "counterexample_pressure",
+    "counterexample_admissibility",
+    "strategy_brief",
+    "human_preference",
+    "reviewer_objection",
+    "prover_progress",
+    "budget_signal",
+    "advisory_memory_signal",
+]
+
+
+class UpdateInboxEntry(StrictBaseModel):
+    """Scheduling-only late signal for V2 Update Inbox.
+
+    The entry has no payload field and no mathematical status owner field. Strict
+    validation rejects status smuggling; validator_ok only means the origin
+    artifact validated in its own lane.
+    """
+
+    id: str
+    type: UpdateInboxType
+    origin_stage: str
+    origin_artifact: str
+    origin_artifact_id_or_path: str
+    locked_claim_id: str
+    route_id_or_step_id: str | None
+    artifact_revision_or_hash: str
+    validator_ok: bool
+    created_at: str
+    dedupe_key: str
+    applied_at: str | None
+    effect: Literal["scheduling_only"]
+    advisory_only: Literal[True]
+
+    @model_validator(mode="after")
+    def validate_required_text(self) -> UpdateInboxEntry:
+        text_fields = {
+            "id": self.id,
+            "origin_stage": self.origin_stage,
+            "origin_artifact": self.origin_artifact,
+            "origin_artifact_id_or_path": self.origin_artifact_id_or_path,
+            "locked_claim_id": self.locked_claim_id,
+            "artifact_revision_or_hash": self.artifact_revision_or_hash,
+            "created_at": self.created_at,
+            "dedupe_key": self.dedupe_key,
+        }
+        blank = [name for name, value in text_fields.items() if not value.strip()]
+        if blank:
+            raise ValueError(f"update inbox entry fields cannot be blank: {blank}")
+        if self.route_id_or_step_id is not None and not self.route_id_or_step_id.strip():
+            raise ValueError("route_id_or_step_id cannot be blank")
+        return self
+
+
+class UpdateInboxReport(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    entries: list[UpdateInboxEntry] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_entries(self) -> UpdateInboxReport:
+        ids = [entry.id for entry in self.entries]
+        dedupe = [entry.dedupe_key for entry in self.entries]
+        if len(ids) != len(set(ids)):
+            raise ValueError("update inbox entry ids must be unique")
+        if len(dedupe) != len(set(dedupe)):
+            raise ValueError("update inbox dedupe_key values must be unique")
+        return self
+
+
 class HumanChoice(StrictBaseModel):
     claim_id: str
     status: HumanChoiceStatus
@@ -3080,6 +3156,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "strategy_synthesis": StrategySynthesis,
     "strategy_brief": StrategyBrief,
     "time_allocation": TimeAllocationPlan,
+    "update_inbox": UpdateInboxReport,
     "human_choice": HumanChoice,
     "human_example_feedback": HumanExampleFeedback,
     "example_feedback_summary": ExampleFeedbackSummary,
