@@ -36,7 +36,9 @@ def _write_mem(run_dir: Path, *, mid: str, mtype: str, summary: str) -> None:
     claim = read_yaml(run_dir / "locked_claim.yaml")
     write_memory_entry(run_dir.parents[1], {
         "id": mid, "timestamp": "t", "project": "mem", "type": mtype,
-        "claim_id": claim["id"], "summary": summary, "provenance": ["p"],
+        "claim_id": claim["id"],
+        "summary": summary,
+        "provenance": [f"projects/mem/runs/{run_dir.name}/idea_grade.yaml"],
         "reusable_lesson": "lesson",
     })
 

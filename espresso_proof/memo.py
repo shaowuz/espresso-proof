@@ -441,11 +441,15 @@ def build_concise_memo(run_dir: Path) -> str:
         mc = read_yaml(run_dir / optional["memory_context"])
         matched = mc.get("matched_entries", [])
         if matched:
+            schema_version = int(mc.get("schema_version") or 1)
             lines.append("")
             lines.append("Memory from prior runs (advisory; never changes status):")
             for m in matched:
                 # recommended_use / type are internal tokens; render as words.
-                use = str(m.get("recommended_use") or "").replace("_", " ")
+                if schema_version < 2 or m.get("revalidation_required"):
+                    use = "pending revalidation; no action"
+                else:
+                    use = str(m.get("recommended_use") or "").replace("_", " ")
                 kind = str(m.get("type") or "").replace("_", " ")
                 lines.append(
                     f"  [{use}] {m.get('summary')} "

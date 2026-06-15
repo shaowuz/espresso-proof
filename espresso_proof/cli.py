@@ -73,7 +73,7 @@ from .scorecard import render_scorecard_markdown, run_scorecard
 from .memo import build_concise_memo
 from .proof_language import scrub_proof_language
 from .reviewer_checklist import review_checklist
-from .memory import summarize_memory, write_memory_entry
+from .memory import load_memory_index, summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
 from .pdf_ingestion import (
     extract_candidate_locators,
@@ -105,6 +105,7 @@ from .models import (
     LLMAgentRunReport,
     LiteratureReviewAgentReport,
     LiteratureReviewReport,
+    MemoryEntry,
     ProverLoopReport,
     TheoremApplicabilityReport,
     TheoremExtractionReport,
@@ -1505,6 +1506,25 @@ def choose_strategy(
             "human_confirmed": True,
         }
         HumanChoice.model_validate(choice)
+        run_id = manifest["run_id"]
+        entry = {
+            "id": f"user_decision_{run_id}",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "project": manifest["project_id"],
+            "type": "user_decision",
+            "claim_id": strategy_brief["claim_id"],
+            "summary": (
+                f"Human chose strategy id {strategy} with {effort.value}; "
+                f"decision={decision.value}."
+            ),
+            "provenance": [
+                f"projects/{manifest['project_id']}/runs/{run_id}/{artifacts['human_choice']}",
+                f"projects/{manifest['project_id']}/runs/{run_id}/{artifacts['strategy_brief']}",
+            ],
+            "reusable_lesson": reason.strip(),
+        }
+        MemoryEntry.model_validate(entry)
+        load_memory_index(run.parents[1])
         write_yaml(run / artifacts["human_choice"], choice)
         manifest["current_state"] = _state_for_human_decision(decision)
         write_yaml(manifest_path, manifest)
@@ -1516,24 +1536,6 @@ def choose_strategy(
             raise
 
     project_dir = run.parents[1]
-    run_id = manifest["run_id"]
-    title = _strategy_title(strategy_brief, strategy)
-    entry = {
-        "id": f"user_decision_{run_id}",
-        "timestamp": datetime.now(UTC).isoformat(),
-        "project": manifest["project_id"],
-        "type": "user_decision",
-        "claim_id": strategy_brief["claim_id"],
-        "summary": (
-            f"Human chose {strategy} ({title}) with {effort.value}; "
-            f"decision={decision.value}."
-        ),
-        "provenance": [
-            f"projects/{manifest['project_id']}/runs/{run_id}/{artifacts['human_choice']}",
-            f"projects/{manifest['project_id']}/runs/{run_id}/{artifacts['strategy_brief']}",
-        ],
-        "reusable_lesson": reason.strip(),
-    }
     memory_path = write_memory_entry(
         project_dir,
         entry,

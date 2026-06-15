@@ -563,7 +563,7 @@ def _memory_entry(**overrides) -> dict:
         "type": "failed_attempt",
         "claim_id": "claim_1",
         "summary": "specialization route stalled at step 3",
-        "provenance": ["run:demo"],
+        "provenance": ["projects/mem_proj/runs/demo/idea_grade.yaml"],
         "reusable_lesson": "specialization route needs a flatness check first",
     }
     entry.update(overrides)
