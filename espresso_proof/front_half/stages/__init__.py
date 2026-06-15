@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from . import (  # noqa: F401 - import side effect registers stages
     attacker,
+    check_generator,
     counterexamples,
     examples,
     grade,
