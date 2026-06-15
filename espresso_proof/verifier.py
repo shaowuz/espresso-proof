@@ -8,6 +8,8 @@ small, zero-dependency, auditable backend:
   walker over :class:`fractions.Fraction` (no ``eval``; only +, -, *, /, **).
 - ``permutation_order``: compute the order of a permutation given in cycle
   notation as the lcm of its cycle lengths.
+- ``finite_enumeration``: exhaustively check ``@var[a:b] body`` identities over
+  a finite integer range, with bounded ``sum(a,b)`` / ``prod(a,b)`` helpers.
 
 The verifier never upgrades status. It produces a verification report recording,
 per check, whether the machine confirmed or refuted the claimed result.
@@ -44,6 +46,8 @@ _MAX_EXPR_LEN = 1000          # input length (also bounds parse/recursion depth)
 _MAX_EXPONENT = 1000          # exponent magnitude for **
 _MAX_RESULT_BITS = 100_000    # estimated bit-length of a ** result
 _MAX_MATRIX_DIM = 12          # max rows/cols for a matrix backend (bounds O(n^3) cost)
+_MAX_ENUM = 100_000           # finite_enumeration range size / sum,prod span
+_MAX_ENUM_WORK = 5_000_000    # composed finite_enumeration work budget
 
 
 def _eval_arith(expr: str) -> Fraction:
@@ -59,10 +63,14 @@ def _eval_arith(expr: str) -> Fraction:
     return _eval_node(tree.body)
 
 
-def _eval_node(node: ast.AST) -> Fraction:
+def _eval_node(
+    node: ast.AST,
+    env: dict[str, Fraction] | None = None,
+    enum_budget: list[int] | None = None,
+) -> Fraction:
     if isinstance(node, ast.BinOp) and isinstance(node.op, _ARITH_BINOPS):
-        left = _eval_node(node.left)
-        right = _eval_node(node.right)
+        left = _eval_node(node.left, env, enum_budget)
+        right = _eval_node(node.right, env, enum_budget)
         if isinstance(node.op, ast.Add):
             return left + right
         if isinstance(node.op, ast.Sub):
@@ -86,14 +94,72 @@ def _eval_node(node: ast.AST) -> Fraction:
             raise VerifierError("exponentiation result too large for safe verification")
         return left ** exp
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, _ARITH_UNARY):
-        operand = _eval_node(node.operand)
+        operand = _eval_node(node.operand, env, enum_budget)
         return operand if isinstance(node.op, ast.UAdd) else -operand
     if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool):
         return Fraction(node.value)
+    if env is not None and isinstance(node, ast.Name) and node.id in env:
+        return env[node.id]
+    if (
+        env is not None
+        and isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"sum", "prod"}
+        and not node.keywords
+    ):
+        args = [_eval_node(arg, env, enum_budget) for arg in node.args]
+        if len(args) != 2 or any(arg.denominator != 1 for arg in args):
+            raise VerifierError("sum/prod take two integer bounds: sum(a,b)")
+        lo, hi = int(args[0]), int(args[1])
+        span = hi - lo + 1
+        if span <= 0 or span > _MAX_ENUM:
+            raise VerifierError("sum/prod span empty or too large for safe verification")
+        if enum_budget is not None:
+            enum_budget[0] -= span
+            if enum_budget[0] < 0:
+                raise VerifierError("finite_enumeration work too large for safe verification")
+        if node.func.id == "sum":
+            return Fraction((lo + hi) * span, 2)
+        result = Fraction(1)
+        for value in range(lo, hi + 1):
+            result *= value
+            bits = max(
+                abs(result.numerator).bit_length(),
+                abs(result.denominator).bit_length(),
+                1,
+            )
+            if bits > _MAX_RESULT_BITS:
+                raise VerifierError("prod result too large for safe verification")
+        return result
     raise VerifierError(
         "unsupported expression element; allow only integers and + - * / ** "
         "(write fractions as a/b)"
     )
+
+
+_ENUM_RE = re.compile(r"^@([A-Za-z_][A-Za-z0-9_]*)\[(-?\d+):(-?\d+)\]\s*(.+)$", re.DOTALL)
+
+
+def _parse_enum(spec: str) -> tuple[str, int, int, str]:
+    """Parse a finite_enumeration spec ``@var[a:b] body``."""
+    if len(spec) > _MAX_EXPR_LEN:
+        raise VerifierError("expression too long for safe verification")
+    match = _ENUM_RE.match(spec.strip())
+    if not match:
+        raise VerifierError("expected finite_enumeration form '@var[a:b] body'")
+    return match.group(1), int(match.group(2)), int(match.group(3)), match.group(4).strip()
+
+
+def _eval_enum_body(
+    body: str, env: dict[str, Fraction], enum_budget: list[int]
+) -> Fraction:
+    try:
+        tree = ast.parse(body, mode="eval")
+    except SyntaxError as exc:
+        raise VerifierError(f"could not parse enumeration body: {exc}") from exc
+    except RecursionError as exc:  # pragma: no cover - defensive
+        raise VerifierError("enumeration body nested too deeply") from exc
+    return _eval_node(tree.body, env, enum_budget)
 
 
 def _frac_str(value: Fraction) -> str:
@@ -414,6 +480,7 @@ def verify_check(check: dict) -> dict | None:
         "check_id": check["id"],
         "claim_id": check["claim_id"],
         "kind": kind,
+        "expression": expression,
         "expected": expected,
     }
     witness = None
@@ -459,6 +526,39 @@ def verify_check(check: dict) -> dict | None:
                 # identity; persistence (see persist_polynomial_witness) records it
                 # with conservative scope flags so it can never refute the claim.
                 witness = find_polynomial_counterexample(lhs, rhs)
+        elif kind == "finite_enumeration":
+            # Exhaustively check an identity over a bounded integer range.
+            # ``confirmed`` means every instance in this finite scope matched;
+            # it is computation_checked evidence only, not a universal proof.
+            var_l, lo_l, hi_l, body_l = _parse_enum(expression)
+            var_r, lo_r, hi_r, body_r = _parse_enum(expected)
+            if (var_l, lo_l, hi_l) != (var_r, lo_r, hi_r):
+                raise VerifierError("expression and expected must enumerate the same var/range")
+            span = hi_l - lo_l + 1
+            if span <= 0 or span > _MAX_ENUM:
+                raise VerifierError("enumeration range empty or too large for safe verification")
+            enum_budget = [_MAX_ENUM_WORK]
+            counterexample = None
+            for value in range(lo_l, hi_l + 1):
+                enum_budget[0] -= 1
+                if enum_budget[0] < 0:
+                    raise VerifierError("finite_enumeration work too large for safe verification")
+                env = {var_l: Fraction(value)}
+                lhs = _eval_enum_body(body_l, env, enum_budget)
+                rhs = _eval_enum_body(body_r, env, enum_budget)
+                if lhs != rhs:
+                    counterexample = (value, _frac_str(lhs), _frac_str(rhs))
+                    break
+            verdict = "confirmed" if counterexample is None else "refuted"
+            computed_str = (
+                f"holds for all {var_l} in [{lo_l},{hi_l}]"
+                if counterexample is None
+                else (
+                    f"counterexample {var_l}={counterexample[0]}: "
+                    f"{counterexample[1]} != {counterexample[2]}"
+                )
+            )
+            backend = "stdlib_finite_enumeration"
         else:
             return {
                 **base,

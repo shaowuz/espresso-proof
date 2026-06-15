@@ -323,6 +323,7 @@ class MachineCheckSpec(StrictBaseModel):
         "matrix_rank",
         "matrix_determinant",
         "polynomial_identity",
+        "finite_enumeration",
     ]
     expression: str
     expected: str
@@ -398,6 +399,7 @@ class ComputationVerificationResult(StrictBaseModel):
     check_id: str
     claim_id: str
     kind: str
+    expression: str = ""
     backend: str
     executed: bool
     verdict: VerificationVerdict

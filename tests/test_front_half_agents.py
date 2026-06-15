@@ -840,3 +840,307 @@ def test_precise_claim_memo_has_no_stale_vague_language(tmp_path: Path) -> None:
     assert "not precise enough to test" not in memo
     for banned in ("proof-close", "proof complete", "we proved", "this establishes the theorem"):
         assert banned not in memo
+
+
+def _finite_confirmed_machine_check() -> dict:
+    return {
+        "kind": "finite_enumeration",
+        "expression": "@n[1:10] sum(1,n)",
+        "expected": "@n[1:10] n*(n+1)/2",
+        "notes": "",
+    }
+
+
+def _confirmed_verification_result(check_id: str = "c1") -> dict:
+    return {
+        "schema_version": 1,
+        "claim_id": "claim_001",
+        "generated_at": "2026-06-14T00:00:00+00:00",
+        "backend": "espresso-stdlib-verifier",
+        "results": [
+            {
+                "check_id": check_id,
+                "claim_id": "claim_001",
+                "kind": "finite_enumeration",
+                "expression": "@n[1:10] sum(1,n)",
+                "backend": "stdlib_finite_enumeration",
+                "executed": True,
+                "verdict": "confirmed",
+                "computed": "holds for all n in [1,10]",
+                "expected": "@n[1:10] n*(n+1)/2",
+                "detail": "executed finite enumeration",
+            }
+        ],
+    }
+
+
+def _regrade_status(
+    tmp_path: Path,
+    *,
+    counterexamples: list[dict] | None = None,
+    check: dict | None = None,
+    verification: dict | None = None,
+) -> dict:
+    from espresso_proof.front_half.stages.grade import _regrade
+    from espresso_proof.llm_agents import load_agent_context
+
+    claim_path = tmp_path / "regrade_claim.md"
+    claim_path.write_text(
+        "For every integer n>=1, 1+2+...+n = n(n+1)/2.\n",
+        encoding="utf-8",
+    )
+    run_dir = run_mock_critique("regrade_test", claim_path, tmp_path)
+    ctx = load_agent_context(run_dir)
+    ctx["hypothesis_ledger"]["claim_precision"] = "precise"
+    if counterexamples is not None:
+        ctx["counterexamples"] = {"tests": counterexamples}
+    if check is not None:
+        ctx["computation_checks"] = {"checks": [check]}
+    if verification is not None:
+        ctx["computation_verification"] = verification
+    _regrade(run_dir=run_dir, client=StubLLMClient(), context=ctx)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    return read_yaml(run_dir / artifacts["idea_grade"])
+
+
+def test_regrade_missing_support_alone_is_fragile_not_likely_false(tmp_path: Path) -> None:
+    grade = _regrade_status(tmp_path, counterexamples=[])
+    assert grade["status"] == "fragile"
+
+
+def test_regrade_confirmed_machine_check_vetoes_likely_false(tmp_path: Path) -> None:
+    counterexamples = [
+        {"id": "cx1", "satisfies_all_claim_hypotheses": False, "refutes_claim": False}
+    ]
+    check = {
+        "id": "c1",
+        "claim_id": "claim_001",
+        "status": "checked",
+        "machine_check": _finite_confirmed_machine_check(),
+    }
+    grade = _regrade_status(
+        tmp_path,
+        counterexamples=counterexamples,
+        check=check,
+        verification=_confirmed_verification_result(),
+    )
+    assert grade["status"] == "fragile"
+    assert grade["status"] not in {"promising", "proved", "refuted"}
+    assert grade["proof_language_status"] == "idea_sketch"
+
+
+def test_regrade_unchecked_negative_pressure_still_flags_likely_false(tmp_path: Path) -> None:
+    counterexamples = [
+        {"id": "cx1", "satisfies_all_claim_hypotheses": False, "refutes_claim": False}
+    ]
+    grade = _regrade_status(tmp_path, counterexamples=counterexamples)
+    assert grade["status"] == "likely_false"
+
+
+def test_regrade_checked_machine_check_without_verification_does_not_veto(
+    tmp_path: Path,
+) -> None:
+    counterexamples = [
+        {"id": "cx1", "satisfies_all_claim_hypotheses": False, "refutes_claim": False}
+    ]
+    check = {
+        "id": "c1",
+        "claim_id": "claim_001",
+        "status": "checked",
+        "machine_check": _finite_confirmed_machine_check(),
+    }
+    grade = _regrade_status(tmp_path, counterexamples=counterexamples, check=check)
+    assert grade["status"] == "likely_false"
+
+
+def test_regrade_stale_verification_for_other_claim_does_not_veto(
+    tmp_path: Path,
+) -> None:
+    counterexamples = [
+        {"id": "cx1", "satisfies_all_claim_hypotheses": False, "refutes_claim": False}
+    ]
+    check = {
+        "id": "c1",
+        "claim_id": "claim_001",
+        "status": "checked",
+        "machine_check": _finite_confirmed_machine_check(),
+    }
+    verification = _confirmed_verification_result()
+    verification["claim_id"] = "other_claim"
+    verification["results"][0]["claim_id"] = "other_claim"
+    grade = _regrade_status(
+        tmp_path, counterexamples=counterexamples, check=check, verification=verification
+    )
+    assert grade["status"] == "likely_false"
+
+
+def test_regrade_stale_verification_for_other_expression_does_not_veto(
+    tmp_path: Path,
+) -> None:
+    counterexamples = [
+        {"id": "cx1", "satisfies_all_claim_hypotheses": False, "refutes_claim": False}
+    ]
+    check = {
+        "id": "c1",
+        "claim_id": "claim_001",
+        "status": "checked",
+        "machine_check": _finite_confirmed_machine_check(),
+    }
+    verification = _confirmed_verification_result()
+    verification["results"][0]["expression"] = "@n[1:10] n"
+    grade = _regrade_status(
+        tmp_path, counterexamples=counterexamples, check=check, verification=verification
+    )
+    assert grade["status"] == "likely_false"
+
+
+def test_regrade_admissible_refutation_still_refuted(tmp_path: Path) -> None:
+    counterexamples = [
+        {"id": "cx1", "satisfies_all_claim_hypotheses": True, "refutes_claim": True}
+    ]
+    grade = _regrade_status(tmp_path, counterexamples=counterexamples)
+    assert grade["status"] == "refuted"
+
+
+def test_regrade_unchecked_computation_check_does_not_veto_likely_false(
+    tmp_path: Path,
+) -> None:
+    counterexamples = [
+        {"id": "cx1", "satisfies_all_claim_hypotheses": False, "refutes_claim": False}
+    ]
+    check = {
+        "id": "c1",
+        "claim_id": "claim_001",
+        "status": "human_needed",
+        "machine_check": _finite_confirmed_machine_check(),
+    }
+    grade = _regrade_status(tmp_path, counterexamples=counterexamples, check=check)
+    assert grade["status"] == "likely_false"
+
+
+def test_reconcile_tests_drops_dangling_example_reference(tmp_path: Path) -> None:
+    from espresso_proof.front_half.stages.examples import _reconcile_tests_with_examples
+
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("recon_tests", claim_path, tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    tests = read_yaml(run_dir / artifacts["tests"])
+    referenced = {eid for test in tests["tests"] for eid in test.get("uses_examples", [])}
+    assert "ex_special_cubic" in referenced
+
+    dropped = _reconcile_tests_with_examples(run_dir, artifacts, tests["claim_id"], set())
+
+    assert dropped >= 1
+    after = read_yaml(run_dir / artifacts["tests"])
+    assert all("ex_special_cubic" not in test.get("uses_examples", []) for test in after["tests"])
+
+
+def test_reconcile_tests_keeps_valid_bank_counterexample_reference(tmp_path: Path) -> None:
+    from espresso_proof.front_half.stages.examples import _reconcile_tests_with_examples
+    from espresso_proof.research_bank import materialize_run_banks
+
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("recon_bank_tests", claim_path, tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    counterexamples = read_yaml(run_dir / artifacts["counterexamples"])
+    cex_id = counterexamples["tests"][0]["id"]
+    write_yaml(
+        run_dir / artifacts["tests"],
+        {
+            "claim_id": counterexamples["claim_id"],
+            "target": "claim",
+            "tests": [
+                {
+                    "id": "t_bank_cex",
+                    "description": "valid bank counterexample reference",
+                    "uses_examples": [],
+                    "uses_counterexamples": [cex_id],
+                    "result": "not_tested",
+                    "evidence_status": "human_needed",
+                    "main_observation": "candidate only",
+                    "next_action": "inspect",
+                }
+            ],
+            "summary": "valid bank reference",
+        },
+    )
+    materialize_run_banks(run_dir, keys=["counterexamples"])
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+
+    dropped = _reconcile_tests_with_examples(run_dir, artifacts, counterexamples["claim_id"], set())
+
+    assert dropped == 0
+    tests = read_yaml(run_dir / artifacts["tests"])
+    assert tests["tests"][0]["uses_counterexamples"] == [cex_id]
+
+
+def test_reconcile_strategy_unclear_resets_to_lock_only(tmp_path: Path) -> None:
+    from espresso_proof.front_half.stages.grade import _reconcile_strategy_after_regrade
+
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text("Vague mirror thing.\n", encoding="utf-8")
+    run_dir = run_mock_critique("recon_unclear", claim_path, tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+
+    _reconcile_strategy_after_regrade(run_dir, artifacts, {"status": "unclear", "score": 10})
+
+    synthesis = read_yaml(run_dir / artifacts["strategy_synthesis"])
+    brief = read_yaml(run_dir / artifacts["strategy_brief"])
+    assert [route["id"] for route in synthesis["routes"]] == ["strategy_lock_claim"]
+    assert [route["id"] for route in brief["top_strategies"]] == ["strategy_lock_claim"]
+    assert synthesis["routes"][0]["estimated_effort"] == "quick_test"
+
+
+def test_reconcile_strategy_unclear_rewrites_stale_lock_route(tmp_path: Path) -> None:
+    from espresso_proof.front_half.stages.grade import _reconcile_strategy_after_regrade
+
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text("Vague mirror thing.\n", encoding="utf-8")
+    run_dir = run_mock_critique("recon_stale_lock", claim_path, tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    synthesis = read_yaml(run_dir / artifacts["strategy_synthesis"])
+    brief = read_yaml(run_dir / artifacts["strategy_brief"])
+    stale = dict(synthesis["routes"][0])
+    stale.update({"id": "strategy_lock_claim", "score": 99, "estimated_effort": "deep_exploration"})
+    synthesis["routes"] = [stale]
+    brief["top_strategies"] = [dict(stale)]
+    write_yaml(run_dir / artifacts["strategy_synthesis"], synthesis)
+    write_yaml(run_dir / artifacts["strategy_brief"], brief)
+
+    _reconcile_strategy_after_regrade(run_dir, artifacts, {"status": "unclear", "score": 10})
+
+    route = read_yaml(run_dir / artifacts["strategy_synthesis"])["routes"][0]
+    assert route["id"] == "strategy_lock_claim"
+    assert route["score"] <= 10
+    assert route["estimated_effort"] == "quick_test"
+
+
+def test_reconcile_strategy_clamps_scores_to_lift_limit(tmp_path: Path) -> None:
+    from espresso_proof.front_half.stages.grade import _reconcile_strategy_after_regrade
+    from espresso_proof.strategy_rules import score_lift_limit
+
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("recon_clamp", claim_path, tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    idea_score = 10
+    synthesis = read_yaml(run_dir / artifacts["strategy_synthesis"])
+    brief = read_yaml(run_dir / artifacts["strategy_brief"])
+    route = synthesis["routes"][0]
+    route["score"] = idea_score + score_lift_limit(route) + 5
+    for brief_route in brief["top_strategies"]:
+        if brief_route["id"] == route["id"]:
+            brief_route["score"] = route["score"]
+    write_yaml(run_dir / artifacts["strategy_synthesis"], synthesis)
+    write_yaml(run_dir / artifacts["strategy_brief"], brief)
+
+    changed = _reconcile_strategy_after_regrade(
+        run_dir, artifacts, {"status": "fragile", "score": idea_score}
+    )
+
+    assert changed >= 1
+    synthesis = read_yaml(run_dir / artifacts["strategy_synthesis"])
+    for route in synthesis["routes"]:
+        assert route["score"] <= idea_score + score_lift_limit(route)

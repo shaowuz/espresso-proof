@@ -26,6 +26,7 @@ from ...models import (
     StrategySynthesis,
     TestReport,
 )
+from ...research_bank import load_bankable_dict
 from ...strategy_rules import (
     HIGH_SCORE_THRESHOLD,
     STANDARD_SCORE_LIFT_LIMIT,
@@ -77,6 +78,12 @@ _EXAMPLES_OUTPUT_SCHEMA = {
             "computed_quantity": "string",
             "input_data": ["string"],
             "result": "string",
+            "machine_check": {
+                "kind": "exact_arithmetic|permutation_order|finite_enumeration",
+                "expression": "string",
+                "expected": "string",
+                "notes": "string",
+            },
             "notes": "string",
         }
     ],
@@ -123,7 +130,7 @@ def _normalize_examples(raw_examples: object, *, claim_id: str) -> list[dict]:
     return examples
 
 
-_MACHINE_CHECK_KINDS = {"exact_arithmetic", "permutation_order"}
+_MACHINE_CHECK_KINDS = {"exact_arithmetic", "permutation_order", "finite_enumeration"}
 
 
 def _normalize_machine_check(raw: object) -> dict | None:
@@ -231,35 +238,70 @@ def _examples(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     write_yaml(run_dir / artifacts["examples"], example_selection)
     write_yaml(run_dir / artifacts["computation_checks"], computation_checks)
 
-    # SAFETY/CONSISTENCY: replacing examples.yaml can orphan a seeded tests.yaml
-    # whose uses_examples points at scaffold example ids (e.g. the hodge_atoms
-    # mock seeds ex_special_cubic). The post-stage validate_run would then fail
-    # before the counterexamples stage rewrites tests.yaml. Prune uses_examples
-    # to the example ids we actually wrote (conservative: drops an unsupported
-    # test reference, never invents one, never upgrades any status).
-    example_ids = {ex["id"] for ex in examples}
-    tests_path = run_dir / artifacts["tests"]
-    if tests_path.exists():
-        test_report = read_yaml(tests_path)
-        changed = False
-        for test in test_report.get("tests", []):
-            kept = [eid for eid in test.get("uses_examples", []) if eid in example_ids]
-            if kept != test.get("uses_examples", []):
-                test["uses_examples"] = kept
-                changed = True
-        if changed:
-            TestReport.model_validate(test_report)
-            write_yaml(tests_path, test_report)
+    # SAFETY/CONSISTENCY: replacing examples.yaml can orphan seeded tests.yaml
+    # entries whose evidence references point at scaffold ids. Drop the stale
+    # test entry rather than inventing/rewriting evidence links. This is a soft
+    # normalization before validate_run; kernel reference checks remain strict.
+    dropped = _reconcile_tests_with_examples(
+        run_dir, artifacts, claim_id, {ex["id"] for ex in examples}
+    )
+    note = (
+        f"examples wrote {len(examples)} candidate example(s), "
+        f"{len(checks)} unverified computation proposal(s) (status human_needed)"
+    )
+    if dropped:
+        note += f"; dropped {dropped} stale test reference(s)"
     return {
         "unsafe_language": [],
-        "notes": [
-            f"examples wrote {len(examples)} candidate example(s), "
-            f"{len(checks)} unverified computation proposal(s) (status human_needed)"
-        ],
+        "notes": [note],
     }
+
+
+def _reconcile_tests_with_examples(
+    run_dir: Path,
+    artifacts: dict,
+    claim_id: str,
+    example_ids: set[str],
+    counterexample_ids: set[str] | None = None,
+) -> int:
+    """Drop tests whose example/counterexample references no longer resolve."""
+    tests_path = run_dir / artifacts["tests"]
+    if not tests_path.exists():
+        return 0
+
+    if counterexample_ids is None:
+        counterexample_ids = set()
+        counterexamples_path = run_dir / artifacts["counterexamples"]
+        if counterexamples_path.exists():
+            counterexamples = load_bankable_dict(
+                run_dir, "counterexamples", read_yaml(run_dir / "run_manifest.yaml")
+            )
+            counterexample_ids = {
+                test.get("id")
+                for test in counterexamples.get("tests", [])
+                if isinstance(test, dict) and test.get("id")
+            }
+
+    test_report = read_yaml(tests_path) or {}
+    original = test_report.get("tests", [])
+    kept = []
+    for test in original:
+        if not isinstance(test, dict):
+            continue
+        if set(test.get("uses_examples", [])) - example_ids:
+            continue
+        if set(test.get("uses_counterexamples", [])) - counterexample_ids:
+            continue
+        kept.append(test)
+    if len(kept) == len(original):
+        return 0
+    test_report["claim_id"] = test_report.get("claim_id") or claim_id
+    test_report["tests"] = kept
+    TestReport.model_validate(test_report)
+    write_yaml(tests_path, test_report)
+    return len(original) - len(kept)
 
 
 # ---------------------------------------------------------------------------
 # S4 — 04 Counterexamples + 05 Admissibility (tests)
 # ---------------------------------------------------------------------------
-
