@@ -376,6 +376,16 @@ def materialize_run_banks(run_dir: Path, *, keys: list[str] | None = None) -> li
     if plan:
         write_yaml(run_dir / manifest["artifacts"]["agent_contracts"], contracts)
         write_yaml(run_dir / "run_manifest.yaml", manifest)
+        if (run_dir / "pressure_status.yaml").exists():
+            from .pressure_status import build_pressure_status
+
+            pressure = read_yaml(run_dir / "pressure_status.yaml")
+            preserve_late = any(
+                marker.get("late_after_strategy") is True
+                for entry in pressure.get("entries", [])
+                for marker in entry.get("late_markers", [])
+            )
+            build_pressure_status(run_dir, late_after_strategy=preserve_late)
     return [key for key, _o, _d, _k, _a in plan]
 
 

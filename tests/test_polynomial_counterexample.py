@@ -119,6 +119,10 @@ def test_witness_persisted_as_step_only_counterexample(tmp_path):
     assert test["result"] == "failed"
     # CounterexampleTest model accepts it (scope guard passes)
     CounterexampleTest.model_validate(test)
+    pressure = read_yaml(run_dir / "pressure_status.yaml")
+    by_kind = {entry["kind"]: entry for entry in pressure["entries"]}
+    assert by_kind["counterexamples"]["candidate_count"] == 1
+    assert by_kind["counterexamples"]["pressure_state"] != "completed_no_candidate_found_in_scope"
     # run still valid after persisting a witness
     validate_run(run_dir)
 

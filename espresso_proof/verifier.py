@@ -544,6 +544,7 @@ def persist_polynomial_witness(run_dir: Path, check: dict, result: dict) -> Path
         return None
 
     from .models import CounterexampleReport, CounterexampleTest
+    from .pressure_status import build_pressure_status
     from .research_bank import append_bank_item, bankable_artifact_path, is_bank_dir
 
     test = _polynomial_witness_test(check, result)
@@ -557,16 +558,25 @@ def persist_polynomial_witness(run_dir: Path, check: dict, result: dict) -> Path
             if p.name != "_meta.yaml"
         }
         if test["id"] in existing_ids:
+            if (Path(run_dir) / "pressure_status.yaml").exists():
+                build_pressure_status(run_dir)
             return cx_path
-        return append_bank_item(cx_path, test)
+        written = append_bank_item(cx_path, test)
+        if (Path(run_dir) / "pressure_status.yaml").exists():
+            build_pressure_status(run_dir)
+        return written
 
     bank = read_yaml(cx_path) if cx_path.exists() else {"claim_id": check["claim_id"], "tests": []}
     bank.setdefault("tests", [])
     if any(t.get("id") == test["id"] for t in bank["tests"]):
+        if (Path(run_dir) / "pressure_status.yaml").exists():
+            build_pressure_status(run_dir)
         return cx_path
     bank["tests"].append(test)
     CounterexampleReport.model_validate(bank)  # fail closed
     write_yaml(cx_path, bank)
+    if (Path(run_dir) / "pressure_status.yaml").exists():
+        build_pressure_status(run_dir)
     return cx_path
 
 
@@ -630,6 +640,7 @@ def audit_evidence(run_dir: Path) -> dict:
     """
 
     from .claim_clear import ensure_claim_clear_for_downstream
+    from .pressure_status import build_pressure_status
     from .validators import validate_run  # local import to avoid an import cycle
 
     ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
@@ -658,5 +669,7 @@ def audit_evidence(run_dir: Path) -> dict:
             check["method"] = "manual_review_needed"
     ComputationChecks.model_validate(computations)
     write_yaml(comp_path, computations)
+    if (run_dir / "pressure_status.yaml").exists():
+        build_pressure_status(run_dir)
     validate_run(run_dir)  # fail closed: confirming-result + evidence-method rules fire here
     return computations
