@@ -32,6 +32,7 @@ from ...strategy_rules import (
     STANDARD_SCORE_LIFT_LIMIT,
     collect_strategy_rule_violations,
 )
+from ...time_allocation import write_time_allocation_plan
 from ...validators import validate_run
 from ..registry import register_stage
 from ..safety import (
@@ -218,6 +219,8 @@ def _strategy(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
         write_yaml(run_dir / "run_manifest.yaml", manifest)
         request_count = len(requests)
 
+    allocation_plan = write_time_allocation_plan(run_dir)
+
     return {
         "unsafe_language": [],
         "notes": [
@@ -228,6 +231,11 @@ def _strategy(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
                 if request_count
                 else ""
             )
+            + (
+                "; provisional time allocation started"
+                if allocation_plan is not None
+                else ""
+            )
         ],
     }
 
@@ -235,4 +243,3 @@ def _strategy(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
 # ---------------------------------------------------------------------------
 # S6 — 10 Example/Counterexample Attacker
 # ---------------------------------------------------------------------------
-
