@@ -13,6 +13,7 @@ from typing import Any
 
 from .io import read_yaml, write_yaml
 from .models import TimeAllocationPlan
+from .validation.errors import KernelValidationError
 
 TIME_ALLOCATION_FILENAME = "time_allocation.yaml"
 _GRADED_ROUTE_FIELDS = {
@@ -228,8 +229,48 @@ def write_time_allocation_plan(run_dir: Path) -> TimeAllocationPlan | None:
     return plan
 
 
+def ensure_prover_time_allocation_plan(run_dir: Path) -> TimeAllocationPlan:
+    """Return the manifest-registered V2 allocation plan required by Prover.
+
+    Older runs can still validate without ``time_allocation.yaml``. Starting a
+    new Prover pass is stricter: if the plan is absent we build it from graded
+    Strategy output; generator-only route lists fail closed because
+    ``build_time_allocation_plan`` returns ``None`` for ungraded routes.
+    """
+
+    run_dir = Path(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    rel = manifest.get("optional_artifacts", {}).get("time_allocation")
+    if rel:
+        if rel != TIME_ALLOCATION_FILENAME:
+            raise KernelValidationError("prover requires canonical time_allocation.yaml")
+        return TimeAllocationPlan.model_validate(read_yaml(run_dir / rel))
+
+    plan = write_time_allocation_plan(run_dir)
+    if plan is None:
+        raise KernelValidationError(
+            "prover requires time_allocation.yaml from graded Strategy output"
+        )
+    return plan
+
+
+def time_allocation_prompt_payload(plan: TimeAllocationPlan) -> dict[str, Any]:
+    """Compact scheduling payload for Prover prompts; status-free by schema."""
+
+    return {
+        "artifact": TIME_ALLOCATION_FILENAME,
+        "allocation_state": plan.allocation_state,
+        "advisory_only": plan.advisory_only,
+        "effect": plan.effect,
+        "missing_context": list(plan.missing_context),
+        "entries": [entry.model_dump(mode="json") for entry in plan.entries],
+    }
+
+
 __all__ = [
     "TIME_ALLOCATION_FILENAME",
     "build_time_allocation_plan",
+    "ensure_prover_time_allocation_plan",
+    "time_allocation_prompt_payload",
     "write_time_allocation_plan",
 ]

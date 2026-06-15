@@ -1863,7 +1863,6 @@ def run_llm_agents(
         network_check=False,
     )
     manifest_path = run / "run_manifest.yaml"
-    manifest = read_yaml(manifest_path)
     report = run_llm_agent_pass(
         run_dir=run,
         provider=provider,
@@ -1875,11 +1874,13 @@ def run_llm_agents(
         provider_diagnostic=provider_diagnostic,
     )
     LLMAgentRunReport.model_validate(report)
+    manifest = read_yaml(manifest_path)
     artifacts = manifest["artifacts"]
     loop_report = build_prover_loop_report(
         agent_report=report,
         strategy_brief=read_yaml(run / artifacts["strategy_brief"]),
         human_choice=read_yaml(run / artifacts["human_choice"]),
+        run_dir=run,
     )
     ProverLoopReport.model_validate(loop_report)
     manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
@@ -1920,8 +1921,10 @@ def resolve_agent_gate(
             agent_report=report,
             strategy_brief=read_yaml(run / artifacts["strategy_brief"]),
             human_choice=read_yaml(run / artifacts["human_choice"]),
+            run_dir=run,
         )
         ProverLoopReport.model_validate(loop_report)
+        manifest = read_yaml(run / "run_manifest.yaml")
         manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"
         manifest.setdefault("optional_artifacts", {})["prover_round_index"] = "prover_rounds/index.yaml"
         write_yaml(run / "prover_loop.yaml", loop_report)
