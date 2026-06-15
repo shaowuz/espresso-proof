@@ -18,6 +18,7 @@ from .runview import RunView, analyze, read_run, score_run
 from .scorecard import (
     PropOutcome, attach_noise_band, build_scorecard, write_scorecard,
 )
+from ..verifier import audit_evidence
 
 REPO = Path(__file__).resolve().parents[2]
 ESPRESSO = [str(REPO / ".venv" / "bin" / "espresso")]
@@ -75,6 +76,15 @@ def run_exam(prop: dict, project: str, cycle_dir: Path, max_rounds: int,
                     "--rounds", str(max_rounds), "--provider", provider],
         cwd=REPO, capture_output=True, text=True, env=_env(),
     )
+    if resume.returncode == 0:
+        try:
+            audit_evidence(run_dir)
+        except Exception as exc:  # noqa: BLE001 - eval run fails closed on audit breakage
+            return {
+                "returncode": 1,
+                "stderr": resume.stderr + f"\naudit_evidence failed: {exc}",
+                "run_dir": run_dir,
+            }
     return {"returncode": resume.returncode, "stderr": resume.stderr, "run_dir": run_dir}
 
 
