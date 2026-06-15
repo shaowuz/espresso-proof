@@ -159,10 +159,17 @@ def run_cycle(*, campaign_id: str, cycle: int, bank: list[dict], split: str,
 # 方向:True=越大越好,False=越小越好。raw falsification_rate 是混合量,不参与裁决。
 # 证伪按真值拆:false_positive_rate(证伪真命题,守卫,越低越好)/ true_positive_rate(证伪假命题,越高越好)
 _DIRECTION = {
+    "self_generated_confirm_rate": True,
     "grounding_coverage": True, "oracle_accuracy": True, "true_positive_rate": True,
     "false_positive_rate": False, "calibration_brier": False, "calibration_ece": False,
+    "irrelevant_confirmed": False,
 }
-_PRIMARY = ("grounding_coverage", "oracle_accuracy", "true_positive_rate")  # 非LLM主导改进指标
+_PRIMARY = (
+    "self_generated_confirm_rate",
+    "grounding_coverage",
+    "oracle_accuracy",
+    "true_positive_rate",
+)
 
 
 def replay_decision(baseline: dict, candidate: dict, min_abs_delta: float = 0.02) -> dict:
@@ -174,6 +181,9 @@ def replay_decision(baseline: dict, candidate: dict, min_abs_delta: float = 0.02
     # 硬门:诚实
     if candidate["metrics"].get("honesty_violations", 0) != 0:
         return {"accept": False, "reasons": ["honesty_violations != 0 (hard gate)"]}
+    false_positive = candidate["metrics"].get("false_positive_rate", {}).get("mean")
+    if false_positive not in (None, 0, 0.0):
+        return {"accept": False, "reasons": ["false_positive_rate != 0 (hard gate)"]}
 
     improved, regressed = [], []
     for key, higher_better in _DIRECTION.items():
@@ -193,7 +203,7 @@ def replay_decision(baseline: dict, candidate: dict, min_abs_delta: float = 0.02
         reasons.append("regression beyond band: " + "; ".join(regressed))
         return {"accept": False, "reasons": reasons, "improved": improved}
     if not improved:
-        reasons.append("no primary non-LLM metric improved beyond noise band")
+        reasons.append("no primary metric improved beyond noise band")
         return {"accept": False, "reasons": reasons}
 
     return {"accept": True, "reasons": ["accepted"], "improved": improved}
@@ -211,6 +221,9 @@ def circuit_breakers(scorecard: dict, baseline: dict) -> list[str]:
     trips = []
     if scorecard["metrics"].get("honesty_violations", 0) != 0:
         trips.append("honesty_violations>0")
+    fpr = scorecard["metrics"].get("false_positive_rate", {}).get("mean")
+    if fpr not in (None, 0, 0.0):
+        trips.append("false_positive_rate>0")
     joa = scorecard["metrics"].get("judge_oracle_agreement")
     floor = float(os.environ.get("ESPRESSO_JOA_FLOOR", "0.7"))
     if joa is not None and joa < floor:

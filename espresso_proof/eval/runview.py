@@ -13,6 +13,8 @@ from pathlib import Path
 
 import yaml
 
+from ..machine_check_guards import is_non_vacuous_machine_check, source_step_ids
+
 
 # --------------------------------------------------------------------------- #
 # 读:run_dir → RunView(契约 C)
@@ -60,14 +62,16 @@ def read_run(prop_id: str, run_dir: Path) -> RunView:
 @dataclass
 class RunMetrics:
     n_steps: int
-    n_refuted: int                  # computation_checks status==wrong(硬证伪)
-    n_grounded: int                 # source_backed step + checked computation
+    n_refuted: int                  # claim-level wrong checks (not generated scoped refutes)
+    n_grounded: int                 # source_backed step + bound, non-vacuous checked computation
     falsification_rate: float
     grounding_coverage: float
     grade_status: str | None        # 用于校准的预测概率映射
     grade_score: int | None
     human_confirmed: bool           # 诚实:必须 False
     proof_language_status: str | None
+    irrelevant_confirmed: int = 0   # checked computations excluded by binding/non-vacuity
+    self_generated_verdict: str | None = None  # checked|wrong when comp_gen_* earns a scoped verdict
 
 
 def score_run(view: RunView) -> RunMetrics:
@@ -80,11 +84,31 @@ def score_run(view: RunView) -> RunMetrics:
     checks = comps.get("checks", [])
 
     n_steps = max(len(steps), 1)
-    n_refuted = sum(1 for c in checks if c.get("status") == "wrong")
-    n_grounded = (
-        sum(1 for s in steps if s.get("status") == "source_backed")
-        + sum(1 for c in checks if c.get("status") == "checked")
-    )
+    step_ids = source_step_ids(grounding)
+    n_refuted = sum(1 for c in checks if _claim_level_wrong(c))
+    checked_machine_grounded = 0
+    irrelevant_confirmed = 0
+    generated_checked = False
+    generated_wrong = False
+    for check in checks:
+        status = check.get("status")
+        is_generated = _is_generated_check(check)
+        bound_non_vacuous = _bound_non_vacuous_machine_check(check, step_ids)
+        if status == "wrong" and is_generated:
+            if bound_non_vacuous:
+                generated_wrong = True
+            continue
+        if status != "checked":
+            continue
+        if bound_non_vacuous:
+            checked_machine_grounded += 1
+            if is_generated:
+                generated_checked = True
+        else:
+            irrelevant_confirmed += 1
+
+    n_grounded = sum(1 for s in steps if s.get("status") == "source_backed") + checked_machine_grounded
+    self_generated_verdict = "wrong" if generated_wrong else "checked" if generated_checked else None
     return RunMetrics(
         n_steps=len(steps),
         n_refuted=n_refuted,
@@ -95,7 +119,25 @@ def score_run(view: RunView) -> RunMetrics:
         grade_score=grade.get("score"),
         human_confirmed=bool(claim.get("human_confirmed")),
         proof_language_status=grade.get("proof_language_status"),
+        irrelevant_confirmed=irrelevant_confirmed,
+        self_generated_verdict=self_generated_verdict,
     )
+
+
+def _is_generated_check(check: dict) -> bool:
+    return str(check.get("id", "")).startswith("comp_gen_")
+
+
+def _claim_level_wrong(check: dict) -> bool:
+    return check.get("status") == "wrong" and not _is_generated_check(check)
+
+
+def _bound_non_vacuous_machine_check(check: dict, step_ids: set[str]) -> bool:
+    spec = check.get("machine_check") if isinstance(check, dict) else None
+    target = spec.get("target_step_id") if isinstance(spec, dict) else None
+    bound = isinstance(target, str) and target in step_ids
+    non_vacuous = isinstance(spec, dict) and is_non_vacuous_machine_check(spec)
+    return bound and non_vacuous
 
 
 # --------------------------------------------------------------------------- #
@@ -157,8 +199,11 @@ def analyze(
     dim = next((_CATEGORY_TO_DIM[c] for c in cats if c in _CATEGORY_TO_DIM), None)
 
     # 2. 机器证伪(硬信号优先)
-    refuted = [c.get("id") for c in view.art("computation_checks").get("checks", [])
-               if c.get("status") == "wrong"]
+    refuted = [
+        c.get("id")
+        for c in view.art("computation_checks").get("checks", [])
+        if _claim_level_wrong(c)
+    ]
     if refuted:
         return Diagnosis(prop_id, "refuted", "computation_checks",
                          f"{len(refuted)} step(s) machine-refuted", refuted, cats,

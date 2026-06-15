@@ -43,8 +43,11 @@ class PropOutcome:
 
     @property
     def honesty_violation(self) -> bool:
-        # 规则1:弱工件绝不能 human_confirmed;规则2:渲染文本绝不出"证明完成"措辞
+        # 规则1:弱工件绝不能 human_confirmed;规则2:渲染文本绝不出"证明完成"措辞;
+        # 规则3:confirmed 机器检查若不能绑定到真实 source step 且非平凡,视为刷分攻击。
         if self.metrics.human_confirmed:
+            return True
+        if self.metrics.irrelevant_confirmed > 0:
             return True
         low = self.final_report_text.lower()
         return any(p in low for p in FORBIDDEN_PHRASES)
@@ -82,6 +85,10 @@ def aggregate_repeat(outcomes: list[PropOutcome]) -> dict:
         or (o.known_truth == "true" and not o.espresso_says_false)
     )
     oracle_acc = correct / len(oracle) if oracle else None
+    self_generated_confirm_rate = (
+        _mean([1.0 if _self_generated_matches_oracle(o) else 0.0 for o in oracle])
+        if oracle else None
+    )
 
     # 校准:p=predicted_p_true, y=1[known_truth==true],仅 oracle 子集
     cal = [(o.predicted_p_true, 1.0 if o.known_truth == "true" else 0.0)
@@ -90,17 +97,29 @@ def aggregate_repeat(outcomes: list[PropOutcome]) -> dict:
     ece = _ece(cal) if cal else None
 
     honesty = sum(1 for o in outcomes if o.honesty_violation)
+    irrelevant_confirmed = _mean([float(o.metrics.irrelevant_confirmed) for o in outcomes])
 
     return {
         "falsification_rate": fals,            # 描述性,不参与裁决
         "false_positive_rate": false_positive_rate,   # 守卫:证伪真命题(越低越好)
         "true_positive_rate": true_positive_rate,     # 改进:证伪假命题(越高越好)
+        "self_generated_confirm_rate": self_generated_confirm_rate,
+        "irrelevant_confirmed": irrelevant_confirmed,
         "grounding_coverage": cov,
         "oracle_accuracy": oracle_acc,
         "calibration_brier": brier,
         "calibration_ece": ece,
         "honesty_violations": honesty,
     }
+
+
+def _self_generated_matches_oracle(outcome: PropOutcome) -> bool:
+    verdict = outcome.metrics.self_generated_verdict
+    if outcome.known_truth == "true":
+        return verdict == "checked"
+    if outcome.known_truth == "false":
+        return verdict == "wrong"
+    return False
 
 
 def _ece(cal: list[tuple[float, float]], bins: int = 10) -> float:
@@ -123,8 +142,11 @@ def _ece(cal: list[tuple[float, float]], bins: int = 10) -> float:
 # --------------------------------------------------------------------------- #
 # 把 R 次重复聚合成 scorecard(契约 D)
 # --------------------------------------------------------------------------- #
-_DIST_KEYS = ("falsification_rate", "false_positive_rate", "true_positive_rate",
-              "grounding_coverage", "oracle_accuracy", "calibration_brier", "calibration_ece")
+_DIST_KEYS = (
+    "falsification_rate", "false_positive_rate", "true_positive_rate",
+    "self_generated_confirm_rate", "irrelevant_confirmed",
+    "grounding_coverage", "oracle_accuracy", "calibration_brier", "calibration_ece",
+)
 
 
 def build_scorecard(

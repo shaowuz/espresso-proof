@@ -327,6 +327,7 @@ class MachineCheckSpec(StrictBaseModel):
     ]
     expression: str
     expected: str
+    target_step_id: str | None = None
     notes: str = ""
 
 

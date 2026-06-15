@@ -12,6 +12,7 @@ FRONT_HALF_STAGES: list[str] = [
     "examples",             # S3: examples + computation_checks
     "counterexamples",      # S4: counterexamples + admissibility tests
     "source_theorem",       # S7: source matching + theorem applicability (candidate)
+    "check_generator",      # Rail-A machine_check proposals bound to source steps
     "regrade",              # evidence-aware grade recompute (before strategy)
     "strategy",             # S5: strategy generator + grader + brief
     "attacker",             # S6: example/counterexample attacker
