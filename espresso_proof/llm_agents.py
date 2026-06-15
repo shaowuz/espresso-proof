@@ -18,6 +18,7 @@ from .human_time_allocation import (
     time_allocation_prompt_context,
     write_time_allocation_context,
 )
+from .claim_clear import ensure_claim_clear_for_downstream
 from .io import read_yaml, write_yaml
 from .models import LLMAgentRunReport, ProverLoopReport, ProverRoundIndex, ProverRoundReport
 from .research_bank import load_bankable_dict
@@ -529,6 +530,7 @@ def run_llm_agent_pass(
     reviewer_set: str = "generic",
     provider_diagnostic: dict | None = None,
 ) -> dict:
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     client = build_client(
         provider=provider,
         model=model,
@@ -1019,6 +1021,7 @@ def resolve_agent_gate(
     decision: str,
     reason: str,
 ) -> dict:
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     agent_path = manifest.get("optional_artifacts", {}).get("llm_agent_run")
     if not agent_path:
@@ -1053,6 +1056,7 @@ def append_prover_loop_round(
     reviewer_set: str = "espresso",
     client: "LLMClient | None" = None,
 ) -> dict:
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     optional = manifest.get("optional_artifacts", {})
     agent_path = optional.get("llm_agent_run")

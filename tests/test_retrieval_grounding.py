@@ -33,9 +33,15 @@ def _hyp(name: str) -> dict:
 def _run_needing_pgroup(tmp_path: Path, *, hypotheses: list[dict] | None = None) -> Path:
     """A run whose first source-grounding step needs the p^2 theorem."""
     run_dir = run_mock_critique("hodge_atoms", FIXTURE, tmp_path)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
     claim = read_yaml(run_dir / "locked_claim.yaml")
     claim["hypotheses"] = hypotheses or [_hyp("group of order p^2"), _hyp("p is prime")]
     write_yaml(run_dir / "locked_claim.yaml", claim)
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
     sg = read_yaml(run_dir / "source_grounding.yaml")
     sg["steps"][0]["needed_theorem"] = "group order abelian center"
     sg["steps"][0]["status"] = "candidate"

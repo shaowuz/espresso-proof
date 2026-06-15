@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.models import (
     LedgerCondition,
@@ -31,21 +32,37 @@ _MISSING_HYPOTHESES = ["G is finite", "p is prime"]
 def _claim(tmp_path: Path) -> Path:
     path = tmp_path / "claim.md"
     path.write_text(
-        "Let p be a prime. Every group G of order p^2 is abelian.\n",
+        "Every group of order p^2, where p is prime, is abelian.\n",
         encoding="utf-8",
     )
     return path
 
 
 def _resumed_run(tmp_path: Path) -> Path:
+    claim_path = _claim(tmp_path)
     result = orchestrate_run(
         project="tcl_demo",
-        input_path=_claim(tmp_path),
+        input_path=claim_path,
         output_root=tmp_path,
         provider="stub",
-        front_half="stub",
+        front_half="mock",
     )
     run_dir = Path(result["run_dir"])
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    ensure_claim_clear_for_downstream(run_dir)
+    orchestrate_run(
+        project="tcl_demo",
+        input_path=claim_path,
+        output_root=tmp_path,
+        provider="stub",
+        front_half="mock",
+        run_dir=run_dir,
+    )
     brief = read_yaml(run_dir / "strategy_brief.yaml")
     selected = brief["top_strategies"][0]["id"]
     resume_run(run_dir=run_dir, selected_strategy=selected, effort="quick_test")

@@ -109,9 +109,14 @@ def test_lock_denied_is_recorded_on_timeline(tmp_path: Path) -> None:
 
 
 def _gate_run(tmp_path: Path) -> Path:
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(
+        "Every group of order p^2, where p is prime, is abelian.",
+        encoding="utf-8",
+    )
     result = orchestrate_run(
         project="conc",
-        input_path=FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        input_path=claim_path,
         output_root=tmp_path,
         provider="stub",
         front_half="mock",

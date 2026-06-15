@@ -13,10 +13,10 @@ from espresso_proof.orchestrator import orchestrate_run, resume_run
 from espresso_proof.run_dashboard import render_run_dashboard
 from espresso_proof.validators import validate_run
 
-# A claim no deterministic probe matches: the run must stay at ZERO earned
-# evidence (the p^2 claim now legitimately earns instance_checked at
-# orchestration time via scoped-verification auto-wiring, Goal 42E c2/c3).
-CLAIM = "Every continuous function f: [0, 1] -> R attains a maximum value."
+# A precise finite-group claim that does not trigger the p^2 scoped-verification
+# probes: the run must stay at ZERO earned evidence while still clearing the V2
+# claim-clarity gate.
+CLAIM = "If G / Z(G) is cyclic, then G is abelian."
 
 
 def _run(tmp_path: Path, name: str = "ia") -> Path:
@@ -86,7 +86,12 @@ def test_missing_evidence_stays_visible_after_selecting_route(tmp_path: Path) ->
     skip_agent(run_dir, "literature", reason="defer")
     brief = read_yaml(run_dir / read_yaml(run_dir / "run_manifest.yaml")["artifacts"]["strategy_brief"])
     sid = (brief.get("top_strategies") or [{}])[0].get("id") or "none"
-    resume_run(run_dir=run_dir, selected_strategy=sid, effort="quick_test")
+    choices = {
+        choice["strategy_id"]: choice.get("effort_options") or []
+        for choice in brief.get("allowed_human_choices", [])
+    }
+    effort = (choices.get(sid) or ["quick_test"])[0]
+    resume_run(run_dir=run_dir, selected_strategy=sid, effort=effort)
     validate_run(run_dir)
     now = _now_section(render_run_dashboard(run_dir, interactive=True))
     # skipped/not-run agents still counted as unfinished — selecting a route

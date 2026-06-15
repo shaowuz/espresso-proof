@@ -14,12 +14,12 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.io import read_yaml
+from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
-CLAIM = "The Mathieu group M23 is realizable as a Galois group over Q."
+CLAIM = "If G / Z(G) is cyclic, then G is abelian."
 
 
 def _fresh(runner: CliRunner, tmp_path: Path) -> Path:
@@ -33,6 +33,26 @@ def _fresh(runner: CliRunner, tmp_path: Path) -> Path:
     return Path(res.output.splitlines()[0].split("Wrote run artifacts to ")[-1])
 
 
+def _first_resume_choice(run_dir: Path) -> tuple[str, str]:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    brief = read_yaml(run_dir / manifest["artifacts"]["strategy_brief"])
+    strategy_id = brief["top_strategies"][0]["id"]
+    choices = {
+        choice["strategy_id"]: choice.get("effort_options") or []
+        for choice in brief.get("allowed_human_choices", [])
+    }
+    return strategy_id, (choices.get(strategy_id) or ["quick_test"])[0]
+
+
+def _mark_claim_clear(run_dir: Path) -> None:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+
+
 def test_retrieve_and_ground_cli_command_resolves_goal03_function(tmp_path: Path) -> None:
     """Regression: the retrieve-and-ground command must call the Goal 03 function
     (run_dir/local_corpus kwargs), not the shadowing literature_retrieval one."""
@@ -40,6 +60,7 @@ def test_retrieve_and_ground_cli_command_resolves_goal03_function(tmp_path: Path
     corpus = tmp_path / "corpus"
     corpus.mkdir()
     (corpus / "note.txt").write_text("Theorem 1.1. An exact statement.", encoding="utf-8")
+    _mark_claim_clear(run_dir)
     res = CliRunner().invoke(app, [
         "retrieve-and-ground", "--run", str(run_dir), "--local-corpus", str(corpus),
         "--source-title", "Notes", "--source-author", "A. Author",
@@ -52,6 +73,7 @@ def test_retrieve_and_ground_cli_command_resolves_goal03_function(tmp_path: Path
 def test_orchestrate_one_command_loop_with_scout_and_auto_ground(tmp_path: Path) -> None:
     runner = CliRunner()
     run_dir = _fresh(runner, tmp_path)
+    strategy_id, effort = _first_resume_choice(run_dir)
 
     corpus = tmp_path / "corpus"
     corpus.mkdir()
@@ -61,7 +83,7 @@ def test_orchestrate_one_command_loop_with_scout_and_auto_ground(tmp_path: Path)
     )
     resumed = runner.invoke(app, [
         "orchestrate", "--resume", str(run_dir), "--provider", "stub",
-        "--select-strategy", "strategy_lock_claim", "--effort", "quick_test",
+        "--select-strategy", strategy_id, "--effort", effort,
         "--literature-scout", "--auto-ground", str(corpus),
     ])
     assert resumed.exit_code == 0, resumed.output

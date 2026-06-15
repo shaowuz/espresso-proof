@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..claim_clear import claim_clear_for_downstream, record_claim_clear_block
 from ..io import read_yaml, write_yaml
 from ..llm_agents import LLMClient, load_agent_context
 from ..models import FrontHalfRunReport
@@ -48,6 +49,21 @@ def run_front_half_agent_pass(
                     "status": "skipped",
                     "validation": "not_run",
                     "errors": [],
+                    "unsafe_language": [],
+                }
+            )
+            continue
+        gate = claim_clear_for_downstream(run_dir, stage=stage)
+        if not gate.clear:
+            record_claim_clear_block(run_dir, gate)
+            results.append(
+                {
+                    "stage": stage,
+                    "status": "skipped",
+                    "validation": "not_run",
+                    "errors": [
+                        "blocked by claim-clear gate: " + "; ".join(gate.reasons)
+                    ],
                     "unsafe_language": [],
                 }
             )

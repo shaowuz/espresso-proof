@@ -921,6 +921,7 @@ def _base_hypothesis_ledger(claim_id: str) -> dict:
         ],
         "missing_or_unclear": ["very general versus all", "exact source theorem"],
         "notes": ["P0 mock ledger flags theorem drift instead of repairing the claim."],
+        "claim_precision": "imprecise",
     }
 
 
@@ -1182,6 +1183,15 @@ def _unchecked_example(text: str, run_id: str) -> dict[str, object]:
 def _promising_but_unproved(text: str, run_id: str) -> dict[str, object]:
     artifacts = _hodge_all_cubic_fourfolds(text, run_id)
     claim_id = artifacts["locked_claim.yaml"]["id"]
+    artifacts["hypothesis_ledger.yaml"] = {
+        "claim_id": claim_id,
+        "hypotheses": artifacts["locked_claim.yaml"]["hypotheses"],
+        "missing_or_unclear": [],
+        "notes": [
+            "The claim is precise enough for the runtime scaffold; proof/source gaps remain separate."
+        ],
+        "claim_precision": "precise",
+    }
     artifacts["computation_checks.yaml"]["checks"].append(
         {
             "id": "check_very_general_hodge_package_source",
@@ -1327,6 +1337,7 @@ def _refuted_by_all_hypotheses(text: str, run_id: str) -> dict[str, object]:
             "hypotheses": claim["hypotheses"],
             "missing_or_unclear": [],
             "notes": ["The claim is precise enough to test by an all-hypotheses example."],
+            "claim_precision": "precise",
         },
         "literature_review.yaml": {
             "claim_id": claim_id,
@@ -1633,6 +1644,7 @@ def _true_theorem_classical_source(text: str, run_id: str) -> dict[str, object]:
         "hypotheses": claim["hypotheses"],
         "missing_or_unclear": [],
         "notes": ["The claim is precise; both hypotheses are explicit in the statement."],
+        "claim_precision": "precise",
     }
     artifacts["literature_review.yaml"] = {
         "claim_id": claim_id,
@@ -1872,6 +1884,7 @@ def _finite_group_claim(text: str, run_id: str) -> dict[str, object]:
             "hypotheses": claim["hypotheses"],
             "missing_or_unclear": [],
             "notes": ["Finite-group claim matched by deterministic scaffold; no status is earned."],
+            "claim_precision": "precise",
         },
         "literature_review.yaml": {
             "claim_id": claim_id,
@@ -2044,6 +2057,7 @@ def _vague_claim(text: str, run_id: str) -> dict[str, object]:
             "hypotheses": claim["hypotheses"],
             "missing_or_unclear": ["main objects", "hypotheses", "conclusion"],
             "notes": ["The sketch is too vague to test."],
+            "claim_precision": "unclear",
         },
         "literature_review.yaml": {
             "claim_id": claim_id,

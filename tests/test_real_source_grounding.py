@@ -9,9 +9,11 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
+from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.models import SourceGroundingReport
+from espresso_proof.orchestrator import orchestrate_run
 from espresso_proof.pdf_ingestion import ingest_source_for_theorems
 from espresso_proof.source_verification import ground_run
 from espresso_proof.validators import validate_run
@@ -46,7 +48,15 @@ def _ingest(run_dir: Path, text: str, *, authors, title: str = "Real Source") ->
 
 
 def _hodge_run(tmp_path: Path) -> Path:
-    return run_mock_critique("hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path)
+    run_dir = run_mock_critique("hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    ensure_claim_clear_for_downstream(run_dir)
+    return run_dir
 
 
 def test_step_earns_source_backed_with_attribution(tmp_path: Path) -> None:
@@ -196,6 +206,21 @@ def test_orchestrate_ground_source_cli_earns_source_backed(tmp_path: Path) -> No
     )
     assert fresh.exit_code == 0, fresh.output
     run_dir = Path(fresh.output.splitlines()[0].split("Wrote run artifacts to ")[-1])
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    ensure_claim_clear_for_downstream(run_dir)
+    orchestrate_run(
+        project="rsg",
+        input_path=FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        output_root=tmp_path,
+        provider="stub",
+        front_half="mock",
+        run_dir=run_dir,
+    )
     brief = read_yaml(run_dir / read_yaml(run_dir / "run_manifest.yaml")["artifacts"]["strategy_brief"])
     selected = brief["top_strategies"][0]["id"]
     effort = brief["allowed_human_choices"][0]["effort_options"][0]
