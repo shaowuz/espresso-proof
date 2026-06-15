@@ -21,12 +21,15 @@ from .human_time_allocation import (
 from .claim_clear import ensure_claim_clear_for_downstream
 from .io import read_yaml, write_yaml
 from .models import LLMAgentRunReport, ProverLoopReport, ProverRoundIndex, ProverRoundReport
+from .pressure_status import artifact_revision_hash
 from .research_bank import load_bankable_dict
 from .time_allocation import (
     TIME_ALLOCATION_FILENAME,
     ensure_prover_time_allocation_plan,
     time_allocation_prompt_payload,
+    write_time_allocation_plan,
 )
+from .update_inbox import append_update_inbox_event
 
 
 AGENT_OUTPUT_SCHEMA = {
@@ -1011,6 +1014,120 @@ def _round_artifact_rel_path(attempt: dict) -> str:
     return f"prover_rounds/round_{int(attempt['round_index']):03d}_{attempt_id}_{strategy}.yaml"
 
 
+def _reviewer_blocker_slots(
+    review: dict, open_blocker_texts: set[str] | None
+) -> list[tuple[str, int]]:
+    slots: list[tuple[str, int]] = []
+    for field in ("objections", "missing_hypotheses", "source_requests"):
+        for index, item in enumerate(review.get(field, []) or [], start=1):
+            text = str(item).strip()
+            if not text:
+                continue
+            if open_blocker_texts is not None and text not in open_blocker_texts:
+                continue
+            slots.append((field, index))
+    return slots
+
+
+def _append_reviewer_objection_events(
+    *,
+    run_dir: Path,
+    claim_id: str,
+    route_id: str,
+    origin_stage: str,
+    origin_artifact: str,
+    event_id_prefix: str,
+    verifier_reviews: list[dict],
+    open_blocker_texts: set[str] | None = None,
+) -> bool:
+    """Route reviewer blockers into Update Inbox as scheduling-only pointers.
+
+    The event records provenance to the validated origin artifact, not blocker
+    prose. Reviewer text remains owned by the prover-round artifact and its
+    language/status-smuggling validators.
+    """
+
+    artifact_hash = artifact_revision_hash(run_dir, origin_artifact)
+    created_any = False
+    event_index = 0
+    for review in verifier_reviews:
+        slots = _reviewer_blocker_slots(review, open_blocker_texts)
+        if not slots:
+            continue
+        verifier_id = str(review.get("verifier_id", "reviewer"))
+        safe_verifier = re.sub(r"[^a-zA-Z0-9_.-]+", "_", verifier_id)
+        for field, blocker_index in slots:
+            event_index += 1
+            append_update_inbox_event(
+                run_dir,
+                {
+                    "id": f"{event_id_prefix}_{event_index:03d}",
+                    "type": "reviewer_objection",
+                    "origin_stage": origin_stage,
+                    "origin_artifact": origin_artifact,
+                    "origin_artifact_id_or_path": (
+                        f"{safe_verifier}:{field}:{blocker_index:03d}"
+                    ),
+                    "locked_claim_id": claim_id,
+                    "route_id_or_step_id": route_id,
+                    "artifact_revision_or_hash": artifact_hash,
+                    "validator_ok": True,
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "dedupe_key": "canonicalized-by-writer",
+                    "applied_at": None,
+                    "effect": "scheduling_only",
+                    "advisory_only": True,
+                },
+            )
+            created_any = True
+    return created_any
+
+
+def route_initial_reviewer_blockers_to_update_inbox(
+    *, run_dir: Path, agent_report: dict, selected_strategy_id: str | None
+) -> bool:
+    """Persist initial reviewer blocker pointers before building resolved loop state."""
+
+    if not selected_strategy_id or selected_strategy_id == "none":
+        return False
+    verifier_reviews = agent_report.get("verifier_reviews", [])
+    blockers = sorted(
+        {
+            item
+            for review in verifier_reviews
+            for item in (
+                review.get("objections", [])
+                + review.get("missing_hypotheses", [])
+                + review.get("source_requests", [])
+            )
+            if str(item).strip()
+        }
+    )
+    blockers, _ = _split_machine_answered_blockers(
+        blockers,
+        run_dir=run_dir,
+        claim_id=agent_report["claim_id"],
+        source_request_texts={
+            str(item).strip()
+            for review in verifier_reviews
+            for item in review.get("source_requests", [])
+        },
+    )
+    created = _append_reviewer_objection_events(
+        run_dir=run_dir,
+        claim_id=agent_report["claim_id"],
+        route_id=str(selected_strategy_id),
+        origin_stage="llm_prover_reviewers",
+        origin_artifact="llm_agent_run.yaml",
+        event_id_prefix="upd_reviewer_objection_initial",
+        verifier_reviews=verifier_reviews,
+        open_blocker_texts=set(blockers[:12]),
+    )
+    if created:
+        write_time_allocation_plan(run_dir)
+    return created
+
+
 def _human_feedback_advisory(run_dir: Path) -> str:
     """The human's advisory ranking note for this run (human_choice.taste_judgment).
 
@@ -1058,11 +1175,7 @@ def _allocation_for_strategy(
         return "ask_human"
     if gate.get("decision") == "stop":
         return "stop"
-    if any(review.get("verdict") == "blocked" for review in reviewer_reviews):
-        return "pause"
     is_selected = strategy_id == selected_strategy_id
-    if any(review.get("verdict") in {"needs_revision", "needs_sources"} for review in reviewer_reviews):
-        return "repair" if is_selected else "cheap_check"
     if allocation_entry is not None:
         action = allocation_entry.get("action")
         if action == "stop":
@@ -1075,6 +1188,10 @@ def _allocation_for_strategy(
             return "cheap_check"
         if action == "bounded_proof_exploration":
             return "expand" if is_selected else "cheap_check"
+    if any(review.get("verdict") == "blocked" for review in reviewer_reviews):
+        return "pause"
+    if any(review.get("verdict") in {"needs_revision", "needs_sources"} for review in reviewer_reviews):
+        return "repair" if is_selected else "cheap_check"
     return "expand" if is_selected else "cheap_check"
 
 
@@ -1407,6 +1524,17 @@ def append_prover_loop_round(
     refresh_prover_round_index(run_dir=run_dir, loop_report=loop_report)
     manifest.setdefault("optional_artifacts", {})["prover_round_index"] = "prover_rounds/index.yaml"
     write_yaml(run_dir / "run_manifest.yaml", manifest)
+    if _append_reviewer_objection_events(
+        run_dir=run_dir,
+        claim_id=loop_report["claim_id"],
+        route_id=str(new_attempt["strategy_id"]),
+        origin_stage="prover_loop_round",
+        origin_artifact=_round_artifact_rel_path(new_attempt),
+        event_id_prefix=f"upd_reviewer_objection_r{int(new_attempt['round_index']):03d}",
+        verifier_reviews=verifier_reviews,
+        open_blocker_texts=set(blockers),
+    ):
+        write_time_allocation_plan(run_dir)
     return loop_report
 
 
