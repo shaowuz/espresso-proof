@@ -446,6 +446,7 @@ def _resolve_and_build_loop(run_dir: Path, *, decision: str, reason: str, human_
         run_dir=run_dir,
     )
     ProverLoopReport.model_validate(loop_report)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
     manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"
     manifest["optional_artifacts"]["prover_round_index"] = "prover_rounds/index.yaml"
     write_yaml(run_dir / "prover_loop.yaml", loop_report)

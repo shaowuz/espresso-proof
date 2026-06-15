@@ -42,7 +42,7 @@ def _snapshot_run(run_dir: Path) -> dict:
     mid-loop validation failure can be rolled back to the last valid state."""
 
     snap: dict = {}
-    for rel in ("prover_loop.yaml", "run_manifest.yaml"):
+    for rel in ("prover_loop.yaml", "run_manifest.yaml", "time_allocation.yaml"):
         p = run_dir / rel
         snap[rel] = p.read_bytes() if p.exists() else None
     rounds_dir = run_dir / "prover_rounds"
