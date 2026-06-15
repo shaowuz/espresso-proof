@@ -90,6 +90,41 @@ def _pressure_missing(pressure_status: dict[str, Any] | None, kind: str) -> bool
     return True
 
 
+def _reviewer_objection_round_counts(update_inbox: dict[str, Any] | None) -> dict[str, int]:
+    """Count distinct reviewer-objection rounds per route from Update Inbox.
+
+    Multiple reviewer entries from the same round still represent one scheduling
+    round. The objection prose is not copied into the inbox and is not inspected
+    here; only validator-approved scheduling pointers count.
+    """
+
+    if not update_inbox:
+        return {}
+    rounds_by_route: dict[str, set[tuple[str, str]]] = {}
+    for entry in update_inbox.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("type") != "reviewer_objection":
+            continue
+        if (
+            entry.get("effect") != "scheduling_only"
+            or entry.get("advisory_only") is not True
+        ):
+            continue
+        if entry.get("validator_ok") is not True:
+            continue
+        route = entry.get("route_id_or_step_id")
+        if not route:
+            continue
+        rounds_by_route.setdefault(str(route), set()).add(
+            (
+                str(entry.get("origin_artifact", "")),
+                str(entry.get("artifact_revision_or_hash", "")),
+            )
+        )
+    return {route: len(rounds) for route, rounds in rounds_by_route.items()}
+
+
 def _unique(values: list[str]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -101,7 +136,23 @@ def _unique(values: list[str]) -> list[str]:
     return out
 
 
-def _route_action(route: dict[str, Any], *, source_support_missing: bool) -> tuple[str, str]:
+def _route_action(
+    route: dict[str, Any],
+    *,
+    source_support_missing: bool,
+    reviewer_objection_rounds: int,
+) -> tuple[str, str]:
+    if reviewer_objection_rounds >= 3:
+        return (
+            "ask_human",
+            "Repeated reviewer objections reached the scheduler; ask human before "
+            "another automated round.",
+        )
+    if reviewer_objection_rounds >= 1:
+        return (
+            "repair_attempt",
+            "Reviewer objection reached Update Inbox; schedule a bounded repair attempt.",
+        )
     if source_support_missing:
         return (
             "source_pinning",
@@ -146,6 +197,8 @@ def build_time_allocation_plan(run_dir: Path) -> TimeAllocationPlan | None:
     human_choice = _read_artifact(run_dir, manifest, "human_choice")
     source_grounding = _read_artifact(run_dir, manifest, "source_grounding")
     pressure_status = _read_optional(run_dir, manifest, "pressure_status")
+    update_inbox = _read_optional(run_dir, manifest, "update_inbox")
+    reviewer_objection_rounds = _reviewer_objection_round_counts(update_inbox)
     source_missing = _source_support_missing(source_grounding)
     if _human_preference_missing(human_choice):
         missing_context.append("human_preference")
@@ -158,7 +211,11 @@ def build_time_allocation_plan(run_dir: Path) -> TimeAllocationPlan | None:
 
     entries: list[dict[str, Any]] = []
     for index, route in enumerate(routes, start=1):
-        action, reason = _route_action(route, source_support_missing=source_missing)
+        action, reason = _route_action(
+            route,
+            source_support_missing=source_missing,
+            reviewer_objection_rounds=reviewer_objection_rounds.get(str(route["id"]), 0),
+        )
         entries.append(
             {
                 "id": f"alloc_{index:03d}",
@@ -222,8 +279,11 @@ def write_time_allocation_plan(run_dir: Path) -> TimeAllocationPlan | None:
     write_yaml(run_dir / TIME_ALLOCATION_FILENAME, plan.model_dump(mode="json"))
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     manifest.setdefault("optional_artifacts", {})["time_allocation"] = TIME_ALLOCATION_FILENAME
+    depends_on = ["strategy_synthesis", "strategy_brief", "idea_grade"]
+    if "update_inbox" in manifest.get("optional_artifacts", {}):
+        depends_on.append("update_inbox")
     manifest.setdefault("dependencies", {})["time_allocation"] = {
-        "depends_on": ["strategy_synthesis", "strategy_brief", "idea_grade"]
+        "depends_on": depends_on
     }
     write_yaml(run_dir / "run_manifest.yaml", manifest)
     return plan

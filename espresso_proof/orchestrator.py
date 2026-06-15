@@ -33,6 +33,7 @@ from .llm_agents import (
     external_agent_diagnostic,
     openai_agent_diagnostic,
     resolve_agent_gate,
+    route_initial_reviewer_blockers_to_update_inbox,
     run_llm_agent_pass,
     write_initial_prover_round_artifacts,
 )
@@ -439,6 +440,13 @@ def _resolve_and_build_loop(run_dir: Path, *, decision: str, reason: str, human_
     report = resolve_agent_gate(run_dir=run_dir, decision=decision, reason=reason)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     artifacts = manifest["artifacts"]
+    selected_strategy = human_choice.get("selected_strategy")
+    if decision == "continue":
+        route_initial_reviewer_blockers_to_update_inbox(
+            run_dir=run_dir,
+            agent_report=report,
+            selected_strategy_id=selected_strategy,
+        )
     loop_report = build_prover_loop_report(
         agent_report=report,
         strategy_brief=read_yaml(run_dir / artifacts["strategy_brief"]),

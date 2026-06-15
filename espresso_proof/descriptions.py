@@ -204,6 +204,8 @@ LOOP_STOP_PHRASES: dict[str, str] = {
     "validation_error": "a validation problem stopped the loop safely",
     "loop_decision_ask_human": "the loop asked for your decision",
     "loop_decision_stop": "the loop chose to stop",
+    "time_allocation_ask_human": "the scheduler asked for your decision",
+    "time_allocation_stop": "the scheduler chose to stop",
 }
 
 

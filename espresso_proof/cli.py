@@ -29,6 +29,7 @@ from .prover_loop_driver import continue_prover_loop
 from .run_lock import run_writer_lock
 from .llm_agents import external_agent_diagnostic
 from .llm_agents import openai_agent_diagnostic
+from .llm_agents import route_initial_reviewer_blockers_to_update_inbox
 from .llm_agents import run_llm_agent_pass
 from .llm_agents import write_initial_prover_round_artifacts
 from .failure_classifier import classify_failures
@@ -1917,10 +1918,17 @@ def resolve_agent_gate(
         LLMAgentRunReport.model_validate(report)
         manifest = read_yaml(run / "run_manifest.yaml")
         artifacts = manifest["artifacts"]
+        human_choice = read_yaml(run / artifacts["human_choice"])
+        if decision == "continue":
+            route_initial_reviewer_blockers_to_update_inbox(
+                run_dir=run,
+                agent_report=report,
+                selected_strategy_id=human_choice.get("selected_strategy"),
+            )
         loop_report = build_prover_loop_report(
             agent_report=report,
             strategy_brief=read_yaml(run / artifacts["strategy_brief"]),
-            human_choice=read_yaml(run / artifacts["human_choice"]),
+            human_choice=human_choice,
             run_dir=run,
         )
         ProverLoopReport.model_validate(loop_report)
