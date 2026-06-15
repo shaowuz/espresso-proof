@@ -169,6 +169,7 @@ def validate_run(run_dir: Path) -> None:
     _validate_grade_proof_language_backed(
         idea_grade, computation_verification, proof_verification
     )
+    _validate_grade_10_requires_global_proof_status(idea_grade)
     _validate_external_tool_artifacts(
         external_tool_candidates, external_tool_runs, claim, manifest
     )
@@ -188,7 +189,9 @@ def validate_run(run_dir: Path) -> None:
     _validate_source_discipline_bindings(
         run_dir, manifest, source_grounding, theorem_extraction, theorem_applicability
     )
-    _validate_theorem_applicability(manifest, claim, source_grounding, theorem_applicability)
+    _validate_theorem_applicability(
+        manifest, claim, source_grounding, theorem_applicability, theorem_extraction
+    )
     _validate_review_outcome(review, idea_grade)
     _validate_loop_control(loop_control)
     _validate_strategy_synthesis(
@@ -896,6 +899,28 @@ def _validate_grade_proof_language_backed(
         )
 
 
+def _validate_grade_10_requires_global_proof_status(idea_grade: IdeaGrade) -> None:
+    """A perfect score is a global proof-strength claim, not local support.
+
+    Source-backed theorem applicability is intentionally step-local. It can
+    support an individual proof step, but it cannot by itself make the whole
+    route proved or justify a Grade-10/perfect grade while the proof-language
+    status is still weak or scoped.
+    """
+    weak_or_scoped_statuses = {
+        ProofLanguageStatus.idea_sketch,
+        ProofLanguageStatus.proof_candidate,
+        ProofLanguageStatus.source_checked_argument,
+        ProofLanguageStatus.computation_checked,
+    }
+    if idea_grade.score == 100 and idea_grade.proof_language_status in weak_or_scoped_statuses:
+        raise KernelValidationError(
+            "idea_grade.score=100 requires a global checked proof status; local "
+            "source-backed/applicable steps, proof candidates, and scoped checks cannot "
+            "upgrade the grade to Grade 10"
+        )
+
+
 def _load_optional_theorem_extraction(
     run_dir: Path,
     manifest: RunManifest,
@@ -1381,6 +1406,7 @@ def _validate_theorem_applicability(
     claim: Claim,
     source_grounding: SourceGroundingReport,
     theorem_applicability: TheoremApplicabilityReport | None,
+    theorem_extraction: TheoremExtractionReport | None,
 ) -> None:
     has_source_backed_step = any(
         step.status == SourceStatus.source_backed for step in source_grounding.steps
@@ -1417,6 +1443,14 @@ def _validate_theorem_applicability(
                 f"theorem_applicability references unknown source ref {usage.source_ref_id!r}"
             )
         step = known_steps[usage.proof_step_id]
+        if (
+            usage.source_ref_id == "missing_source_ref"
+            and (usage.source_status == SourceStatus.source_backed or step.status == SourceStatus.source_backed)
+        ):
+            raise KernelValidationError(
+                f"{usage.proof_step_id}: source_backed theorem applicability requires "
+                "a concrete cited source_ref_id"
+            )
         if usage.source_ref_id != "missing_source_ref" and usage.source_ref_id not in step.source_refs:
             raise KernelValidationError(
                 f"{usage.proof_step_id}: theorem_applicability source_ref_id is not used by proof step"
@@ -1428,6 +1462,10 @@ def _validate_theorem_applicability(
         if usage.source_ref_id in refs_by_id and refs_by_id[usage.source_ref_id].status != usage.source_status:
             raise KernelValidationError(
                 f"{usage.proof_step_id}: theorem_applicability source_status does not match source ref"
+            )
+        if usage.source_status == SourceStatus.source_backed and usage.source_ref_id in refs_by_id:
+            _validate_applicability_usage_source_binding(
+                usage, refs_by_id[usage.source_ref_id], theorem_extraction
             )
     for step in source_grounding.steps:
         if step.status != SourceStatus.source_backed:
@@ -1458,6 +1496,79 @@ def _validate_theorem_applicability(
                 f"{step.proof_step_id}: a '{usage.theorem_scope}' theorem cannot back a universal "
                 f"('all') claim without an explicit scope_justification"
             )
+
+
+def _normalize_source_text(text: str) -> str:
+    return " ".join(str(text).split())
+
+
+def _locator_tuple(locator) -> tuple[str, str]:
+    kind = locator.kind.value if hasattr(locator.kind, "value") else str(locator.kind)
+    return kind, str(locator.value).strip()
+
+
+def _validate_applicability_usage_source_binding(
+    usage,
+    source_ref,
+    theorem_extraction: TheoremExtractionReport | None,
+) -> None:
+    """Bind step-local theorem applicability to the cited checked source.
+
+    A source-backed applicability usage may only discuss the exact statement and
+    locator that the source-grounding artifact already checked. When extraction
+    is present, that pair must also name a real extracted theorem and source.
+    """
+
+    if _normalize_source_text(usage.theorem_statement) != _normalize_source_text(
+        source_ref.statement_or_summary
+    ):
+        raise KernelValidationError(
+            f"{usage.proof_step_id}: theorem_applicability theorem_statement does not "
+            "match the cited source_ref statement"
+        )
+    if _locator_tuple(usage.locator) != _locator_tuple(source_ref.locator):
+        raise KernelValidationError(
+            f"{usage.proof_step_id}: theorem_applicability locator does not match "
+            "the cited source_ref locator"
+        )
+    if theorem_extraction is None:
+        return
+
+    extraction_sources = {source.id: source for source in theorem_extraction.sources}
+    matching_theorems = [
+        theorem
+        for theorem in theorem_extraction.theorems
+        if _normalize_source_text(theorem.statement) == _normalize_source_text(usage.theorem_statement)
+        and _locator_tuple(theorem.locator) == _locator_tuple(usage.locator)
+    ]
+    if not matching_theorems:
+        raise KernelValidationError(
+            f"{usage.proof_step_id}: theorem_applicability statement/locator does not "
+            "match any extracted theorem"
+        )
+    if usage.theorem_id is not None and usage.theorem_id not in {
+        theorem.id for theorem in matching_theorems
+    }:
+        raise KernelValidationError(
+            f"{usage.proof_step_id}: theorem_applicability theorem_id does not match "
+            "the extracted theorem"
+        )
+    source_matches = False
+    for theorem in matching_theorems:
+        extracted_source = extraction_sources.get(theorem.source_ref_id)
+        if extracted_source is None:
+            continue
+        if (
+            extracted_source.title == source_ref.title
+            and extracted_source.authors == source_ref.authors
+        ):
+            source_matches = True
+            break
+    if not source_matches:
+        raise KernelValidationError(
+            f"{usage.proof_step_id}: theorem_applicability extracted theorem source "
+            "does not match the cited source_ref"
+        )
 
 
 def _validate_review_outcome(review: Review, idea_grade: IdeaGrade) -> None:

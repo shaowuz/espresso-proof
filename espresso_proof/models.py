@@ -1055,6 +1055,25 @@ class LiteratureItem(StrictBaseModel):
         return self
 
 
+def _contains_literal_string(value: Any, literal: str) -> bool:
+    if isinstance(value, str):
+        return literal in value
+    if isinstance(value, dict):
+        return any(_contains_literal_string(item, literal) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_literal_string(item, literal) for item in value)
+    return False
+
+
+def _validate_literature_candidate_only_meanings(value: Any, *, artifact_name: str) -> None:
+    forbidden = "literature_implies"
+    if _contains_literal_string(value, forbidden):
+        raise ValueError(
+            f"{artifact_name} cannot emit literature_implies; only source-grounding "
+            "or theorem applicability may use it for a specific proof step"
+        )
+
+
 class LiteratureReviewReport(StrictBaseModel):
     claim_id: str
     query_summary: str
@@ -1062,6 +1081,14 @@ class LiteratureReviewReport(StrictBaseModel):
     known_examples: list[str] = Field(default_factory=list)
     known_counterexample_families: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_candidate_only_meanings(self) -> LiteratureReviewReport:
+        _validate_literature_candidate_only_meanings(
+            self.model_dump(mode="json"),
+            artifact_name="Literature Review",
+        )
+        return self
 
 
 class ExtractedTheorem(StrictBaseModel):
@@ -1279,6 +1306,10 @@ class LiteratureReviewAgentReport(StrictBaseModel):
 
     @model_validator(mode="after")
     def validate_literature_review_agent_refs(self) -> LiteratureReviewAgentReport:
+        _validate_literature_candidate_only_meanings(
+            self.model_dump(mode="json"),
+            artifact_name="Literature Review Agent",
+        )
         source_by_id = {source.source_ref.id: source for source in self.input_sources}
         unknown_theorem_sources = {
             theorem.source_ref_id
@@ -1406,9 +1437,11 @@ class TheoremApplicabilityUsage(StrictBaseModel):
         bad_conditions = {"missing", "mismatched", "unclear", "not_checked"}
         has_bad_condition = any(condition.status in bad_conditions for condition in self.conditions)
         if self.applicability_status == "applicable":
+            if not self.conditions:
+                raise ValueError("applicable theorem usage requires non-empty condition coverage")
             if has_bad_condition:
                 raise ValueError("applicable theorem usage requires all conditions satisfied")
-            if self.conclusion_status in {"orthogonal", "contradicts", "unclear"}:
+            if self.conclusion_status != "compatible":
                 raise ValueError("applicable theorem usage requires compatible conclusion")
             if self.blocks_source_backed:
                 raise ValueError("applicable theorem usage cannot block source_backed")
