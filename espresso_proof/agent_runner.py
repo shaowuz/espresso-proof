@@ -44,6 +44,7 @@ from .front_half.registry import _STAGE_REGISTRY
 from .io import read_text
 from .literature_discovery import discover_literature as run_literature_discovery
 from .llm_agents import build_client, load_agent_context
+from .pressure_status import PRESSURE_STATUS_FILENAME, build_pressure_status
 from .run_dashboard import write_run_dashboard
 from .run_lock import run_writer_lock
 from .stage_runner import StageError, StageRunner
@@ -112,6 +113,8 @@ def skip_agent(run_dir: Path, agent: str, *, reason: str | None = None) -> dict:
         if not has_status(run_dir):
             init_agent_run_status(run_dir)
         set_agent_status(run_dir, agent, "skipped", error_summary=reason)
+        if agent in ("examples", "counterexamples"):
+            build_pressure_status(run_dir)
         validate_run(run_dir)
         _refresh_dashboard(run_dir)
     return {"agent": agent, "status": "skipped"}
@@ -185,9 +188,11 @@ def _run_single_agent_locked(
     # rollback (retries are recorded even when the run fails).
     started_at = _now()
     set_agent_status(run_dir, agent, "running", started_at=started_at, increment_attempt=True)
+    if agent in ("examples", "counterexamples"):
+        build_pressure_status(run_dir)
     validate_run(run_dir)
 
-    snapshot_paths = AGENT_SNAPSHOT_PATHS[agent] + ["agent_run_status.yaml"]
+    snapshot_paths = AGENT_SNAPSHOT_PATHS[agent] + ["agent_run_status.yaml", PRESSURE_STATUS_FILENAME]
     runner = StageRunner(run_dir)
 
     def _mutate() -> None:
@@ -196,6 +201,8 @@ def _run_single_agent_locked(
         # roll back together (safe_to_use_as_evidence is recomputed from the real
         # artifact presence).
         set_agent_status(run_dir, agent, "done", finished_at=_now())
+        if agent in ("examples", "counterexamples"):
+            build_pressure_status(run_dir)
 
     try:
         runner.run(
@@ -216,6 +223,8 @@ def _run_single_agent_locked(
             finished_at=_now(),
             error_summary=str(exc)[:500],
         )
+        if agent in ("examples", "counterexamples"):
+            build_pressure_status(run_dir)
         validate_run(run_dir)
         _refresh_dashboard(run_dir)
         return {"agent": agent, "status": "failed", "error": str(exc)}

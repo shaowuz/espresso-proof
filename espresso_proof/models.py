@@ -1363,6 +1363,8 @@ class CounterexampleTest(StrictBaseModel):
                 "a counterexample can refute the claim only with a checked 'failed' "
                 "result; an untested / survived / inconclusive result cannot refute"
             )
+        if self.refutes_claim and (self.exposes_missing_hypothesis or self.missing_hypothesis):
+            raise ValueError("missing-hypothesis pressure cannot refute the original claim")
         if self.satisfies_all_claim_hypotheses is False and self.refutes_claim:
             raise ValueError("dropped-hypothesis tests cannot refute the original claim")
         if self.satisfies_all_claim_hypotheses is not True and self.refutes_claim:
@@ -1372,6 +1374,8 @@ class CounterexampleTest(StrictBaseModel):
             )
         if self.refutes_step_only and self.refutes_claim:
             raise ValueError("a proof-step attack cannot refute the original claim")
+        if self.refutes_claim and self.target != "theorem":
+            raise ValueError("claim refutation requires target='theorem'")
         return self
 
 
@@ -2661,6 +2665,121 @@ class AgentRunStatusReport(StrictBaseModel):
         return self
 
 
+PressureState = Literal[
+    "pending_not_run_or_partial",
+    "completed_no_candidate_found_in_scope",
+    "candidate_present_needs_admissibility",
+    "admissible_refutation",
+    "inadmissible_pressure",
+]
+
+
+class PressureLateMarker(StrictBaseModel):
+    """Local late-pressure marker for later Update Inbox conversion.
+
+    This is not an Update Inbox entry. It is deterministic scheduling metadata
+    only: ``dedupe_key`` lets Task 05 convert it into exactly one inbox event
+    without changing proof/source/evidence/refutation/grade ownership here.
+    """
+
+    id: str
+    type: Literal["example_pressure", "counterexample_pressure"]
+    origin_stage: Literal["examples", "counterexamples"]
+    origin_artifact: str
+    origin_artifact_id: str
+    artifact_revision_or_hash: str
+    locked_claim_id: str
+    route_id_or_step_id: str
+    scope: Literal["whole_claim", "proof_step", "route"]
+    pressure_state: PressureState
+    lifecycle_state_at_creation: str
+    late_after_strategy: bool
+    dedupe_key: str
+    created_at: str
+    effect: Literal["scheduling_only"] = "scheduling_only"
+    advisory_only: Literal[True] = True
+    update_inbox_entry: Literal[False] = False
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_marker_scope(self) -> PressureLateMarker:
+        expected_type = (
+            "example_pressure" if self.origin_stage == "examples" else "counterexample_pressure"
+        )
+        if self.type != expected_type:
+            raise ValueError("late pressure marker type must match origin_stage")
+        if not self.dedupe_key.strip():
+            raise ValueError("late pressure marker requires a dedupe_key")
+        if self.origin_artifact.startswith("/") or ".." in self.origin_artifact.split("/"):
+            raise ValueError("late pressure origin_artifact must be run-relative")
+        if not self.artifact_revision_or_hash.strip():
+            raise ValueError("late pressure marker requires artifact_revision_or_hash")
+        if not self.route_id_or_step_id.strip():
+            raise ValueError("late pressure marker requires route_id_or_step_id")
+        return self
+
+
+class PressureStatusEntry(StrictBaseModel):
+    """Derived example/counterexample pressure state.
+
+    Advisory process context only. It records whether pressure is pending,
+    empty, admissible, inadmissible, or awaiting admissibility. It cannot carry
+    checked evidence or refutation authority; those remain owned by examples,
+    counterexamples, computation checks, and validators.
+    """
+
+    kind: Literal["examples", "counterexamples"]
+    pressure_state: PressureState
+    agent_status: Literal["not_run", "queued", "running", "done", "failed", "skipped", "no_board"]
+    artifact_path: str
+    candidate_count: int = Field(ge=0)
+    admissible_refutation_count: int = Field(ge=0, default=0)
+    inadmissible_pressure_count: int = Field(ge=0, default=0)
+    needs_admissibility_count: int = Field(ge=0, default=0)
+    late_markers: list[PressureLateMarker] = Field(default_factory=list)
+    effect: Literal["pressure_context_only"] = "pressure_context_only"
+    advisory_only: Literal[True] = True
+
+    @model_validator(mode="after")
+    def validate_counts_match_state(self) -> PressureStatusEntry:
+        if self.kind == "examples" and self.admissible_refutation_count:
+            raise ValueError("example pressure cannot carry refutation counts")
+        if self.pressure_state == "admissible_refutation" and not self.admissible_refutation_count:
+            raise ValueError("admissible_refutation state requires an admissible refutation count")
+        if self.pressure_state == "candidate_present_needs_admissibility" and not self.needs_admissibility_count:
+            raise ValueError(
+                "candidate_present_needs_admissibility state requires a pending-admissibility count"
+            )
+        if self.pressure_state == "inadmissible_pressure" and not self.inadmissible_pressure_count:
+            raise ValueError("inadmissible_pressure state requires an inadmissible pressure count")
+        if self.artifact_path.startswith("/") or ".." in self.artifact_path.split("/"):
+            raise ValueError("pressure artifact_path must be run-relative")
+        return self
+
+
+class PressureStatusReport(StrictBaseModel):
+    """Run-level async pressure sidecar.
+
+    Optional/additive. It is derived from existing artifacts and is intended for
+    UI/scheduling context only; it never changes grade, evidence, source,
+    theorem, proof, final-report, memory, or Update Inbox ownership.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    entries: list[PressureStatusEntry]
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_entries(self) -> PressureStatusReport:
+        kinds = [entry.kind for entry in self.entries]
+        if len(kinds) != len(set(kinds)):
+            raise ValueError("pressure_status entries must be unique by kind")
+        return self
+
+
 class RouteAllocationEntry(StrictBaseModel):
     """Goal 54C: one candidate route's advisory scheduling line.
 
@@ -2885,6 +3004,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "human_time_allocation_context": HumanTimeAllocationContext,
     "front_half_run": FrontHalfRunReport,
     "agent_run_status": AgentRunStatusReport,
+    "pressure_status": PressureStatusReport,
     "memory_entry": MemoryEntry,
     "memory_index": MemoryIndex,
     "memory_context": MemoryContext,

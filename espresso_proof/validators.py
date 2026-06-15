@@ -42,6 +42,7 @@ from .models import (
     HumanChoice,
     HumanExampleFeedback,
     HumanChoiceStatus,
+    ExampleStatus,
     IdeaGrade,
     IdeaStatus,
     LLMAgentRunReport,
@@ -52,6 +53,7 @@ from .models import (
     ProverLoopReport,
     ProverRoundIndex,
     ProverRoundReport,
+    PressureStatusReport,
     Review,
     VerificationVerdict,
     ReviewerVerdict,
@@ -64,6 +66,14 @@ from .models import (
     TheoremApplicabilityReport,
     TheoremConditionLedger,
     TheoremExtractionReport,
+)
+from .pressure_status import (
+    artifact_revision_hash,
+    derive_counterexamples_pressure_state,
+    derive_examples_pressure_state,
+    is_admissible_refutation,
+    is_inadmissible_counterexample_pressure,
+    needs_counterexample_admissibility,
 )
 from .strategy_rules import validate_strategy_rules
 from .validation.errors import KernelValidationError
@@ -137,6 +147,7 @@ def validate_run(run_dir: Path) -> None:
     proof_goal_graph = _load_optional_proof_goal_graph(run_dir, manifest)
     theorem_condition_ledger = _load_optional_theorem_condition_ledger(run_dir, manifest)
     agent_run_status = _load_optional_agent_run_status(run_dir, manifest)
+    pressure_status = _load_optional_pressure_status(run_dir, manifest)
     _load_optional_ai_review(run_dir, manifest, claim)
     human_feedback, feedback_summary = _load_optional_human_feedback(run_dir, manifest)
 
@@ -233,6 +244,15 @@ def validate_run(run_dir: Path) -> None:
         strategy_brief,
     )
     _validate_agent_run_status(agent_run_status, claim, manifest, run_dir)
+    _validate_pressure_status(
+        pressure_status,
+        claim,
+        manifest,
+        run_dir,
+        agent_run_status,
+        examples,
+        counterexamples,
+    )
     _validate_final_report_language(run_dir / artifacts["final_report"], idea_grade)
 
 
@@ -246,6 +266,19 @@ def _load_optional_agent_run_status(
     return validate_yaml_model(
         run_dir / optional["agent_run_status"],
         AgentRunStatusReport,
+    )
+
+
+def _load_optional_pressure_status(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> PressureStatusReport | None:
+    optional = manifest.optional_artifacts
+    if "pressure_status" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["pressure_status"],
+        PressureStatusReport,
     )
 
 
@@ -306,6 +339,149 @@ def _validate_agent_run_status(
                 )
 
 
+def _validate_pressure_status(
+    pressure_status: PressureStatusReport | None,
+    claim: Claim,
+    manifest: RunManifest,
+    run_dir: Path,
+    agent_run_status: AgentRunStatusReport | None,
+    examples: ExampleSelection,
+    counterexamples: CounterexampleReport,
+) -> None:
+    """Async pressure sidecar is derived/advisory only.
+
+    It may expose pending/late pressure to scheduling surfaces, but it cannot
+    create survived examples, no-counterexample evidence, or refutation status.
+    Bind it back to the current run and artifacts so a stale or hand-edited
+    pressure file fails closed.
+    """
+
+    if pressure_status is None:
+        return
+    if pressure_status.claim_id != claim.id:
+        raise KernelValidationError("pressure_status claim_id does not match locked claim")
+    if pressure_status.run_id != manifest.run_id:
+        raise KernelValidationError("pressure_status run_id does not match run manifest")
+    kinds = {entry.kind for entry in pressure_status.entries}
+    if kinds != {"examples", "counterexamples"}:
+        raise KernelValidationError("pressure_status requires exactly examples and counterexamples entries")
+
+    board_statuses = (
+        {entry.agent: entry.status for entry in agent_run_status.agents}
+        if agent_run_status is not None
+        else {}
+    )
+    artifact_counts = {
+        "examples": len(examples.examples),
+        "counterexamples": len(counterexamples.tests),
+    }
+    expected_artifacts = {
+        "examples": manifest.artifacts["examples"],
+        "counterexamples": manifest.artifacts["counterexamples"],
+    }
+    seen_dedupe_keys: set[str] = set()
+    for entry in pressure_status.entries:
+        expected_status = board_statuses.get(entry.kind, "no_board")
+        if entry.agent_status != expected_status:
+            raise KernelValidationError(
+                f"pressure_status {entry.kind} agent_status is stale: "
+                f"{entry.agent_status!r} != {expected_status!r}"
+            )
+        if entry.artifact_path != expected_artifacts[entry.kind]:
+            raise KernelValidationError(
+                f"pressure_status {entry.kind} artifact_path does not match manifest"
+            )
+        if entry.candidate_count != artifact_counts[entry.kind]:
+            raise KernelValidationError(
+                f"pressure_status {entry.kind} candidate_count is stale"
+            )
+        expected_state = _expected_pressure_state(entry.kind, expected_status, examples, counterexamples)
+        if entry.pressure_state != expected_state:
+            raise KernelValidationError(
+                f"pressure_status {entry.kind} pressure_state is stale: "
+                f"{entry.pressure_state!r} != {expected_state!r}"
+            )
+        _validate_pressure_counts(entry, examples, counterexamples)
+        artifact_hash = artifact_revision_hash(run_dir, entry.artifact_path)
+        for marker in entry.late_markers:
+            if marker.effect != "scheduling_only" or not marker.advisory_only:
+                raise KernelValidationError("late pressure marker must be scheduling-only/advisory")
+            if marker.update_inbox_entry is not False:
+                raise KernelValidationError("Task 03 pressure marker must not be an Update Inbox entry")
+            if marker.artifact_revision_or_hash != artifact_hash:
+                raise KernelValidationError("late pressure marker artifact_revision_or_hash is stale")
+            if marker.scope != "whole_claim" or marker.route_id_or_step_id != "whole_claim":
+                raise KernelValidationError("Task 03 late pressure marker must be scoped to whole_claim")
+            if marker.late_after_strategy is not True:
+                raise KernelValidationError("late pressure marker must record late_after_strategy=true")
+            if marker.origin_stage != entry.kind:
+                raise KernelValidationError("late pressure marker origin_stage does not match entry kind")
+            if marker.origin_artifact != entry.artifact_path:
+                raise KernelValidationError("late pressure marker origin_artifact does not match entry")
+            if marker.locked_claim_id != claim.id:
+                raise KernelValidationError("late pressure marker locked_claim_id does not match claim")
+            if marker.pressure_state != entry.pressure_state:
+                raise KernelValidationError("late pressure marker pressure_state does not match entry")
+            if marker.dedupe_key in seen_dedupe_keys:
+                raise KernelValidationError("duplicate late pressure marker dedupe_key")
+            seen_dedupe_keys.add(marker.dedupe_key)
+            valid_ids = (
+                {example.id for example in examples.examples}
+                if entry.kind == "examples"
+                else {test.id for test in counterexamples.tests}
+            )
+            if marker.origin_artifact_id not in valid_ids:
+                raise KernelValidationError("late pressure marker origin_artifact_id is stale")
+
+
+def _expected_pressure_state(
+    kind: str,
+    agent_status: str,
+    examples: ExampleSelection,
+    counterexamples: CounterexampleReport,
+) -> str:
+    if kind == "examples":
+        return derive_examples_pressure_state(list(examples.examples), agent_status)
+    return derive_counterexamples_pressure_state(list(counterexamples.tests), agent_status)
+
+
+def _validate_pressure_counts(
+    entry,
+    examples: ExampleSelection,
+    counterexamples: CounterexampleReport,
+) -> None:
+    if entry.kind == "examples":
+        needs = sum(
+            1
+            for example in examples.examples
+            if example.satisfies_all_claim_hypotheses == "unclear"
+            or example.result_for_current_idea in {ExampleStatus.inconclusive, ExampleStatus.not_tested}
+        )
+        inadmissible = sum(
+            1
+            for example in examples.examples
+            if example.satisfies_all_claim_hypotheses is False
+            or example.result_for_current_idea == ExampleStatus.failed
+        )
+        admissible = 0
+    else:
+        needs = sum(
+            1 for test in counterexamples.tests if needs_counterexample_admissibility(test)
+        )
+        inadmissible = sum(
+            1 for test in counterexamples.tests if is_inadmissible_counterexample_pressure(test)
+        )
+        admissible = sum(
+            1 for test in counterexamples.tests if is_admissible_refutation(test)
+        )
+    if entry.needs_admissibility_count != needs:
+        raise KernelValidationError(f"pressure_status {entry.kind} needs_admissibility_count is stale")
+    if entry.inadmissible_pressure_count != inadmissible:
+        raise KernelValidationError(f"pressure_status {entry.kind} inadmissible_pressure_count is stale")
+    if entry.admissible_refutation_count != admissible:
+        raise KernelValidationError(f"pressure_status {entry.kind} admissible_refutation_count is stale")
+
+
 def _load_optional_human_feedback(
     run_dir: Path,
     manifest: RunManifest,
@@ -364,7 +540,7 @@ def _has_admissible_counterexample(counterexamples: CounterexampleReport) -> boo
     refutation definition cannot drift between them.
     """
     return any(
-        test.satisfies_all_claim_hypotheses is True and test.refutes_claim
+        is_admissible_refutation(test)
         for test in counterexamples.tests
     )
 

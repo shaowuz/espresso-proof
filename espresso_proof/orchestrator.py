@@ -44,6 +44,7 @@ from .observability import (
     register_observability_artifacts,
     write_timings,
 )
+from .pressure_status import build_pressure_status
 from .run_events import append_event
 from .prover_loop_driver import continue_prover_loop
 from .run_dashboard import write_run_dashboard
@@ -116,6 +117,7 @@ def _finish_without_llm_gate(
             "Skipped evidence agents contribute no evidence or status.",
         ],
     )
+    build_pressure_status(run_dir, late_after_strategy=False)
     validate_run(run_dir)
     write_timings(run_dir)
     register_observability_artifacts(run_dir)
@@ -412,6 +414,7 @@ def orchestrate_run(
                 done.add("examples")
                 done.add("counterexamples")
         init_agent_run_status(run_dir, done=done)
+        build_pressure_status(run_dir, late_after_strategy=False)
         validate_run(run_dir)
 
     # Goal 54A: aggregate run timings + register the per-run observability logs as
