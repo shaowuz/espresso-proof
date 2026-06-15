@@ -28,6 +28,7 @@ import hashlib
 import platform
 from pathlib import Path
 
+from .claim_clear import ensure_claim_clear_for_downstream
 from .external_tool_runner import (
     run_and_record_external_tool,
     run_completed_cleanly,
@@ -74,6 +75,7 @@ def run_exact_modexp_adapter(
     if mod < 1 or exp < 0:
         raise ValueError("exact_modexp requires mod >= 1 and exp >= 0")
 
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     run = run_and_record_external_tool(
         run_dir,
         "exact_modexp",

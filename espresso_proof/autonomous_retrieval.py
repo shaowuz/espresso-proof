@@ -18,6 +18,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .claim_clear import ensure_claim_clear_for_downstream
 from .io import read_yaml, write_yaml
 from .literature_planner import plan_literature_search
 from .literature_retrieval import retrieve_and_ground, retrieve_local_corpus
@@ -141,6 +142,7 @@ def run_autonomous_retrieval(
     """
 
     run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     providers = providers or ["local_corpus"]
     plan = plan_literature_search(run_dir=run_dir, client=client)
 

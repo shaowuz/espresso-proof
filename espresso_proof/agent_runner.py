@@ -35,6 +35,10 @@ from .agent_run_status import (
     init_agent_run_status,
     set_agent_status,
 )
+from .claim_clear import (
+    CLAIM_CLEAR_BLOCKED_ON_DEMAND_AGENTS,
+    ensure_claim_clear_for_downstream,
+)
 from .failure_pattern_bank import audit_failure_patterns
 from .front_half.registry import _STAGE_REGISTRY
 from .io import read_text
@@ -162,6 +166,8 @@ def _run_single_agent_locked(
     validate_run(run_dir)
     if not has_status(run_dir):
         init_agent_run_status(run_dir)
+    if agent in CLAIM_CLEAR_BLOCKED_ON_DEMAND_AGENTS:
+        ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
 
     # Build the client BEFORE marking the agent running: a misconfigured provider
     # then fails with the board untouched (no permanently-"running" card and the

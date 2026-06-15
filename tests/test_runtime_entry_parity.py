@@ -20,13 +20,22 @@ from espresso_proof.validators import validate_run
 FIXTURES = Path("tests/fixtures")
 
 # An arbitrary claim that matches no mock scenario, so it scaffolds to the generic
-# unclear/needs_human run (consistent under the stub front-half on both paths).
-CLAIM_TEXT = "Let p be a prime. Every group G of order p^2 is abelian.\n"
+# unclear/needs_human run and stops consistently at the claim-clear gate.
+CLAIM_TEXT = "The Mathieu group M23 is realizable as a Galois group over Q.\n"
+
+# A precise seeded scenario used when a test needs to reach downstream stages.
+CLEAR_CLAIM_TEXT = "Every group of order p^2, where p is prime, is abelian.\n"
 
 
 def _claim(tmp_path: Path) -> str:
     path = tmp_path / "claim.md"
     path.write_text(CLAIM_TEXT, encoding="utf-8")
+    return str(path)
+
+
+def _clear_claim(tmp_path: Path) -> str:
+    path = tmp_path / "clear_claim.md"
+    path.write_text(CLEAR_CLAIM_TEXT, encoding="utf-8")
     return str(path)
 
 
@@ -76,7 +85,7 @@ def test_orchestrate_and_run_flow_reach_same_state_and_artifacts(tmp_path: Path)
     orch_state, orch_req, orch_opt = _artifact_shape(orch)
     flow_state, flow_req, flow_opt = _artifact_shape(flow)
 
-    assert orch_state == flow_state == "WAITING_LLM_AGENT_HUMAN_GATE"
+    assert orch_state == flow_state == "WAITING_CLAIM_CLARIFICATION"
     assert orch_req == flow_req
     assert orch_opt == flow_opt
 
@@ -95,7 +104,8 @@ def test_run_flow_does_not_manufacture_human_confirmation(tmp_path: Path) -> Non
     validate_run(flow)
     manifest = read_yaml(flow / "run_manifest.yaml")
     claim = read_yaml(flow / manifest["artifacts"]["locked_claim"])
-    # the wrapper reaches the human gate without confirming the claim
+    # the wrapper stops for claim clarification without manufacturing user
+    # confirmation.
     assert claim.get("human_confirmed") is False
     human_choice = read_yaml(flow / manifest["artifacts"]["human_choice"])
     assert human_choice.get("status") == "pending"
@@ -114,10 +124,10 @@ def test_run_flow_fails_closed_on_invalid_artifact(tmp_path: Path, monkeypatch) 
         app,
         [
             "run-flow",
-            "--input", _claim(tmp_path),
+            "--input", _clear_claim(tmp_path),
             "--project", "parity",
             "--provider", "stub",
-            "--front-half", "stub",
+            "--front-half", "mock",
             "--output-root", str(tmp_path),
         ],
     )

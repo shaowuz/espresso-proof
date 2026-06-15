@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .claim_clear import ensure_claim_clear_for_downstream
 from .io import read_yaml, write_yaml
 from .llm_agents import LLMClient, append_prover_loop_round
 from .observability import append_agent_event, monotonic_ms, now_iso
@@ -185,6 +186,7 @@ def _continue_prover_loop_locked(
     max_rounds: int | None,
     client: LLMClient | None,
 ) -> dict:
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     validate_run(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     loop_path = manifest.get("optional_artifacts", {}).get("prover_loop")

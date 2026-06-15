@@ -13,8 +13,9 @@ from pathlib import Path
 
 import pytest
 
+from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.external_tool_adapters import run_exact_modexp_adapter
-from espresso_proof.io import read_yaml
+from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.memo import build_concise_memo
 from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.proof_language import contains_proof_language
@@ -24,7 +25,15 @@ FIXTURES = Path("tests/fixtures")
 
 
 def _run(tmp_path: Path) -> Path:
-    return run_mock_critique("g25c", FIXTURES / "promising_but_unproved" / "input.md", tmp_path)
+    run = run_mock_critique("g25c", FIXTURES / "promising_but_unproved" / "input.md", tmp_path)
+    manifest = read_yaml(run / "run_manifest.yaml")
+    ledger_path = run / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    ensure_claim_clear_for_downstream(run)
+    return run
 
 
 def _pv_entries(run: Path) -> list[dict]:

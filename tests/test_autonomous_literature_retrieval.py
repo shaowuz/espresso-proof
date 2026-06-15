@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from espresso_proof.autonomous_retrieval import run_autonomous_retrieval
+from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.literature_planner import plan_literature_search
 from espresso_proof.llm_agents import StubLLMClient
@@ -69,6 +70,13 @@ def _p2_run(tmp_path: Path) -> Path:
         {"name": "G is a group", "status": "explicit", "source": "agent"},
     ]
     write_yaml(run_dir / "locked_claim.yaml", claim)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    ensure_claim_clear_for_downstream(run_dir)
     sg = read_yaml(run_dir / "source_grounding.yaml")
     sg["source_refs"] = []
     sg["steps"] = [

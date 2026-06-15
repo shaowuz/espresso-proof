@@ -19,12 +19,15 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml
+from espresso_proof.agent_run_status import init_agent_run_status
+from espresso_proof.claim_clear import evaluate_claim_clear, write_claim_clear_gate
+from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.run_dashboard import render_run_dashboard
 from espresso_proof.server import Workbench, WorkbenchError, _make_handler
 from espresso_proof.validators import validate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
+UNCLEAR_CLAIM = "Prove the thing about the nice mirror object."
 
 
 @pytest.fixture()
@@ -65,13 +68,31 @@ def _await_job(call, job_id: str, timeout: float = 20.0) -> dict:
     raise AssertionError("job did not finish")
 
 
-def _create(call) -> str:
+def _create_text(call, text: str) -> str:
     # Create is async: POST returns a job_id immediately; poll for the run_id.
-    status, d = call("POST", "/api/runs", {"text": CLAIM})
+    status, d = call("POST", "/api/runs", {"text": text})
     assert status == 202, d
     job = _await_job(call, d["job_id"])
     assert job["state"] == "done", job
     return job["result"]["run_id"]
+
+
+def _create(call) -> str:
+    return _create_text(call, CLAIM)
+
+
+def _mark_claim_clear(run_dir: Path) -> None:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    manifest["current_state"] = "CLAIM_CLEAR"
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+    write_claim_clear_gate(run_dir, evaluate_claim_clear(run_dir))
+    init_agent_run_status(run_dir, done={"claim_understanding"})
+    validate_run(run_dir)
 
 
 # --------------------------------------------------------------------------- #
@@ -164,6 +185,7 @@ def test_run_examples_writes_only_examples(client) -> None:
     wb, call, _ = client
     run_id = _create(call)
     run_dir = wb.resolve_run(run_id)
+    _mark_claim_clear(run_dir)
     ce0 = _sha(run_dir / "counterexamples.yaml")
     lit0 = _sha(run_dir / "literature_review.yaml")
     status, d = call("POST", f"/api/runs/{run_id}/agents/examples")
@@ -180,10 +202,32 @@ def test_run_examples_writes_only_examples(client) -> None:
     validate_run(run_dir)
 
 
+def test_unclear_claim_server_agent_launch_is_blocked(client) -> None:
+    wb, call, _ = client
+    run_id = _create_text(call, UNCLEAR_CLAIM)
+    run_dir = wb.resolve_run(run_id)
+    before = _sha(run_dir / "examples.yaml")
+
+    status, d = call("POST", f"/api/runs/{run_id}/agents/examples")
+    assert status == 202
+    job = _await_job(call, d["job_id"])
+    assert job["state"] == "failed"
+    assert "claim-clear gate" in job.get("error_detail", "")
+    assert _sha(run_dir / "examples.yaml") == before
+    _, st = call("GET", f"/api/runs/{run_id}/status")
+    agents = {a["agent"]: a for a in st["agents"]}
+    assert agents["examples"]["status"] == "skipped"
+    board = read_yaml(run_dir / "agent_run_status.yaml")
+    board_agents = {a["agent"]: a for a in board["agents"]}
+    assert board_agents["examples"]["safe_to_use_as_evidence"] is False
+    validate_run(run_dir)
+
+
 def test_run_counterexamples_writes_only_counterexamples(client) -> None:
     wb, call, _ = client
     run_id = _create(call)
     run_dir = wb.resolve_run(run_id)
+    _mark_claim_clear(run_dir)
     ex0 = _sha(run_dir / "examples.yaml")
     lit0 = _sha(run_dir / "literature_review.yaml")
     _, d = call("POST", f"/api/runs/{run_id}/agents/counterexamples")
@@ -199,6 +243,7 @@ def test_run_literature_grants_no_reference_support(client) -> None:
     wb, call, _ = client
     run_id = _create(call)
     run_dir = wb.resolve_run(run_id)
+    _mark_claim_clear(run_dir)
     _, d = call("POST", f"/api/runs/{run_id}/agents/literature")
     assert _await_job(call, d["job_id"])["state"] == "done"
     sg = read_yaml(run_dir / "source_grounding.yaml")
@@ -209,6 +254,7 @@ def test_failed_agent_records_failed_and_preserves_run(client, monkeypatch) -> N
     wb, call, _ = client
     run_id = _create(call)
     run_dir = wb.resolve_run(run_id)
+    _mark_claim_clear(run_dir)
     # run examples once successfully
     _, d = call("POST", f"/api/runs/{run_id}/agents/examples")
     assert _await_job(call, d["job_id"])["state"] == "done"

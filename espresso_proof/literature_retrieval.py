@@ -28,6 +28,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .claim_clear import ensure_claim_clear_for_downstream
 from .io import read_yaml, write_yaml
 from .models import LiteratureRetrievalReport
 
@@ -160,6 +161,7 @@ def retrieve_sources(
 ) -> dict:
     """Write literature_retrieval.yaml (candidate sources) and register it."""
     run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     report = build_retrieval_report(
         run_dir,
         corpus_dir=corpus_dir,
@@ -197,6 +199,7 @@ def retrieve_and_ground(
     from .models import TheoremExtractionReport
 
     run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     report = retrieve_sources(
         run_dir, corpus_dir=corpus_dir, query=query, providers=["local_corpus"], max_results=max_results
     )

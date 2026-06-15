@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .claim_clear import ensure_claim_clear_for_downstream
 from .io import read_yaml
 from .pdf_ingestion import extract_source_text, extract_theorems, locator_for_source, read_source_bytes
 from .source_verification import expanded_hypothesis_terms, significant_terms, term_covered
@@ -33,6 +34,7 @@ def run_literature_review_agent(
     remain Referencing decisions.
     """
 
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     artifacts = manifest["artifacts"]
     claim = read_yaml(run_dir / artifacts["locked_claim"])

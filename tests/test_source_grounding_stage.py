@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml
+from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.source_grounding_stage import prepare_source_grounding
 from espresso_proof.stage_runner import StageError
@@ -27,7 +27,14 @@ THM = (
 
 
 def _hodge_run(tmp_path: Path) -> Path:
-    return run_mock_critique("hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path)
+    run_dir = run_mock_critique("hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    return run_dir
 
 
 def _src(run_dir: Path, text: str) -> Path:

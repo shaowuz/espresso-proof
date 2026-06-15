@@ -15,6 +15,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .claim_clear import ensure_claim_clear_for_downstream
 from .io import read_yaml, write_yaml
 from .llm_agents import LLMClient, safe_list, safe_text
 from .models import LiteratureCandidates
@@ -151,6 +152,7 @@ def run_literature_scout(
     references per step; writes a candidate-only artifact; registers it in the
     manifest; and re-validates the run (fail closed).
     """
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     artifacts = manifest["artifacts"]
     claim = read_yaml(run_dir / artifacts["locked_claim"])

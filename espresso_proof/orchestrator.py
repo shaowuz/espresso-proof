@@ -16,6 +16,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from .agent_run_status import init_agent_run_status
+from .claim_clear import (
+    CLAIM_CLEAR,
+    WAITING_CLAIM_CLARIFICATION,
+    ensure_claim_clear_for_downstream,
+    evaluate_claim_clear,
+    write_claim_clear_gate,
+)
 from .front_half_agents import run_front_half_agent_pass, write_front_half_run
 from .validation.front_half import validate_front_half_run
 from .io import read_text, read_yaml, write_yaml
@@ -55,7 +62,9 @@ from .validators import validate_run
 # it, which makes the orchestrator idempotent and resumable.
 ORCHESTRATION_STATES: list[str] = [
     "SCAFFOLDED",
+    "WAITING_CLAIM_CLARIFICATION",
     "FRONT_HALF_DONE",
+    "CLAIM_CLEAR",
     "LITERATURE_DONE",
     "WAITING_LLM_AGENT_HUMAN_GATE",
     "COMPLETED_MEMO",
@@ -91,6 +100,37 @@ def _set_state(run_dir: Path, state: str) -> None:
 def _reached(run_dir: Path, state: str) -> bool:
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     return _state_index(manifest.get("current_state", "")) >= _state_index(state)
+
+
+def _finish_without_llm_gate(
+    run_dir: Path,
+    *,
+    claim_gate: dict,
+) -> dict:
+    init_agent_run_status(
+        run_dir,
+        done={"claim_understanding"},
+        skipped={"literature", "examples", "counterexamples"},
+        notes=[
+            "Claim clarity blocked downstream scheduling.",
+            "Skipped evidence agents contribute no evidence or status.",
+        ],
+    )
+    validate_run(run_dir)
+    write_timings(run_dir)
+    register_observability_artifacts(run_dir)
+    dashboard = write_run_dashboard(run_dir)
+    final_manifest = read_yaml(run_dir / "run_manifest.yaml")
+    return {
+        "run_dir": run_dir,
+        "state": final_manifest.get("current_state"),
+        "human_gate": {
+            "status": "waiting_claim_clarification",
+            "human_confirmed": False,
+            "reason": "; ".join(claim_gate.get("blocking_reasons") or []),
+        },
+        "dashboard": dashboard,
+    }
 
 
 def _preflight_provider(
@@ -182,6 +222,24 @@ def orchestrate_run(
     else:
         runner = StageRunner(run_dir)
 
+    if _reached(run_dir, CLAIM_CLEAR):
+        resume_gate = evaluate_claim_clear(run_dir, require_recorded_clear_gate=True)
+        if not resume_gate.clear:
+            gate_report: dict = {}
+
+            def _stale_claim_gate() -> None:
+                nonlocal gate_report
+                gate_report = write_claim_clear_gate(run_dir, resume_gate)
+
+            runner.run(
+                name="claim_clear_gate",
+                mutate=_stale_claim_gate,
+                validate=lambda: validate_run(run_dir),
+                state_after=WAITING_CLAIM_CLARIFICATION,
+                snapshot_paths=["claim_clear_gate.yaml"],
+            )
+            return _finish_without_llm_gate(run_dir, claim_gate=gate_report)
+
     # Goal 27 fast core pass: run only the FAST_CORE_STAGES in the front half and
     # DEFER literature discovery + the evidence stages (examples / counterexamples),
     # so the user sees an initial judgment + preliminary routes quickly. The
@@ -220,6 +278,16 @@ def orchestrate_run(
             validate=_validate_front_half,
             state_after="FRONT_HALF_DONE",
         )
+
+    gate_result = evaluate_claim_clear(run_dir)
+    gate_report = write_claim_clear_gate(run_dir, gate_result)
+    if not gate_result.clear:
+        _set_state(run_dir, WAITING_CLAIM_CLARIFICATION)
+        validate_run(run_dir)
+        return _finish_without_llm_gate(run_dir, claim_gate=gate_report)
+    if not _reached(run_dir, CLAIM_CLEAR):
+        _set_state(run_dir, CLAIM_CLEAR)
+        validate_run(run_dir)
 
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     artifacts = manifest["artifacts"]
@@ -420,6 +488,7 @@ def _resume_run_locked(
 
     run_dir = Path(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     state = manifest.get("current_state", "")
     if state == "COMPLETED_MEMO":
         # idempotent: do not re-resolve / re-append rounds. But a pre-loop step on

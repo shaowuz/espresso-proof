@@ -594,6 +594,9 @@ def verify_computation_checks(run_dir: Path) -> dict:
     Registers the artifact in the run manifest's optional_artifacts so the
     standard validator picks it up.
     """
+    from .claim_clear import ensure_claim_clear_for_downstream
+
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     manifest_path = run_dir / "run_manifest.yaml"
     manifest = read_yaml(manifest_path)
     computations_path = run_dir / manifest["artifacts"]["computation_checks"]
@@ -626,8 +629,10 @@ def audit_evidence(run_dir: Path) -> dict:
     idea_grade, tests, source, or proof status. Re-validates the run (fail closed).
     """
 
+    from .claim_clear import ensure_claim_clear_for_downstream
     from .validators import validate_run  # local import to avoid an import cycle
 
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     report = verify_computation_checks(run_dir)
     result_by_check = {r["check_id"]: r for r in report["results"]}
 
