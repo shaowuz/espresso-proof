@@ -66,6 +66,7 @@ from .models import (
     TheoremApplicabilityReport,
     TheoremConditionLedger,
     TheoremExtractionReport,
+    TimeAllocationPlan,
 )
 from .pressure_status import (
     artifact_revision_hash,
@@ -148,6 +149,7 @@ def validate_run(run_dir: Path) -> None:
     theorem_condition_ledger = _load_optional_theorem_condition_ledger(run_dir, manifest)
     agent_run_status = _load_optional_agent_run_status(run_dir, manifest)
     pressure_status = _load_optional_pressure_status(run_dir, manifest)
+    time_allocation = _load_optional_time_allocation(run_dir, manifest)
     _load_optional_ai_review(run_dir, manifest, claim)
     human_feedback, feedback_summary = _load_optional_human_feedback(run_dir, manifest)
 
@@ -253,6 +255,14 @@ def validate_run(run_dir: Path) -> None:
         examples,
         counterexamples,
     )
+    _validate_time_allocation(
+        time_allocation,
+        claim,
+        manifest,
+        run_dir,
+        strategy_synthesis,
+        strategy_brief,
+    )
     _validate_final_report_language(run_dir / artifacts["final_report"], idea_grade)
 
 
@@ -279,6 +289,19 @@ def _load_optional_pressure_status(
     return validate_yaml_model(
         run_dir / optional["pressure_status"],
         PressureStatusReport,
+    )
+
+
+def _load_optional_time_allocation(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> TimeAllocationPlan | None:
+    optional = manifest.optional_artifacts
+    if "time_allocation" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["time_allocation"],
+        TimeAllocationPlan,
     )
 
 
@@ -480,6 +503,87 @@ def _validate_pressure_counts(
         raise KernelValidationError(f"pressure_status {entry.kind} inadmissible_pressure_count is stale")
     if entry.admissible_refutation_count != admissible:
         raise KernelValidationError(f"pressure_status {entry.kind} admissible_refutation_count is stale")
+
+
+def _validate_time_allocation(
+    time_allocation: TimeAllocationPlan | None,
+    claim: Claim,
+    manifest: RunManifest,
+    run_dir: Path,
+    strategy_synthesis: StrategySynthesis,
+    strategy_brief: StrategyBrief,
+) -> None:
+    if "time_allocation" in manifest.artifacts:
+        raise KernelValidationError("time_allocation must be an optional scheduling artifact")
+    if time_allocation is None:
+        return
+    if manifest.optional_artifacts.get("time_allocation") != "time_allocation.yaml":
+        raise KernelValidationError("time_allocation optional artifact must be time_allocation.yaml")
+    if time_allocation.claim_id != claim.id:
+        raise KernelValidationError("time_allocation claim_id does not match locked claim")
+    if time_allocation.run_id != manifest.run_id:
+        raise KernelValidationError("time_allocation run_id does not match run manifest")
+    if not time_allocation.advisory_only or time_allocation.effect != "scheduling_only":
+        raise KernelValidationError("time_allocation must be scheduling-only/advisory")
+    if time_allocation.allocation_state != "TIME_ALLOCATION_STARTED":
+        raise KernelValidationError("time_allocation must record TIME_ALLOCATION_STARTED")
+
+    artifact_path = run_dir / manifest.optional_artifacts["time_allocation"]
+    if not artifact_path.exists():
+        raise KernelValidationError("time_allocation optional artifact is missing")
+
+    if time_allocation.strategy_artifact == "strategy_brief":
+        route_ids = {route.id for route in strategy_brief.top_strategies}
+    else:
+        route_ids = {route.id for route in strategy_synthesis.routes}
+    for entry in time_allocation.entries:
+        if entry.route_id is not None and entry.route_id not in route_ids:
+            raise KernelValidationError(
+                f"time_allocation entry references unknown route_id: {entry.route_id}"
+            )
+        if entry.action == "bounded_proof_exploration" and not entry.unchecked:
+            raise KernelValidationError("bounded proof exploration must be marked unchecked")
+
+    forbidden = {
+        "proof_status",
+        "source_status",
+        "evidence_status",
+        "theorem_applicability_status",
+        "refutation_status",
+        "grade_status",
+        "source_backed",
+        "checked_evidence",
+        "proved",
+        "verified",
+    }
+    raw = read_yaml(artifact_path)
+    if _contains_forbidden_allocation_token(raw, forbidden):
+        raise KernelValidationError(
+            "time_allocation cannot write proof/source/evidence/theorem/refutation/grade status"
+        )
+
+
+def _contains_forbidden_allocation_token(value, forbidden: set[str]) -> bool:
+    if isinstance(value, str):
+        normalized = value.lower()
+        if _first_forbidden_proof_language(normalized):
+            return True
+        allocation_only_patterns = [
+            r"\bproof-close\b",
+            r"\bsettled\b",
+            r"\bverified\s+by\s+examples\b",
+        ]
+        return any(token in normalized for token in forbidden) or any(
+            re.search(pattern, normalized) for pattern in allocation_only_patterns
+        )
+    if isinstance(value, dict):
+        return any(
+            str(key) in forbidden or _contains_forbidden_allocation_token(item, forbidden)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_forbidden_allocation_token(item, forbidden) for item in value)
+    return False
 
 
 def _load_optional_human_feedback(

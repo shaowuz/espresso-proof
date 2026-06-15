@@ -31,6 +31,38 @@ from espresso_proof.strategy_feedback import StrategyFeedback, append_feedback
 from espresso_proof.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
+CLEAR_CLAIM = "Every group of order p^2, where p is prime, is abelian.\n"
+
+
+def _clear_claim_input(tmp_path: Path) -> Path:
+    path = tmp_path / "clear_claim.md"
+    path.write_text(CLEAR_CLAIM, encoding="utf-8")
+    return path
+
+
+def _add_second_strategy_route(run_dir: Path) -> None:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    brief_path = run_dir / manifest["artifacts"]["strategy_brief"]
+    synthesis_path = run_dir / manifest["artifacts"]["strategy_synthesis"]
+    brief = read_yaml(brief_path)
+    synthesis = read_yaml(synthesis_path)
+    second = dict(brief["top_strategies"][0])
+    second.update(
+        {
+            "id": "strategy_secondary_002",
+            "title": "Secondary bounded check route",
+            "score": max(0, int(second.get("score", 50)) - 5),
+            "next_loop_plan": "Keep as backup route for allocation ordering tests.",
+        }
+    )
+    brief["top_strategies"].append(second)
+    brief["allowed_human_choices"].append(
+        {"strategy_id": second["id"], "effort_options": [second["estimated_effort"]]}
+    )
+    synthesis["routes"].append(second)
+    write_yaml(brief_path, brief)
+    write_yaml(synthesis_path, synthesis)
+    validate_run(run_dir)
 
 
 # -- deterministic scheduling score (exact Goal 54C formula) -------------------
@@ -117,12 +149,13 @@ def test_packet_advisory_only_locked_true() -> None:
 def _run_with_feedback(tmp_path: Path, *, priority: str, score: int = 90, strategy_id_override: str | None = None):
     result = orchestrate_run(
         project="g54c",
-        input_path=FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        input_path=_clear_claim_input(tmp_path),
         output_root=tmp_path,
         provider="stub",
         front_half="mock",
     )
     run_dir = Path(result["run_dir"])
+    _add_second_strategy_route(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     brief = read_yaml(run_dir / manifest["artifacts"]["strategy_brief"])
     selected = brief["top_strategies"][0]["id"]
@@ -202,12 +235,13 @@ def test_clean_continuation_reduce_route_gets_cheap_check(tmp_path: Path, monkey
 
     result = orchestrate_run(
         project="g54c_clean",
-        input_path=FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        input_path=_clear_claim_input(tmp_path),
         output_root=tmp_path,
         provider="stub",
         front_half="mock",
     )
     run_dir = Path(result["run_dir"])
+    _add_second_strategy_route(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     brief = read_yaml(run_dir / manifest["artifacts"]["strategy_brief"])
     selected = brief["top_strategies"][0]["id"]
@@ -295,7 +329,7 @@ def test_proof_language_note_never_reaches_dashboard(tmp_path: Path) -> None:
 
     result = orchestrate_run(
         project="g54c_scrub",
-        input_path=FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        input_path=_clear_claim_input(tmp_path),
         output_root=tmp_path,
         provider="stub",
         front_half="mock",

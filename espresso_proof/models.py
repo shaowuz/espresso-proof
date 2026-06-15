@@ -1649,6 +1649,93 @@ class StrategyBrief(StrictBaseModel):
         return self
 
 
+class TimeAllocationEntry(StrictBaseModel):
+    id: str
+    route_id: str | None = None
+    action: Literal[
+        "source_pinning",
+        "cheap_check",
+        "bounded_proof_exploration",
+        "repair_attempt",
+        "ask_human",
+        "stop",
+    ]
+    budget: Literal["tiny", "small", "bounded", "human", "none"]
+    unchecked: Literal[True]
+    advisory_only: Literal[True]
+    effect: Literal["scheduling_only"]
+    reason: str
+
+    @model_validator(mode="after")
+    def validate_route_binding(self) -> TimeAllocationEntry:
+        route_actions = {
+            "source_pinning",
+            "cheap_check",
+            "bounded_proof_exploration",
+            "repair_attempt",
+        }
+        if self.action in route_actions and not self.route_id:
+            raise ValueError(f"{self.action} allocation requires route_id")
+        if self.action == "ask_human" and self.budget != "human":
+            raise ValueError("ask_human allocation requires human budget")
+        if self.action == "stop" and self.budget != "none":
+            raise ValueError("stop allocation requires none budget")
+        if self.action == "bounded_proof_exploration" and self.budget != "bounded":
+            raise ValueError("bounded proof exploration must use bounded budget")
+        return self
+
+
+class TimeAllocationPlan(StrictBaseModel):
+    """V2 Task 04 provisional scheduling plan from Strategy Grader.
+
+    This artifact is deliberately scheduling-only: it can order work and name
+    missing context, but it has no field that can own proof/source/evidence/
+    theorem/refutation/grade status. StrictBaseModel rejects any smuggled status
+    fields on the plan or its entries.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    trigger: Literal["strategy_grader"]
+    allocation_state: Literal["TIME_ALLOCATION_STARTED"]
+    strategy_artifact: Literal["strategy_brief", "strategy_synthesis"]
+    advisory_only: Literal[True]
+    effect: Literal["scheduling_only"]
+    missing_context: list[
+        Literal[
+            "strategy_brief",
+            "human_preference",
+            "source_support",
+            "examples_pressure",
+            "counterexamples_pressure",
+        ]
+    ] = Field(default_factory=list)
+    entries: list[TimeAllocationEntry]
+    forbidden_status_effect: list[str] = Field(
+        default_factory=lambda: [
+            "proof",
+            "source",
+            "evidence",
+            "theorem_applicability",
+            "refutation",
+            "grade",
+        ]
+    )
+
+    @model_validator(mode="after")
+    def validate_scheduling_only(self) -> TimeAllocationPlan:
+        if not self.entries:
+            raise ValueError("time allocation plan requires at least one entry")
+        ids = [entry.id for entry in self.entries]
+        if len(ids) != len(set(ids)):
+            raise ValueError("time allocation entries must have unique ids")
+        if len(self.missing_context) != len(set(self.missing_context)):
+            raise ValueError("missing_context entries must be unique")
+        return self
+
+
 class HumanChoice(StrictBaseModel):
     claim_id: str
     status: HumanChoiceStatus
@@ -2992,6 +3079,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "loop_control": LoopControl,
     "strategy_synthesis": StrategySynthesis,
     "strategy_brief": StrategyBrief,
+    "time_allocation": TimeAllocationPlan,
     "human_choice": HumanChoice,
     "human_example_feedback": HumanExampleFeedback,
     "example_feedback_summary": ExampleFeedbackSummary,
