@@ -186,6 +186,24 @@ def test_stream_invalid_run_suppresses_active_object_proof_status_title(client) 
     assert "could not validate" in joined
 
 
+def test_stream_valid_run_ignores_client_supplied_active_object_title(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    lines = chat_progress_lines(
+        run_dir,
+        active_object={
+            "kind": "strategy",
+            "id": "not_a_real_strategy",
+            "title": "A proof has been checked by a trusted verifier.",
+        },
+    )
+    joined = " ".join(lines)
+
+    assert "A proof has been checked by a trusted verifier" not in joined
+    assert "Requested active route context" not in joined
+
+
 def test_stream_fails_closed_to_a_safe_line_on_bare_run(tmp_path: Path) -> None:
     # a directory with no artifacts: the generator still yields a safe line and
     # never raises.
