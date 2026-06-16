@@ -8,6 +8,7 @@ from pathlib import Path
 from espresso_proof.front_half_agents import run_front_half_agent_pass
 from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.mock_pipeline import run_mock_critique
+from espresso_proof.surface_warnings import refresh_final_report_disclosures
 from espresso_proof.validators import validate_run
 
 
@@ -73,6 +74,7 @@ def _prepared_run(tmp_path: Path, *, step_count: int = 2) -> tuple[Path, dict, s
         },
     )
     write_yaml(run_dir / artifacts["computation_checks"], {"claim_id": claim_id, "checks": []})
+    refresh_final_report_disclosures(run_dir)
     validate_run(run_dir)
     return run_dir, artifacts, claim_id
 
