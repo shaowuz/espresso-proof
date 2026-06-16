@@ -304,14 +304,14 @@ def _literature(review: dict | None) -> list[dict]:
         items.append(
             {
                 "id": _clip(raw.get("id"), 80),
-                "title": _clip(raw.get("title"), 160),
+                "title": _clip_scrubbed(raw.get("title"), 160),
                 "authors": [_clip(a, 60) for a in (raw.get("authors") or [])[:6]],
                 "locator": {
                     "kind": _clip(locator.get("kind"), 24),
                     "value": _clip(locator.get("value"), 160),
                 },
                 "relevance": _clip(raw.get("relevance"), 40),
-                "why": _clip(raw.get("why_relevant")),
+                "why": _clip_scrubbed(raw.get("why_relevant")),
                 # a literature hit is metadata: its phrase/tone comes from the
                 # SOURCE status the kernel recorded, never from mere relevance.
                 "phrase": evidence_phrase(status),

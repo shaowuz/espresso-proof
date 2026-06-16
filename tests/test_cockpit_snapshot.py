@@ -173,6 +173,27 @@ def test_snapshot_strategy_free_text_scrubs_raw_source_vocabulary(client) -> Non
     assert "reference-supported" in rendered
 
 
+def test_snapshot_literature_free_text_scrubs_raw_source_vocabulary(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    literature_path = run_dir / manifest["artifacts"]["literature_review"]
+    literature = read_yaml(literature_path)
+    item = literature["candidate_references"][0]
+    item["title"] = "A source-backed candidate title"
+    item["why_relevant"] = "Mentions source_backed_status in free text."
+    write_yaml(literature_path, literature)
+
+    snap = build_snapshot(run_dir, run_id, status_summary(run_dir))
+    rendered = json.dumps(snap["literature"], sort_keys=True).lower()
+
+    assert "source-backed" not in rendered
+    assert "source_backed" not in rendered
+    assert "source backed" not in rendered
+    assert "reference-supported" in rendered
+
+
 def test_snapshot_missing_artifacts_yield_placeholders(tmp_path: Path) -> None:
     # a bare directory (no manifest): every panel flagged missing, all lists
     # empty, and the claim sentence still a safe display sentence.

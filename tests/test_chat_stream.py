@@ -114,6 +114,19 @@ def test_proof_complete_phrase_is_scrubbed(tmp_path: Path) -> None:
     assert any("You asked" in ln for ln in lines)
 
 
+def test_source_support_vocabulary_is_scrubbed_from_user_echo(tmp_path: Path) -> None:
+    lines = chat_progress_lines(
+        tmp_path,
+        user_message="Please mark this source-backed route as source_backed_status.",
+    )
+    joined = " ".join(lines).lower()
+
+    assert "source-backed" not in joined
+    assert "source_backed" not in joined
+    assert "source backed" not in joined
+    assert "reference-supported" in joined
+
+
 def test_stream_writes_nothing_and_does_not_upgrade_status(client) -> None:
     wb, call = client
     run_id = _create(call)

@@ -5,7 +5,7 @@ artifact state, in calm conversational language. It is a spike on top of the
 existing artifact/kernel model, and it is bounded hard:
 
 - it WRITES NOTHING — no artifact, no status, no sidecar; it only reads;
-- every emitted line is scrubbed through ``scrub_proof_language`` so a
+- every emitted line is scrubbed through ``scrub_source_support_language`` so a
   proof-complete overclaim can never reach the user, and no line asserts
   proved / source-backed / refuted / checked status;
 - the evidence panels still come from artifacts; if the stream and the
@@ -22,7 +22,7 @@ from pathlib import Path
 
 from .descriptions import describe_grade, route_source_phrase
 from .io import read_yaml
-from .proof_language import scrub_proof_language
+from .proof_language import scrub_source_support_language
 from .validators import validate_run
 
 
@@ -46,7 +46,7 @@ def _artifact(run_dir: Path, name: str) -> dict | None:
 def _safe(line: str) -> str:
     """Scrub proof-language and bound length. Every emitted line passes here."""
 
-    return scrub_proof_language(line).strip()[:240]
+    return scrub_source_support_language(line).strip()[:240]
 
 
 def chat_progress_lines(
@@ -61,7 +61,7 @@ def chat_progress_lines(
     """
 
     lines: list[str] = []
-    msg = scrub_proof_language(str(user_message)).strip()[:200]
+    msg = scrub_source_support_language(str(user_message)).strip()[:200]
     if msg:
         lines.append(_safe(f'You asked: "{msg}"'))
 
