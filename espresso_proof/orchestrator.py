@@ -51,6 +51,7 @@ from .prover_loop_driver import continue_prover_loop
 from .run_dashboard import write_run_dashboard
 from .run_lock import run_writer_lock
 from .stage_runner import StageRunner
+from .surface_warnings import refresh_final_report_disclosures
 from .validation.errors import KernelValidationError
 from .models import (
     HumanChoice,
@@ -462,6 +463,7 @@ def _resolve_and_build_loop(run_dir: Path, *, decision: str, reason: str, human_
         run_dir=run_dir, agent_report=report, loop_report=loop_report
     )
     write_yaml(run_dir / "run_manifest.yaml", manifest)
+    refresh_final_report_disclosures(run_dir)
     validate_run(run_dir)
 
 

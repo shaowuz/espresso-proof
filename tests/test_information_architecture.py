@@ -10,6 +10,7 @@ from espresso_proof.agent_run_status import set_agent_status
 from espresso_proof.agent_runner import run_single_agent, skip_agent
 from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.orchestrator import orchestrate_run, resume_run
+from espresso_proof.pressure_status import build_pressure_status
 from espresso_proof.run_dashboard import render_run_dashboard
 from espresso_proof.validators import validate_run
 
@@ -119,6 +120,7 @@ def test_running_agent_never_yields_are_done(tmp_path: Path) -> None:
     a suggestion to continue the route while the search is in flight."""
     run_dir = _run(tmp_path)
     set_agent_status(run_dir, "counterexamples", "running", increment_attempt=True)
+    build_pressure_status(run_dir)
     validate_run(run_dir)
     now = _now_section(render_run_dashboard(run_dir, interactive=True))
     assert "are done" not in now
@@ -168,6 +170,7 @@ def test_next_action_for_admissible_refutation_is_read_counterexample(tmp_path: 
     }]
     write_yaml(ce_path, ce)
     set_agent_status(run_dir, "counterexamples", "done")
+    build_pressure_status(run_dir)
     validate_run(run_dir)
     now = _now_section(render_run_dashboard(run_dir, interactive=True))
     assert "Read the counterexample" in now
@@ -187,6 +190,7 @@ def test_route_only_attack_does_not_trigger_refutation_action(tmp_path: Path) ->
         "explanation": "Attacks one proof step only.",
     }]
     write_yaml(ce_path, ce)
+    build_pressure_status(run_dir)
     validate_run(run_dir)
     now = _now_section(render_run_dashboard(run_dir, interactive=True))
     assert "Read the counterexample" not in now

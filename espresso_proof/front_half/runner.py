@@ -11,6 +11,7 @@ from ..llm_agents import LLMClient, load_agent_context
 from ..models import FrontHalfRunReport
 from ..observability import append_agent_event, monotonic_ms, now_iso
 from ..run_events import append_event
+from ..surface_warnings import refresh_final_report_disclosures
 from ..validators import validate_run
 from .registry import FRONT_HALF_STAGES, _STAGE_REGISTRY
 from . import stages as _stages  # noqa: F401 - ensure stage normalizers are registered
@@ -77,6 +78,7 @@ def run_front_half_agent_pass(
         try:
             context = load_agent_context(run_dir)
             outcome = normalizer(run_dir=run_dir, client=client, context=context) or {}
+            refresh_final_report_disclosures(run_dir)
             validate_run(run_dir)
         except Exception as exc:  # noqa: BLE001 - fail closed, record, optionally re-raise
             append_agent_event(

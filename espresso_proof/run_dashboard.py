@@ -49,6 +49,7 @@ from .subgoal_graph import (
     group_subgoals as _group_subgoals,
     state_words as _state_words,
 )
+from .surface_warnings import collect_surface_warnings
 
 
 DASHBOARD_FILENAME = "research_dashboard.html"
@@ -180,6 +181,7 @@ def status_summary(run_dir: Path) -> dict[str, Any]:
             }
             for r in _agent_display_rows(run_dir)
         ],
+        "open_warnings": state["surface_warnings"],
     }
 
 
@@ -208,10 +210,13 @@ def _load_run_state(run_dir: Path) -> dict[str, Any]:
     source_grounding = artifact("source_grounding")
     examples = artifact("examples")
     counterexamples = artifact("counterexamples")
+    tests = artifact("tests")
     computations = artifact("computation_checks")
     literature = artifact("literature_review")
     loop = optional_artifact("prover_loop")
     graph = optional_artifact("proof_goal_graph")
+    theorem_applicability = optional_artifact("theorem_applicability")
+    update_inbox = optional_artifact("update_inbox")
     judgment = optional_artifact("mathematical_judgment")
     proof_verification = optional_artifact("proof_verification")
     failure_audit = optional_artifact("failure_pattern_audit")
@@ -246,6 +251,7 @@ def _load_run_state(run_dir: Path) -> dict[str, Any]:
         "source_grounding": source_grounding,
         "examples": examples,
         "counterexamples": counterexamples,
+        "tests": tests,
         "computations": computations,
         "literature": literature,
         "proof_verification": proof_verification,
@@ -256,6 +262,18 @@ def _load_run_state(run_dir: Path) -> dict[str, Any]:
         "failure_audit": failure_audit,
         "memory_context": memory_context,
         "llm_agent_run": llm_agent_run,
+        "theorem_applicability": theorem_applicability,
+        "update_inbox": update_inbox,
+        "surface_warnings": collect_surface_warnings(
+            grade=grade,
+            review=artifact("review"),
+            examples=examples,
+            counterexamples=counterexamples,
+            tests=tests,
+            source_grounding=source_grounding,
+            theorem_applicability=theorem_applicability,
+            update_inbox=update_inbox,
+        ),
         "current_state": current_state,
         "completed": completed,
         "repair_needed": repair_needed,
@@ -797,6 +815,16 @@ def _plan_section(
         shown = [str(g).replace("source_backed", "reference-supported") for g in gaps[:5]]
         gap_items = "".join(f"<li>{_h(g)}</li>" for g in shown)
         gaps_html = f'<div class="gaps"><b>Source gaps</b><ul class="detail-list">{gap_items}</ul></div>'
+    warning_items = "".join(
+        f"<li>{_h(str(w.get('text') or ''))}</li>"
+        for w in (state.get("surface_warnings") or [])[:8]
+        if str(w.get("text") or "").strip()
+    )
+    warnings_html = (
+        f'<div class="gaps"><b>Open blockers / pending checks</b><ul class="detail-list">{warning_items}</ul></div>'
+        if warning_items
+        else ""
+    )
     continue_note = (
         '<p class="your-call">You can continue this route now, before the remaining '
         "evidence agents finish &mdash; the memo will clearly mark what is still missing.</p>"
@@ -850,6 +878,7 @@ def _plan_section(
     <div class="effort" id="selected-effort">{_h(str(initial['effort']).replace('_', ' '))}</div>
   </div>
   <ul class="detail-list" id="selected-detail">{selected_items}</ul>
+  {warnings_html}
   {gaps_html}
   {action_html}
   {continue_note}

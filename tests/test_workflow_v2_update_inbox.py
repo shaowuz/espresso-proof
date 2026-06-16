@@ -15,6 +15,7 @@ from espresso_proof.update_inbox import (
     canonical_dedupe_key,
     load_update_inbox,
 )
+from espresso_proof.surface_warnings import refresh_final_report_disclosures
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.validators import validate_run
 
@@ -79,6 +80,11 @@ def _write_raw_inbox(run_dir: Path, entries: list[dict]) -> None:
     write_yaml(run_dir / "run_manifest.yaml", manifest)
 
 
+def _refresh_and_validate(run_dir: Path) -> None:
+    refresh_final_report_disclosures(run_dir)
+    validate_run(run_dir)
+
+
 def test_old_run_without_update_inbox_validates(tmp_path: Path) -> None:
     run_dir = _fast_run(tmp_path)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
@@ -97,7 +103,7 @@ def test_duplicate_update_inbox_event_is_idempotent(tmp_path: Path) -> None:
     assert len(first.entries) == 1
     assert len(second.entries) == 1
     assert load_update_inbox(run_dir) is not None
-    validate_run(run_dir)
+    _refresh_and_validate(run_dir)
 
 
 def test_whole_claim_event_allows_null_route_or_step_id(tmp_path: Path) -> None:
@@ -117,7 +123,7 @@ def test_whole_claim_event_allows_null_route_or_step_id(tmp_path: Path) -> None:
     entry = report.entries[0]
     assert entry.route_id_or_step_id is None
     assert entry.dedupe_key == canonical_dedupe_key(entry)
-    validate_run(run_dir)
+    _refresh_and_validate(run_dir)
 
 
 def test_mismatched_caller_dedupe_key_cannot_bypass_idempotency(tmp_path: Path) -> None:
@@ -132,7 +138,7 @@ def test_mismatched_caller_dedupe_key_cannot_bypass_idempotency(tmp_path: Path) 
     assert inbox is not None
     assert len(inbox.entries) == 1
     assert inbox.entries[0].dedupe_key == canonical_dedupe_key(inbox.entries[0])
-    validate_run(run_dir)
+    _refresh_and_validate(run_dir)
 
 
 def test_raw_update_inbox_with_noncanonical_dedupe_key_fails_validation(
@@ -192,7 +198,7 @@ def test_same_dedupe_key_with_different_payload_conflicts(tmp_path: Path) -> Non
         append_update_inbox_event(run_dir, changed)
 
     assert len(load_update_inbox(run_dir).entries) == 1  # type: ignore[union-attr]
-    validate_run(run_dir)
+    _refresh_and_validate(run_dir)
 
 
 def test_truncated_update_inbox_cannot_validate(tmp_path: Path) -> None:
@@ -237,7 +243,7 @@ def test_concurrent_append_retry_does_not_lose_entries(tmp_path: Path) -> None:
     assert inbox is not None
     assert len(inbox.entries) == 8
     assert {entry.id for entry in inbox.entries} == {f"upd_{i:03d}" for i in range(8)}
-    validate_run(run_dir)
+    _refresh_and_validate(run_dir)
 
 
 def test_failed_append_transaction_does_not_advance_manifest_state(tmp_path: Path, monkeypatch) -> None:
@@ -279,7 +285,7 @@ def test_validator_ok_true_does_not_transfer_status(tmp_path: Path) -> None:
     source_after = read_yaml(run_dir / manifest["artifacts"]["source_grounding"])
     assert source_after == source_before
     assert load_update_inbox(run_dir).entries[0].locked_claim_id == claim["id"]  # type: ignore[union-attr]
-    validate_run(run_dir)
+    _refresh_and_validate(run_dir)
 
 
 @pytest.mark.parametrize(
@@ -337,6 +343,7 @@ def test_counterexample_update_cannot_make_grade_refuted(tmp_path: Path) -> None
     grade = read_yaml(grade_path)
     grade["status"] = "refuted"
     write_yaml(grade_path, grade)
+    refresh_final_report_disclosures(run_dir)
 
     with pytest.raises(KernelValidationError, match="requires an admissible checked counterexample"):
         validate_run(run_dir)
@@ -353,6 +360,7 @@ def test_budget_signal_cannot_override_validator_blocker(tmp_path: Path) -> None
     grade = read_yaml(grade_path)
     grade["score"] = 100
     write_yaml(grade_path, grade)
+    refresh_final_report_disclosures(run_dir)
 
     with pytest.raises(KernelValidationError, match="Grade 10"):
         validate_run(run_dir)

@@ -78,7 +78,12 @@ from .pressure_status import (
     is_inadmissible_counterexample_pressure,
     needs_counterexample_admissibility,
 )
+from .proof_language import contains_proof_language
 from .strategy_rules import validate_strategy_rules
+from .surface_warnings import (
+    collect_surface_warnings,
+    final_report_missing_disclosures,
+)
 from .validation.errors import KernelValidationError
 from .validation.front_half import validate_front_half_run
 from .validation.evidence import (
@@ -321,7 +326,18 @@ def validate_run(run_dir: Path) -> None:
         strategy_brief,
     )
     _validate_update_inbox(update_inbox, claim, manifest, run_dir)
-    _validate_final_report_language(run_dir / artifacts["final_report"], idea_grade)
+    _validate_final_report_language(
+        run_dir / artifacts["final_report"],
+        manifest,
+        idea_grade,
+        examples,
+        counterexamples,
+        tests,
+        source_grounding,
+        review,
+        theorem_applicability,
+        update_inbox,
+    )
 
 
 def _load_optional_agent_run_status(
@@ -2788,8 +2804,35 @@ def _feedback_target_sets(
     }
 
 
-def _validate_final_report_language(final_report: Path, idea_grade: IdeaGrade) -> None:
+def _validate_final_report_language(
+    final_report: Path,
+    manifest: RunManifest,
+    idea_grade: IdeaGrade,
+    examples: ExampleSelection,
+    counterexamples: CounterexampleReport,
+    tests: TestReport,
+    source_grounding: SourceGroundingReport,
+    review: Review,
+    theorem_applicability: TheoremApplicabilityReport | None,
+    update_inbox: UpdateInboxReport | None,
+) -> None:
     text = read_text(final_report).lower()
+    warnings = collect_surface_warnings(
+        grade=idea_grade.model_dump(mode="json"),
+        review=review.model_dump(mode="json"),
+        examples=examples.model_dump(mode="json"),
+        counterexamples=counterexamples.model_dump(mode="json"),
+        tests=tests.model_dump(mode="json"),
+        source_grounding=source_grounding.model_dump(mode="json"),
+        theorem_applicability=(
+            theorem_applicability.model_dump(mode="json")
+            if theorem_applicability is not None
+            else {}
+        ),
+        update_inbox=(
+            update_inbox.model_dump(mode="json") if update_inbox is not None else {}
+        ),
+    )
     weak_statuses = {
         ProofLanguageStatus.idea_sketch,
         ProofLanguageStatus.proof_candidate,
@@ -2802,11 +2845,373 @@ def _validate_final_report_language(final_report: Path, idea_grade: IdeaGrade) -
             raise KernelValidationError(
                 f"final_report.md uses forbidden proof language: {phrase!r}"
             )
+    _validate_final_report_does_not_hide_pending_checks(
+        text, examples, counterexamples, tests
+    )
+    source_projection = _first_final_report_global_source_backed_projection(text)
+    if source_projection:
+        raise KernelValidationError(
+            "final_report.md projects step-local source support onto a route/proof/argument: "
+            f"{source_projection!r}"
+        )
+    _validate_final_report_does_not_hide_blockers(
+        text, idea_grade, source_grounding, review, theorem_applicability, update_inbox
+    )
+    support_misuse = _first_final_report_unchecked_support_misuse(text)
+    if support_misuse:
+        raise KernelValidationError(
+            "final_report.md treats advisory/scheduling context as evidence: "
+            f"{support_misuse!r}"
+        )
+    missing = final_report_missing_disclosures(
+        text,
+        warnings,
+        allow_missing_header=False,
+    )
+    if missing:
+        raise KernelValidationError(
+            "final_report.md must disclose active blocker/pending/stale categories: "
+            + ", ".join(missing)
+        )
+
+
+def _validate_final_report_does_not_hide_pending_checks(
+    text: str,
+    examples: ExampleSelection,
+    counterexamples: CounterexampleReport,
+    tests: TestReport,
+) -> None:
+    pending_examples = [
+        example.id
+        for example in examples.examples
+        if example.result_for_current_idea
+        in {ExampleStatus.inconclusive, ExampleStatus.not_tested}
+    ]
+    example_pressure_gaps = pending_examples or (
+        ["no example checks recorded"] if not examples.examples else []
+    )
+    if example_pressure_gaps:
+        phrase = _first_matching_pattern(
+            text,
+            {
+                r"\bno\s+pending\s+examples?\s+(?:remain|left|exist)\b": "no pending examples",
+                r"\bno\s+examples?\s+(?:are|remain|left|exist)\s+pending\b": "no examples pending",
+                r"\bno\s+examples?\s+checks?\s+pending\b": "no example checks pending",
+                r"\bno\s+examples?\s+checks?\s+(?:are|remain|left|exist)\s+pending\b": "no example checks pending",
+                r"\bexamples?\s+pending\s*:\s*(?:none|zero|0)\b": "examples pending none",
+                r"\bexamples?\s+checks?\s*:\s*none\s+pending\b": "example checks none pending",
+                r"\bexamples?\s+(?:are\s+)?not\s+pending\b": "examples not pending",
+                r"\bexamples?\s+ha(?:s|ve)\s+no\s+pending\s+checks?\b": "examples no pending checks",
+                r"\ball\s+examples?\s+(?:survived|passed|validated|checked)\b": "all examples survived/passed",
+                r"\bexamples?\s+(?:all\s+)?(?:survived|passed)\b": "examples survived/passed",
+                r"\bsurvived\s+examples?\b": "survived examples",
+                r"\bno\s+(?:failing|failed)\s+examples?\b": "no failed examples",
+            },
+        )
+        if phrase:
+            raise KernelValidationError(
+                "final_report.md cannot claim examples are cleared while examples "
+                f"are pending/unavailable ({', '.join(example_pressure_gaps)}): {phrase!r}"
+            )
+
+    pending_counterexamples = [
+        test.id
+        for test in counterexamples.tests
+        if test.result in {ExampleStatus.inconclusive, ExampleStatus.not_tested}
+    ]
+    pending_counterexamples.extend(
+        report_item.id
+        for report_item in tests.tests
+        if report_item.uses_counterexamples
+        and report_item.result in {ExampleStatus.inconclusive, ExampleStatus.not_tested}
+    )
+    pending_counterexamples = list(dict.fromkeys(pending_counterexamples))
+    has_counterexample_pressure = bool(counterexamples.tests) or any(
+        report_item.uses_counterexamples for report_item in tests.tests
+    )
+    counterexample_pressure_gaps = pending_counterexamples or (
+        ["no counterexample checks recorded"] if not has_counterexample_pressure else []
+    )
+    if counterexample_pressure_gaps:
+        phrase = _first_matching_pattern(
+            text,
+            {
+                r"\bno\s+pending\s+counterexamples?\s+(?:remain|left|exist)\b": "no pending counterexamples",
+                r"\bno\s+counterexamples?\s+(?:are|remain|left|exist)\s+pending\b": "no counterexamples pending",
+                r"\bno\s+counterexamples?\s+checks?\s+pending\b": "no counterexample checks pending",
+                r"\bno\s+counterexamples?\s+checks?\s+(?:are|remain|left|exist)\s+pending\b": "no counterexample checks pending",
+                r"\bcounterexamples?\s+pending\s*:\s*(?:none|zero|0)\b": "counterexamples pending none",
+                r"\bcounterexample\s+pressure\s*:\s*(?:none|zero|0)\b": "counterexample pressure none",
+                r"\bcounterexamples?\s+checks?\s*:\s*none\s+pending\b": "counterexample checks none pending",
+                r"\bcounterexamples?\s+(?:are\s+)?not\s+pending\b": "counterexamples not pending",
+                r"\bcounterexamples?\s+ha(?:s|ve)\s+no\s+pending\s+checks?\b": "counterexamples no pending checks",
+                r"\bno\s+counterexample\s+pressure\b": "no counterexample pressure",
+                r"\bno\s+counterexamples?\s+(?:remain|exist|found|were\s+found|detected)\b": "no counterexamples found",
+                r"\bcounterexample\s+search\s+(?:found\s+)?(?:none|nothing)\b": "counterexample search found none",
+                r"\bcounterexamples?\s+(?:are\s+)?(?:cleared|settled)\b": "counterexamples cleared",
+            },
+        )
+        if phrase:
+            raise KernelValidationError(
+                "final_report.md cannot claim counterexample pressure is cleared "
+                "while counterexample checks are pending/unavailable "
+                f"({', '.join(counterexample_pressure_gaps)}): {phrase!r}"
+            )
+
+
+def _validate_final_report_does_not_hide_blockers(
+    text: str,
+    idea_grade: IdeaGrade,
+    source_grounding: SourceGroundingReport,
+    review: Review,
+    theorem_applicability: TheoremApplicabilityReport | None,
+    update_inbox: UpdateInboxReport | None,
+) -> None:
+    has_source_gap = bool(idea_grade.source_gaps) or any(
+        ref.status != SourceStatus.source_backed for ref in source_grounding.source_refs
+    ) or any(step.status != SourceStatus.source_backed for step in source_grounding.steps)
+    if has_source_gap:
+        phrase = _first_matching_pattern(
+            text,
+            {
+                r"\bno\s+source\s+gaps?\b": "no source gaps",
+                r"\bno\s+open\s+source\s+gaps?\b": "no open source gaps",
+                r"\b(?:open\s+)?source\s+gaps?\s*:\s*(?:none|zero|0)\b": "source gaps none",
+                r"\bthere\s+(?:are|is)\s+no\s+open\s+source\s+gaps?\b": "no open source gaps",
+                r"\bthere\s+(?:are|is)\s+(?:zero|0)\s+(?:open\s+)?source\s+gaps?\b": "zero source gaps",
+                r"\bsource\s+gaps?\s+(?:are\s+)?(?:resolved|cleared|closed)\b": "source gaps resolved",
+                r"\ball\s+source\s+gaps?\s+ha(?:s|ve)\s+been\s+(?:resolved|cleared|closed)\b": "all source gaps resolved",
+                r"\ball\s+sources?\s+(?:checked|validated|verified|backed)\b": "all sources checked/backed",
+                r"\bsource[- ]backed\s+(?:proof|argument|route)\b": "source-backed proof/argument",
+                r"\broute\s+(?:is\s+)?source[- ]backed\b": "route is source-backed",
+            },
+        )
+        if phrase:
+            raise KernelValidationError(
+                f"final_report.md cannot hide open source gaps: {phrase!r}"
+            )
+
+    if _has_theorem_applicability_blocker(theorem_applicability):
+        phrase = _first_matching_pattern(
+            text,
+            {
+                r"\bno\s+theorem\s+(?:blockers?|applicability\s+blockers?)\b": "no theorem blockers",
+                r"\ball\s+theorem\s+(?:conditions|hypotheses)\s+(?:are\s+)?(?:satisfied|checked|met)\b": "all theorem conditions satisfied",
+                r"\btheorem\s+applicability\s+(?:is\s+)?(?:clear|settled|all\s+applicable|applicable)\b": "theorem applicability clear/applicable",
+                r"\btheorem\s+(?:applies|is\s+applicable)\b": "theorem applies",
+            },
+        )
+        if phrase:
+            raise KernelValidationError(
+                f"final_report.md cannot hide theorem applicability blockers: {phrase!r}"
+            )
+
+    if _has_reviewer_blocker(review):
+        phrase = _first_matching_pattern(
+            text,
+            {
+                r"\bno\s+(?:reviewer\s+)?(?:blockers?|objections?|risks?)\b": "no reviewer blockers/objections",
+                r"\breviewers?\s+(?:approved|passed|found\s+no)\b": "reviewers approved/passed",
+                r"\ball\s+reviewers?\s+(?:passed|approved)\b": "all reviewers passed",
+            },
+        )
+        if phrase:
+            raise KernelValidationError(
+                f"final_report.md cannot hide reviewer blockers: {phrase!r}"
+            )
+
+    pending_update_ids = [
+        entry.id for entry in (update_inbox.entries if update_inbox else []) if entry.applied_at is None
+    ]
+    if pending_update_ids:
+        phrase = _first_stale_clearing_phrase(text)
+        if phrase:
+            raise KernelValidationError(
+                "final_report.md cannot present stale/pending scheduling signals "
+                f"as cleared ({', '.join(pending_update_ids)}): {phrase!r}"
+            )
+
+
+def _has_theorem_applicability_blocker(
+    theorem_applicability: TheoremApplicabilityReport | None,
+) -> bool:
+    if theorem_applicability is None:
+        return False
+    if theorem_applicability.overall_status != "all_applicable":
+        return True
+    return any(
+        usage.blocks_source_backed or usage.applicability_status != "applicable"
+        for usage in [*theorem_applicability.usages, *theorem_applicability.ledger_usages]
+    )
+
+
+def _has_reviewer_blocker(review: Review) -> bool:
+    return (
+        any(reviewer.verdict != ReviewerVerdict.passed for reviewer in review.reviewers)
+        or bool(review.theorem_drift)
+        or bool(review.missing_hypotheses)
+        or bool(review.source_risks)
+        or bool(review.example_risks)
+        or bool(review.downgrade_reasons)
+    )
+
+
+def _first_matching_pattern(text: str, patterns: dict[str, str]) -> str | None:
+    for pattern, phrase in patterns.items():
+        if re.search(pattern, text):
+            return phrase
+    return None
+
+
+def _first_stale_clearing_phrase(text: str) -> str | None:
+    for clause in _prover_assertion_clauses(text):
+        phrase = _first_matching_pattern(
+            clause,
+            {
+                r"\b(?:not|no\s+longer)\s+stale\b": "not stale",
+                r"\bnot\s+pending\b": "not pending",
+                r"\bno\s+(?:pending|stale|late|unapplied)\s+(?:updates?|signals?|events?|entries?)\b": "no pending updates",
+                r"\bupdate inbox\s*:\s*(?:none|empty|clear|cleared|resolved)\b": "update inbox none",
+                r"\bupdate inbox\s+(?:has|contains|shows)\s+no\s+(?:pending|stale|late|unapplied)?\s*(?:entries?|updates?|events?|signals?)\b": "update inbox no pending entries",
+                r"\bno\s+(?:pending|stale|late|unapplied)\s+update inbox\s+(?:entries?|updates?|events?|signals?)\b": "no pending update inbox entries",
+                r"\ball\s+update inbox\s+(?:entries?|updates?|events?|signals?)\s+(?:are\s+)?(?:resolved|cleared|applied)\b": "update inbox entries resolved",
+                r"\bupdate inbox\s+(?:is\s+)?(?:current|up[- ]to[- ]date|clear|cleared|resolved|empty)\b": "update inbox current",
+                r"\bno\s+(?:late|pending|unapplied)\s+advisory\s+signals?\s+remain\b": "no late advisory signals remain",
+                r"\b(?:late|pending|unapplied)\s+advisory\s+signals?\s+(?:are\s+)?(?:resolved|cleared|applied)\b": "late advisory signals resolved",
+                r"\b(?:updates?|signals?|events?)\s+(?:are\s+)?(?:cleared|resolved)\b": "updates cleared",
+            },
+        )
+        if phrase:
+            return phrase
+        if any(term in clause for term in ("stale", "pending", "unapplied", "update inbox", "late")):
+            continue
+        phrase = _first_matching_pattern(
+            clause,
+            {
+                r"\b(?:complete|up[- ]to[- ]date|current)\s+(?:final\s+)?(?:summary|report|answer|state)\b": "current report",
+                r"\b(?:the\s+|this\s+)?(?:final\s+)?(?:summary|report|answer|state)\s+(?:is|was|remains)\s+(?:complete|up[- ]to[- ]date|current|final)\b": "current report",
+                r"\bfinal\s+(?:summary|answer|state)\b": "final summary",
+            },
+        )
+        if phrase:
+            return phrase
+    return None
+
+
+def _first_final_report_unchecked_support_misuse(text: str) -> str | None:
+    context_terms = (
+        "memory",
+        "prior run",
+        "prior-run",
+        "prior runs",
+        "human preference",
+        "human choice",
+        "human confirmed",
+        "mathematician preference",
+        "strategy brief",
+        "update inbox",
+        "literature",
+        "literature review",
+        "literature candidate",
+        "literature candidates",
+        "candidate literature",
+        "candidate source",
+        "candidate sources",
+        "candidate reference",
+        "candidate references",
+        "candidate theorem",
+        "prover",
+        "prover text",
+        "prover output",
+        "prover answer",
+        "prover response",
+        "prover draft",
+        "prover round",
+        "prover comment",
+        "reviewer",
+        "reviewer text",
+        "reviewer output",
+        "reviewer answer",
+        "reviewer response",
+        "reviewer assessment",
+        "reviewer comment",
+        "reviewer approval",
+        "reviewer objection",
+        "reviewer report",
+        "reviewer verdict",
+        "reviewers passed",
+        "route",
+        "strategy",
+        "autonomous retrieval",
+        "retrieval hit",
+        "proposed source",
+        "proposed sources",
+        "unchecked source",
+        "unchecked citation",
+    )
+    support_terms = (
+        r"\b(?:evidence|support(?:s|ed|ing)?|establish(?:es|ed|ing)?|"
+        r"prove(?:s|d|n|ing)?|confirm(?:s|ed|ing)?|validat(?:es|ed|ing)?|"
+        r"certif(?:y|ies|ied|ying)|verif(?:y|ies|ied|ying)|"
+        r"show(?:s|ed|ing)?|demonstrat(?:e|es|ed|ing)|"
+        r"approv(?:e|es|ed|ing))\b"
+    )
+    for clause in _prover_assertion_clauses(text):
+        if _prover_clause_is_support_disclaimer(clause):
+            continue
+        if re.search(
+            (
+                r"\b(?:prover|reviewer)\s+"
+                r"(?:(?:text|output|answer|response|draft|round|comment|assessment|approval|objection|report|verdict)\s+)?"
+                r"(?:is|are|was|were|becomes?|became)\s+"
+                r"(?:a\s+)?(?:proof|proof\s+status|source\s+support|evidence|"
+                r"checked\s+evidence|refutation|refutation\s+status)\b"
+            ),
+            clause,
+        ):
+            return clause
+        if any(term in clause for term in context_terms) and re.search(support_terms, clause):
+            return clause
+    return None
+
+
+def _first_final_report_global_source_backed_projection(text: str) -> str | None:
+    patterns = {
+        r"\bsource[-_ ]backed\s+(?:proof|argument|route|strategy)\b": "source-backed proof/argument/route",
+        r"\b(?:proof|argument|route|strategy)\s+(?:is|are|was|were|becomes?|became)\s+(?:a\s+)?source[-_ ]backed\b": "proof/argument/route is source-backed",
+    }
+    for clause in _prover_assertion_clauses(text):
+        if any(
+            phrase in clause
+            for phrase in (
+                "not source-backed",
+                "not source backed",
+                "not source_backed",
+                "no source-backed",
+                "no source backed",
+                "no source_backed",
+                "without source-backed",
+                "without source backed",
+                "without source_backed",
+            )
+        ):
+            continue
+        phrase = _first_matching_pattern(clause, patterns)
+        if phrase:
+            return phrase
+    return None
 
 
 def _first_forbidden_proof_language(text: str) -> str | None:
+    canonical_phrase = contains_proof_language(text)
+    if canonical_phrase:
+        return canonical_phrase
     forbidden_patterns = {
+        r"\bq\.?e\.?d\.?\b": "proof-close",
         r"\bverified\b": "verified",
+        r"\b(?:the\s+)?(?:theorem|claim|result)\s+(?:is|was|has\s+been)\s+settled\b": "settled result",
+        r"\bsettled\s+the\s+(?:theorem|claim|result)\b": "settled result",
+        r"\bsettles?\s+the\s+(?:theorem|claim|result)\b": "settles result",
         r"\bproof\s+complete\b": "proof complete",
         r"\bwe\s+proved\b": "we proved",
         r"\bproved\s+the\s+theorem\b": "proved the theorem",
@@ -2817,6 +3222,13 @@ def _first_forbidden_proof_language(text: str) -> str | None:
         r"\bthis\s+proof\b": "this proof",
         r"\bcomplete\s+proof\b": "complete proof",
         r"\bfull\s+proof\b": "full proof",
+        r"\b(?:route|strategy)\s+(?:is|are|was|were)\s+(?:a\s+)?(?:proof|proof\s+status|source\s+support|evidence)\b": "route/strategy proof status",
+        r"\broute\s+(?:is\s+)?(?:a\s+)?proof\b": "route is a proof",
+        r"\broute\s+proves\s+the\s+(?:result|claim|theorem)\b": "route proves the result",
+        r"\broute\s+establishes\s+the\s+(?:result|claim|theorem)\b": "route establishes the result",
+        r"\b(?:route|strategy)\s+(?:show(?:s|ed|ing)?|demonstrat(?:e|es|ed|ing)|verif(?:y|ies|ied|ying)|validat(?:e|es|ed|ing)|support(?:s|ed|ing)?|certif(?:y|ies|ied|ying)|prove(?:s|d|n|ing)?)\s+(?:the\s+)?(?:theorem|claim|result|proof|proof\s+status|source\s+support|evidence)\b": "route/strategy status projection",
+        r"\btheorem\s+applicability\s+(?:proves|establishes|confirms)\b": "theorem applicability proves",
+        r"\bapplicability\s+(?:proves|establishes)\s+the\s+(?:route|claim|theorem|result)\b": "applicability proves",
         r"\bestablishes\s+the\s+theorem\b": "establishes the theorem",
         r"\bestablishes\s+the\s+claim\b": "establishes the claim",
         r"\bproof\s+establishes\b": "proof establishes",
