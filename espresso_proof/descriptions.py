@@ -69,6 +69,17 @@ PROOF_LANGUAGE_DESCRIPTIONS: dict[str, str] = {
 }
 
 
+ROUTE_SOURCE_DESCRIPTIONS: dict[str, str] = {
+    "source_backed": "route source label; verify step grounding",
+    "candidate": "route source label: candidate only",
+    "unverified": "route source label: needs a check",
+    "misapplied": "route source label: applicability problem",
+    "not_found": "route source label: needs a source",
+    "mixed": "route source label: mixed support",
+    "missing": "route source label: missing support",
+}
+
+
 def describe_idea_status(status: str | None) -> str:
     """Concrete English for an IdeaStatus value."""
 
@@ -82,6 +93,19 @@ def describe_proof_language(proof_language_status: str | None) -> str:
 
     return PROOF_LANGUAGE_DESCRIPTIONS.get(
         str(proof_language_status), "an unverified candidate (not a checked proof)"
+    )
+
+
+def route_source_phrase(source_status: str | None) -> str:
+    """Display wording for strategy-route source labels.
+
+    Route ``source_status`` is advisory ranking metadata. Earned source support
+    belongs to source-grounding steps, so route labels must never reuse the
+    source-grounding evidence wording.
+    """
+
+    return ROUTE_SOURCE_DESCRIPTIONS.get(
+        str(source_status), "route source label: not verified"
     )
 
 

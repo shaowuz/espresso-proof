@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from espresso_proof.chat_stream import chat_progress_lines, stream_chat
+from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.proof_language import contains_proof_language
 from espresso_proof.server import Workbench, _make_handler
 
@@ -125,6 +126,22 @@ def test_stream_writes_nothing_and_does_not_upgrade_status(client) -> None:
     assert sorted(p.name for p in run_dir.iterdir()) == before
     assert (run_dir / "idea_grade.yaml").read_bytes() == grade_before
     assert (run_dir / "source_grounding.yaml").read_bytes() == src_before
+
+
+def test_stream_route_source_label_is_advisory_not_earned_evidence(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    brief_path = run_dir / manifest["artifacts"]["strategy_brief"]
+    brief = read_yaml(brief_path)
+    brief["top_strategies"][0]["source_status"] = "source_backed"
+    write_yaml(brief_path, brief)
+
+    joined = " ".join(chat_progress_lines(run_dir))
+
+    assert "route source label; verify step grounding" in joined
+    assert "Reference supports this stated claim" not in joined
 
 
 def test_stream_fails_closed_to_a_safe_line_on_bare_run(tmp_path: Path) -> None:

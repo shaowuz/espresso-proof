@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
-from .descriptions import describe_grade, evidence_phrase
+from .descriptions import describe_grade, route_source_phrase
 from .io import read_yaml
 from .proof_language import scrub_proof_language
 
@@ -87,7 +87,7 @@ def chat_progress_lines(
         if isinstance(active_object, dict) and active_object.get("kind") == "strategy":
             active_id = str(active_object.get("id") or "")
             route = next((r for r in routes if str(r.get("id") or "") == active_id), route)
-        src = evidence_phrase(route.get("source_status"))
+        src = route_source_phrase(route.get("source_status"))
         label = "Requested route" if route is not routes[0] else "Top route"
         lines.append(_safe(f'{label} — "{str(route.get("title",""))[:80]}". Source standing: {src}.'))
 

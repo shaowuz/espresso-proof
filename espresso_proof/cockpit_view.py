@@ -20,7 +20,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .descriptions import describe_grade, effort_phrase, evidence_phrase, objection_phrase
+from .descriptions import (
+    describe_grade,
+    effort_phrase,
+    evidence_phrase,
+    objection_phrase,
+    route_source_phrase,
+)
 from .io import read_yaml
 from .latest_round import load_latest_round
 from .proof_language import scrub_proof_language
@@ -51,6 +57,14 @@ def _tone(status: str | None) -> str:
         return "warn"
     if s in {"human_attested", "human_confirmed", "human_needed"}:
         return "human"
+    return "muted"
+
+
+def _route_source_tone(status: str | None) -> str:
+    """Route source labels are advisory metadata, not earned evidence."""
+
+    if str(status or "") in {"misapplied"}:
+        return "warn"
     return "muted"
 
 
@@ -181,8 +195,8 @@ def _strategies(
                 "one_line": _clip(raw.get("why_this_route")),
                 "score": raw.get("score") if isinstance(raw.get("score"), int) else None,
                 "status_sentence": describe_grade(status=raw.get("status")),
-                "source_phrase": evidence_phrase(source_status),
-                "source_tone": _tone(source_status),
+                "source_phrase": route_source_phrase(source_status),
+                "source_tone": _route_source_tone(source_status),
                 "main_risk": _clip(raw.get("main_risk")),
                 "next_step": _clip(raw.get("next_loop_plan")),
                 "selected": bool(selected_id) and raw.get("id") == selected_id,

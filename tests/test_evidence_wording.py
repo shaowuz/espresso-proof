@@ -22,6 +22,7 @@ from espresso_proof.descriptions import (
     evidence_phrase,
     judgment_tier_phrase,
     objection_phrase,
+    route_source_phrase,
 )
 from espresso_proof.failure_pattern_bank import audit_failure_patterns
 from espresso_proof.mathematical_judgment import judge_run
@@ -112,6 +113,14 @@ def test_source_checked_argument_wording_is_scoped_reference_support() -> None:
     assert "source-checked" not in phrase
     assert "source checked" not in phrase
     assert "verified proof" not in phrase
+
+
+def test_route_source_phrase_is_advisory_not_earned_evidence() -> None:
+    phrase = route_source_phrase("source_backed")
+
+    assert phrase == "route source label; verify step grounding"
+    assert phrase != evidence_phrase("source_backed")
+    assert "Reference supports this stated claim" not in phrase
 
 
 def test_objection_phrase_required_wording() -> None:
