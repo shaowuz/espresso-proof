@@ -13,6 +13,7 @@ from .verification_request_probes import (
 )
 from .io import read_text, write_text, write_yaml
 from .memory import write_run_memory
+from .surface_warnings import collect_surface_warnings, render_warning_lines
 from .validators import validate_run
 
 _ORDER_6_GROUPS_ABELIAN_EXACT = re.compile(
@@ -81,6 +82,10 @@ def run_mock_critique(project_id: str, input_path: Path, output_root: Path) -> P
             "claim_id": claim_id,
             "requests": verification_requests,
         }
+    artifacts["final_report.md"] = _with_final_report_disclosures(
+        str(artifacts.get("final_report.md") or ""),
+        artifacts,
+    )
     artifacts["agent_contracts.yaml"] = default_agent_contracts(project_id)
     artifacts.setdefault("human_choice.yaml", _pending_human_choice(claim_id))
     optional_artifacts = {
@@ -281,6 +286,29 @@ def _artifacts_for_scenario(scenario: str, text: str, run_id: str, project_id: s
     }:
         return _human_feedback_scenario(scenario, text, run_id, project_id)
     return _vague_claim(text, run_id)
+
+
+def _artifact_dict(artifacts: dict[str, object], filename: str) -> dict:
+    value = artifacts.get(filename)
+    return value if isinstance(value, dict) else {}
+
+
+def _with_final_report_disclosures(text: str, artifacts: dict[str, object]) -> str:
+    warnings = collect_surface_warnings(
+        grade=_artifact_dict(artifacts, "idea_grade.yaml"),
+        review=_artifact_dict(artifacts, "review.yaml"),
+        examples=_artifact_dict(artifacts, "examples.yaml"),
+        counterexamples=_artifact_dict(artifacts, "counterexamples.yaml"),
+        tests=_artifact_dict(artifacts, "tests.yaml"),
+        source_grounding=_artifact_dict(artifacts, "source_grounding.yaml"),
+        theorem_applicability=_artifact_dict(artifacts, "theorem_applicability.yaml"),
+        update_inbox=_artifact_dict(artifacts, "update_inbox.yaml"),
+    )
+    lines = render_warning_lines(warnings)
+    if not lines:
+        return text
+    block = "\n".join(f"- {line}" for line in lines)
+    return text.rstrip() + "\n\nOpen blockers / pending checks:\n" + block + "\n"
 
 
 def _common_source_grounding(claim_id: str, *, source_backed: bool = False) -> dict:
@@ -1735,7 +1763,7 @@ def _true_theorem_classical_source(text: str, run_id: str) -> dict[str, object]:
             "all hypotheses, but no line-by-line proof or verified source "
             "excerpt is available."
         ),
-        source_risks=["candidate source still needs verified statement excerpt"],
+        source_risks=["candidate source still needs checked statement excerpt"],
         downgrade_reasons=["Sketch-only line proof review blocks proof-like language."],
     )
     artifacts["idea_grade.yaml"] = {
@@ -1751,7 +1779,7 @@ def _true_theorem_classical_source(text: str, run_id: str) -> dict[str, object]:
         "failed_tests": [],
         "counterexample_candidates": [],
         "missing_hypotheses": [],
-        "source_gaps": ["verified statement excerpt for the classical corollary"],
+        "source_gaps": ["checked statement excerpt for the classical corollary"],
         "repair_options": [
             "Verify the exact source statement, then attempt the center/class-equation route."
         ],

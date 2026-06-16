@@ -20,6 +20,7 @@ from .llm_agents import LLMClient, append_prover_loop_round
 from .observability import append_agent_event, monotonic_ms, now_iso
 from .run_events import append_event
 from .run_lock import run_writer_lock
+from .surface_warnings import refresh_final_report_disclosures
 from .validators import validate_run
 
 # How many consecutive rounds with an identical blocker set count as no-progress.
@@ -49,6 +50,7 @@ def _snapshot_run(run_dir: Path) -> dict:
         "run_manifest.yaml",
         "time_allocation.yaml",
         "update_inbox.yaml",
+        "final_report.md",
     ):
         p = run_dir / rel
         snap[rel] = p.read_bytes() if p.exists() else None
@@ -349,6 +351,7 @@ def _continue_prover_loop_locked(
                 reviewer_set=reviewer_set,
                 client=client,
             )
+            refresh_final_report_disclosures(run_dir)
             validate_run(run_dir)
         except Exception as exc:  # noqa: BLE001 - fail closed + roll back
             # Restore the last valid state so a mid-loop failure never leaves a

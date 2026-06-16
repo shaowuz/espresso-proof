@@ -31,6 +31,7 @@ from .io import read_yaml
 from .proof_language import scrub_proof_language
 from .route_table import build_route_step_rows, render_route_step_table_lines
 from .subgoal_graph import render_proof_search_lines
+from .surface_warnings import collect_surface_warnings, render_warning_lines
 
 
 # Conservative defaults for a proof-route field that has no specific artifact
@@ -176,10 +177,13 @@ def render_proof_route_steps(
 def build_concise_memo(run_dir: Path) -> str:
     """Render a compact memo string from a run's validated artifacts.
 
-    Callers must run ``validate_run`` first; this function assumes the run is
-    valid and only reads/echoes artifact fields via the run manifest.
+    This is a final user-facing surface, so it validates before rendering and
+    then only reads/echoes artifact fields via the run manifest.
     """
     run_dir = Path(run_dir)
+    from .validators import validate_run
+
+    validate_run(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     artifacts = manifest.get("artifacts", {})
 
@@ -192,6 +196,9 @@ def build_concise_memo(run_dir: Path) -> str:
     strategy_brief = artifact("strategy_brief")
     source_grounding = artifact("source_grounding")
     computations = artifact("computation_checks")
+    examples = artifact("examples")
+    counterexamples = artifact("counterexamples")
+    tests = artifact("tests")
 
     status = grade.get("status", "unknown")
     score = grade.get("score", "?")
@@ -207,6 +214,11 @@ def build_concise_memo(run_dir: Path) -> str:
     _ta_rel = optional_artifacts.get("theorem_applicability")
     if _ta_rel and (run_dir / _ta_rel).exists():
         theorem_applicability = read_yaml(run_dir / _ta_rel)
+
+    update_inbox: dict = {}
+    _ui_rel = optional_artifacts.get("update_inbox")
+    if _ui_rel and (run_dir / _ui_rel).exists():
+        update_inbox = read_yaml(run_dir / _ui_rel)
 
     # Autonomous literature search (optional): candidate sources found without a
     # human-provided source. Rendered as "Found by autonomous literature search"
@@ -256,6 +268,21 @@ def build_concise_memo(run_dir: Path) -> str:
         + ("; ".join(evidence_summary) if evidence_summary else "none recorded")
         + "."
     )
+    warning_lines = render_warning_lines(collect_surface_warnings(
+        grade=grade,
+        review=review,
+        examples=examples,
+        counterexamples=counterexamples,
+        tests=tests,
+        source_grounding=source_grounding,
+        theorem_applicability=theorem_applicability,
+        update_inbox=update_inbox,
+    ))
+    if warning_lines:
+        lines.append("")
+        lines.append("Open blockers / pending checks:")
+        for warning in warning_lines:
+            lines.append(f"  - {warning}")
     # Proof-route step table (Goal 24): one row per local step, separating local
     # step evidence from the whole-claim/route status above. Built from validated
     # artifacts (source grounding + confirmed scoped computations), using the

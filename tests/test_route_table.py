@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.memo import build_concise_memo
 from espresso_proof.mock_pipeline import run_mock_critique
@@ -21,9 +22,20 @@ from espresso_proof.route_table import (
     render_route_step_table_lines,
 )
 from espresso_proof.run_dashboard import render_run_dashboard
+from espresso_proof.surface_warnings import refresh_final_report_disclosures
 from espresso_proof.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
+
+
+def _mark_claim_clear(run_dir: Path) -> None:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    ensure_claim_clear_for_downstream(run_dir)
 
 
 def _grounding() -> dict:
@@ -131,6 +143,7 @@ def test_route_table_in_memo_sanitizes_proof_complete_free_text(tmp_path: Path) 
         "note": "",
     })
     write_yaml(run / artifacts["source_grounding"], sg)
+    refresh_final_report_disclosures(run)
     validate_run(run)
     memo = build_concise_memo(run)
     assert "Proof-route step table" in memo
@@ -140,6 +153,7 @@ def test_route_table_in_memo_sanitizes_proof_complete_free_text(tmp_path: Path) 
 # --- memo + dashboard integration -----------------------------------------
 def test_memo_and_dashboard_show_route_table(tmp_path: Path) -> None:
     run = run_mock_critique("g24", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path)
+    _mark_claim_clear(run)
     verify_finite_groups(run, primes=[2])  # adds a scoped computation row
     validate_run(run)
     memo = build_concise_memo(run)

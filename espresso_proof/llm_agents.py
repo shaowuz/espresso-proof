@@ -22,6 +22,7 @@ from .claim_clear import ensure_claim_clear_for_downstream
 from .io import read_yaml, write_yaml
 from .models import LLMAgentRunReport, ProverLoopReport, ProverRoundIndex, ProverRoundReport
 from .pressure_status import artifact_revision_hash
+from .proof_language import PROOF_COMPLETE_PHRASES
 from .research_bank import load_bankable_dict
 from .time_allocation import (
     TIME_ALLOCATION_FILENAME,
@@ -95,6 +96,7 @@ FORBIDDEN_LANGUAGE = [
     "我们证明了该定理",
     "我们证明了这个定理",
 ]
+FORBIDDEN_LANGUAGE = list(dict.fromkeys([*FORBIDDEN_LANGUAGE, *PROOF_COMPLETE_PHRASES]))
 
 INPUT_ARTIFACTS = [
     "locked_claim.yaml",
@@ -1845,7 +1847,7 @@ def safe_list(value: object) -> list[str]:
 
 def safe_text(value: object) -> str:
     text = re.sub(r"\s+", " ", str(value)).strip()
-    for phrase in FORBIDDEN_LANGUAGE:
+    for phrase in sorted(FORBIDDEN_LANGUAGE, key=len, reverse=True):
         text = re.sub(
             forbidden_pattern(phrase),
             "[withheld proof-like phrase]",

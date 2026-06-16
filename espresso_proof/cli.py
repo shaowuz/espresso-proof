@@ -72,6 +72,11 @@ from .claim_clear import (
 from .scorecard import render_scorecard_markdown, run_scorecard
 from .memo import build_concise_memo
 from .proof_language import scrub_proof_language
+from .surface_warnings import (
+    collect_surface_warnings,
+    refresh_final_report_disclosures,
+    render_warning_lines,
+)
 from .reviewer_checklist import review_checklist
 from .memory import load_memory_index, summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
@@ -1146,6 +1151,17 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     examples = _artifact("examples")
     counterexamples = _artifact("counterexamples")
     computations = _artifact("computation_checks")
+    tests = _artifact("tests")
+    theorem_applicability = {}
+    theorem_applicability_path = _optional_artifact_path(
+        run, optional_artifacts, "theorem_applicability"
+    )
+    if theorem_applicability_path is not None:
+        theorem_applicability = read_yaml(theorem_applicability_path)
+    update_inbox = {}
+    update_inbox_path = _optional_artifact_path(run, optional_artifacts, "update_inbox")
+    if update_inbox_path is not None:
+        update_inbox = read_yaml(update_inbox_path)
 
     failed_reviewers = [
         reviewer["reviewer_id"]
@@ -1198,6 +1214,21 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
         "- evidence so far: "
         + ("; ".join(_evidence_summary) if _evidence_summary else "none recorded")
     )
+    warning_lines = render_warning_lines(collect_surface_warnings(
+        grade=grade,
+        review=review,
+        examples=examples,
+        counterexamples=counterexamples,
+        tests=tests,
+        source_grounding=source_grounding,
+        theorem_applicability=theorem_applicability,
+        update_inbox=update_inbox,
+    ))
+    if warning_lines:
+        _echo("")
+        _echo("Open Blockers / Pending Checks")
+        for line in warning_lines:
+            _echo(f"- {line}")
     _refs_by_id = {r.get("id"): r for r in source_grounding.get("source_refs", [])}
     for step in source_grounding.get("steps", []):
         if step.get("status") != "source_backed":
@@ -1244,11 +1275,7 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
             )
     else:
         _echo("- counterexamples: none")
-    theorem_applicability_path = _optional_artifact_path(
-        run, optional_artifacts, "theorem_applicability"
-    )
     if theorem_applicability_path is not None:
-        theorem_applicability = read_yaml(theorem_applicability_path)
         usages = theorem_applicability.get("usages", [])
         blocking_usages = [
             usage
@@ -1675,6 +1702,7 @@ def audit_theorem_applicability_command(
     manifest = read_yaml(manifest_path)
     manifest.setdefault("optional_artifacts", {})["theorem_applicability"] = "theorem_applicability.yaml"
     write_yaml(manifest_path, manifest)
+    refresh_final_report_disclosures(run)
     validate_run(run)
     typer.echo(f"Wrote theorem applicability audit to {run / 'theorem_applicability.yaml'}")
 
@@ -1944,6 +1972,7 @@ def resolve_agent_gate(
             loop_report=loop_report,
         )
         write_yaml(run / "run_manifest.yaml", manifest)
+        refresh_final_report_disclosures(run)
         validate_run(run)
     typer.echo(f"Resolved LLM agent human gate as {decision}")
 

@@ -22,6 +22,7 @@ from espresso_proof.memory import summarize_memory, write_memory_entry
 from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.proof_language import contains_proof_language, scrub_proof_language
 from espresso_proof.run_dashboard import render_run_dashboard
+from espresso_proof.surface_warnings import refresh_final_report_disclosures
 from espresso_proof.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
@@ -88,6 +89,7 @@ def _run_with_forged_overclaims(tmp_path: Path) -> tuple[Path, dict]:
     grade["next_cheapest_test"] = "None needed: Espresso proved the claim."
     grade["source_gaps"] = ["proof-close; no gaps remain."]
     write_yaml(run / artifacts["idea_grade"], grade)
+    refresh_final_report_disclosures(run)
     validate_run(run)  # forged free-text fields are not cross-validated; run stays valid
     return run, artifacts
 

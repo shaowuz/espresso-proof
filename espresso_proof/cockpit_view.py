@@ -332,6 +332,7 @@ def build_snapshot(run_dir: Path, run_id: str, status: dict) -> dict:
         "counterexamples": _counterexamples(counterexamples),
         "computations": _computations(computations),
         "literature": _literature(literature),
+        "open_warnings": status.get("open_warnings") or [],
         "source_gaps": [_clip(g, 160) for g in ((grade or {}).get("source_gaps") or [])[:8]],
         "missing": {
             "claim": claim is None,
