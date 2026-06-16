@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from enum import Enum
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -1364,7 +1366,10 @@ class CounterexampleTest(StrictBaseModel):
                 "result; an untested / survived / inconclusive result cannot refute"
             )
         if self.refutes_claim and (self.exposes_missing_hypothesis or self.missing_hypothesis):
-            raise ValueError("missing-hypothesis pressure cannot refute the original claim")
+            raise ValueError(
+                "dropped-hypothesis / missing-hypothesis pressure cannot refute "
+                "the original claim"
+            )
         if self.satisfies_all_claim_hypotheses is False and self.refutes_claim:
             raise ValueError("dropped-hypothesis tests cannot refute the original claim")
         if self.satisfies_all_claim_hypotheses is not True and self.refutes_claim:
@@ -2566,6 +2571,437 @@ class ProofGoalGraph(StrictBaseModel):
         return parts
 
 
+_MEMORY_FORBIDDEN_FIELD_TOKENS = {
+    "source_backed",
+    "source_status",
+    "proof_status",
+    "proof_language_status",
+    "evidence_status",
+    "checked_evidence",
+    "theorem_applicability_status",
+    "refutation_status",
+    "grade_status",
+    "memory_evidence",
+}
+
+
+def _memory_text_clauses(text: str) -> list[str]:
+    return [
+        clause.strip().lower()
+        for clause in re.split(r"[.;:\n]", str(text))
+        if clause.strip()
+    ]
+
+
+def _memory_clause_is_disclaimer(clause: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:not|never|cannot|can't|must not|does not|do not|no)\b",
+            clause,
+        )
+    )
+
+
+def _memory_non_disclaimer_segments(clause: str) -> list[str]:
+    segments = [
+        segment.strip()
+        for segment in re.split(r",|\b(?:and|but|however|yet)\b", clause)
+        if segment.strip()
+    ]
+    return [segment for segment in segments if not _memory_clause_is_disclaimer(segment)]
+
+
+def _memory_normalized_status_text(text: str) -> str:
+    normalized = str(text).lower()
+    normalized = re.sub(r"[_-]+", " ", normalized)
+    normalized = re.sub(r"\s*(?:=|:)\s*", " is ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
+
+
+def _memory_full_text_status_reason(text: str) -> str | None:
+    normalized = _memory_normalized_status_text(text)
+    status_patterns = [
+        (
+            r"\bno\s+counterexamples?\s+"
+            r"(?:remain|exists?|appeared?|produced|found|"
+            r"(?:(?:was|were)\s+)?(?:found|produced)|pressure|"
+            r"refutes?\s+(?:this|the)\s+(?:claim|route|step))\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\bno\s+counterexamples?\s+to\s+(?:this|the)\s+"
+            r"(?:claim|route|step|theorem)\s+(?:was|were)\s+found\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\b(?:this|the)\s+(?:search|run)\s+"
+            r"(?:produced\s+no|found\s+(?:zero|no))\s+counterexamples?\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\bcounterexamples?\s+[a-z0-9./_-]+\s+"
+            r"(?:is\s+)?(?:this\s+)?refutes?\s+(?:this|the)?\s*(?:claim|route|step)\b",
+            "refutation status",
+        ),
+        (r"\bno\s+examples?\s+(?:failed|fail|failing)\b", "example evidence status"),
+        (r"\bno\s+failing\s+examples?\b", "example evidence status"),
+        (r"\b(?:the\s+)?examples?\s+did\s+not\s+fail\b", "example evidence status"),
+        (
+            r"\bexamples?\s+(?:[a-z0-9./]+(?:\s+|$))?"
+            r"(?:does\s+not|did\s+not|do\s+not)\s+fail\b",
+            "example evidence status",
+        ),
+        (
+            r"\bexamples?\s+(?:[a-z0-9./]+(?:\s+|$))?"
+            r"(?:survived|failed|checked|passed|passes)\b",
+            "example evidence status",
+        ),
+        (
+            r"\bexamples?\s+(?:verify|verifies|confirmed?|validated?)\s+"
+            r"(?:this|the)?\s*(?:claim|route|step|theorem)\b",
+            "example evidence status",
+        ),
+        (r"\b(?:survived|failed|checked|passed)\s+examples?\b", "example evidence status"),
+        (
+            r"\bcounterexample\s+search\s+"
+            r"(?:(?:did\s+not\s+find|found\s+no)\s+pressure|found\s+none)\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\bcounterexample\s+search\s+came\s+back\s+empty\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\b(?:empty\s+counterexample\s+search|"
+            r"(?:the\s+)?counterexample\s+search\s+(?:was|returned)\s+empty)\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\bno\s+obstruction\s+(?:was|were)?\s*found\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|theorem|route|statement)\s+survived\s+"
+            r"counterexample\s+search\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|theorem|route|statement)\s+"
+            r"(?:was|is)\s+not\s+refuted\b",
+            "refutation status",
+        ),
+        (
+            r"\bno\s+(?:refutation|counterexample\s+pressure)\s+"
+            r"(?:remain|remains|exists?|found)\b",
+            "refutation status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|theorem|route|statement)\s+"
+            r"(?:is\s+)?unrefuted\b",
+            "refutation status",
+        ),
+        (
+            r"\b(?:this|the)\s+establishes\s+"
+            r"(?:this|the)?\s*(?:claim|theorem|route|statement)\b",
+            "current theorem status",
+        ),
+        (
+            r"\b(?:this|the)?\s*proof\s+establishes\s+"
+            r"(?:this|the)?\s*(?:claim|theorem|route|statement)\b",
+            "proof status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|theorem|route|statement)\s+"
+            r"(?:(?:is|has\s+been)\s+)?established\b",
+            "current theorem status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|theorem|route|statement)\s+"
+            r"(?:is\s+)?false\b",
+            "current theorem/refutation status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|theorem|route|statement)\s+holds\b",
+            "current theorem status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:disproves|contradicts)\s+"
+            r"(?:this|the)?\s*(?:claim|theorem|route|statement)\b",
+            "refutation status",
+        ),
+        (
+            r"\b(?:claim|theorem|route|statement)\s+is\s+true\b",
+            "current theorem truth",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|theorem|route|statement)\s+"
+            r"(?:is\s+)?settled\b",
+            "current theorem status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:paper|source|reference)\s+"
+            r"(?:supports?|confirms?)\s+"
+            r"(?:this|the)?\s*(?:claim|route|step|theorem)\b",
+            "source support status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:paper|source|reference)\s+"
+            r"(?:establishes|validates)\s+"
+            r"(?:this|the)?\s*(?:claim|route|step|theorem|proof\s+step)"
+            r"(?:\s+[a-z0-9._-]+)?\b",
+            "source support status",
+        ),
+        (
+            r"\b(?:literature\s+candidate|paper|source|reference|theorem)\s+"
+            r"is\s+(?:source\s+support|reference\s+support|support)\b",
+            "source/theorem support status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:literature\s+candidate|theorem)\s+"
+            r"(?:supports?|confirms?)\s+"
+            r"(?:this|the)?\s*(?:claim|route|step|theorem)\b",
+            "source/theorem support status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:source|reference)\s+verifies\s+"
+            r"(?:this|the)?\s*(?:claim|route|step|theorem)\b",
+            "source support status",
+        ),
+        (
+            r"\b[a-z][a-z0-9._ -]*\s+theorem\s+verifies\s+"
+            r"(?:this|the)?\s*(?:claim|route|step|theorem)\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|route|step|theorem)\s+"
+            r"(?:is\s+)?supported\s+by\s+(?:the\s+)?"
+            r"(?:cited\s+)?(?:paper|source|reference|candidate\s+reference)\b",
+            "source support status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:source|reference|candidate\s+reference)\s+"
+            r"backs\s+(?:this|the)?\s*(?:claim|route|step|theorem)\b",
+            "source support status",
+        ),
+        (
+            r"\bsource\s+status\s+is\s+(?:source\s+backed|backed|supported)\b",
+            "source support status",
+        ),
+        (r"\bsource\s+is\s+(?:source\s+backed|backed|supported)\b", "source support status"),
+        (
+            r"\b(?:this|the)?\s*(?:claim|route|step|theorem)\s+"
+            r"has\s+(?:source|reference)\s+support\b",
+            "source support status",
+        ),
+        (
+            r"\bstep\s+[a-z0-9._-]+\s+has\s+(?:source|reference)\s+support\b",
+            "source support status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|route|step|theorem)\s+"
+            r"(?:is\s+)?source\s+supported\b",
+            "source support status",
+        ),
+        (
+            r"\b(?:theorem\s+)?applicability\s+(?:status\s+)?is\s+applicable\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\b(?:this|the)?\s*theorem\s+is\s+applicable\b",
+            "theorem applicability status",
+        ),
+        (r"\btheorem\s+applicable\s+here\b", "theorem applicability status"),
+        (
+            r"\bapplicable\s+theorem\s+for\s+(?:this|the)\s+"
+            r"(?:step|claim|route)\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\btheorem\s+is\s+applicable\s+to\s+(?:this|the)\s+(?:step|claim|route)\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\btheorem\s+applies\s+to\s+(?:this|the)\s+(?:step|claim|route)\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\btheorem\s+applies\s+(?:for\s+(?:this|the)\s+"
+            r"(?:step|claim|route)|to\s+(?:this|the)\s+"
+            r"(?:step|claim|route))\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\btheorem\s+[a-z0-9._-]+\s+applies\s+to\s+"
+            r"(?:step\s+[a-z0-9._-]+|(?:this|the)\s+(?:step|claim|route))\b",
+            "theorem applicability status",
+        ),
+        (r"\btheorem\s+applies\s+here\b", "theorem applicability status"),
+        (r"\btheorem\s+applies\b", "theorem applicability status"),
+        (
+            r"\btheorem\s+applies\s+(?:is\s+)?(?:true|yes|applicable)\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\bproof\s+status\s+is\s+"
+            r"(?:complete|checked|verified|proved|proven|source\s+checked(?:\s+argument)?)\b",
+            "proof status",
+        ),
+        (
+            r"\b(?:this|the)?\s*proof\s+is\s+complete\b",
+            "proof-complete status",
+        ),
+        (
+            r"\b(?:this|the)\s+gives\s+a\s+proof\s+of\s+"
+            r"(?:this|the)?\s*(?:claim|theorem|route|statement)\b",
+            "proof status",
+        ),
+        (
+            r"\b(?:this\s+)?theorem\s+gives\s+(?:this|the)?\s*proof\b",
+            "theorem/proof status",
+        ),
+        (
+            r"\b(?:this|the)?\s*theorem\s+covers\s+(?:this|the)\s+case\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\b(?:this|the)?\s*proof\s+is\s+valid\b",
+            "proof status",
+        ),
+        (
+            r"\b(?:route|strategy)\s+[a-z0-9._-]+\s+"
+            r"(?:is\s+(?:a\s+)?proof\s+of\s+(?:this|the)?\s*"
+            r"(?:claim|theorem|statement)|gives\s+(?:this|the)?\s*proof)\b",
+            "route proof status",
+        ),
+        (r"\b(?:this|the)?\s*proof\s+checks\s+out\b", "proof status"),
+        (
+            r"\bno\s+proof\s+gaps?\s+remain\b",
+            "proof-complete status",
+        ),
+        (
+            r"\b(?:reviewer|prover)\s+"
+            r"(?:approved|certified|completed|verified|checked)\s+(?:this|the)?\s*proof\b",
+            "proof status",
+        ),
+        (
+            r"\b(?:reviewer|prover)\s+[a-z0-9._-]+\s+"
+            r"(?:approved|certified|completed|verified|checked)\s+"
+            r"(?:proof|the\s+proof|proof\s+of\s+step\s+[a-z0-9._-]+)\b",
+            "proof status",
+        ),
+        (
+            r"\bprover\s+(?:found|produced)\s+a\s+proof\b",
+            "proof status",
+        ),
+        (
+            r"\b(?:paper|source|reference)\s+[a-z0-9._-]+\s+"
+            r"supports?\s+(?:proof\s+)?step\s+[a-z0-9._-]+\b",
+            "source/proof support status",
+        ),
+        (r"\b(?:this|the)\s+is\s+a\s+complete\s+argument\b", "proof-complete status"),
+        (r"\bexamples?\s+pass\b", "example evidence status"),
+        (
+            r"\bhuman\s+(?:preference|choice|feedback|marked|chose)\b.*\b"
+            r"(?:supports?|evidence|proof|proves?|refutes?|true|false)\b",
+            "human preference as evidence",
+        ),
+        (
+            r"\bhuman\s+(?:preference|preferred)\b.*\b(?:as\s+evidence|evidence)\b",
+            "human preference as evidence",
+        ),
+        (
+            r"\bhuman\s+preference\s+shows\b.*\b(?:route|claim|theorem|statement)\b.*\bworks\b",
+            "human preference as evidence",
+        ),
+        (
+            r"\bproof\s+language\s+status\s+is\s+"
+            r"(?:source\s+checked(?:\s+argument)?|checked|complete|verified|proved|proven)\b",
+            "proof language status",
+        ),
+        (
+            r"\bgrade(?:\s+status)?\s+is\s+"
+            r"(?:promising|complete|accepted|passing|pass|verified|proof\s+complete|source\s+backed)\b",
+            "grade status",
+        ),
+    ]
+    for pattern, reason in status_patterns:
+        if re.search(pattern, normalized):
+            return reason
+    return None
+
+
+def _memory_forbidden_text_reason(text: str) -> str | None:
+    full_text_reason = _memory_full_text_status_reason(text)
+    if full_text_reason:
+        return full_text_reason
+
+    for clause in _memory_text_clauses(text):
+        no_pressure_patterns = [
+            (r"\bno\s+counterexamples?\s+(?:remain|exists?|found|pressure)\b"),
+            (r"\bcounterexample[_ -]?pressure\s*(?:is|=|:)\s*(?:none|clear|resolved)\b"),
+        ]
+        if any(re.search(pattern, clause) for pattern in no_pressure_patterns):
+            return "counterexample no-pressure status"
+        if _memory_clause_is_disclaimer(clause):
+            segments = _memory_non_disclaimer_segments(clause)
+            if not segments:
+                continue
+            clause = " ".join(segments)
+        if any(token in clause for token in _MEMORY_FORBIDDEN_FIELD_TOKENS):
+            return "trusted status field token"
+        status_patterns = [
+            (r"\b(?:proved|proven|proves|verified|refuted)\b", "proof/refutation status"),
+            (r"\b(?:complete proof|proof complete|proof-close)\b", "proof-complete status"),
+            (r"\b(?:claim|theorem|route|statement)\s+is\s+true\b", "current theorem truth"),
+            (r"\btheorem\s+(?:is\s+)?(?:established|settled)\b", "current theorem status"),
+            (r"\bsource[_ -]?backed\b", "source support status"),
+            (
+                r"\bsource\s+status\s+(?:is|=|:)\s*(?:source[_ -]?backed|backed|supported)\b",
+                "source support status",
+            ),
+            (r"\breference\s+supports?\s+(?:this|the)\s+(?:claim|route|step)\b", "source support status"),
+            (
+                r"\b(?:theorem\s+)?applicability(?:\s+status)?\s+"
+                r"(?:is|=)\s+applicable\b",
+                "theorem applicability status",
+            ),
+            (
+                r"\bapplicability[_ -]?status\s*(?:is|=|:)\s*applicable\b",
+                "theorem applicability status",
+            ),
+            (r"\btheorem\s+applies\s+to\s+(?:this|the)\s+step\b", "theorem applicability status"),
+            (r"\bapplies\s+to\s+(?:this|the)\s+claim\b", "theorem applicability status"),
+            (r"\bchecked\s+evidence\b", "checked evidence status"),
+            (r"\bexamples?\s+(?:survived|failed|checked)\b", "example evidence status"),
+            (r"\b(?:survived|failed|checked)\s+examples?\b", "example evidence status"),
+            (r"\bcounterexamples?\s+refutes?\b", "refutation status"),
+        ]
+        for pattern, reason in status_patterns:
+            if re.search(pattern, clause):
+                return reason
+    return None
+
+
+def _validate_memory_text_boundary(where: str, values: list[str]) -> None:
+    for value in values:
+        reason = _memory_forbidden_text_reason(value)
+        if reason:
+            raise ValueError(f"{where} cannot store current mathematical status ({reason})")
+
+
+def _has_run_artifact_provenance(provenance: list[str]) -> bool:
+    for item in provenance:
+        parts = Path(str(item)).parts
+        if (
+            "projects" in parts
+            and "runs" in parts
+            and len(parts) >= parts.index("runs") + 3
+        ):
+            return True
+    return False
+
+
 class MemoryEntry(StrictBaseModel):
     id: str
     timestamp: str
@@ -2575,6 +3011,31 @@ class MemoryEntry(StrictBaseModel):
     summary: str
     provenance: list[str]
     reusable_lesson: str
+
+    @model_validator(mode="after")
+    def validate_memory_entry(self) -> MemoryEntry:
+        text_fields = {
+            "id": self.id,
+            "timestamp": self.timestamp,
+            "project": self.project,
+            "claim_id": self.claim_id,
+            "summary": self.summary,
+            "reusable_lesson": self.reusable_lesson,
+        }
+        blank = [name for name, value in text_fields.items() if not str(value).strip()]
+        if blank:
+            raise ValueError(f"memory entry fields cannot be blank: {blank}")
+        if not self.provenance:
+            raise ValueError("memory entry requires provenance")
+        if not all(str(item).strip() for item in self.provenance):
+            raise ValueError("memory entry provenance cannot be blank")
+        if not _has_run_artifact_provenance(self.provenance):
+            raise ValueError("memory entry provenance requires a run artifact reference")
+        _validate_memory_text_boundary(
+            "memory entry",
+            [self.summary, self.reusable_lesson, *self.provenance],
+        )
+        return self
 
 
 class MemoryContextEntry(StrictBaseModel):
@@ -2592,6 +3053,33 @@ class MemoryContextEntry(StrictBaseModel):
     relevance_reason: str
     recommended_use: Literal["avoid", "retest", "request_source", "prioritize", "ask_human", "note"]
     summary: str
+    memory_claim_id: str
+    provenance: list[str]
+    revalidation_required: bool
+    revalidated_against_locked_claim: bool
+
+    @model_validator(mode="after")
+    def validate_memory_context_entry(self) -> MemoryContextEntry:
+        if not self.provenance:
+            raise ValueError("memory context entry requires provenance")
+        if not all(str(item).strip() for item in self.provenance):
+            raise ValueError("memory context entry provenance cannot be blank")
+        if not _has_run_artifact_provenance(self.provenance):
+            raise ValueError(
+                "memory context entry provenance requires a run artifact reference"
+            )
+        _validate_memory_text_boundary(
+            "memory context entry",
+            [
+                self.relevance_reason,
+                self.summary,
+                self.memory_claim_id,
+                *self.provenance,
+            ],
+        )
+        if self.revalidated_against_locked_claim and self.revalidation_required:
+            raise ValueError("memory context cannot be both revalidated and pending revalidation")
+        return self
 
 
 class MemoryContext(StrictBaseModel):
@@ -2599,13 +3087,18 @@ class MemoryContext(StrictBaseModel):
     claim, with recommended uses. Advisory only — never upgrades any status and
     never overrides current-run artifacts (StrictBaseModel forbids status fields)."""
 
-    schema_version: int = 1
+    schema_version: int = 2
     claim_id: str
     run_id: str
     advisory_only: Literal[True] = True
     generated_at: str = ""
     matched_entries: list[MemoryContextEntry] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_memory_context(self) -> MemoryContext:
+        _validate_memory_text_boundary("memory context constraints", self.constraints)
+        return self
 
 
 class MemoryIndexEntry(StrictBaseModel):
@@ -2616,6 +3109,20 @@ class MemoryIndexEntry(StrictBaseModel):
     tags: list[str] = Field(default_factory=list)
     summary: str
     provenance: list[str]
+
+    @model_validator(mode="after")
+    def validate_memory_index_entry(self) -> MemoryIndexEntry:
+        if not self.id.strip() or not self.claim_id.strip() or not self.entry_path.strip():
+            raise ValueError("memory index entry requires id, claim_id, and entry_path")
+        if not self.provenance:
+            raise ValueError("memory index entry requires provenance")
+        if not _has_run_artifact_provenance(self.provenance):
+            raise ValueError("memory index entry provenance requires a run artifact reference")
+        _validate_memory_text_boundary(
+            "memory index entry",
+            [self.summary, self.entry_path, *self.tags, *self.provenance],
+        )
+        return self
 
 
 class MemoryIndex(StrictBaseModel):

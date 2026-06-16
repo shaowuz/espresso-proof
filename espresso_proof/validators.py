@@ -32,6 +32,7 @@ from .models import (
     LiteratureSearchPlan,
     MathematicalJudgmentReport,
     ProofGoalGraph,
+    _has_run_artifact_provenance,
     ProofVerificationReport,
     ProofVerificationStatus,
     SubgoalState,
@@ -95,6 +96,60 @@ def validate_yaml_model(path: Path, model: type[BaseModel]) -> BaseModel:
         return model.model_validate(read_yaml(path))
     except ValidationError as exc:
         raise KernelValidationError(f"{path}: schema validation failed\n{exc}") from exc
+
+
+def _memory_context_schema_version(raw: object) -> int:
+    if not isinstance(raw, dict):
+        return 2
+    try:
+        return int(raw.get("schema_version", 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _legacy_memory_context_provenance(run_dir: Path, artifact_path: str) -> str:
+    return f"projects/{run_dir.parents[1].name}/runs/{run_dir.name}/{artifact_path}"
+
+
+def _adapt_legacy_memory_context(raw: dict, run_dir: Path, artifact_path: str) -> dict:
+    """Keep legacy memory_context files readable without replaying them.
+
+    V1 entries did not carry per-memory claim binding or provenance. For
+    validation they are converted to pending notes, so old runs can still render
+    memory context while no route ranking, time allocation, or test-priority
+    action is implied before revalidation.
+    """
+
+    adapted = dict(raw)
+    entries = []
+    for raw_entry in raw.get("matched_entries") or []:
+        if not isinstance(raw_entry, dict):
+            entries.append(raw_entry)
+            continue
+        entry = dict(raw_entry)
+        reason = str(entry.get("relevance_reason") or "legacy memory context entry")
+        if "revalidation" not in reason.lower():
+            reason = f"{reason}; pending revalidation before reuse"
+        entry["relevance_reason"] = reason
+        entry["recommended_use"] = "note"
+        entry["memory_claim_id"] = str(
+            entry.get("memory_claim_id") or "__legacy_memory_context_unscoped__"
+        )
+        provenance = entry.get("provenance")
+        entry["provenance"] = (
+            provenance
+            if provenance and _has_run_artifact_provenance(provenance)
+            else [_legacy_memory_context_provenance(run_dir, artifact_path)]
+        )
+        entry["revalidation_required"] = True
+        entry["revalidated_against_locked_claim"] = False
+        entries.append(entry)
+    adapted["schema_version"] = 2
+    adapted["matched_entries"] = entries
+    adapted.setdefault("advisory_only", True)
+    adapted.setdefault("generated_at", "")
+    adapted.setdefault("constraints", [])
+    return adapted
 
 
 def validate_run(run_dir: Path) -> None:
@@ -1011,10 +1066,15 @@ def _load_optional_memory_context(
     # MemoryContext / MemoryContextEntry (StrictBaseModel, extra=forbid) have no
     # source/evidence/proof status field; validating here fails closed if a memory
     # context were ever written/hand-edited with a trusted status.
-    return validate_yaml_model(
-        run_dir / optional["memory_context"],
-        MemoryContext,
-    )
+    artifact_path = optional["memory_context"]
+    path = run_dir / artifact_path
+    raw = read_yaml(path)
+    if isinstance(raw, dict) and _memory_context_schema_version(raw) < 2:
+        raw = _adapt_legacy_memory_context(raw, run_dir, artifact_path)
+    try:
+        return MemoryContext.model_validate(raw)
+    except ValidationError as exc:
+        raise KernelValidationError(f"{path}: schema validation failed\n{exc}") from exc
 
 
 def _validate_memory_context(
@@ -1030,6 +1090,28 @@ def _validate_memory_context(
         raise KernelValidationError(
             f"memory_context run_id mismatch: {memory_context.run_id!r} != {manifest.run_id!r}"
         )
+    if memory_context.schema_version < 2 and memory_context.matched_entries:
+        raise KernelValidationError(
+            "memory_context with matched_entries requires schema_version >= 2 replay metadata"
+        )
+    for entry in memory_context.matched_entries:
+        if not entry.memory_claim_id.strip():
+            raise KernelValidationError("memory_context entry requires memory_claim_id")
+        if not entry.provenance:
+            raise KernelValidationError("memory_context entry requires provenance")
+        cross_claim = entry.memory_claim_id != claim.id
+        if cross_claim and not entry.revalidation_required:
+            raise KernelValidationError(
+                "memory_context replay under a different locked claim requires revalidation"
+            )
+        if cross_claim and entry.revalidation_required and entry.recommended_use != "note":
+            raise KernelValidationError(
+                "pending cross-claim memory replay must be non-actionable"
+            )
+        if cross_claim and entry.revalidated_against_locked_claim:
+            raise KernelValidationError(
+                "memory_context cannot claim revalidation for a different locked claim"
+            )
 
 
 def _validate_literature_retrieval(

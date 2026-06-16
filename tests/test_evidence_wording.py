@@ -268,6 +268,11 @@ def _run_with_optional_artifacts(tmp_path: Path) -> Path:
     run = run_mock_critique(
         "wd", FIXTURES / "source_misapplication_very_general_to_all" / "input.md", tmp_path
     )
+    ledger_path = _artifact_path(run, "hypothesis_ledger")
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
     judge_run(run)
     audit_failure_patterns(run)
     verify_finite_groups(run, primes=[2, 3])
