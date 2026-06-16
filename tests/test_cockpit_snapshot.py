@@ -148,6 +148,31 @@ def test_snapshot_route_source_label_is_advisory_even_when_route_says_source_bac
     assert route["source_tone"] != "earned"
 
 
+def test_snapshot_strategy_free_text_scrubs_raw_source_vocabulary(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    brief_path = run_dir / manifest["artifacts"]["strategy_brief"]
+    brief = read_yaml(brief_path)
+    route = brief["top_strategies"][0]
+    route_id = route["id"]
+    route["title"] = "A source-backed route title"
+    route["why_this_route"] = "Uses a source_backed theorem label."
+    route["main_risk"] = "The source backed phrase is advisory only."
+    route["next_loop_plan"] = "Avoid source_backed_status wording."
+    write_yaml(brief_path, brief)
+
+    snap = build_snapshot(run_dir, run_id, status_summary(run_dir))
+    rendered_route = next(s for s in snap["strategies"] if s["id"] == route_id)
+    rendered = json.dumps(rendered_route, sort_keys=True).lower()
+
+    assert "source-backed" not in rendered
+    assert "source_backed" not in rendered
+    assert "source backed" not in rendered
+    assert "reference-supported" in rendered
+
+
 def test_snapshot_missing_artifacts_yield_placeholders(tmp_path: Path) -> None:
     # a bare directory (no manifest): every panel flagged missing, all lists
     # empty, and the claim sentence still a safe display sentence.

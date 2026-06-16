@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .proof_language import scrub_proof_language
+from .proof_language import scrub_source_support_language
 
 
 SOURCE_GAPS = "source_gaps"
@@ -24,12 +24,7 @@ def _text_items(value: Any) -> list[str]:
 
 
 def _display_text(value: Any) -> str:
-    text = re.sub(
-        r"\bsource(?:[_ -])backed\b",
-        "reference-supported",
-        scrub_proof_language(str(value).strip()),
-        flags=re.IGNORECASE,
-    )
+    text = scrub_source_support_language(str(value).strip())
     advisory_context_terms = (
         "memory",
         "prior run",

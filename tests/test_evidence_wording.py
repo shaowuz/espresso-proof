@@ -299,13 +299,10 @@ def _run_with_optional_artifacts(tmp_path: Path) -> Path:
 
 
 # NOTE on scope: these renderers translate every *status field* into evidence
-# wording. They still echo producer-authored free-text artifact fields verbatim
-# (e.g. a strategy route's ``main_risk`` prose, or a judgment finding's
-# ``explanation``), which may quote an internal token inside a sentence. Rewording
-# that upstream prose belongs to a separate goal (it touches artifact producers,
-# not the presentation layer). These tests therefore pin the renderer-controlled
-# label surfaces: no status enum is shown as a bracketed/labelled value, and the
-# required evidence phrases are used.
+# wording. They also scrub raw source-support enum vocabulary when it appears in
+# producer-authored free text. General mathematical prose remains producer text;
+# source/proof/evidence authority still belongs to validators and checked
+# artifacts, not to the renderer.
 
 
 def test_memo_label_surfaces_use_evidence_wording(tmp_path: Path) -> None:

@@ -29,7 +29,7 @@ from .descriptions import (
 )
 from .io import read_yaml
 from .latest_round import load_latest_round
-from .proof_language import scrub_proof_language
+from .proof_language import scrub_source_support_language
 
 # The ONLY statuses whose evidence the kernel has actually earned. Everything
 # else — candidate, unverified, not_found, running agents, literature
@@ -92,13 +92,12 @@ def _clip(text: object, limit: int = 280) -> str:
 
 
 def _clip_scrubbed(text: object, limit: int = 280) -> str:
-    return scrub_proof_language(_clip(text, limit))
+    return scrub_source_support_language(_clip(text, limit))
 
 
 def _clip_status_text(text: object, limit: int = 280) -> str:
     return (
         _clip_scrubbed(text, limit)
-        .replace("source_backed", "reference-supported")
         .replace("checked_evidence", "checked evidence")
         .replace("theorem_applicability_status", "theorem applicability status")
     )
@@ -192,13 +191,13 @@ def _strategies(
             {
                 "id": sid,
                 "title": _clip_scrubbed(raw.get("title"), 140),
-                "one_line": _clip(raw.get("why_this_route")),
+                "one_line": _clip_scrubbed(raw.get("why_this_route")),
                 "score": raw.get("score") if isinstance(raw.get("score"), int) else None,
                 "status_sentence": describe_grade(status=raw.get("status")),
                 "source_phrase": route_source_phrase(source_status),
                 "source_tone": _route_source_tone(source_status),
-                "main_risk": _clip(raw.get("main_risk")),
-                "next_step": _clip(raw.get("next_loop_plan")),
+                "main_risk": _clip_scrubbed(raw.get("main_risk")),
+                "next_step": _clip_scrubbed(raw.get("next_loop_plan")),
                 "selected": bool(selected_id) and raw.get("id") == selected_id,
                 # advisory: the user's latest feedback for this route, or null.
                 "my_feedback": feedback.get(sid),

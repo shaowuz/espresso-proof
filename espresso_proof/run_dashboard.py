@@ -39,7 +39,7 @@ from .agent_run_status import (
 )
 from .descriptions import evidence_phrase, objection_phrase
 from .io import read_yaml
-from .proof_language import scrub_proof_language
+from .proof_language import scrub_proof_language, scrub_source_support_language
 from .research_timeline import build_timeline
 from .route_table import ROUTE_TABLE_COLUMNS, build_route_step_rows
 from .subgoal_graph import (
@@ -326,11 +326,11 @@ def _route_data(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
     route_data: dict[str, dict[str, Any]] = {}
     for index, route in enumerate(routes, start=1):
         route_id = str(route.get("id") or f"route_{index}")
-        title = str(route.get("title") or f"Route {index}")
+        title = scrub_source_support_language(route.get("title") or f"Route {index}")
         effort = str(route.get("estimated_effort") or "quick_test")
-        why = str(route.get("why_this_route") or "")
-        risk = str(route.get("main_risk") or "")
-        next_plan = str(route.get("next_loop_plan") or "")
+        why = scrub_source_support_language(route.get("why_this_route") or "")
+        risk = scrub_source_support_language(route.get("main_risk") or "")
+        next_plan = scrub_source_support_language(route.get("next_loop_plan") or "")
         steer = (state.get("time_allocation") or {}).get(route_id)
         steer_line = ""
         if steer:
@@ -459,7 +459,7 @@ def _proof_label(grade: dict[str, Any], repair_needed: bool) -> str:
 
 
 def _one_sentence(text: str) -> str:
-    text = " ".join(str(text or "").split())
+    text = " ".join(scrub_source_support_language(text).split())
     if not text:
         return ""
     for marker in (". ", "; "):
@@ -489,7 +489,7 @@ def _display_title(title: str, index: int) -> str:
         return "Generators"
     # No keyword match: keep the route's real title (truncated) instead of an
     # anonymous "Route N", so non-demo domains keep meaningful card titles.
-    title = " ".join(str(title or "").split())
+    title = " ".join(scrub_source_support_language(title).split())
     if title:
         return title if len(title) <= 48 else title[:45].rstrip() + "…"
     return label
@@ -520,7 +520,7 @@ def _command_for(run_dir: Path, route_id: str, effort: str, *, completed: bool) 
 
 
 def _h(value: object) -> str:
-    return html.escape(str(value if value is not None else ""))
+    return html.escape(scrub_source_support_language(value if value is not None else ""))
 
 
 def _js(obj: object) -> str:
@@ -814,7 +814,7 @@ def _plan_section(
     if gaps:
         # Display-layer translation: artifact free text may carry internal enum
         # tokens; the product surface never shows them raw.
-        shown = [str(g).replace("source_backed", "reference-supported") for g in gaps[:5]]
+        shown = [scrub_source_support_language(g) for g in gaps[:5]]
         gap_items = "".join(f"<li>{_h(g)}</li>" for g in shown)
         gaps_html = f'<div class="gaps"><b>Source gaps</b><ul class="detail-list">{gap_items}</ul></div>'
     warning_items = "".join(

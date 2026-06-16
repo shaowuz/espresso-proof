@@ -28,7 +28,7 @@ from .descriptions import (
 from .external_tool_runner import run_completed_cleanly
 from .failure_pattern_bank import failure_pattern_allocation_hints
 from .io import read_yaml
-from .proof_language import scrub_proof_language
+from .proof_language import scrub_proof_language, scrub_source_support_language
 from .research_bank import load_bankable_dict
 from .route_table import build_route_step_rows, render_route_step_table_lines
 from .subgoal_graph import render_proof_search_lines
@@ -172,7 +172,7 @@ def render_proof_route_steps(
     # Self-safe: a step's echoed free text (e.g. needed_theorem) can never render
     # global proof-complete language, regardless of caller. Idempotent with the
     # whole-memo scrub in build_concise_memo. Never upgrades status.
-    return [scrub_proof_language(line) for line in lines]
+    return [scrub_source_support_language(line) for line in lines]
 
 
 def build_concise_memo(run_dir: Path) -> str:
@@ -258,7 +258,7 @@ def build_concise_memo(run_dir: Path) -> str:
     # translate to the product vocabulary (same rewrite as the dashboard).
     evidence_summary = sorted({evidence_phrase(s) for s in source_statuses})
     shown_gaps = [
-        str(g).replace("source_backed", "reference-supported").rstrip(".")
+        scrub_source_support_language(g).rstrip(".")
         for g in source_gaps
     ]
     lines.append(
@@ -538,6 +538,6 @@ def build_concise_memo(run_dir: Path) -> str:
     )
     # Display-layer safety: redact any global proof-complete overclaim that an
     # echoed free-text artifact field (objection / risk / explanation / summary)
-    # might carry. Typed status descriptions are unaffected (the sanitizer only
-    # matches global "the whole theorem is proved" language). Never upgrades status.
-    return scrub_proof_language("\n".join(lines))
+    # might carry, and translate raw source-support enum vocabulary. Typed status
+    # descriptions are unaffected. Never upgrades status.
+    return scrub_source_support_language("\n".join(lines))

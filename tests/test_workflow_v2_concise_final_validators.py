@@ -116,6 +116,38 @@ def test_warning_disclosures_scrub_raw_source_backed_vocabulary() -> None:
     assert final_report_missing_disclosures(block, warnings) == []
 
 
+def test_dashboard_memo_and_cockpit_scrub_strategy_source_vocabulary(tmp_path: Path) -> None:
+    run_dir = _run(tmp_path)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    brief_path = run_dir / manifest["artifacts"]["strategy_brief"]
+    brief = read_yaml(brief_path)
+    route = brief["top_strategies"][0]
+    route["title"] = "A source-backed route title"
+    route["why_this_route"] = "A source_backed route summary."
+    route["main_risk"] = "A source backed risk."
+    route["next_loop_plan"] = "Avoid source_backed_status display."
+    write_yaml(brief_path, brief)
+    synthesis_path = run_dir / manifest["artifacts"]["strategy_synthesis"]
+    synthesis = read_yaml(synthesis_path)
+    synthesis_route = next(r for r in synthesis["routes"] if r["id"] == route["id"])
+    for key in ("title", "why_this_route", "main_risk", "next_loop_plan"):
+        synthesis_route[key] = route[key]
+    write_yaml(synthesis_path, synthesis)
+    dashboard = render_run_dashboard(run_dir)
+    memo = build_concise_memo(run_dir)
+    cockpit = json.dumps(
+        build_snapshot(run_dir, run_dir.name, status_summary(run_dir)),
+        sort_keys=True,
+    )
+
+    for rendered in (dashboard, memo, cockpit):
+        lowered = rendered.lower()
+        assert "source-backed" not in lowered
+        assert "source_backed" not in lowered
+        assert "source backed" not in lowered
+        assert "reference-supported" in lowered
+
+
 def _write_disclosed_final(
     run_dir: Path,
     extra: str = "",

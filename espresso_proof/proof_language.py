@@ -117,9 +117,26 @@ def scrub_proof_language(text: object) -> str:
     return _PATTERN.sub(REDACTION, str(text))
 
 
+def scrub_source_support_language(text: object) -> str:
+    """Translate raw source-support enum vocabulary in display text.
+
+    Internal artifacts may store values like ``source_backed``. User-facing
+    surfaces should use plain scoped wording, so free text and rendered labels
+    pass through this display-only helper.
+    """
+
+    return re.sub(
+        r"\bsource(?:[_ -])backed(?:[_ -]status)?\b",
+        "reference-supported",
+        scrub_proof_language(text),
+        flags=re.IGNORECASE,
+    )
+
+
 __all__ = [
     "PROOF_COMPLETE_PHRASES",
     "REDACTION",
     "contains_proof_language",
     "scrub_proof_language",
+    "scrub_source_support_language",
 ]
