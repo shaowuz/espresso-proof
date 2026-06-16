@@ -314,8 +314,20 @@ def test_update_inbox_forbidden_ownership_fields_fail_validation(
         validate_run(run_dir)
 
 
-@pytest.mark.parametrize("phrase", ["proof-close", "complete proof", "settled", "verified by examples"])
-def test_prover_progress_proof_complete_wording_cannot_upgrade_status(
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "proof-close",
+        "complete proof",
+        "source_backed",
+        "checked_evidence",
+        "theorem_applicability_status",
+        "counterexample_refutes_claim",
+        "settled",
+        "verified by examples",
+    ],
+)
+def test_update_inbox_status_wording_cannot_upgrade_status(
     tmp_path: Path, phrase: str
 ) -> None:
     run_dir = _fast_run(tmp_path)
@@ -326,6 +338,28 @@ def test_prover_progress_proof_complete_wording_cannot_upgrade_status(
         dedupe_key=f"prover:{phrase}",
         origin_artifact_id_or_path=f"prover text says {phrase}",
     )
+    _write_raw_inbox(run_dir, [event])
+
+    with pytest.raises(KernelValidationError, match="update_inbox cannot write"):
+        validate_run(run_dir)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("origin_stage", "source_backed"),
+        ("origin_artifact", "checked_evidence.yaml"),
+        ("origin_artifact_id_or_path", "theorem_applicability_status"),
+        ("artifact_revision_or_hash", "counterexample_refutes_claim"),
+        ("route_id_or_step_id", "complete_proof"),
+    ],
+)
+def test_update_inbox_string_fields_reject_raw_status_tokens(
+    tmp_path: Path, field: str, value: str
+) -> None:
+    run_dir = _fast_run(tmp_path)
+    event = _event(run_dir)
+    event[field] = value
     _write_raw_inbox(run_dir, [event])
 
     with pytest.raises(KernelValidationError, match="update_inbox cannot write"):

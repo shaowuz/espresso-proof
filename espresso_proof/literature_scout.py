@@ -233,7 +233,9 @@ def run_literature_scout(
     write_yaml(run_dir / "run_manifest.yaml", manifest)
 
     # Fail closed: the kernel re-validates the whole run after the scout writes.
+    from .surface_warnings import refresh_final_report_disclosures
     from .validators import validate_run
 
+    refresh_final_report_disclosures(run_dir)
     validate_run(run_dir)
     return report

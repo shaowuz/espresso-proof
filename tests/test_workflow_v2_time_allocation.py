@@ -234,6 +234,31 @@ def test_scheduling_only_markers_are_required(tmp_path: Path, remove_path: tuple
         validate_run(run_dir)
 
 
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        None,
+        [],
+        ["proof", "source", "evidence"],
+        ["proof", "source", "evidence", "theorem_applicability", "grade"],
+    ],
+)
+def test_forbidden_status_effect_cannot_be_removed_or_weakened(
+    tmp_path: Path,
+    replacement: list[str] | None,
+) -> None:
+    run_dir = _fast_run(tmp_path)
+    plan = _plan(run_dir)
+    if replacement is None:
+        plan.pop("forbidden_status_effect")
+    else:
+        plan["forbidden_status_effect"] = replacement
+    write_yaml(run_dir / TIME_ALLOCATION_FILENAME, plan)
+
+    with pytest.raises(KernelValidationError, match="forbidden_status_effect"):
+        validate_run(run_dir)
+
+
 def test_high_llm_score_or_proof_language_in_allocation_cannot_prove_route(
     tmp_path: Path,
 ) -> None:
@@ -252,6 +277,10 @@ def test_high_llm_score_or_proof_language_in_allocation_cannot_prove_route(
         "proof-close",
         "complete proof",
         "this establishes the theorem",
+        "source_backed",
+        "checked_evidence",
+        "theorem_applicability_status",
+        "refutation_status",
         "settled",
         "verified by examples",
     ],

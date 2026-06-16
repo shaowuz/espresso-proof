@@ -165,4 +165,7 @@ def plan_literature_search(*, run_dir: Path, client: LLMClient) -> dict:
     write_yaml(run_dir / "literature_search_plan.yaml", plan)
     manifest.setdefault("optional_artifacts", {})["literature_search_plan"] = "literature_search_plan.yaml"
     write_yaml(run_dir / "run_manifest.yaml", manifest)
+    from .surface_warnings import refresh_final_report_disclosures
+
+    refresh_final_report_disclosures(run_dir)
     return plan

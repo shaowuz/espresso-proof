@@ -117,7 +117,13 @@ def test_memo_has_no_raw_effort_or_stop_enums(tmp_path: Path) -> None:
         run_dir / "strategy_brief.yaml"
     )
     sid = (brief.get("top_strategies") or [{}])[0].get("id") or "none"
-    memo = resume_run(run_dir=run_dir, selected_strategy=sid, effort="quick_test")
+    effort = next(
+        str(option)
+        for choice in brief.get("allowed_human_choices") or []
+        if choice.get("strategy_id") == sid
+        for option in choice.get("effort_options") or []
+    )
+    memo = resume_run(run_dir=run_dir, selected_strategy=sid, effort=effort)
     validate_run(run_dir)
     assert "quick_test" not in memo
     assert "budget_rounds" not in memo

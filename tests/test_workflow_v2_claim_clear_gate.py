@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from copy import deepcopy
 from pathlib import Path
 
@@ -12,6 +15,7 @@ from espresso_proof.cli import app
 from espresso_proof.claim_clear import ClaimClearBlockedError, ensure_claim_clear_for_downstream
 from espresso_proof.front_half_agents import run_front_half_agent_pass
 from espresso_proof.io import read_yaml, write_yaml
+from espresso_proof.kernel import snapshot as kernel_snapshot
 import espresso_proof.llm_agents as llm_agents
 from espresso_proof.llm_agents import StubLLMClient
 from espresso_proof.mock_pipeline import run_mock_critique
@@ -19,6 +23,12 @@ from espresso_proof.orchestrator import orchestrate_run, resume_run
 from espresso_proof.pdf_ingestion import ingest_source_for_theorems
 from espresso_proof.prover_loop_driver import continue_prover_loop
 from espresso_proof.retrieval_grounding import retrieve_and_ground
+from espresso_proof.run_dashboard import (
+    render_run_dashboard,
+    render_topbar_status_html,
+    status_summary,
+)
+from espresso_proof.cockpit_view import build_snapshot
 from espresso_proof.source_verification import ground_run
 from espresso_proof.theorem_applicability import audit_theorem_applicability
 from espresso_proof.validators import validate_run
@@ -196,6 +206,80 @@ def test_unclear_claim_blocks_orchestrator_downstream_stages(tmp_path: Path) -> 
     for agent in ("literature", "examples", "counterexamples"):
         assert by_agent[agent]["status"] == "skipped"
         assert by_agent[agent]["safe_to_use_as_evidence"] is False
+
+
+def test_unclear_claim_runtime_ui_kernel_and_vscode_snapshots_agree(
+    tmp_path: Path,
+) -> None:
+    result = orchestrate_run(
+        project="v2_claim_gate",
+        input_path=_claim_file(tmp_path, UNCLEAR_CLAIM),
+        output_root=tmp_path,
+        provider="stub",
+        front_half="stub",
+    )
+    run_dir = Path(result["run_dir"])
+
+    validate_run(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    summary = status_summary(run_dir)
+    dashboard = render_run_dashboard(run_dir)
+    topbar = render_topbar_status_html(run_dir)
+    cockpit = build_snapshot(run_dir, run_dir.name, summary)
+    kernel = kernel_snapshot(tmp_path, run_dir)
+    bridge_result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/espresso_vscode_bridge.py",
+            "snapshot",
+            "--workspace",
+            str(tmp_path),
+            "--run",
+            str(run_dir),
+        ],
+        cwd=Path.cwd(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    vscode = json.loads(bridge_result.stdout)["payload"]
+
+    assert manifest["current_state"] == "WAITING_CLAIM_CLARIFICATION"
+    assert summary["state"] == "Waiting Claim Clarification"
+    assert cockpit["status"]["state"] == summary["state"]
+    assert kernel["current"]["validation"]["status"] == "valid"
+    assert vscode["current"]["validation"]["status"] == "valid"
+    assert kernel["current"]["artifacts"]["run_manifest"]["current_state"] == (
+        "WAITING_CLAIM_CLARIFICATION"
+    )
+    assert vscode["current"]["artifacts"]["run_manifest"]["current_state"] == (
+        "WAITING_CLAIM_CLARIFICATION"
+    )
+
+    agent_status = {row["agent"]: row["status"] for row in summary["agents"]}
+    for agent in ("literature", "examples", "counterexamples"):
+        assert agent_status[agent] == "skipped"
+    optional = manifest.get("optional_artifacts", {})
+    assert "llm_agent_run" not in optional
+    assert "prover_loop" not in optional
+    assert "prover_round_index" not in optional
+    assert not (run_dir / "prover_rounds").exists()
+
+    warning_categories = {item["category"] for item in summary["open_warnings"]}
+    assert {"source_gaps", "examples_pending", "counterexamples_pending"}.issubset(
+        warning_categories
+    )
+    assert cockpit["open_warnings"] == summary["open_warnings"]
+    assert "Open blockers / pending checks" in dashboard
+    assert "Waiting Claim Clarification" in topbar
+    assert summary["evidence"] == {"reference_supported_steps": 0, "machine_checks": 0}
+    for rendered in (
+        dashboard,
+        topbar,
+        json.dumps(cockpit, sort_keys=True),
+    ):
+        assert "source_backed" not in rendered
+        assert "checked_evidence" not in rendered
 
 
 @pytest.mark.parametrize("stage", ["literature_review", "examples", "counterexamples", "strategy"])

@@ -98,8 +98,10 @@ def _write_report(run_dir: Path, report: dict) -> dict:
     manifest = read_yaml(manifest_path)
     manifest.setdefault("optional_artifacts", {})["retrieval_resolution"] = "retrieval_resolution.yaml"
     write_yaml(manifest_path, manifest)
+    from .surface_warnings import refresh_final_report_disclosures
     from .validators import validate_run
 
+    refresh_final_report_disclosures(run_dir)
     validate_run(run_dir)
     return report
 

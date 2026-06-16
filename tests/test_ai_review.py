@@ -18,6 +18,7 @@ from espresso_proof.evidence_trust import EARNED_LEVELS, is_green, trust_tone
 from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.memo import build_concise_memo
 from espresso_proof.models import AIReviewAssessment, AIReviewVerdict
+from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.orchestrator import orchestrate_run
 from espresso_proof.validators import validate_run
 
@@ -369,11 +370,9 @@ def test_memo_renders_human_text_no_raw_enum(tmp_path: Path) -> None:
 
 
 def test_memo_renders_insufficient(tmp_path: Path) -> None:
-    # Single reviewer -> insufficient. Shrinking reviewers breaks the unrelated
-    # >=3-role prover cross-check, so render the memo directly (no validate_run).
-    run_dir = _gate_run(tmp_path)
-    _set_reviews(run_dir, [_review("strategy_reviewer_001")])
-    _clear_prover_blockers(run_dir)
+    # No LLM reviewer artifacts -> insufficient, while the run remains internally
+    # valid because there is no prover-loop cross-check to satisfy.
+    run_dir = run_mock_critique("ai_review_demo", _claim(tmp_path), tmp_path)
     build_ai_review(run_dir)
     memo = build_concise_memo(run_dir)
     assert "not enough independent reviewers to assess" in memo

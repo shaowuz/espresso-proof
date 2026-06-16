@@ -33,6 +33,24 @@ _GROUNDABLE_STATEMENT = (
     "Theorem 1.2. Exact literature statement supporting the Hodge-theoretic step "
     "over base field C for cubic fourfolds."
 )
+
+
+def _mark_probe_claim_clear(run_dir: Path, *, state: str | None = None) -> None:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    from .claim_clear import ensure_claim_clear_for_downstream
+
+    ensure_claim_clear_for_downstream(run_dir)
+    if state is not None:
+        manifest = read_yaml(run_dir / "run_manifest.yaml")
+        manifest["current_state"] = state
+        write_yaml(run_dir / "run_manifest.yaml", manifest)
+
+
 def _grounded_run(
     root: Path,
     *,
@@ -49,6 +67,7 @@ def _grounded_run(
     run_dir = run_mock_critique(
         project, FIXTURES_DIR / "hodge_all_cubic_fourfolds" / "input.md", root
     )
+    _mark_probe_claim_clear(run_dir)
     src = root / "scorecard_source.txt"
     src.write_text(statement, encoding="utf-8")
     from .pdf_ingestion import ingest_source_for_theorems
@@ -349,16 +368,24 @@ def _probe_dogfood_replay(root: Path) -> dict:
     from .orchestrator import orchestrate_run, resume_run
     from .validators import validate_run
 
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    claim_path = root / "dogfood_claim.md"
+    claim_path.write_text(
+        "Let p be a prime. Every group G of order p^2 is abelian.\n",
+        encoding="utf-8",
+    )
     result = orchestrate_run(
         project="scorecard_dogfood",
-        input_path=FIXTURES_DIR / "hodge_all_cubic_fourfolds" / "input.md",
+        input_path=claim_path,
         output_root=root,
         provider="stub",
-        front_half="mock",
+        front_half="stub",
     )
     run_dir = Path(result["run_dir"])
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
     brief = read_yaml(
-        run_dir / read_yaml(run_dir / "run_manifest.yaml")["artifacts"]["strategy_brief"]
+        run_dir / manifest["artifacts"]["strategy_brief"]
     )
     resume_run(
         run_dir=run_dir,
@@ -370,7 +397,12 @@ def _probe_dogfood_replay(root: Path) -> dict:
     memo = build_concise_memo(run_dir)
     memo_honest = contains_proof_language(memo) is None
     sg = read_yaml(run_dir / "source_grounding.yaml")
-    unauthorized = [s for s in sg["steps"] if s["status"] == "source_backed"]
+    unauthorized_steps = [
+        s for s in sg.get("steps", []) if s.get("status") == "source_backed"
+    ]
+    unauthorized_refs = [
+        ref for ref in sg.get("source_refs", []) if ref.get("status") == "source_backed"
+    ]
     loop = read_yaml(run_dir / "prover_loop.yaml")
     rounds = {}
     for attempt in loop["attempts"]:
@@ -388,13 +420,14 @@ def _probe_dogfood_replay(root: Path) -> dict:
     }
     return {
         "memo_honest": memo_honest,
-        "unauthorized_source_backed": len(unauthorized),
+        "unauthorized_source_backed": len(unauthorized_steps) + len(unauthorized_refs),
         "rounds_run": last_round,
         "repair_round_non_regression": last_blockers <= first_blockers,
         "stop_bounded": bool(stop_bounded),
         "passed": (
             memo_honest
-            and not unauthorized
+            and not unauthorized_steps
+            and not unauthorized_refs
             and stop_bounded
             and last_blockers <= first_blockers
         ),

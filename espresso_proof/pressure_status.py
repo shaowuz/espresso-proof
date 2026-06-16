@@ -68,6 +68,9 @@ def build_pressure_status(run_dir: Path, *, late_after_strategy: bool | None = N
     write_yaml(run_dir / PRESSURE_STATUS_FILENAME, report)
     manifest.setdefault("optional_artifacts", {})["pressure_status"] = PRESSURE_STATUS_FILENAME
     write_yaml(run_dir / "run_manifest.yaml", manifest)
+    from .surface_warnings import refresh_final_report_disclosures
+
+    refresh_final_report_disclosures(run_dir)
     return report
 
 

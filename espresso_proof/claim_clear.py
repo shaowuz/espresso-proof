@@ -189,6 +189,7 @@ def record_claim_clear_block(
     write_yaml(run_dir / "run_manifest.yaml", manifest)
 
     from .agent_run_status import init_agent_run_status
+    from .pressure_status import build_pressure_status
     from .validators import validate_run
 
     init_agent_run_status(
@@ -200,6 +201,7 @@ def record_claim_clear_block(
             "Skipped evidence agents contribute no evidence or status.",
         ],
     )
+    build_pressure_status(run_dir, late_after_strategy=False)
     validate_run(run_dir)
     return report
 

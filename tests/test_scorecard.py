@@ -137,13 +137,21 @@ def test_dogfood_replay_fails_on_unauthorized_source_backed(tmp_path: Path) -> N
         original = sc.read_yaml
 
         def tampered_read(path):
-            data = original(path)
-            if str(path).endswith("source_grounding.yaml") and isinstance(data, dict):
-                steps = [dict(s) for s in data.get("steps", [])]
-                if steps:
-                    steps[0]["status"] = "source_backed"
-                data = {**data, "steps": steps}
-            return data
+                data = original(path)
+                if str(path).endswith("source_grounding.yaml") and isinstance(data, dict):
+                    steps = [dict(s) for s in data.get("steps", [])]
+                    if steps:
+                        steps[0]["status"] = "source_backed"
+                    else:
+                        steps.append(
+                            {
+                                "id": "planted_unauthorized_step",
+                                "text": "Planted unsupported source-backed step.",
+                                "status": "source_backed",
+                            }
+                        )
+                    data = {**data, "steps": steps}
+                return data
 
         sc.read_yaml = tampered_read
         try:

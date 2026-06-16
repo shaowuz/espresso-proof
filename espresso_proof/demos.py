@@ -126,6 +126,18 @@ def _fast_run(root: Path, demo_id: str, claim: str) -> Path:
     return result["run_dir"]
 
 
+def _mark_claim_clear(run_dir: Path) -> None:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    from .claim_clear import ensure_claim_clear_for_downstream
+
+    ensure_claim_clear_for_downstream(run_dir)
+
+
 def _seed_order6_refutation(run_dir: Path) -> None:
     """Overwrite the scaffolded artifacts with a coherent, kernel-validated
     S3 refutation set (modeled 1:1 on the proven arithmetic refutation fixture).
@@ -159,6 +171,7 @@ def _seed_order6_refutation(run_dir: Path) -> None:
         "hypotheses": claim["hypotheses"],
         "missing_or_unclear": [],
         "notes": ["The claim is precise enough to test by an all-hypotheses example."],
+        "claim_precision": "precise",
     })
     write_yaml(run_dir / "literature_review.yaml", {
         "claim_id": claim_id,
@@ -270,6 +283,10 @@ def _seed_order6_refutation(run_dir: Path) -> None:
     # validated, so those agents read Done; literature was not needed.
     set_agent_status(run_dir, "examples", "done", finished_at=None, increment_attempt=True)
     set_agent_status(run_dir, "counterexamples", "done", finished_at=None, increment_attempt=True)
+    _mark_claim_clear(run_dir)
+    from .pressure_status import build_pressure_status
+
+    build_pressure_status(run_dir)
 
 
 def create_demo_run(root: Path, demo_id: str) -> Path:
@@ -290,6 +307,7 @@ def create_demo_run(root: Path, demo_id: str) -> Path:
     elif demo_id == "matrix-rank":
         from .proof_verification import verify_matrix_rank_in_run
 
+        _mark_claim_clear(run_dir)
         verify_matrix_rank_in_run(
             run_dir,
             matrix=[[1, 2, 3], [4, 5, 6], [7, 8, 9]],

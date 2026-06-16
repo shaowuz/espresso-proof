@@ -29,6 +29,7 @@ from .external_tool_runner import run_completed_cleanly
 from .failure_pattern_bank import failure_pattern_allocation_hints
 from .io import read_yaml
 from .proof_language import scrub_proof_language
+from .research_bank import load_bankable_dict
 from .route_table import build_route_step_rows, render_route_step_table_lines
 from .subgoal_graph import render_proof_search_lines
 from .surface_warnings import collect_surface_warnings, render_warning_lines
@@ -196,8 +197,8 @@ def build_concise_memo(run_dir: Path) -> str:
     strategy_brief = artifact("strategy_brief")
     source_grounding = artifact("source_grounding")
     computations = artifact("computation_checks")
-    examples = artifact("examples")
-    counterexamples = artifact("counterexamples")
+    examples = load_bankable_dict(run_dir, "examples", manifest)
+    counterexamples = load_bankable_dict(run_dir, "counterexamples", manifest)
     tests = artifact("tests")
 
     status = grade.get("status", "unknown")
