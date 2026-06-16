@@ -128,7 +128,7 @@ def test_stream_writes_nothing_and_does_not_upgrade_status(client) -> None:
     assert (run_dir / "source_grounding.yaml").read_bytes() == src_before
 
 
-def test_stream_route_source_label_is_advisory_not_earned_evidence(client) -> None:
+def test_stream_invalid_route_source_label_fails_closed_not_earned_evidence(client) -> None:
     wb, call = client
     run_id = _create(call)
     run_dir = wb.resolve_run(run_id)
@@ -140,8 +140,27 @@ def test_stream_route_source_label_is_advisory_not_earned_evidence(client) -> No
 
     joined = " ".join(chat_progress_lines(run_dir))
 
-    assert "route source label; verify step grounding" in joined
+    assert "could not validate" in joined
     assert "Reference supports this stated claim" not in joined
+
+
+def test_stream_invalid_grade_cannot_render_global_checked_proof(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    grade_path = run_dir / manifest["artifacts"]["idea_grade"]
+    grade = read_yaml(grade_path)
+    grade["proof_language_status"] = "human_confirmed"
+    write_yaml(grade_path, grade)
+
+    status, ctype, raw = call("POST", f"/api/runs/{run_id}/chat", {"message": "status?"})
+
+    assert status == 200 and "text/event-stream" in ctype
+    messages = [e["data"]["text"] for e in _parse_sse(raw) if e["event"] == "message"]
+    joined = " ".join(messages)
+    assert "A proof has been checked by a trusted verifier" not in joined
+    assert "could not validate" in joined
 
 
 def test_stream_fails_closed_to_a_safe_line_on_bare_run(tmp_path: Path) -> None:
