@@ -163,6 +163,29 @@ def test_stream_invalid_grade_cannot_render_global_checked_proof(client) -> None
     assert "could not validate" in joined
 
 
+def test_stream_invalid_run_suppresses_active_object_proof_status_title(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    grade_path = run_dir / manifest["artifacts"]["idea_grade"]
+    grade = read_yaml(grade_path)
+    grade["proof_language_status"] = "human_confirmed"
+    write_yaml(grade_path, grade)
+
+    lines = chat_progress_lines(
+        run_dir,
+        active_object={
+            "kind": "strategy",
+            "title": "A proof has been checked by a trusted verifier.",
+        },
+    )
+    joined = " ".join(lines)
+
+    assert "A proof has been checked by a trusted verifier" not in joined
+    assert "could not validate" in joined
+
+
 def test_stream_fails_closed_to_a_safe_line_on_bare_run(tmp_path: Path) -> None:
     # a directory with no artifacts: the generator still yields a safe line and
     # never raises.

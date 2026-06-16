@@ -64,10 +64,6 @@ def chat_progress_lines(
     msg = scrub_proof_language(str(user_message)).strip()[:200]
     if msg:
         lines.append(_safe(f'You asked: "{msg}"'))
-    if isinstance(active_object, dict) and active_object.get("kind") == "strategy":
-        title = str(active_object.get("title") or "").strip()[:120]
-        if title:
-            lines.append(_safe(f'Requested active route context: "{title}". This is advisory focus, not evidence.'))
 
     if (run_dir / "run_manifest.yaml").exists():
         try:
@@ -78,6 +74,11 @@ def chat_progress_lines(
                 "Use the panels or kernel validation output as the source of truth."
             ))
             return [ln for ln in lines if ln]
+
+    if isinstance(active_object, dict) and active_object.get("kind") == "strategy":
+        title = str(active_object.get("title") or "").strip()[:120]
+        if title:
+            lines.append(_safe(f'Requested active route context: "{title}". This is advisory focus, not evidence.'))
 
     claim = _artifact(run_dir, "locked_claim")
     grade = _artifact(run_dir, "idea_grade")

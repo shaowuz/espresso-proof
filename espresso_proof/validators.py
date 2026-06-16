@@ -192,7 +192,7 @@ def validate_run(run_dir: Path) -> None:
     theorem_extraction = _load_optional_theorem_extraction(run_dir, manifest)
     _load_optional_literature_review_agent(run_dir, manifest)
     _load_optional_literature_search_plan(run_dir, manifest)
-    _load_optional_autonomous_literature_retrieval(run_dir, manifest)
+    autonomous_literature_retrieval = _load_optional_autonomous_literature_retrieval(run_dir, manifest)
     _load_optional_literature_candidates(run_dir, manifest)
     _load_optional_retrieval_resolution(run_dir, manifest)
     memory_context = _load_optional_memory_context(run_dir, manifest)
@@ -261,6 +261,10 @@ def validate_run(run_dir: Path) -> None:
     )
     _validate_example_evidence(computations, counterexamples, idea_grade)
     _validate_source_backing(source_grounding)
+    _validate_autonomous_literature_retrieval(
+        autonomous_literature_retrieval,
+        source_grounding,
+    )
     _validate_source_discipline_bindings(
         run_dir, manifest, source_grounding, theorem_extraction, theorem_applicability
     )
@@ -1059,6 +1063,30 @@ def _load_optional_autonomous_literature_retrieval(
         run_dir / optional["autonomous_literature_retrieval"],
         AutonomousLiteratureRetrievalReport,
     )
+
+
+def _validate_autonomous_literature_retrieval(
+    report: AutonomousLiteratureRetrievalReport | None,
+    source_grounding: SourceGroundingReport,
+) -> None:
+    """Bind autonomous retrieval's earned flag to source-grounding truth.
+
+    The retrieval sidecar is provenance/scheduling context. If it records that
+    grounding earned source support, the current validated source-grounding
+    artifact must actually contain an earned source-backed step.
+    """
+
+    if report is None or not report.earned_source_backed:
+        return
+    if not report.grounded:
+        raise KernelValidationError(
+            "autonomous_literature_retrieval earned_source_backed requires grounded=true"
+        )
+    if not any(step.status == SourceStatus.source_backed for step in source_grounding.steps):
+        raise KernelValidationError(
+            "autonomous_literature_retrieval earned_source_backed requires an "
+            "earned source-grounding step"
+        )
 
 
 def _load_optional_literature_candidates(

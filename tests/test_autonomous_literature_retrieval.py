@@ -20,6 +20,7 @@ from espresso_proof.llm_agents import StubLLMClient
 from espresso_proof.memo import build_concise_memo
 from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.models import AutonomousRetrievalCandidate, LiteratureSearchPlan
+from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
@@ -167,6 +168,25 @@ def test_missing_attribution_cannot_become_reference_supported(tmp_path: Path) -
     assert report["earned_source_backed"] is False
     sg = read_yaml(run_dir / "source_grounding.yaml")
     assert all(s["status"] != "source_backed" for s in sg["steps"])
+
+
+def test_stale_autonomous_earned_flag_requires_source_grounding_support(
+    tmp_path: Path,
+) -> None:
+    run_dir = _p2_run(tmp_path)
+    corpus = _p2_corpus(tmp_path, attribution=False)
+    run_autonomous_retrieval(
+        run_dir, client=StubLLMClient(), corpus_dir=corpus, providers=["local_corpus"], ground=True
+    )
+    report_path = run_dir / "autonomous_literature_retrieval.yaml"
+    report = read_yaml(report_path)
+    report["earned_source_backed"] = True
+    write_yaml(report_path, report)
+
+    with pytest.raises(KernelValidationError, match="earned source-grounding step"):
+        build_concise_memo(run_dir)
+    with pytest.raises(KernelValidationError, match="earned source-grounding step"):
+        validate_run(run_dir)
 
 
 def test_abstract_without_exact_locator_cannot_become_reference_supported(tmp_path: Path) -> None:
