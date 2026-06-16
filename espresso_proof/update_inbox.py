@@ -8,6 +8,7 @@ status and is not consumed by prover/reviewer loops in this task.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -118,10 +119,54 @@ def append_update_inbox_event(
         return report
 
 
+def mark_update_inbox_entries_applied(
+    run_dir: Path,
+    entry_ids: set[str],
+    *,
+    applied_at: str | None = None,
+    timeout_seconds: float = 30.0,
+) -> UpdateInboxReport | None:
+    """Stamp selected entries as consumed by a scheduler artifact.
+
+    This is lifecycle metadata only. It never removes entries, never changes
+    their scheduling payload, and never overwrites a previous ``applied_at``.
+    """
+
+    run_dir = Path(run_dir)
+    if not entry_ids:
+        return load_update_inbox(run_dir)
+    stamp = applied_at or datetime.now(UTC).isoformat()
+    with run_writer_lock(run_dir, action="apply update inbox", timeout_seconds=timeout_seconds):
+        report = load_update_inbox(run_dir)
+        if report is None:
+            return None
+        changed = False
+        entries = []
+        for entry in report.entries:
+            data = entry.model_dump(mode="json")
+            if entry.id in entry_ids and data.get("applied_at") is None:
+                data["applied_at"] = stamp
+                changed = True
+            entries.append(data)
+        if not changed:
+            return report
+        updated = UpdateInboxReport.model_validate(
+            {
+                "schema_version": report.schema_version,
+                "claim_id": report.claim_id,
+                "run_id": report.run_id,
+                "entries": entries,
+            }
+        )
+        write_yaml(run_dir / UPDATE_INBOX_FILENAME, updated.model_dump(mode="json"))
+        return updated
+
+
 __all__ = [
     "UPDATE_INBOX_FILENAME",
     "UpdateInboxConflictError",
     "append_update_inbox_event",
     "canonical_dedupe_key",
     "load_update_inbox",
+    "mark_update_inbox_entries_applied",
 ]

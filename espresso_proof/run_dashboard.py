@@ -449,7 +449,9 @@ def _proof_label(grade: dict[str, Any], repair_needed: bool) -> str:
     if repair_needed:
         return "Needs repair"
     proof_status = str(grade.get("proof_language_status") or "")
-    if proof_status in {"computation_checked", "lean_checked", "human_confirmed"}:
+    if proof_status == "computation_checked":
+        return "Scoped check"
+    if proof_status in {"lean_checked", "human_confirmed"}:
         return "Checked"
     if "sketch" in proof_status:
         return "Sketched"

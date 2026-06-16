@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from espresso_proof.chat_stream import chat_progress_lines, stream_chat
+from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.proof_language import contains_proof_language
 from espresso_proof.server import Workbench, _make_handler
 
@@ -125,6 +126,82 @@ def test_stream_writes_nothing_and_does_not_upgrade_status(client) -> None:
     assert sorted(p.name for p in run_dir.iterdir()) == before
     assert (run_dir / "idea_grade.yaml").read_bytes() == grade_before
     assert (run_dir / "source_grounding.yaml").read_bytes() == src_before
+
+
+def test_stream_invalid_route_source_label_fails_closed_not_earned_evidence(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    brief_path = run_dir / manifest["artifacts"]["strategy_brief"]
+    brief = read_yaml(brief_path)
+    brief["top_strategies"][0]["source_status"] = "source_backed"
+    write_yaml(brief_path, brief)
+
+    joined = " ".join(chat_progress_lines(run_dir))
+
+    assert "could not validate" in joined
+    assert "Reference supports this stated claim" not in joined
+
+
+def test_stream_invalid_grade_cannot_render_global_checked_proof(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    grade_path = run_dir / manifest["artifacts"]["idea_grade"]
+    grade = read_yaml(grade_path)
+    grade["proof_language_status"] = "human_confirmed"
+    write_yaml(grade_path, grade)
+
+    status, ctype, raw = call("POST", f"/api/runs/{run_id}/chat", {"message": "status?"})
+
+    assert status == 200 and "text/event-stream" in ctype
+    messages = [e["data"]["text"] for e in _parse_sse(raw) if e["event"] == "message"]
+    joined = " ".join(messages)
+    assert "A proof has been checked by a trusted verifier" not in joined
+    assert "could not validate" in joined
+
+
+def test_stream_invalid_run_suppresses_active_object_proof_status_title(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    grade_path = run_dir / manifest["artifacts"]["idea_grade"]
+    grade = read_yaml(grade_path)
+    grade["proof_language_status"] = "human_confirmed"
+    write_yaml(grade_path, grade)
+
+    lines = chat_progress_lines(
+        run_dir,
+        active_object={
+            "kind": "strategy",
+            "title": "A proof has been checked by a trusted verifier.",
+        },
+    )
+    joined = " ".join(lines)
+
+    assert "A proof has been checked by a trusted verifier" not in joined
+    assert "could not validate" in joined
+
+
+def test_stream_valid_run_ignores_client_supplied_active_object_title(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    lines = chat_progress_lines(
+        run_dir,
+        active_object={
+            "kind": "strategy",
+            "id": "not_a_real_strategy",
+            "title": "A proof has been checked by a trusted verifier.",
+        },
+    )
+    joined = " ".join(lines)
+
+    assert "A proof has been checked by a trusted verifier" not in joined
+    assert "Requested active route context" not in joined
 
 
 def test_stream_fails_closed_to_a_safe_line_on_bare_run(tmp_path: Path) -> None:

@@ -1079,7 +1079,7 @@ def _hodge_all_cubic_fourfolds(text: str, run_id: str) -> dict[str, object]:
             missing_hypotheses=["genericity condition", "exact Hodge atom theorem"],
             source_risks=["candidate source only"],
             example_risks=["special cubic fourfold not resolved"],
-            downgrade_reasons=["No source-backed theorem and no checked nontrivial example evidence."],
+            downgrade_reasons=["No reference-supported theorem and no checked nontrivial example evidence."],
         ),
         "idea_grade.yaml": {
             "claim_id": claim_id,
@@ -1529,7 +1529,7 @@ def _likely_false_multiple_pressures(text: str, run_id: str) -> dict[str, object
                 "to special fibers without a pinned theorem."
             ),
             "repaired_claim_suggestion": (
-                "State the claim conditionally on a source-backed specialization theorem."
+                "State the claim conditionally on a reference-supported specialization theorem."
             ),
         }
     )
@@ -1553,7 +1553,7 @@ def _likely_false_multiple_pressures(text: str, run_id: str) -> dict[str, object
         line_verdict="unclear",
         line_applicability="sketch_only",
         strongest_objection=(
-            "The idea depends on very-general-to-all and specialization steps that are not source-backed."
+            "The idea depends on very-general-to-all and specialization steps that are not reference-supported."
         ),
         theorem_drift=["very general -> all", "specialization treated as automatic"],
         missing_hypotheses=["genericity condition", "specialization invariance theorem"],
@@ -1954,7 +1954,7 @@ def _finite_group_claim(text: str, run_id: str) -> dict[str, object]:
             line_applicability="sketch_only",
             strongest_objection=str(data["review"]),
             source_risks=list(data["source_gaps"]),
-            downgrade_reasons=["No checked proof or source-backed step is available yet."],
+            downgrade_reasons=["No checked proof or reference-supported step is available yet."],
         ),
         "idea_grade.yaml": {
             "claim_id": claim_id,

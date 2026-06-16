@@ -29,7 +29,7 @@ def current_capabilities() -> list[dict[str, str]]:
         {"label": "live arXiv/Crossref Literature Discovery", "status": "exists"},
         {"label": "ADS Literature Discovery", "status": "exists with ADS_API_TOKEN"},
         {"label": "PDF/text theorem ingestion", "status": "conservative"},
-        {"label": "source-backed verification", "status": "conservative"},
+        {"label": "reference-support verification", "status": "conservative"},
         {"label": "LLM prover/verifier CLI", "status": "initial"},
         {"label": "per-round prover/reviewer audit trail", "status": "exists"},
         {"label": "real Evidence Auditor adapters", "status": "not implemented"},

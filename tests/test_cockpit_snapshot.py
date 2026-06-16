@@ -23,6 +23,8 @@ import pytest
 
 from espresso_proof import server as server_module
 from espresso_proof.cockpit_view import _EARNED_STATUSES, _tone, build_snapshot
+from espresso_proof.io import read_yaml, write_yaml
+from espresso_proof.run_dashboard import status_summary
 from espresso_proof.server import Workbench, _make_handler
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
@@ -124,6 +126,26 @@ def test_snapshot_green_tone_only_for_earned_evidence(client) -> None:
     assert _tone(None) == "muted"
     assert _tone("totally_unknown_status") == "muted"
     assert _tone("misapplied") == "warn"
+
+
+def test_snapshot_route_source_label_is_advisory_even_when_route_says_source_backed(
+    client,
+) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    brief_path = run_dir / manifest["artifacts"]["strategy_brief"]
+    brief = read_yaml(brief_path)
+    route_id = brief["top_strategies"][0]["id"]
+    brief["top_strategies"][0]["source_status"] = "source_backed"
+    write_yaml(brief_path, brief)
+
+    snap = build_snapshot(run_dir, run_id, status_summary(run_dir))
+    route = next(s for s in snap["strategies"] if s["id"] == route_id)
+
+    assert route["source_phrase"] == "route source label; verify step grounding"
+    assert route["source_tone"] != "earned"
 
 
 def test_snapshot_missing_artifacts_yield_placeholders(tmp_path: Path) -> None:

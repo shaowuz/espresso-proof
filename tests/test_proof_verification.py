@@ -23,6 +23,7 @@ from espresso_proof.memo import build_concise_memo
 from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.models import ProofVerificationStatus
 from espresso_proof.proof_verification import verify_finite_groups
+from espresso_proof.run_dashboard import render_topbar_status_html, status_summary
 from espresso_proof.validators import KernelValidationError, validate_run
 
 FIXTURES = Path("tests/fixtures")
@@ -235,3 +236,8 @@ def test_computation_checked_grade_renders_scoped_not_universal_proof(tmp_path: 
     verdict = next(line for line in memo.splitlines() if line.startswith("Verdict:"))
     assert "finite/computational scope" in verdict
     assert "not a proof of the full claim" in verdict
+    topbar = render_topbar_status_html(run_dir)
+    summary = status_summary(run_dir)
+    assert "Proof status: Scoped check" in topbar
+    assert "Proof status: Checked" not in topbar
+    assert summary["proof_status"] == "Scoped check"

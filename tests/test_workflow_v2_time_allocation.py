@@ -9,7 +9,10 @@ from espresso_proof.orchestrator import orchestrate_run
 from espresso_proof.time_allocation import (
     TIME_ALLOCATION_FILENAME,
     build_time_allocation_plan,
+    write_time_allocation_plan,
 )
+from espresso_proof.update_inbox import append_update_inbox_event, load_update_inbox
+from espresso_proof.surface_warnings import pending_update_inbox_ids
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.validators import validate_run
 
@@ -59,6 +62,64 @@ def _mark_first_route_source_backed(run_dir: Path) -> None:
     synthesis = read_yaml(synthesis_path)
     synthesis["routes"][0]["source_status"] = "source_backed"
     write_yaml(synthesis_path, synthesis)
+
+
+def _claim_and_manifest(run_dir: Path) -> tuple[dict, dict]:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])
+    return claim, manifest
+
+
+def _first_route_id(run_dir: Path) -> str:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    brief = read_yaml(run_dir / manifest["artifacts"]["strategy_brief"])
+    return str(brief["top_strategies"][0]["id"])
+
+
+def _reviewer_objection_event(run_dir: Path, *, route_id: str | None = None, **overrides) -> dict:
+    claim, manifest = _claim_and_manifest(run_dir)
+    route = route_id if route_id is not None else _first_route_id(run_dir)
+    data = {
+        "id": "upd_reviewer_001",
+        "type": "reviewer_objection",
+        "origin_stage": "prover_loop_round",
+        "origin_artifact": "prover_rounds/round_001.yaml",
+        "origin_artifact_id_or_path": "reviewer:objections:001",
+        "locked_claim_id": claim["id"],
+        "route_id_or_step_id": route,
+        "artifact_revision_or_hash": "hash_review_001",
+        "validator_ok": True,
+        "created_at": "2026-06-15T00:00:00+00:00",
+        "dedupe_key": f"{manifest['run_id']}:reviewer_objection:{route}",
+        "applied_at": None,
+        "effect": "scheduling_only",
+        "advisory_only": True,
+    }
+    data.update(overrides)
+    return data
+
+
+def _source_gap_event(run_dir: Path, *, route_id: str | None = None, **overrides) -> dict:
+    claim, manifest = _claim_and_manifest(run_dir)
+    route = route_id if route_id is not None else _first_route_id(run_dir)
+    data = {
+        "id": "upd_source_gap_001",
+        "type": "source_gap",
+        "origin_stage": "source_theorem",
+        "origin_artifact": "source_grounding.yaml",
+        "origin_artifact_id_or_path": "step_001",
+        "locked_claim_id": claim["id"],
+        "route_id_or_step_id": route,
+        "artifact_revision_or_hash": "hash_source_gap_001",
+        "validator_ok": True,
+        "created_at": "2026-06-15T00:00:00+00:00",
+        "dedupe_key": f"{manifest['run_id']}:source_gap:{route}",
+        "applied_at": None,
+        "effect": "scheduling_only",
+        "advisory_only": True,
+    }
+    data.update(overrides)
+    return data
 
 
 def test_strategy_generator_output_alone_does_not_start_allocation(tmp_path: Path) -> None:
@@ -178,6 +239,99 @@ def test_unrelated_source_backed_step_does_not_suppress_missing_source_support(
     assert plan is not None
     assert "source_support" in plan.missing_context
     assert plan.entries[0].action == "source_pinning"
+
+
+def test_reviewer_objection_allocation_marks_consumed_inbox_entries(
+    tmp_path: Path,
+) -> None:
+    run_dir = _fast_run(tmp_path)
+    _drop_time_allocation(run_dir)
+    route_id = _first_route_id(run_dir)
+    append_update_inbox_event(run_dir, _reviewer_objection_event(run_dir, route_id=route_id))
+
+    inbox_before = load_update_inbox(run_dir)
+    assert inbox_before is not None
+    assert pending_update_inbox_ids(inbox_before.model_dump(mode="json")) == [
+        "upd_reviewer_001"
+    ]
+
+    plan = write_time_allocation_plan(run_dir)
+
+    assert plan is not None
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert manifest["optional_artifacts"]["time_allocation"] == TIME_ALLOCATION_FILENAME
+    assert "update_inbox" in manifest["dependencies"]["time_allocation"]["depends_on"]
+    entry = next(entry for entry in plan.entries if entry.route_id == route_id)
+    assert entry.action == "repair_attempt"
+    inbox_after = load_update_inbox(run_dir)
+    assert inbox_after is not None
+    assert inbox_after.entries[0].applied_at is not None
+    assert pending_update_inbox_ids(inbox_after.model_dump(mode="json")) == []
+    validate_run(run_dir)
+
+
+def test_reviewer_objection_allocation_preserves_existing_applied_at(
+    tmp_path: Path,
+) -> None:
+    run_dir = _fast_run(tmp_path)
+    _drop_time_allocation(run_dir)
+    route_id = _first_route_id(run_dir)
+    append_update_inbox_event(run_dir, _reviewer_objection_event(run_dir, route_id=route_id))
+    inbox_path = run_dir / "update_inbox.yaml"
+    raw = read_yaml(inbox_path)
+    raw["entries"][0]["applied_at"] = "2026-06-15T02:00:00+00:00"
+    write_yaml(inbox_path, raw)
+
+    plan = write_time_allocation_plan(run_dir)
+
+    assert plan is not None
+    entry = next(entry for entry in plan.entries if entry.route_id == route_id)
+    assert entry.action == "repair_attempt"
+    inbox_after = load_update_inbox(run_dir)
+    assert inbox_after is not None
+    assert inbox_after.entries[0].applied_at == "2026-06-15T02:00:00+00:00"
+    validate_run(run_dir)
+
+
+def test_non_reviewer_inbox_entries_remain_pending_after_time_allocation(
+    tmp_path: Path,
+) -> None:
+    run_dir = _fast_run(tmp_path)
+    _drop_time_allocation(run_dir)
+    append_update_inbox_event(run_dir, _source_gap_event(run_dir))
+
+    plan = write_time_allocation_plan(run_dir)
+
+    assert plan is not None
+    inbox = load_update_inbox(run_dir)
+    assert inbox is not None
+    assert inbox.entries[0].type == "source_gap"
+    assert inbox.entries[0].applied_at is None
+
+
+def test_failed_time_allocation_write_does_not_mark_inbox_applied(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import espresso_proof.time_allocation as time_allocation_mod
+
+    run_dir = _fast_run(tmp_path)
+    _drop_time_allocation(run_dir)
+    append_update_inbox_event(run_dir, _reviewer_objection_event(run_dir))
+
+    def fail_time_allocation_write(path, data):
+        if Path(path).name == TIME_ALLOCATION_FILENAME:
+            raise RuntimeError("simulated time_allocation write failure")
+        return write_yaml(path, data)
+
+    monkeypatch.setattr(time_allocation_mod, "write_yaml", fail_time_allocation_write)
+
+    with pytest.raises(RuntimeError, match="simulated"):
+        time_allocation_mod.write_time_allocation_plan(run_dir)
+
+    inbox = load_update_inbox(run_dir)
+    assert inbox is not None
+    assert inbox.entries[0].applied_at is None
 
 
 @pytest.mark.parametrize("action,budget", [("source_pinning", "small"), ("cheap_check", "tiny")])
