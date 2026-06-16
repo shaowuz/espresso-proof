@@ -23,6 +23,8 @@ import pytest
 
 from espresso_proof import server as server_module
 from espresso_proof.cockpit_view import _EARNED_STATUSES, _tone, build_snapshot
+from espresso_proof.io import read_yaml, write_yaml
+from espresso_proof.run_dashboard import status_summary
 from espresso_proof.server import Workbench, _make_handler
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
@@ -124,6 +126,72 @@ def test_snapshot_green_tone_only_for_earned_evidence(client) -> None:
     assert _tone(None) == "muted"
     assert _tone("totally_unknown_status") == "muted"
     assert _tone("misapplied") == "warn"
+
+
+def test_snapshot_route_source_label_is_advisory_even_when_route_says_source_backed(
+    client,
+) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    brief_path = run_dir / manifest["artifacts"]["strategy_brief"]
+    brief = read_yaml(brief_path)
+    route_id = brief["top_strategies"][0]["id"]
+    brief["top_strategies"][0]["source_status"] = "source_backed"
+    write_yaml(brief_path, brief)
+
+    snap = build_snapshot(run_dir, run_id, status_summary(run_dir))
+    route = next(s for s in snap["strategies"] if s["id"] == route_id)
+
+    assert route["source_phrase"] == "route source label; verify step grounding"
+    assert route["source_tone"] != "earned"
+
+
+def test_snapshot_strategy_free_text_scrubs_raw_source_vocabulary(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    brief_path = run_dir / manifest["artifacts"]["strategy_brief"]
+    brief = read_yaml(brief_path)
+    route = brief["top_strategies"][0]
+    route_id = route["id"]
+    route["title"] = "A source-backed route title"
+    route["why_this_route"] = "Uses a source_backed theorem label."
+    route["main_risk"] = "The source backed phrase is advisory only."
+    route["next_loop_plan"] = "Avoid source_backed_status wording."
+    write_yaml(brief_path, brief)
+
+    snap = build_snapshot(run_dir, run_id, status_summary(run_dir))
+    rendered_route = next(s for s in snap["strategies"] if s["id"] == route_id)
+    rendered = json.dumps(rendered_route, sort_keys=True).lower()
+
+    assert "source-backed" not in rendered
+    assert "source_backed" not in rendered
+    assert "source backed" not in rendered
+    assert "reference-supported" in rendered
+
+
+def test_snapshot_literature_free_text_scrubs_raw_source_vocabulary(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    literature_path = run_dir / manifest["artifacts"]["literature_review"]
+    literature = read_yaml(literature_path)
+    item = literature["candidate_references"][0]
+    item["title"] = "A source-backed candidate title"
+    item["why_relevant"] = "Mentions source_backed_status in free text."
+    write_yaml(literature_path, literature)
+
+    snap = build_snapshot(run_dir, run_id, status_summary(run_dir))
+    rendered = json.dumps(snap["literature"], sort_keys=True).lower()
+
+    assert "source-backed" not in rendered
+    assert "source_backed" not in rendered
+    assert "source backed" not in rendered
+    assert "reference-supported" in rendered
 
 
 def test_snapshot_missing_artifacts_yield_placeholders(tmp_path: Path) -> None:

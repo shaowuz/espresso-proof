@@ -22,6 +22,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .claim_clear import ensure_claim_clear_for_downstream
 from .finite_group_verifier import (
     all_groups_of_order_p_squared,
     verify_group_abelian,
@@ -101,6 +102,7 @@ def build_proof_verification(run_dir: Path, *, primes: list[int]) -> dict:
 def verify_finite_groups(run_dir: Path, *, primes: list[int]) -> dict:
     """Write proof_verification.yaml and register it as an optional artifact."""
     run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     report = build_proof_verification(run_dir, primes=primes)
     write_yaml(run_dir / "proof_verification.yaml", report)
     manifest_path = run_dir / "run_manifest.yaml"
@@ -208,6 +210,7 @@ def verify_matrix_rank_in_run(
 ) -> dict:
     """Connect the matrix rank/determinant verifier into the run's proof-verification flow."""
     run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
     entry = build_matrix_rank_entry(
@@ -231,6 +234,7 @@ def append_verification_entries(run_dir: Path, entries: list[dict]) -> dict:
     each other's entries (Goal 35B)."""
 
     run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     with run_writer_lock(run_dir, action="verification append"):
         return _append_verification_entries_locked(run_dir, entries)
 
@@ -273,6 +277,7 @@ def _append_verification_entries_locked(run_dir: Path, entries: list[dict]) -> d
 def verify_identity_table_in_run(run_dir: Path, *, table: object, identity: str, entry_id: str, target: str = "") -> dict:
     """Connect ``verify_identity_on_table`` into the run's proof-verification flow."""
     run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
     entry = build_identity_table_entry(claim_id, entry_id=entry_id, table=table, identity=identity, target=target)
@@ -283,6 +288,7 @@ def verify_identity_table_in_run(run_dir: Path, *, table: object, identity: str,
 def verify_ring_identity_in_run(run_dir: Path, *, identity: str, modulus: object, entry_id: str, target: str = "") -> dict:
     """Connect ``verify_ring_identity_mod`` into the run's proof-verification flow."""
     run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
     entry = build_ring_identity_entry(claim_id, entry_id=entry_id, identity=identity, modulus=modulus, target=target)
@@ -334,6 +340,7 @@ def auto_wire_scoped_verifications(
     from .validators import validate_run  # local import to avoid an import cycle
 
     run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
     summary: dict = {"appended": [], "skipped": []}

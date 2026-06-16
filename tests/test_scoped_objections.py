@@ -40,7 +40,14 @@ from espresso_proof.subgoal_graph import (
     render_proof_search_lines,
 )
 
-FIXTURES = Path("tests/fixtures")
+
+def _claim(tmp_path: Path) -> Path:
+    path = tmp_path / "claim.md"
+    path.write_text(
+        "Let p be a prime. Every group G of order p^2 is abelian.\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def _scoped(**overrides) -> dict:
@@ -251,10 +258,10 @@ def test_pointer_scope_no_subgoal_objections_is_route() -> None:
 def _resumed_run(tmp_path: Path) -> Path:
     result = orchestrate_run(
         project="g54b",
-        input_path=FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        input_path=_claim(tmp_path),
         output_root=tmp_path,
         provider="stub",
-        front_half="mock",
+        front_half="stub",
     )
     run_dir = Path(result["run_dir"])
     brief = read_yaml(

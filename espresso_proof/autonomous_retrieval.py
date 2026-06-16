@@ -18,6 +18,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .claim_clear import ensure_claim_clear_for_downstream
 from .io import read_yaml, write_yaml
 from .literature_planner import plan_literature_search
 from .literature_retrieval import retrieve_and_ground, retrieve_local_corpus
@@ -121,6 +122,47 @@ def _rank_candidates(client: LLMClient, claim: dict, candidates: list[dict]) -> 
             pass
 
 
+def _earned_grounding_bindings(
+    run_dir: Path,
+    retrieval_source_id: str | None,
+) -> tuple[list[str], list[str]]:
+    if not retrieval_source_id:
+        return [], []
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    extraction_rel = manifest.get("optional_artifacts", {}).get("theorem_extraction")
+    if not extraction_rel:
+        return [], []
+    extraction_path = run_dir / extraction_rel
+    grounding_path = run_dir / manifest["artifacts"]["source_grounding"]
+    if not extraction_path.exists() or not grounding_path.exists():
+        return [], []
+    extraction = read_yaml(extraction_path) or {}
+    grounding = read_yaml(grounding_path) or {}
+    candidate_ref_ids = {
+        f"verified_{theorem.get('id')}"
+        for theorem in extraction.get("theorems", [])
+        if theorem.get("source_ref_id") == retrieval_source_id and theorem.get("id")
+    }
+    if not candidate_ref_ids:
+        return [], []
+    refs_by_id = {ref.get("id"): ref for ref in grounding.get("source_refs", [])}
+    earned_refs = {
+        ref_id
+        for ref_id in candidate_ref_ids
+        if refs_by_id.get(ref_id, {}).get("status") == "source_backed"
+    }
+    earned_steps: list[str] = []
+    for step in grounding.get("steps", []):
+        if step.get("status") != "source_backed":
+            continue
+        if not any(ref_id in earned_refs for ref_id in step.get("source_refs", [])):
+            continue
+        step_id = step.get("proof_step_id")
+        if step_id:
+            earned_steps.append(str(step_id))
+    return sorted(earned_refs), list(dict.fromkeys(earned_steps))
+
+
 def run_autonomous_retrieval(
     run_dir: Path,
     *,
@@ -141,6 +183,7 @@ def run_autonomous_retrieval(
     """
 
     run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     providers = providers or ["local_corpus"]
     plan = plan_literature_search(run_dir=run_dir, client=client)
 
@@ -178,25 +221,38 @@ def run_autonomous_retrieval(
     # Optional grounding: hand the best READABLE local candidate to grounding.
     grounded = False
     grounding_reason = "grounding not attempted"
+    grounded_candidate_id: str | None = None
+    grounded_retrieval_source_id: str | None = None
+    earned_source_ref_ids: list[str] = []
+    earned_proof_step_ids: list[str] = []
     best_local = next((c for c in candidates if c["provider"] == "local_corpus" and c.get("local_path")), None)
     if ground and best_local is not None and corpus_dir is not None:
-        result = retrieve_and_ground(run_dir, corpus_dir=Path(corpus_dir), query=best_local["query"])
+        expected_hit_id = f"ret_{Path(best_local['local_path']).stem}"
+        result = retrieve_and_ground(
+            run_dir,
+            corpus_dir=Path(corpus_dir),
+            query=best_local["query"],
+            hit_id=expected_hit_id,
+        )
         grounded = bool(result.get("grounded"))
+        if grounded:
+            grounded_candidate_id = str(best_local["id"])
+            grounded_retrieval_source_id = str(result.get("chosen_hit_id") or expected_hit_id)
+            earned_source_ref_ids, earned_proof_step_ids = _earned_grounding_bindings(
+                run_dir,
+                grounded_retrieval_source_id,
+            )
         grounding_reason = "handed top local candidate to source grounding" if grounded else (
             f"grounding not earned ({result.get('reason', 'see source_grounding')})"
         )
     elif ground and best_local is None:
         grounding_reason = "no readable local candidate to ground (candidates stay candidate)"
 
-    # Read the ACTUAL grounding outcome back from source_grounding; retrieval
-    # never decides source_backed itself.
-    earned_source_backed = False
-    sg_path = run_dir / read_yaml(run_dir / "run_manifest.yaml")["artifacts"]["source_grounding"]
-    if sg_path.exists():
-        sg = read_yaml(sg_path)
-        earned_source_backed = any(
-            step.get("status") == "source_backed" for step in sg.get("steps", [])
-        )
+    # Read the ACTUAL grounding outcome back from source_grounding, but only for
+    # the candidate/source that this retrieval handed to grounding. Retrieval
+    # never decides source_backed itself, and unrelated existing grounding cannot
+    # satisfy this report-level flag.
+    earned_source_backed = bool(earned_source_ref_ids and earned_proof_step_ids)
 
     report = {
         "schema_version": 1,
@@ -222,6 +278,10 @@ def run_autonomous_retrieval(
             for c in candidates
         ],
         "grounded": grounded,
+        "grounded_candidate_id": grounded_candidate_id,
+        "grounded_retrieval_source_id": grounded_retrieval_source_id,
+        "earned_source_ref_ids": earned_source_ref_ids,
+        "earned_proof_step_ids": earned_proof_step_ids,
         "earned_source_backed": earned_source_backed,
         "notes": notes + [grounding_reason],
     }
@@ -232,5 +292,8 @@ def run_autonomous_retrieval(
         "autonomous_literature_retrieval.yaml"
     )
     write_yaml(run_dir / "run_manifest.yaml", manifest)
+    from .surface_warnings import refresh_final_report_disclosures
+
+    refresh_final_report_disclosures(run_dir)
     validate_run(run_dir)
     return report

@@ -4,8 +4,10 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from espresso_proof.agent_run_status import set_agent_status
+from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.cli import app
-from espresso_proof.io import read_yaml
+from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.orchestrator import orchestrate_run, resume_run
 from espresso_proof.run_dashboard import render_run_dashboard, write_run_dashboard
 from espresso_proof.validators import validate_run
@@ -14,7 +16,7 @@ from espresso_proof.validators import validate_run
 def _claim(tmp_path: Path) -> Path:
     path = tmp_path / "claim.md"
     path.write_text(
-        "Let p be a prime. Every group G of order p^2 is abelian.\n",
+        "Every group of order p^2, where p is prime, is abelian.\n",
         encoding="utf-8",
     )
     return path
@@ -29,6 +31,19 @@ def _fresh_run(tmp_path: Path) -> Path:
         front_half="stub",
     )
     return result["run_dir"]
+
+
+def _mark_claim_clear(run_dir: Path) -> None:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    ensure_claim_clear_for_downstream(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    manifest["current_state"] = "WAITING_LLM_AGENT_HUMAN_GATE"
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
 
 
 def test_orchestrate_writes_minimal_interactive_dashboard_at_gate(tmp_path: Path) -> None:
@@ -52,10 +67,16 @@ def test_orchestrate_writes_minimal_interactive_dashboard_at_gate(tmp_path: Path
 
 def test_resume_refreshes_dashboard_with_repair_state(tmp_path: Path) -> None:
     run_dir = _fresh_run(tmp_path)
+    _mark_claim_clear(run_dir)
     brief = read_yaml(run_dir / "strategy_brief.yaml")
     selected = brief["top_strategies"][0]["id"]
+    choices = {
+        choice["strategy_id"]: choice.get("effort_options") or []
+        for choice in brief.get("allowed_human_choices", [])
+    }
+    effort = (choices.get(selected) or ["quick_test"])[0]
 
-    resume_run(run_dir=run_dir, selected_strategy=selected, effort="quick_test")
+    resume_run(run_dir=run_dir, selected_strategy=selected, effort=effort)
     validate_run(run_dir)
     html = (run_dir / "research_dashboard.html").read_text(encoding="utf-8")
 
@@ -109,8 +130,6 @@ def test_dashboard_escapes_script_breakout_in_route_text(tmp_path: Path) -> None
     """Stored-XSS guard: artifact free text containing </script> must not be able
     to terminate the inline script block or inject live HTML (reviewer BLOCKER).
     The embedded JSON escapes <, >, & to \\uXXXX."""
-    from espresso_proof.io import write_yaml
-
     run_dir = _fresh_run(tmp_path)
     brief_path = run_dir / "strategy_brief.yaml"
     brief = read_yaml(brief_path)
@@ -151,6 +170,7 @@ def test_dashboard_unclear_counterexample_never_admissible(tmp_path: Path) -> No
     ]
     ce["claim_id"] = claim_id
     write_yaml(ce_path, ce)
+    set_agent_status(run_dir, "counterexamples", "done")
     html = render_run_dashboard(run_dir)
     assert "admissible checked counterexample" not in html
     assert "hypothesis match unclear" in html

@@ -5,7 +5,7 @@ artifact state, in calm conversational language. It is a spike on top of the
 existing artifact/kernel model, and it is bounded hard:
 
 - it WRITES NOTHING — no artifact, no status, no sidecar; it only reads;
-- every emitted line is scrubbed through ``scrub_proof_language`` so a
+- every emitted line is scrubbed through ``scrub_source_support_language`` so a
   proof-complete overclaim can never reach the user, and no line asserts
   proved / source-backed / refuted / checked status;
 - the evidence panels still come from artifacts; if the stream and the
@@ -20,9 +20,10 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
-from .descriptions import describe_grade, evidence_phrase
+from .descriptions import describe_grade, route_source_phrase
 from .io import read_yaml
-from .proof_language import scrub_proof_language
+from .proof_language import scrub_source_support_language
+from .validators import validate_run
 
 
 def _artifact(run_dir: Path, name: str) -> dict | None:
@@ -45,7 +46,7 @@ def _artifact(run_dir: Path, name: str) -> dict | None:
 def _safe(line: str) -> str:
     """Scrub proof-language and bound length. Every emitted line passes here."""
 
-    return scrub_proof_language(line).strip()[:240]
+    return scrub_source_support_language(line).strip()[:240]
 
 
 def chat_progress_lines(
@@ -60,13 +61,19 @@ def chat_progress_lines(
     """
 
     lines: list[str] = []
-    msg = scrub_proof_language(str(user_message)).strip()[:200]
+    msg = scrub_source_support_language(str(user_message)).strip()[:200]
     if msg:
         lines.append(_safe(f'You asked: "{msg}"'))
-    if isinstance(active_object, dict) and active_object.get("kind") == "strategy":
-        title = str(active_object.get("title") or "").strip()[:120]
-        if title:
-            lines.append(_safe(f'Requested active route context: "{title}". This is advisory focus, not evidence.'))
+
+    if (run_dir / "run_manifest.yaml").exists():
+        try:
+            validate_run(run_dir)
+        except Exception:  # noqa: BLE001 - preview must fail closed on invalid artifacts
+            lines.append(_safe(
+                "I could not validate this run's current artifacts, so I will not summarize status. "
+                "Use the panels or kernel validation output as the source of truth."
+            ))
+            return [ln for ln in lines if ln]
 
     claim = _artifact(run_dir, "locked_claim")
     grade = _artifact(run_dir, "idea_grade")
@@ -87,7 +94,7 @@ def chat_progress_lines(
         if isinstance(active_object, dict) and active_object.get("kind") == "strategy":
             active_id = str(active_object.get("id") or "")
             route = next((r for r in routes if str(r.get("id") or "") == active_id), route)
-        src = evidence_phrase(route.get("source_status"))
+        src = route_source_phrase(route.get("source_status"))
         label = "Requested route" if route is not routes[0] else "Top route"
         lines.append(_safe(f'{label} — "{str(route.get("title",""))[:80]}". Source standing: {src}.'))
 

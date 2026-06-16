@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .io import read_yaml, write_yaml
 from .models import MemoryEntry, MemoryIndex, MemoryIndexEntry
+from .models import _has_run_artifact_provenance, _validate_memory_text_boundary
 from .proof_language import scrub_proof_language
 from .research_bank import bankable_artifact_path, load_bankable_dict
 
@@ -42,6 +43,15 @@ _STOP_WORDS = {
     "with",
 }
 
+_MEMORY_INDEX_REQUIRED_ENTRY_FIELDS = {
+    "id",
+    "entry_path",
+    "claim_id",
+    "type",
+    "summary",
+    "provenance",
+}
+
 
 def load_memory_index(project_dir: Path | str) -> MemoryIndex:
     """Load and validate a project's memory index.
@@ -60,7 +70,60 @@ def load_memory_index(project_dir: Path | str) -> MemoryIndex:
             entries=[],
         )
 
-    return MemoryIndex.model_validate(read_yaml(index_path))
+    raw = read_yaml(index_path)
+    try:
+        return MemoryIndex.model_validate(raw)
+    except ValueError:
+        return _adapt_legacy_memory_index(project_path, raw)
+
+
+def _adapt_legacy_memory_index(project_dir: Path, raw: object) -> MemoryIndex:
+    if not isinstance(raw, dict):
+        raise ValueError("malformed memory index")
+    raw_entries = raw.get("entries", [])
+    if not isinstance(raw_entries, list):
+        raise ValueError("malformed memory index entries")
+
+    entries: list[MemoryIndexEntry] = []
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            raise ValueError("malformed memory index entry")
+        missing = sorted(_MEMORY_INDEX_REQUIRED_ENTRY_FIELDS.difference(raw_entry))
+        if missing:
+            raise ValueError(f"malformed memory index entry missing fields: {missing}")
+        entry = dict(raw_entry)
+        entry.setdefault("tags", [])
+        if not isinstance(entry["provenance"], list):
+            raise ValueError("malformed memory index entry provenance")
+        if not isinstance(entry["tags"], list):
+            raise ValueError("malformed memory index entry tags")
+        try:
+            _validate_memory_text_boundary(
+                "legacy memory index entry",
+                [
+                    str(entry.get("summary") or ""),
+                    str(entry.get("entry_path") or ""),
+                    *[str(tag) for tag in (entry.get("tags") or [])],
+                ],
+            )
+        except ValueError:
+            continue
+        provenance = entry.get("provenance") or []
+        if not _has_run_artifact_provenance([str(item) for item in provenance]):
+            entry["provenance"] = [
+                f"projects/{_project_id(project_dir)}/runs/__legacy_memory_index__/index.yaml"
+            ]
+        try:
+            entries.append(MemoryIndexEntry.model_validate(entry))
+        except ValueError:
+            continue
+
+    return MemoryIndex(
+        project_id=str(raw.get("project_id") or _project_id(project_dir)),
+        last_updated=str(raw.get("last_updated") or ""),
+        lookup_keys=[str(item) for item in (raw.get("lookup_keys") or [])],
+        entries=entries,
+    )
 
 
 def summarize_memory(project_dir: Path | str, claim_text: str | None = None) -> str:
@@ -105,10 +168,53 @@ def write_memory_entry(
     entry_filename = filename or f"{entry['id']}.yaml"
     if Path(entry_filename).name != entry_filename:
         raise ValueError("memory entry filename must not contain directories")
+    index = _build_updated_memory_index(
+        memory_dir,
+        project_id,
+        entry,
+        entry_filename,
+        tags=tags or [],
+    )
+    MemoryIndex.model_validate(index)
     entry_path = memory_dir / entry_filename
     write_yaml(entry_path, entry)
-    _update_memory_index(memory_dir, project_id, entry, entry_filename, tags=tags or [])
+    _write_memory_index(memory_dir, index)
     return entry_path
+
+
+def build_grade_memory_entry(
+    idea_grade: dict,
+    strategy_brief: dict,
+    *,
+    project_id: str,
+    run_id: str,
+) -> dict:
+    """Build the primary advisory memory entry for a run grade."""
+
+    def prov(name: str) -> str:
+        return f"projects/{project_id}/runs/{run_id}/{name}"
+
+    source_gaps = idea_grade.get("source_gaps") or []
+    top_strategies = strategy_brief.get("top_strategies") or []
+    top_strategy_id = (
+        top_strategies[0].get("strategy_id") or top_strategies[0].get("id") or "none"
+        if top_strategies
+        else "none"
+    )
+    return {
+        "id": f"memory_{run_id}",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "project": project_id,
+        "type": "source_gap" if source_gaps else "failed_attempt",
+        "claim_id": idea_grade["claim_id"],
+        "summary": f"grade score {idea_grade['score']}; top strategy id: {top_strategy_id}",
+        "provenance": [
+            prov("idea_grade.yaml"),
+            prov("strategy_synthesis.yaml"),
+            prov("strategy_brief.yaml"),
+        ],
+        "reusable_lesson": idea_grade["next_cheapest_test"],
+    }
 
 
 def write_run_memory(
@@ -151,21 +257,14 @@ def write_run_memory(
     timestamp = datetime.now(UTC).isoformat()
 
     strategy_brief = read_yaml(run_path / "strategy_brief.yaml")
-    source_gaps = idea_grade.get("source_gaps") or []
-    top_strategies = strategy_brief.get("top_strategies") or []
-    top_strategy = top_strategies[0]["title"] if top_strategies else "none"
     emit(
         "",
-        {
-            "id": f"memory_{run_id}",
-            "timestamp": timestamp,
-            "project": project_id,
-            "type": "source_gap" if source_gaps else "failed_attempt",
-            "claim_id": claim_id,
-            "summary": f"{idea_grade['status']} score {idea_grade['score']}; top strategy: {top_strategy}",
-            "provenance": [prov("idea_grade.yaml"), prov("strategy_synthesis.yaml"), prov("strategy_brief.yaml")],
-            "reusable_lesson": idea_grade["next_cheapest_test"],
-        },
+        build_grade_memory_entry(
+            idea_grade,
+            strategy_brief,
+            project_id=project_id,
+            run_id=run_id,
+        ),
     )
 
     review_path = run_path / "review.yaml"
@@ -174,6 +273,7 @@ def write_run_memory(
         objection = (review.get("strongest_objection") or "").strip()
         failed = [r["reviewer_id"] for r in review.get("reviewers", []) if r.get("verdict") == "fail"]
         if objection or failed:
+            failed_label = ", ".join(str(item) for item in failed) if failed else "none"
             emit(
                 "reviewer",
                 {
@@ -182,9 +282,9 @@ def write_run_memory(
                     "project": project_id,
                     "type": "reviewer_objection",
                     "claim_id": claim_id,
-                    "summary": f"failed reviewers {failed or 'none'}: {objection or 'objection raised'}",
+                    "summary": f"reviewer objection recorded; failed reviewers: {failed_label}",
                     "provenance": [prov("review.yaml")],
-                    "reusable_lesson": objection or "address the reviewer objection before reusing this route",
+                    "reusable_lesson": "inspect review.yaml before reusing this route",
                 },
             )
 
@@ -208,7 +308,7 @@ def write_run_memory(
                     "project": project_id,
                     "type": "counterexample",
                     "claim_id": claim_id,
-                    "summary": f"counterexample {first.get('id')}: {(first.get('explanation') or '')[:80]}",
+                    "summary": f"counterexample pressure recorded: {first.get('id')}",
                     "provenance": [prov("counterexamples.yaml")],
                     "reusable_lesson": "retest this counterexample pressure in future runs",
                 },
@@ -231,7 +331,7 @@ def write_run_memory(
                     "project": project_id,
                     "type": "theorem_applicability_failure",
                     "claim_id": claim_id,
-                    "summary": f"{len(blocking)} blocking theorem usage(s) for source-backed steps",
+                    "summary": f"{len(blocking)} blocking theorem usage(s) recorded",
                     "provenance": [prov("theorem_applicability.yaml")],
                     "reusable_lesson": "pin and check theorem hypotheses before reusing this theorem",
                 },
@@ -357,9 +457,28 @@ def _update_memory_index(
     *,
     tags: list[str],
 ) -> None:
+    index = _build_updated_memory_index(
+        memory_dir,
+        project_id,
+        entry,
+        entry_filename,
+        tags=tags,
+    )
+    _write_memory_index(memory_dir, index)
+
+
+def _build_updated_memory_index(
+    memory_dir: Path,
+    project_id: str,
+    entry: dict,
+    entry_filename: str,
+    *,
+    tags: list[str],
+) -> dict:
     index_path = memory_dir / "index.yaml"
     if index_path.exists():
-        index = read_yaml(index_path)
+        existing = load_memory_index(memory_dir)
+        index = existing.model_dump(mode="json")
     else:
         index = {
             "project_id": project_id,
@@ -387,6 +506,11 @@ def _update_memory_index(
     index["lookup_keys"] = sorted(lookup_keys)
     index["last_updated"] = datetime.now(UTC).isoformat()
     MemoryIndex.model_validate(index)
+    return index
+
+
+def _write_memory_index(memory_dir: Path, index: dict) -> None:
+    index_path = memory_dir / "index.yaml"
     write_yaml(index_path, index)
 
 

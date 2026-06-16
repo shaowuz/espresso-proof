@@ -129,3 +129,34 @@ def test_missing_optional_fields_render_conservatively() -> None:
     # must not be a fabricated proof status.
     assert "Reported on examples (needs a check)" in ex_html  # unknown ExampleStatus -> conservative
     assert "ex_min" in ex_html and "ce_min" in ce_html and "st_min" in st_html
+
+
+def test_strategy_route_source_label_renders_advisory_not_earned_evidence() -> None:
+    st_html = _strategy_card({"id": "st_src", "source_status": "source_backed"})
+
+    assert "route source label; verify step grounding" in st_html
+    assert "Reference supports this stated claim" not in st_html
+
+
+def test_dashboard_free_text_scrubs_raw_source_backed_vocabulary() -> None:
+    ce_html = _counterexample_card(
+        {
+            "id": "ce_src",
+            "explanation": "A source_backed route claim was overbroad.",
+            "support": "No source-backed theorem was checked for this target.",
+            "repaired_claim_suggestion": "State it only as source backed context.",
+        }
+    )
+    st_html = _strategy_card(
+        {
+            "id": "st_src",
+            "why_this_route": "Uses a source-backed specialization theorem.",
+            "main_risk": "The source_backed phrase is only advisory here.",
+        }
+    )
+
+    rendered = (ce_html + st_html).lower()
+    assert "source-backed" not in rendered
+    assert "source_backed" not in rendered
+    assert "source backed" not in rendered
+    assert "reference-supported" in rendered

@@ -157,16 +157,18 @@ Current command scope is deliberately narrow. `critique-sketch` and `eval` run d
 The current product loop is:
 
 1. Understand and lock the user's mathematical problem.
-2. Run Literature Review, Examples, and Counterexamples in parallel.
-3. Generate several proof strategies.
-4. Attack strategies with the examples/counterexamples bank and grade them with LLM mathematical judgment.
-5. Check whether references actually match each strategy.
-5.5. Audit theorem applicability by listing theorem conditions and whether the current claim satisfies them.
-6. Present a Strategy Brief and collect Human Strategy Preference.
-7. Let the Prover try the selected or high-score routes.
-8. Let reviewers check proof outline, literature use, and line-level proof detail.
-9. Send reviewer objections to the Time Allocation Agent, which decides whether to repair, retry, switch, stop, or spend more time.
-10. Grade the current proof attempt and save useful routes, failures, examples, source gaps, and human preferences to Memory.
+2. If the claim is unclear, stop before Literature, Examples, Counterexamples, Strategy, Prover, and Reviewers.
+3. If the claim is clear, run Literature Review and start Examples / Counterexamples as async pressure lanes.
+4. Run the current runtime `source_theorem` candidate-only source/theorem pass before Strategy; it cannot create source-backed status or prove a route/theorem.
+5. Conservatively regrade from checked artifacts and known blockers without treating pending pressure as survived/no-pressure evidence.
+6. Generate several proof strategies; examples and counterexamples may still be pending.
+7. Attack strategies with the examples/counterexamples bank and grade them with LLM mathematical judgment.
+8. Start bounded Time Allocation from Strategy Grader output; Strategy Generator alone does not start Time Allocation.
+9. Present a Strategy Brief and optionally collect Human Strategy Preference as a steering signal.
+10. Let the Prover try allocated routes.
+11. Let reviewers check proof outline, literature use, and line-level proof detail.
+12. Send reviewer objections through Update Inbox as scheduling-only advice to Time Allocation, which decides whether to repair, retry, switch, stop, or spend more time.
+13. Grade the current proof attempt and save useful routes, failures, examples, source gaps, and human preferences to Memory as advisory context only.
 
 After a Lean adapter exists, V0 should default to background **Lean-light**: use existing Mathlib/Lean results if they are available, but skip Lean if they are not. Do not ask the user to choose a Lean mode, and do not formalize the user's research theorem by default.
 
@@ -187,10 +189,14 @@ Hard product decision:
 - Custom agents are editable Markdown/YAML-like playbooks.
 - Platform value comes from workflows being composable, auditable, reusable, and evaluable; not from having many agents.
 - All advanced capabilities must leave artifacts, not only chat history.
-- Literature Review only finds candidate papers/examples/counterexamples; `Check If References Match Strategies` decides whether a proof step is actually source-backed.
+- Literature Review only finds candidate papers/examples/counterexamples; candidate discovery never decides whether a proof step is actually source-backed.
+- A source candidate is not source-backed.
+- Current runtime runs the candidate-only `source_theorem` pass before Strategy; supported/applicable proof steps remain step-local and do not prove a route or theorem.
+- Pending examples are not `survived_tests`, and pending counterexamples are not `failed_tests` or no-pressure evidence.
 - Stop after repeated no-progress loops and return a Strategy Brief instead of letting agents self-loop.
 - Examples/Counterexamples Attacker can lower or block a strategy score; LLM Strategy Grader cannot overrule concrete example failure, unchecked computation, or theorem-condition gaps.
-- Human Strategy Preference affects future time allocation, not proof status, source-backed status, or checked evidence.
+- Human Strategy Preference affects future time allocation, not proof status, source-backed status, or checked evidence. It is optional.
+- Reviewer approval does not prove a theorem, and Memory is advisory, not evidence.
 - Do not become a broad research workbench.
 - Do not let LaTeX, slides, Lean, computation, or tool count replace mathematical judgment.
 

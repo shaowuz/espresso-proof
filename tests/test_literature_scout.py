@@ -16,6 +16,7 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
+from espresso_proof.claim_clear import ClaimClearBlockedError
 from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.literature_scout import run_literature_scout
 from espresso_proof.llm_agents import StubLLMClient
@@ -33,6 +34,17 @@ HODGE_CLAIM = (
 
 
 def _run_with_step(tmp_path: Path) -> Path:
+    run_dir = _unclear_run_with_step(tmp_path)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    return run_dir
+
+
+def _unclear_run_with_step(tmp_path: Path) -> Path:
     claim = tmp_path / "claim.md"
     claim.write_text(HODGE_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("hodge_atoms", claim, tmp_path)
@@ -79,6 +91,27 @@ def test_scout_stub_runs_and_writes_valid_candidate_artifact(tmp_path: Path) -> 
     for step in report["proof_step_candidates"]:
         for cand in step["candidates"]:
             assert cand["status"] == "candidate"
+
+
+def test_scout_blocks_unclear_claim_before_model_call(tmp_path: Path) -> None:
+    run_dir = _unclear_run_with_step(tmp_path)
+    called = False
+
+    class _TrackingClient(_FakeClient):
+        def complete_json(self, *, system: str, prompt: str) -> dict:
+            nonlocal called
+            called = True
+            return super().complete_json(system=system, prompt=prompt)
+
+    with pytest.raises(ClaimClearBlockedError, match="claim-clear gate"):
+        run_literature_scout(
+            run_dir=run_dir,
+            client=_TrackingClient(_candidate_payload("step_001")),
+        )
+
+    assert called is False
+    assert not (run_dir / "literature_candidates.yaml").exists()
+    validate_run(run_dir)
 
 
 def test_scout_ties_candidates_to_known_step(tmp_path: Path) -> None:

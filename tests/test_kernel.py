@@ -563,7 +563,7 @@ def _memory_entry(**overrides) -> dict:
         "type": "failed_attempt",
         "claim_id": "claim_1",
         "summary": "specialization route stalled at step 3",
-        "provenance": ["run:demo"],
+        "provenance": ["projects/mem_proj/runs/demo/idea_grade.yaml"],
         "reusable_lesson": "specialization route needs a flatness check first",
     }
     entry.update(overrides)
@@ -1120,8 +1120,14 @@ def test_final_report_allows_unverified_but_rejects_proof_language(tmp_path: Pat
         FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
         tmp_path,
     )
+    disclosure = (run_dir / "final_report.md").read_text(encoding="utf-8").split(
+        "Open blockers / pending checks:",
+        1,
+    )[1]
     (run_dir / "final_report.md").write_text(
-        "This is an unverified candidate and not a completed argument.",
+        "This is an unverified candidate and not a completed argument.\n\n"
+        "Open blockers / pending checks:"
+        + disclosure,
         encoding="utf-8",
     )
     validate_run(run_dir)

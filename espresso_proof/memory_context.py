@@ -62,37 +62,47 @@ def build_memory_context(run_dir: Path, *, generated_at: str | None = None) -> d
                 continue  # only genuinely relevant memory is surfaced
             mem = _load_memory_entry(project_dir, index_entry)
             summary = (mem.summary if mem else index_entry.summary)
+            provenance = list((mem.provenance if mem else index_entry.provenance) or [])
+            source_claim_id = str((mem.claim_id if mem else index_entry.claim_id) or "")
             # _score_entry also scores over tags/provenance, so a relevant entry
             # may share no SUMMARY terms; report that honestly instead of "shares 0".
             reason = (
-                f"shares claim term(s): {', '.join(shared)}"
+                f"shares {len(shared)} claim term(s)"
                 if shared
                 else "matches this claim on tags/metadata"
             )
+            same_claim = source_claim_id == claim_id
+            recommended_use = _USE_BY_TYPE.get(index_entry.type, "note")
+            if not same_claim:
+                recommended_use = "note"
+                reason = f"{reason}; pending revalidation before reuse"
             matched.append(
                 {
                     "id": index_entry.id,
                     "type": index_entry.type,
                     "relevance_reason": reason,
-                    "recommended_use": _USE_BY_TYPE.get(index_entry.type, "note"),
+                    "recommended_use": recommended_use,
                     "summary": summary,
+                    "memory_claim_id": source_claim_id,
+                    "provenance": provenance,
+                    "revalidation_required": not same_claim,
+                    "revalidated_against_locked_claim": same_claim,
                 }
             )
             if len(matched) >= _MAX_MATCHED:
                 break
 
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "claim_id": claim_id,
         "run_id": manifest["run_id"],
         "advisory_only": True,
         "generated_at": generated_at or datetime.now(UTC).isoformat(),
         "matched_entries": matched,
         "constraints": [
-            "advisory only; memory never sets source_backed / checked evidence / "
-            "proof status / claim refutation, and never promotes a failure-pattern tier",
+            "advisory only; memory records reuse hints and never assigns kernel-owned conclusions",
             "memory only influences route ranking, time allocation, and what to test "
-            "first; the kernel validators remain the only gate that earns any status",
+            "first; kernel validators remain the only gate for trusted conclusions",
             "memory never overrides a current-run artifact",
         ],
     }

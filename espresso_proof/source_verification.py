@@ -4,6 +4,7 @@ import hashlib
 import re
 from pathlib import Path
 
+from .claim_clear import ensure_claim_clear_for_downstream
 from .hypothesis_matching import match_hypothesis_semantically
 from .io import read_yaml, write_yaml
 from .models import SourceGroundingReport, TheoremExtractionReport
@@ -79,7 +80,7 @@ def verify_source_grounding_from_theorems(
                 reason = "no exact locator"
             else:
                 reason = ", ".join(hypothesis_match.get("mismatches", [])) or "unclear hypothesis match"
-            step["note"] = f"Candidate theorem found, but source-backed verification is blocked by {reason}."
+            step["note"] = f"Candidate theorem found, but reference-support verification is blocked by {reason}."
 
     source_grounding["source_refs"] = list(existing_refs.values())
     SourceGroundingReport.model_validate(source_grounding)
@@ -98,6 +99,7 @@ def ground_run(*, run_dir: Path, theorem_extraction_path: Path) -> dict:
     from .theorem_applicability import audit_theorem_applicability
     from .validators import validate_run
 
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     verify_source_grounding_from_theorems(
         run_dir=run_dir, theorem_extraction_path=theorem_extraction_path
     )
@@ -108,6 +110,9 @@ def ground_run(*, run_dir: Path, theorem_extraction_path: Path) -> dict:
         "theorem_applicability.yaml"
     )
     write_yaml(manifest_path, manifest)
+    from .surface_warnings import refresh_final_report_disclosures
+
+    refresh_final_report_disclosures(run_dir)
     validate_run(run_dir)
     return read_yaml(run_dir / "source_grounding.yaml")
 

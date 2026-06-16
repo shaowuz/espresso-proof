@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.literature_retrieval import (
     retrieve_and_ground,
@@ -47,7 +48,15 @@ _MISMATCHED_THEOREM = (
 
 
 def _build(tmp_path: Path) -> Path:
-    return run_mock_critique("lr", FIXTURES / _STEP_FIXTURE / "input.md", tmp_path)
+    run_dir = run_mock_critique("lr", FIXTURES / _STEP_FIXTURE / "input.md", tmp_path)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    ensure_claim_clear_for_downstream(run_dir)
+    return run_dir
 
 
 def _corpus(tmp_path: Path, name: str = "corpus") -> Path:

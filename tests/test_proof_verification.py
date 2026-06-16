@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.finite_group_verifier import (
     cyclic_group_table,
     elementary_abelian_table,
@@ -22,13 +23,26 @@ from espresso_proof.memo import build_concise_memo
 from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.models import ProofVerificationStatus
 from espresso_proof.proof_verification import verify_finite_groups
+from espresso_proof.run_dashboard import render_topbar_status_html, status_summary
 from espresso_proof.validators import KernelValidationError, validate_run
 
 FIXTURES = Path("tests/fixtures")
 
 
 def _build(tmp_path: Path) -> Path:
-    return run_mock_critique("pv", FIXTURES / "vague_claim_unclear" / "input.md", tmp_path)
+    run_dir = run_mock_critique("pv", FIXTURES / "vague_claim_unclear" / "input.md", tmp_path)
+    _mark_claim_clear(run_dir)
+    return run_dir
+
+
+def _mark_claim_clear(run_dir: Path) -> None:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    ensure_claim_clear_for_downstream(run_dir)
 
 
 def _claim_id(run_dir: Path) -> str:
@@ -186,6 +200,7 @@ def test_grade_computation_checked_valid_with_confirming_entry(tmp_path: Path) -
     # back computation_checked (e.g. the claim is exactly the enumerated scope).
     # Use a fixture without failed reviewers so only the Goal-23 gate is exercised.
     run_dir = run_mock_critique("pv", FIXTURES / "promising_but_unproved" / "input.md", tmp_path)
+    _mark_claim_clear(run_dir)
     verify_finite_groups(run_dir, primes=[2])  # trusted+confirmed instance_checked entries
     _set_grade_proof_status(run_dir, "computation_checked")
     validate_run(run_dir)
@@ -212,6 +227,7 @@ def test_computation_checked_grade_renders_scoped_not_universal_proof(tmp_path: 
     # trusted verifier" sentence -- a finite computation is scoped, not a proof
     # of the universal claim.
     run_dir = run_mock_critique("pv", FIXTURES / "promising_but_unproved" / "input.md", tmp_path)
+    _mark_claim_clear(run_dir)
     verify_finite_groups(run_dir, primes=[2, 3])
     _set_grade_proof_status(run_dir, "computation_checked")
     validate_run(run_dir)
@@ -220,3 +236,8 @@ def test_computation_checked_grade_renders_scoped_not_universal_proof(tmp_path: 
     verdict = next(line for line in memo.splitlines() if line.startswith("Verdict:"))
     assert "finite/computational scope" in verdict
     assert "not a proof of the full claim" in verdict
+    topbar = render_topbar_status_html(run_dir)
+    summary = status_summary(run_dir)
+    assert "Proof status: Scoped check" in topbar
+    assert "Proof status: Checked" not in topbar
+    assert summary["proof_status"] == "Scoped check"

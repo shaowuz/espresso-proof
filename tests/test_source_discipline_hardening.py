@@ -38,6 +38,12 @@ def _grounded_run(tmp_path: Path) -> Path:
     run_dir = run_mock_critique(
         "g41", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path
     )
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
     src = tmp_path / "src.txt"
     src.write_text(THM, encoding="utf-8")
     claim = read_yaml(run_dir / "locked_claim.yaml")
@@ -49,7 +55,6 @@ def _grounded_run(tmp_path: Path) -> Path:
         authors=["A. Author"],
         source_type="paper",
     )
-    manifest = read_yaml(run_dir / "run_manifest.yaml")
     manifest.setdefault("optional_artifacts", {})["theorem_extraction"] = "theorem_extraction.yaml"
     write_yaml(run_dir / "theorem_extraction.yaml", report)
     write_yaml(run_dir / "run_manifest.yaml", manifest)

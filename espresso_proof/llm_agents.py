@@ -18,9 +18,19 @@ from .human_time_allocation import (
     time_allocation_prompt_context,
     write_time_allocation_context,
 )
+from .claim_clear import ensure_claim_clear_for_downstream
 from .io import read_yaml, write_yaml
 from .models import LLMAgentRunReport, ProverLoopReport, ProverRoundIndex, ProverRoundReport
+from .pressure_status import artifact_revision_hash
+from .proof_language import PROOF_COMPLETE_PHRASES
 from .research_bank import load_bankable_dict
+from .time_allocation import (
+    TIME_ALLOCATION_FILENAME,
+    ensure_prover_time_allocation_plan,
+    time_allocation_prompt_payload,
+    write_time_allocation_plan,
+)
+from .update_inbox import append_update_inbox_event
 
 
 AGENT_OUTPUT_SCHEMA = {
@@ -86,6 +96,7 @@ FORBIDDEN_LANGUAGE = [
     "我们证明了该定理",
     "我们证明了这个定理",
 ]
+FORBIDDEN_LANGUAGE = list(dict.fromkeys([*FORBIDDEN_LANGUAGE, *PROOF_COMPLETE_PHRASES]))
 
 INPUT_ARTIFACTS = [
     "locked_claim.yaml",
@@ -100,6 +111,43 @@ INPUT_ARTIFACTS = [
     "idea_grade.yaml",
     "strategy_brief.yaml",
 ]
+
+MISSING_CONTEXT_NOTES = {
+    "source_support": {
+        "source_request": (
+            "Missing source context: exact source support is not checked for this route."
+        ),
+        "risk": (
+            "Unchecked citations cannot support a proof candidate; route source use must "
+            "stay pending until source grounding validates exact locator and hypotheses."
+        ),
+    },
+    "theorem_applicability": {
+        "source_request": (
+            "Missing theorem context: theorem applicability is not checked for this route."
+        ),
+        "risk": (
+            "Pending theorem applicability cannot support a proof candidate; route theorem "
+            "use must stay conditional until applicability validation passes."
+        ),
+    },
+    "examples_pressure": {
+        "source_request": (
+            "Missing example context: example pressure is pending or partial."
+        ),
+        "risk": (
+            "Unchecked examples cannot count as survived evidence for a proof candidate."
+        ),
+    },
+    "counterexamples_pressure": {
+        "source_request": (
+            "Missing counterexample context: counterexample pressure is pending or partial."
+        ),
+        "risk": (
+            "No counterexample found in unchecked pressure is not evidence against refutation."
+        ),
+    },
+}
 
 ESPRESSO_REVIEWER_ROLES = [
     "strategy_reviewer",
@@ -518,6 +566,71 @@ def external_agent_diagnostic(
     return report
 
 
+def _agent_input_artifacts(manifest: dict) -> list[str]:
+    inputs = list(INPUT_ARTIFACTS)
+    rel = (manifest.get("optional_artifacts") or {}).get("time_allocation")
+    if rel and rel not in inputs:
+        inputs.append(rel)
+    return inputs
+
+
+def _route_allocation_entry(plan, route_id: str | None) -> dict | None:
+    if route_id is None:
+        return None
+    for entry in plan.entries:
+        if entry.route_id == route_id:
+            return entry.model_dump(mode="json")
+    return None
+
+
+def _time_allocation_context(run_dir: Path, plan) -> dict:
+    payload = time_allocation_prompt_payload(plan)
+    theorem_missing = True
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    theorem_rel = (manifest.get("optional_artifacts") or {}).get("theorem_applicability")
+    if theorem_rel and (run_dir / theorem_rel).exists():
+        try:
+            theorem = read_yaml(run_dir / theorem_rel)
+            theorem_missing = theorem.get("overall_status") != "applicable"
+        except Exception:  # noqa: BLE001 - fail closed for prompt context
+            theorem_missing = True
+    if theorem_missing and "theorem_applicability" not in payload["missing_context"]:
+        payload["missing_context"].append("theorem_applicability")
+    return payload
+
+
+def _append_unique(values: list[str], new_values: list[str]) -> list[str]:
+    seen = {value.strip() for value in values}
+    out = list(values)
+    for value in new_values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
+def _apply_missing_context_notes(prover: dict, time_context: dict) -> None:
+    missing = [
+        item
+        for item in time_context.get("missing_context", [])
+        if item in MISSING_CONTEXT_NOTES
+    ]
+    if not missing:
+        return
+    source_requests = [
+        MISSING_CONTEXT_NOTES[item]["source_request"]
+        for item in missing
+    ]
+    risks = [
+        MISSING_CONTEXT_NOTES[item]["risk"]
+        for item in missing
+    ]
+    prover["source_requests"] = _append_unique(prover.get("source_requests", []), source_requests)
+    prover["risks"] = _append_unique(prover.get("risks", []), risks)
+
+
 def run_llm_agent_pass(
     *,
     run_dir: Path,
@@ -529,6 +642,8 @@ def run_llm_agent_pass(
     reviewer_set: str = "generic",
     provider_diagnostic: dict | None = None,
 ) -> dict:
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
+    allocation_plan = ensure_prover_time_allocation_plan(run_dir)
     client = build_client(
         provider=provider,
         model=model,
@@ -536,12 +651,22 @@ def run_llm_agent_pass(
         external_agent_command_env=external_agent_command_env,
     )
     context = load_agent_context(run_dir)
+    time_context = _time_allocation_context(run_dir, allocation_plan)
+    context["time_allocation_plan"] = time_context
+    context["prover_missing_context_to_record"] = time_context["missing_context"]
+    input_artifacts = _agent_input_artifacts(context["manifest"])
     now = datetime.now(UTC).isoformat()
     prover_raw = client.complete_json(
         system=prover_system_prompt(),
         prompt=agent_prompt(context, role="prover"),
     )
-    prover = make_prover_attempt(prover_raw, client=client, created_at=now)
+    prover = make_prover_attempt(
+        prover_raw,
+        client=client,
+        created_at=now,
+        input_artifacts=input_artifacts,
+    )
+    _apply_missing_context_notes(prover, time_context)
     verifier_reviews = []
     reviewer_roles = _reviewer_roles(reviewer_set, verifier_count)
     for index, reviewer_role in enumerate(reviewer_roles, start=1):
@@ -569,7 +694,7 @@ def run_llm_agent_pass(
         "generated_at": now,
         "provider": client.provider,
         "model": client.model,
-        "input_artifacts": INPUT_ARTIFACTS,
+        "input_artifacts": input_artifacts,
         "prover_attempt": prover,
         "verifier_reviews": verifier_reviews,
         "human_gate": gate,
@@ -680,6 +805,7 @@ def build_prover_loop_report(
     approved_effort: str = "normal_pass",
     run_dir: Path | None = None,
 ) -> dict:
+    allocation_plan = ensure_prover_time_allocation_plan(run_dir) if run_dir is not None else None
     top_strategies = strategy_brief.get("top_strategies", [])[:3]
     if not top_strategies:
         top_strategies = [
@@ -724,6 +850,11 @@ def build_prover_loop_report(
             selected_strategy_id=selected_strategy,
             gate=gate,
             reviewer_reviews=verifier_reviews,
+            allocation_entry=(
+                _route_allocation_entry(allocation_plan, strategy_id)
+                if allocation_plan is not None
+                else None
+            ),
         )
         status = _attempt_status_for_allocation(allocation, blockers)
         attempts.append(
@@ -885,6 +1016,120 @@ def _round_artifact_rel_path(attempt: dict) -> str:
     return f"prover_rounds/round_{int(attempt['round_index']):03d}_{attempt_id}_{strategy}.yaml"
 
 
+def _reviewer_blocker_slots(
+    review: dict, open_blocker_texts: set[str] | None
+) -> list[tuple[str, int]]:
+    slots: list[tuple[str, int]] = []
+    for field in ("objections", "missing_hypotheses", "source_requests"):
+        for index, item in enumerate(review.get(field, []) or [], start=1):
+            text = str(item).strip()
+            if not text:
+                continue
+            if open_blocker_texts is not None and text not in open_blocker_texts:
+                continue
+            slots.append((field, index))
+    return slots
+
+
+def _append_reviewer_objection_events(
+    *,
+    run_dir: Path,
+    claim_id: str,
+    route_id: str,
+    origin_stage: str,
+    origin_artifact: str,
+    event_id_prefix: str,
+    verifier_reviews: list[dict],
+    open_blocker_texts: set[str] | None = None,
+) -> bool:
+    """Route reviewer blockers into Update Inbox as scheduling-only pointers.
+
+    The event records provenance to the validated origin artifact, not blocker
+    prose. Reviewer text remains owned by the prover-round artifact and its
+    language/status-smuggling validators.
+    """
+
+    artifact_hash = artifact_revision_hash(run_dir, origin_artifact)
+    created_any = False
+    event_index = 0
+    for review in verifier_reviews:
+        slots = _reviewer_blocker_slots(review, open_blocker_texts)
+        if not slots:
+            continue
+        verifier_id = str(review.get("verifier_id", "reviewer"))
+        safe_verifier = re.sub(r"[^a-zA-Z0-9_.-]+", "_", verifier_id)
+        for field, blocker_index in slots:
+            event_index += 1
+            append_update_inbox_event(
+                run_dir,
+                {
+                    "id": f"{event_id_prefix}_{event_index:03d}",
+                    "type": "reviewer_objection",
+                    "origin_stage": origin_stage,
+                    "origin_artifact": origin_artifact,
+                    "origin_artifact_id_or_path": (
+                        f"{safe_verifier}:{field}:{blocker_index:03d}"
+                    ),
+                    "locked_claim_id": claim_id,
+                    "route_id_or_step_id": route_id,
+                    "artifact_revision_or_hash": artifact_hash,
+                    "validator_ok": True,
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "dedupe_key": "canonicalized-by-writer",
+                    "applied_at": None,
+                    "effect": "scheduling_only",
+                    "advisory_only": True,
+                },
+            )
+            created_any = True
+    return created_any
+
+
+def route_initial_reviewer_blockers_to_update_inbox(
+    *, run_dir: Path, agent_report: dict, selected_strategy_id: str | None
+) -> bool:
+    """Persist initial reviewer blocker pointers before building resolved loop state."""
+
+    if not selected_strategy_id or selected_strategy_id == "none":
+        return False
+    verifier_reviews = agent_report.get("verifier_reviews", [])
+    blockers = sorted(
+        {
+            item
+            for review in verifier_reviews
+            for item in (
+                review.get("objections", [])
+                + review.get("missing_hypotheses", [])
+                + review.get("source_requests", [])
+            )
+            if str(item).strip()
+        }
+    )
+    blockers, _ = _split_machine_answered_blockers(
+        blockers,
+        run_dir=run_dir,
+        claim_id=agent_report["claim_id"],
+        source_request_texts={
+            str(item).strip()
+            for review in verifier_reviews
+            for item in review.get("source_requests", [])
+        },
+    )
+    created = _append_reviewer_objection_events(
+        run_dir=run_dir,
+        claim_id=agent_report["claim_id"],
+        route_id=str(selected_strategy_id),
+        origin_stage="llm_prover_reviewers",
+        origin_artifact="llm_agent_run.yaml",
+        event_id_prefix="upd_reviewer_objection_initial",
+        verifier_reviews=verifier_reviews,
+        open_blocker_texts=set(blockers[:12]),
+    )
+    if created:
+        write_time_allocation_plan(run_dir)
+    return created
+
+
 def _human_feedback_advisory(run_dir: Path) -> str:
     """The human's advisory ranking note for this run (human_choice.taste_judgment).
 
@@ -926,14 +1171,27 @@ def _allocation_for_strategy(
     selected_strategy_id: str | None,
     gate: dict,
     reviewer_reviews: list[dict],
+    allocation_entry: dict | None = None,
 ) -> str:
     if gate.get("status") == "pending":
         return "ask_human"
     if gate.get("decision") == "stop":
         return "stop"
+    is_selected = strategy_id == selected_strategy_id
+    if allocation_entry is not None:
+        action = allocation_entry.get("action")
+        if action == "stop":
+            return "stop"
+        if action == "ask_human":
+            return "ask_human"
+        if action in {"source_pinning", "repair_attempt"}:
+            return "repair" if is_selected else "cheap_check"
+        if action == "cheap_check":
+            return "cheap_check"
+        if action == "bounded_proof_exploration":
+            return "expand" if is_selected else "cheap_check"
     if any(review.get("verdict") == "blocked" for review in reviewer_reviews):
         return "pause"
-    is_selected = strategy_id == selected_strategy_id
     if any(review.get("verdict") in {"needs_revision", "needs_sources"} for review in reviewer_reviews):
         return "repair" if is_selected else "cheap_check"
     return "expand" if is_selected else "cheap_check"
@@ -1019,6 +1277,7 @@ def resolve_agent_gate(
     decision: str,
     reason: str,
 ) -> dict:
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     agent_path = manifest.get("optional_artifacts", {}).get("llm_agent_run")
     if not agent_path:
@@ -1053,6 +1312,8 @@ def append_prover_loop_round(
     reviewer_set: str = "espresso",
     client: "LLMClient | None" = None,
 ) -> dict:
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
+    allocation_plan = ensure_prover_time_allocation_plan(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     optional = manifest.get("optional_artifacts", {})
     agent_path = optional.get("llm_agent_run")
@@ -1080,6 +1341,8 @@ def append_prover_loop_round(
         external_agent_command_env=external_agent_command_env,
     )
     context = load_agent_context(run_dir)
+    time_context = _time_allocation_context(run_dir, allocation_plan)
+    input_artifacts = _agent_input_artifacts(manifest)
     # Goal 26: the subgoal graph is the scheduling center. Pick the highest-value
     # OPEN subgoal and NAME it to the prover so the round works on that specific
     # subgoal id + local claim (not the whole claim). This is scheduling only: it
@@ -1116,6 +1379,11 @@ def append_prover_loop_round(
         "reviewer_blockers_to_repair": parent_attempt.get("blockers", []),
         "loop_decision": loop_report.get("loop_decision"),
         "time_allocation": parent_attempt.get("time_allocation"),
+        "time_allocation_plan": time_context,
+        "time_allocation_entry": _route_allocation_entry(
+            allocation_plan, parent_attempt.get("strategy_id")
+        ),
+        "prover_missing_context_to_record": time_context["missing_context"],
         "target_subgoal": target_subgoal,
         # Goal 43C: the human's advisory ranking/time-allocation note for this
         # continuation (from human_choice.taste_judgment). It is prompt context
@@ -1131,8 +1399,14 @@ def append_prover_loop_round(
         system=prover_system_prompt(),
         prompt=agent_prompt(round_context, role="prover_loop_round"),
     )
-    prover = make_prover_attempt(prover_raw, client=client, created_at=created_at)
+    prover = make_prover_attempt(
+        prover_raw,
+        client=client,
+        created_at=created_at,
+        input_artifacts=input_artifacts,
+    )
     prover["agent_id"] = f"llm_prover_{next_round:03d}"
+    _apply_missing_context_notes(prover, time_context)
 
     reviewer_roles = _reviewer_roles(reviewer_set, 3)
     verifier_reviews = []
@@ -1242,7 +1516,7 @@ def append_prover_loop_round(
         )
     _write_prover_round_artifact(
         run_dir=run_dir,
-        agent_report=agent_report,
+        agent_report={**agent_report, "input_artifacts": input_artifacts},
         loop_report=loop_report,
         attempt=new_attempt,
         prover_attempt=prover,
@@ -1252,6 +1526,17 @@ def append_prover_loop_round(
     refresh_prover_round_index(run_dir=run_dir, loop_report=loop_report)
     manifest.setdefault("optional_artifacts", {})["prover_round_index"] = "prover_rounds/index.yaml"
     write_yaml(run_dir / "run_manifest.yaml", manifest)
+    if _append_reviewer_objection_events(
+        run_dir=run_dir,
+        claim_id=loop_report["claim_id"],
+        route_id=str(new_attempt["strategy_id"]),
+        origin_stage="prover_loop_round",
+        origin_artifact=_round_artifact_rel_path(new_attempt),
+        event_id_prefix=f"upd_reviewer_objection_r{int(new_attempt['round_index']):03d}",
+        verifier_reviews=verifier_reviews,
+        open_blocker_texts=set(blockers),
+    ):
+        write_time_allocation_plan(run_dir)
     return loop_report
 
 
@@ -1303,14 +1588,20 @@ def load_agent_context(run_dir: Path) -> dict:
     }
 
 
-def make_prover_attempt(raw: dict, *, client: LLMClient, created_at: str) -> dict:
+def make_prover_attempt(
+    raw: dict,
+    *,
+    client: LLMClient,
+    created_at: str,
+    input_artifacts: list[str] | None = None,
+) -> dict:
     return {
         "agent_id": "llm_prover_001",
         "role": "prover",
         "provider": client.provider,
         "model": client.model,
         "created_at": created_at,
-        "input_artifacts": INPUT_ARTIFACTS,
+        "input_artifacts": list(input_artifacts or INPUT_ARTIFACTS),
         "output_summary": safe_text(raw.get("summary", "")),
         "proposed_steps": safe_list(raw.get("steps", [])),
         "source_requests": safe_list(raw.get("source_requests", [])),
@@ -1532,6 +1823,8 @@ def agent_prompt(context: dict, *, role: str) -> str:
                 "no proof/source/evidence upgrades",
                 "human gate before deeper work",
                 "source_backed requires exact locator and matching hypotheses",
+                "time_allocation.yaml is scheduling-only and advisory-only",
+                "record missing source/theorem/example/counterexample context explicitly",
             ],
             "context": context,
             "required_json_schema": AGENT_OUTPUT_SCHEMA,
@@ -1554,7 +1847,7 @@ def safe_list(value: object) -> list[str]:
 
 def safe_text(value: object) -> str:
     text = re.sub(r"\s+", " ", str(value)).strip()
-    for phrase in FORBIDDEN_LANGUAGE:
+    for phrase in sorted(FORBIDDEN_LANGUAGE, key=len, reverse=True):
         text = re.sub(
             forbidden_pattern(phrase),
             "[withheld proof-like phrase]",

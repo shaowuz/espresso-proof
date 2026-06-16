@@ -129,6 +129,12 @@ def _hodge_run(tmp_path: Path) -> Path:
         {"name": "p is prime", "status": "explicit", "source": "user"},
     ]
     write_yaml(run_dir / "locked_claim.yaml", claim)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
     sg = read_yaml(run_dir / "source_grounding.yaml")
     sg["steps"][0]["needed_theorem"] = "group order abelian center"
     sg["steps"][0]["status"] = "candidate"

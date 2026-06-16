@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from enum import Enum
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -742,8 +744,27 @@ class AutonomousLiteratureRetrievalReport(StrictBaseModel):
     # (exact locator + hypothesis match + attribution). Retrieval never sets the
     # latter itself — it is read back from source_grounding after ground_run.
     grounded: bool = False
+    grounded_candidate_id: str | None = None
+    grounded_retrieval_source_id: str | None = None
+    earned_source_ref_ids: list[str] = Field(default_factory=list)
+    earned_proof_step_ids: list[str] = Field(default_factory=list)
     earned_source_backed: bool = False
     notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_earned_binding(self) -> AutonomousLiteratureRetrievalReport:
+        if self.earned_source_backed and (
+            not self.grounded
+            or not self.grounded_candidate_id
+            or not self.grounded_retrieval_source_id
+            or not self.earned_source_ref_ids
+            or not self.earned_proof_step_ids
+        ):
+            raise ValueError(
+                "earned_source_backed requires grounded candidate, retrieval source, "
+                "source ref, and proof step bindings"
+            )
+        return self
 
 
 class VerifierType(str, Enum):
@@ -1058,6 +1079,25 @@ class LiteratureItem(StrictBaseModel):
         return self
 
 
+def _contains_literal_string(value: Any, literal: str) -> bool:
+    if isinstance(value, str):
+        return literal in value
+    if isinstance(value, dict):
+        return any(_contains_literal_string(item, literal) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_literal_string(item, literal) for item in value)
+    return False
+
+
+def _validate_literature_candidate_only_meanings(value: Any, *, artifact_name: str) -> None:
+    forbidden = "literature_implies"
+    if _contains_literal_string(value, forbidden):
+        raise ValueError(
+            f"{artifact_name} cannot emit literature_implies; only source-grounding "
+            "or theorem applicability may use it for a specific proof step"
+        )
+
+
 class LiteratureReviewReport(StrictBaseModel):
     claim_id: str
     query_summary: str
@@ -1065,6 +1105,14 @@ class LiteratureReviewReport(StrictBaseModel):
     known_examples: list[str] = Field(default_factory=list)
     known_counterexample_families: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_candidate_only_meanings(self) -> LiteratureReviewReport:
+        _validate_literature_candidate_only_meanings(
+            self.model_dump(mode="json"),
+            artifact_name="Literature Review",
+        )
+        return self
 
 
 class ExtractedTheorem(StrictBaseModel):
@@ -1282,6 +1330,10 @@ class LiteratureReviewAgentReport(StrictBaseModel):
 
     @model_validator(mode="after")
     def validate_literature_review_agent_refs(self) -> LiteratureReviewAgentReport:
+        _validate_literature_candidate_only_meanings(
+            self.model_dump(mode="json"),
+            artifact_name="Literature Review Agent",
+        )
         source_by_id = {source.source_ref.id: source for source in self.input_sources}
         unknown_theorem_sources = {
             theorem.source_ref_id
@@ -1335,6 +1387,11 @@ class CounterexampleTest(StrictBaseModel):
                 "a counterexample can refute the claim only with a checked 'failed' "
                 "result; an untested / survived / inconclusive result cannot refute"
             )
+        if self.refutes_claim and (self.exposes_missing_hypothesis or self.missing_hypothesis):
+            raise ValueError(
+                "dropped-hypothesis / missing-hypothesis pressure cannot refute "
+                "the original claim"
+            )
         if self.satisfies_all_claim_hypotheses is False and self.refutes_claim:
             raise ValueError("dropped-hypothesis tests cannot refute the original claim")
         if self.satisfies_all_claim_hypotheses is not True and self.refutes_claim:
@@ -1344,6 +1401,8 @@ class CounterexampleTest(StrictBaseModel):
             )
         if self.refutes_step_only and self.refutes_claim:
             raise ValueError("a proof-step attack cannot refute the original claim")
+        if self.refutes_claim and self.target != "theorem":
+            raise ValueError("claim refutation requires target='theorem'")
         return self
 
 
@@ -1409,9 +1468,11 @@ class TheoremApplicabilityUsage(StrictBaseModel):
         bad_conditions = {"missing", "mismatched", "unclear", "not_checked"}
         has_bad_condition = any(condition.status in bad_conditions for condition in self.conditions)
         if self.applicability_status == "applicable":
+            if not self.conditions:
+                raise ValueError("applicable theorem usage requires non-empty condition coverage")
             if has_bad_condition:
                 raise ValueError("applicable theorem usage requires all conditions satisfied")
-            if self.conclusion_status in {"orthogonal", "contradicts", "unclear"}:
+            if self.conclusion_status != "compatible":
                 raise ValueError("applicable theorem usage requires compatible conclusion")
             if self.blocks_source_backed:
                 raise ValueError("applicable theorem usage cannot block source_backed")
@@ -1612,6 +1673,169 @@ class StrategyBrief(StrictBaseModel):
         for strategy in self.top_strategies:
             if strategy.score >= 75 and strategy.source_status in {"unverified", "not_found"}:
                 raise ValueError("high-scoring strategies require at least candidate or mixed source status")
+        return self
+
+
+class TimeAllocationEntry(StrictBaseModel):
+    id: str
+    route_id: str | None = None
+    action: Literal[
+        "source_pinning",
+        "cheap_check",
+        "bounded_proof_exploration",
+        "repair_attempt",
+        "ask_human",
+        "stop",
+    ]
+    budget: Literal["tiny", "small", "bounded", "human", "none"]
+    unchecked: Literal[True]
+    advisory_only: Literal[True]
+    effect: Literal["scheduling_only"]
+    reason: str
+
+    @model_validator(mode="after")
+    def validate_route_binding(self) -> TimeAllocationEntry:
+        route_actions = {
+            "source_pinning",
+            "cheap_check",
+            "bounded_proof_exploration",
+            "repair_attempt",
+        }
+        if self.action in route_actions and not self.route_id:
+            raise ValueError(f"{self.action} allocation requires route_id")
+        if self.action == "ask_human" and self.budget != "human":
+            raise ValueError("ask_human allocation requires human budget")
+        if self.action == "stop" and self.budget != "none":
+            raise ValueError("stop allocation requires none budget")
+        if self.action == "bounded_proof_exploration" and self.budget != "bounded":
+            raise ValueError("bounded proof exploration must use bounded budget")
+        return self
+
+
+class TimeAllocationPlan(StrictBaseModel):
+    """V2 Task 04 provisional scheduling plan from Strategy Grader.
+
+    This artifact is deliberately scheduling-only: it can order work and name
+    missing context, but it has no field that can own proof/source/evidence/
+    theorem/refutation/grade status. StrictBaseModel rejects any smuggled status
+    fields on the plan or its entries.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    trigger: Literal["strategy_grader"]
+    allocation_state: Literal["TIME_ALLOCATION_STARTED"]
+    strategy_artifact: Literal["strategy_brief", "strategy_synthesis"]
+    advisory_only: Literal[True]
+    effect: Literal["scheduling_only"]
+    missing_context: list[
+        Literal[
+            "strategy_brief",
+            "human_preference",
+            "source_support",
+            "examples_pressure",
+            "counterexamples_pressure",
+        ]
+    ] = Field(default_factory=list)
+    entries: list[TimeAllocationEntry]
+    forbidden_status_effect: list[str] = Field(
+        default_factory=lambda: [
+            "proof",
+            "source",
+            "evidence",
+            "theorem_applicability",
+            "refutation",
+            "grade",
+        ]
+    )
+
+    @model_validator(mode="after")
+    def validate_scheduling_only(self) -> TimeAllocationPlan:
+        if not self.entries:
+            raise ValueError("time allocation plan requires at least one entry")
+        ids = [entry.id for entry in self.entries]
+        if len(ids) != len(set(ids)):
+            raise ValueError("time allocation entries must have unique ids")
+        if len(self.missing_context) != len(set(self.missing_context)):
+            raise ValueError("missing_context entries must be unique")
+        return self
+
+
+UpdateInboxType = Literal[
+    "source_gap",
+    "source_status_signal",
+    "theorem_condition_blocker",
+    "example_pressure",
+    "counterexample_pressure",
+    "counterexample_admissibility",
+    "strategy_brief",
+    "human_preference",
+    "reviewer_objection",
+    "prover_progress",
+    "budget_signal",
+    "advisory_memory_signal",
+]
+
+
+class UpdateInboxEntry(StrictBaseModel):
+    """Scheduling-only late signal for V2 Update Inbox.
+
+    The entry has no payload field and no mathematical status owner field. Strict
+    validation rejects status smuggling; validator_ok only means the origin
+    artifact validated in its own lane.
+    """
+
+    id: str
+    type: UpdateInboxType
+    origin_stage: str
+    origin_artifact: str
+    origin_artifact_id_or_path: str
+    locked_claim_id: str
+    route_id_or_step_id: str | None
+    artifact_revision_or_hash: str
+    validator_ok: bool
+    created_at: str
+    dedupe_key: str
+    applied_at: str | None
+    effect: Literal["scheduling_only"]
+    advisory_only: Literal[True]
+
+    @model_validator(mode="after")
+    def validate_required_text(self) -> UpdateInboxEntry:
+        text_fields = {
+            "id": self.id,
+            "origin_stage": self.origin_stage,
+            "origin_artifact": self.origin_artifact,
+            "origin_artifact_id_or_path": self.origin_artifact_id_or_path,
+            "locked_claim_id": self.locked_claim_id,
+            "artifact_revision_or_hash": self.artifact_revision_or_hash,
+            "created_at": self.created_at,
+            "dedupe_key": self.dedupe_key,
+        }
+        blank = [name for name, value in text_fields.items() if not value.strip()]
+        if blank:
+            raise ValueError(f"update inbox entry fields cannot be blank: {blank}")
+        if self.route_id_or_step_id is not None and not self.route_id_or_step_id.strip():
+            raise ValueError("route_id_or_step_id cannot be blank")
+        return self
+
+
+class UpdateInboxReport(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    entries: list[UpdateInboxEntry] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_entries(self) -> UpdateInboxReport:
+        ids = [entry.id for entry in self.entries]
+        dedupe = [entry.dedupe_key for entry in self.entries]
+        if len(ids) != len(set(ids)):
+            raise ValueError("update inbox entry ids must be unique")
+        if len(dedupe) != len(set(dedupe)):
+            raise ValueError("update inbox dedupe_key values must be unique")
         return self
 
 
@@ -2369,6 +2593,437 @@ class ProofGoalGraph(StrictBaseModel):
         return parts
 
 
+_MEMORY_FORBIDDEN_FIELD_TOKENS = {
+    "source_backed",
+    "source_status",
+    "proof_status",
+    "proof_language_status",
+    "evidence_status",
+    "checked_evidence",
+    "theorem_applicability_status",
+    "refutation_status",
+    "grade_status",
+    "memory_evidence",
+}
+
+
+def _memory_text_clauses(text: str) -> list[str]:
+    return [
+        clause.strip().lower()
+        for clause in re.split(r"[.;:\n]", str(text))
+        if clause.strip()
+    ]
+
+
+def _memory_clause_is_disclaimer(clause: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:not|never|cannot|can't|must not|does not|do not|no)\b",
+            clause,
+        )
+    )
+
+
+def _memory_non_disclaimer_segments(clause: str) -> list[str]:
+    segments = [
+        segment.strip()
+        for segment in re.split(r",|\b(?:and|but|however|yet)\b", clause)
+        if segment.strip()
+    ]
+    return [segment for segment in segments if not _memory_clause_is_disclaimer(segment)]
+
+
+def _memory_normalized_status_text(text: str) -> str:
+    normalized = str(text).lower()
+    normalized = re.sub(r"[_-]+", " ", normalized)
+    normalized = re.sub(r"\s*(?:=|:)\s*", " is ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
+
+
+def _memory_full_text_status_reason(text: str) -> str | None:
+    normalized = _memory_normalized_status_text(text)
+    status_patterns = [
+        (
+            r"\bno\s+counterexamples?\s+"
+            r"(?:remain|exists?|appeared?|produced|found|"
+            r"(?:(?:was|were)\s+)?(?:found|produced)|pressure|"
+            r"refutes?\s+(?:this|the)\s+(?:claim|route|step))\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\bno\s+counterexamples?\s+to\s+(?:this|the)\s+"
+            r"(?:claim|route|step|theorem)\s+(?:was|were)\s+found\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\b(?:this|the)\s+(?:search|run)\s+"
+            r"(?:produced\s+no|found\s+(?:zero|no))\s+counterexamples?\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\bcounterexamples?\s+[a-z0-9./_-]+\s+"
+            r"(?:is\s+)?(?:this\s+)?refutes?\s+(?:this|the)?\s*(?:claim|route|step)\b",
+            "refutation status",
+        ),
+        (r"\bno\s+examples?\s+(?:failed|fail|failing)\b", "example evidence status"),
+        (r"\bno\s+failing\s+examples?\b", "example evidence status"),
+        (r"\b(?:the\s+)?examples?\s+did\s+not\s+fail\b", "example evidence status"),
+        (
+            r"\bexamples?\s+(?:[a-z0-9./]+(?:\s+|$))?"
+            r"(?:does\s+not|did\s+not|do\s+not)\s+fail\b",
+            "example evidence status",
+        ),
+        (
+            r"\bexamples?\s+(?:[a-z0-9./]+(?:\s+|$))?"
+            r"(?:survived|failed|checked|passed|passes)\b",
+            "example evidence status",
+        ),
+        (
+            r"\bexamples?\s+(?:verify|verifies|confirmed?|validated?)\s+"
+            r"(?:this|the)?\s*(?:claim|route|step|theorem)\b",
+            "example evidence status",
+        ),
+        (r"\b(?:survived|failed|checked|passed)\s+examples?\b", "example evidence status"),
+        (
+            r"\bcounterexample\s+search\s+"
+            r"(?:(?:did\s+not\s+find|found\s+no)\s+pressure|found\s+none)\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\bcounterexample\s+search\s+came\s+back\s+empty\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\b(?:empty\s+counterexample\s+search|"
+            r"(?:the\s+)?counterexample\s+search\s+(?:was|returned)\s+empty)\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\bno\s+obstruction\s+(?:was|were)?\s*found\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|theorem|route|statement)\s+survived\s+"
+            r"counterexample\s+search\b",
+            "counterexample no-pressure status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|theorem|route|statement)\s+"
+            r"(?:was|is)\s+not\s+refuted\b",
+            "refutation status",
+        ),
+        (
+            r"\bno\s+(?:refutation|counterexample\s+pressure)\s+"
+            r"(?:remain|remains|exists?|found)\b",
+            "refutation status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|theorem|route|statement)\s+"
+            r"(?:is\s+)?unrefuted\b",
+            "refutation status",
+        ),
+        (
+            r"\b(?:this|the)\s+establishes\s+"
+            r"(?:this|the)?\s*(?:claim|theorem|route|statement)\b",
+            "current theorem status",
+        ),
+        (
+            r"\b(?:this|the)?\s*proof\s+establishes\s+"
+            r"(?:this|the)?\s*(?:claim|theorem|route|statement)\b",
+            "proof status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|theorem|route|statement)\s+"
+            r"(?:(?:is|has\s+been)\s+)?established\b",
+            "current theorem status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|theorem|route|statement)\s+"
+            r"(?:is\s+)?false\b",
+            "current theorem/refutation status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|theorem|route|statement)\s+holds\b",
+            "current theorem status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:disproves|contradicts)\s+"
+            r"(?:this|the)?\s*(?:claim|theorem|route|statement)\b",
+            "refutation status",
+        ),
+        (
+            r"\b(?:claim|theorem|route|statement)\s+is\s+true\b",
+            "current theorem truth",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|theorem|route|statement)\s+"
+            r"(?:is\s+)?settled\b",
+            "current theorem status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:paper|source|reference)\s+"
+            r"(?:supports?|confirms?)\s+"
+            r"(?:this|the)?\s*(?:claim|route|step|theorem)\b",
+            "source support status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:paper|source|reference)\s+"
+            r"(?:establishes|validates)\s+"
+            r"(?:this|the)?\s*(?:claim|route|step|theorem|proof\s+step)"
+            r"(?:\s+[a-z0-9._-]+)?\b",
+            "source support status",
+        ),
+        (
+            r"\b(?:literature\s+candidate|paper|source|reference|theorem)\s+"
+            r"is\s+(?:source\s+support|reference\s+support|support)\b",
+            "source/theorem support status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:literature\s+candidate|theorem)\s+"
+            r"(?:supports?|confirms?)\s+"
+            r"(?:this|the)?\s*(?:claim|route|step|theorem)\b",
+            "source/theorem support status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:source|reference)\s+verifies\s+"
+            r"(?:this|the)?\s*(?:claim|route|step|theorem)\b",
+            "source support status",
+        ),
+        (
+            r"\b[a-z][a-z0-9._ -]*\s+theorem\s+verifies\s+"
+            r"(?:this|the)?\s*(?:claim|route|step|theorem)\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|route|step|theorem)\s+"
+            r"(?:is\s+)?supported\s+by\s+(?:the\s+)?"
+            r"(?:cited\s+)?(?:paper|source|reference|candidate\s+reference)\b",
+            "source support status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:source|reference|candidate\s+reference)\s+"
+            r"backs\s+(?:this|the)?\s*(?:claim|route|step|theorem)\b",
+            "source support status",
+        ),
+        (
+            r"\bsource\s+status\s+is\s+(?:source\s+backed|backed|supported)\b",
+            "source support status",
+        ),
+        (r"\bsource\s+is\s+(?:source\s+backed|backed|supported)\b", "source support status"),
+        (
+            r"\b(?:this|the)?\s*(?:claim|route|step|theorem)\s+"
+            r"has\s+(?:source|reference)\s+support\b",
+            "source support status",
+        ),
+        (
+            r"\bstep\s+[a-z0-9._-]+\s+has\s+(?:source|reference)\s+support\b",
+            "source support status",
+        ),
+        (
+            r"\b(?:this|the)?\s*(?:claim|route|step|theorem)\s+"
+            r"(?:is\s+)?source\s+supported\b",
+            "source support status",
+        ),
+        (
+            r"\b(?:theorem\s+)?applicability\s+(?:status\s+)?is\s+applicable\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\b(?:this|the)?\s*theorem\s+is\s+applicable\b",
+            "theorem applicability status",
+        ),
+        (r"\btheorem\s+applicable\s+here\b", "theorem applicability status"),
+        (
+            r"\bapplicable\s+theorem\s+for\s+(?:this|the)\s+"
+            r"(?:step|claim|route)\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\btheorem\s+is\s+applicable\s+to\s+(?:this|the)\s+(?:step|claim|route)\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\btheorem\s+applies\s+to\s+(?:this|the)\s+(?:step|claim|route)\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\btheorem\s+applies\s+(?:for\s+(?:this|the)\s+"
+            r"(?:step|claim|route)|to\s+(?:this|the)\s+"
+            r"(?:step|claim|route))\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\btheorem\s+[a-z0-9._-]+\s+applies\s+to\s+"
+            r"(?:step\s+[a-z0-9._-]+|(?:this|the)\s+(?:step|claim|route))\b",
+            "theorem applicability status",
+        ),
+        (r"\btheorem\s+applies\s+here\b", "theorem applicability status"),
+        (r"\btheorem\s+applies\b", "theorem applicability status"),
+        (
+            r"\btheorem\s+applies\s+(?:is\s+)?(?:true|yes|applicable)\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\bproof\s+status\s+is\s+"
+            r"(?:complete|checked|verified|proved|proven|source\s+checked(?:\s+argument)?)\b",
+            "proof status",
+        ),
+        (
+            r"\b(?:this|the)?\s*proof\s+is\s+complete\b",
+            "proof-complete status",
+        ),
+        (
+            r"\b(?:this|the)\s+gives\s+a\s+proof\s+of\s+"
+            r"(?:this|the)?\s*(?:claim|theorem|route|statement)\b",
+            "proof status",
+        ),
+        (
+            r"\b(?:this\s+)?theorem\s+gives\s+(?:this|the)?\s*proof\b",
+            "theorem/proof status",
+        ),
+        (
+            r"\b(?:this|the)?\s*theorem\s+covers\s+(?:this|the)\s+case\b",
+            "theorem applicability status",
+        ),
+        (
+            r"\b(?:this|the)?\s*proof\s+is\s+valid\b",
+            "proof status",
+        ),
+        (
+            r"\b(?:route|strategy)\s+[a-z0-9._-]+\s+"
+            r"(?:is\s+(?:a\s+)?proof\s+of\s+(?:this|the)?\s*"
+            r"(?:claim|theorem|statement)|gives\s+(?:this|the)?\s*proof)\b",
+            "route proof status",
+        ),
+        (r"\b(?:this|the)?\s*proof\s+checks\s+out\b", "proof status"),
+        (
+            r"\bno\s+proof\s+gaps?\s+remain\b",
+            "proof-complete status",
+        ),
+        (
+            r"\b(?:reviewer|prover)\s+"
+            r"(?:approved|certified|completed|verified|checked)\s+(?:this|the)?\s*proof\b",
+            "proof status",
+        ),
+        (
+            r"\b(?:reviewer|prover)\s+[a-z0-9._-]+\s+"
+            r"(?:approved|certified|completed|verified|checked)\s+"
+            r"(?:proof|the\s+proof|proof\s+of\s+step\s+[a-z0-9._-]+)\b",
+            "proof status",
+        ),
+        (
+            r"\bprover\s+(?:found|produced)\s+a\s+proof\b",
+            "proof status",
+        ),
+        (
+            r"\b(?:paper|source|reference)\s+[a-z0-9._-]+\s+"
+            r"supports?\s+(?:proof\s+)?step\s+[a-z0-9._-]+\b",
+            "source/proof support status",
+        ),
+        (r"\b(?:this|the)\s+is\s+a\s+complete\s+argument\b", "proof-complete status"),
+        (r"\bexamples?\s+pass\b", "example evidence status"),
+        (
+            r"\bhuman\s+(?:preference|choice|feedback|marked|chose)\b.*\b"
+            r"(?:supports?|evidence|proof|proves?|refutes?|true|false)\b",
+            "human preference as evidence",
+        ),
+        (
+            r"\bhuman\s+(?:preference|preferred)\b.*\b(?:as\s+evidence|evidence)\b",
+            "human preference as evidence",
+        ),
+        (
+            r"\bhuman\s+preference\s+shows\b.*\b(?:route|claim|theorem|statement)\b.*\bworks\b",
+            "human preference as evidence",
+        ),
+        (
+            r"\bproof\s+language\s+status\s+is\s+"
+            r"(?:source\s+checked(?:\s+argument)?|checked|complete|verified|proved|proven)\b",
+            "proof language status",
+        ),
+        (
+            r"\bgrade(?:\s+status)?\s+is\s+"
+            r"(?:promising|complete|accepted|passing|pass|verified|proof\s+complete|source\s+backed)\b",
+            "grade status",
+        ),
+    ]
+    for pattern, reason in status_patterns:
+        if re.search(pattern, normalized):
+            return reason
+    return None
+
+
+def _memory_forbidden_text_reason(text: str) -> str | None:
+    full_text_reason = _memory_full_text_status_reason(text)
+    if full_text_reason:
+        return full_text_reason
+
+    for clause in _memory_text_clauses(text):
+        no_pressure_patterns = [
+            (r"\bno\s+counterexamples?\s+(?:remain|exists?|found|pressure)\b"),
+            (r"\bcounterexample[_ -]?pressure\s*(?:is|=|:)\s*(?:none|clear|resolved)\b"),
+        ]
+        if any(re.search(pattern, clause) for pattern in no_pressure_patterns):
+            return "counterexample no-pressure status"
+        if _memory_clause_is_disclaimer(clause):
+            segments = _memory_non_disclaimer_segments(clause)
+            if not segments:
+                continue
+            clause = " ".join(segments)
+        if any(token in clause for token in _MEMORY_FORBIDDEN_FIELD_TOKENS):
+            return "trusted status field token"
+        status_patterns = [
+            (r"\b(?:proved|proven|proves|verified|refuted)\b", "proof/refutation status"),
+            (r"\b(?:complete proof|proof complete|proof-close)\b", "proof-complete status"),
+            (r"\b(?:claim|theorem|route|statement)\s+is\s+true\b", "current theorem truth"),
+            (r"\btheorem\s+(?:is\s+)?(?:established|settled)\b", "current theorem status"),
+            (r"\bsource[_ -]?backed\b", "source support status"),
+            (
+                r"\bsource\s+status\s+(?:is|=|:)\s*(?:source[_ -]?backed|backed|supported)\b",
+                "source support status",
+            ),
+            (r"\breference\s+supports?\s+(?:this|the)\s+(?:claim|route|step)\b", "source support status"),
+            (
+                r"\b(?:theorem\s+)?applicability(?:\s+status)?\s+"
+                r"(?:is|=)\s+applicable\b",
+                "theorem applicability status",
+            ),
+            (
+                r"\bapplicability[_ -]?status\s*(?:is|=|:)\s*applicable\b",
+                "theorem applicability status",
+            ),
+            (r"\btheorem\s+applies\s+to\s+(?:this|the)\s+step\b", "theorem applicability status"),
+            (r"\bapplies\s+to\s+(?:this|the)\s+claim\b", "theorem applicability status"),
+            (r"\bchecked\s+evidence\b", "checked evidence status"),
+            (r"\bexamples?\s+(?:survived|failed|checked)\b", "example evidence status"),
+            (r"\b(?:survived|failed|checked)\s+examples?\b", "example evidence status"),
+            (r"\bcounterexamples?\s+refutes?\b", "refutation status"),
+        ]
+        for pattern, reason in status_patterns:
+            if re.search(pattern, clause):
+                return reason
+    return None
+
+
+def _validate_memory_text_boundary(where: str, values: list[str]) -> None:
+    for value in values:
+        reason = _memory_forbidden_text_reason(value)
+        if reason:
+            raise ValueError(f"{where} cannot store current mathematical status ({reason})")
+
+
+def _has_run_artifact_provenance(provenance: list[str]) -> bool:
+    for item in provenance:
+        parts = Path(str(item)).parts
+        if (
+            "projects" in parts
+            and "runs" in parts
+            and len(parts) >= parts.index("runs") + 3
+        ):
+            return True
+    return False
+
+
 class MemoryEntry(StrictBaseModel):
     id: str
     timestamp: str
@@ -2378,6 +3033,31 @@ class MemoryEntry(StrictBaseModel):
     summary: str
     provenance: list[str]
     reusable_lesson: str
+
+    @model_validator(mode="after")
+    def validate_memory_entry(self) -> MemoryEntry:
+        text_fields = {
+            "id": self.id,
+            "timestamp": self.timestamp,
+            "project": self.project,
+            "claim_id": self.claim_id,
+            "summary": self.summary,
+            "reusable_lesson": self.reusable_lesson,
+        }
+        blank = [name for name, value in text_fields.items() if not str(value).strip()]
+        if blank:
+            raise ValueError(f"memory entry fields cannot be blank: {blank}")
+        if not self.provenance:
+            raise ValueError("memory entry requires provenance")
+        if not all(str(item).strip() for item in self.provenance):
+            raise ValueError("memory entry provenance cannot be blank")
+        if not _has_run_artifact_provenance(self.provenance):
+            raise ValueError("memory entry provenance requires a run artifact reference")
+        _validate_memory_text_boundary(
+            "memory entry",
+            [self.summary, self.reusable_lesson, *self.provenance],
+        )
+        return self
 
 
 class MemoryContextEntry(StrictBaseModel):
@@ -2395,6 +3075,33 @@ class MemoryContextEntry(StrictBaseModel):
     relevance_reason: str
     recommended_use: Literal["avoid", "retest", "request_source", "prioritize", "ask_human", "note"]
     summary: str
+    memory_claim_id: str
+    provenance: list[str]
+    revalidation_required: bool
+    revalidated_against_locked_claim: bool
+
+    @model_validator(mode="after")
+    def validate_memory_context_entry(self) -> MemoryContextEntry:
+        if not self.provenance:
+            raise ValueError("memory context entry requires provenance")
+        if not all(str(item).strip() for item in self.provenance):
+            raise ValueError("memory context entry provenance cannot be blank")
+        if not _has_run_artifact_provenance(self.provenance):
+            raise ValueError(
+                "memory context entry provenance requires a run artifact reference"
+            )
+        _validate_memory_text_boundary(
+            "memory context entry",
+            [
+                self.relevance_reason,
+                self.summary,
+                self.memory_claim_id,
+                *self.provenance,
+            ],
+        )
+        if self.revalidated_against_locked_claim and self.revalidation_required:
+            raise ValueError("memory context cannot be both revalidated and pending revalidation")
+        return self
 
 
 class MemoryContext(StrictBaseModel):
@@ -2402,13 +3109,18 @@ class MemoryContext(StrictBaseModel):
     claim, with recommended uses. Advisory only — never upgrades any status and
     never overrides current-run artifacts (StrictBaseModel forbids status fields)."""
 
-    schema_version: int = 1
+    schema_version: int = 2
     claim_id: str
     run_id: str
     advisory_only: Literal[True] = True
     generated_at: str = ""
     matched_entries: list[MemoryContextEntry] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_memory_context(self) -> MemoryContext:
+        _validate_memory_text_boundary("memory context constraints", self.constraints)
+        return self
 
 
 class MemoryIndexEntry(StrictBaseModel):
@@ -2419,6 +3131,20 @@ class MemoryIndexEntry(StrictBaseModel):
     tags: list[str] = Field(default_factory=list)
     summary: str
     provenance: list[str]
+
+    @model_validator(mode="after")
+    def validate_memory_index_entry(self) -> MemoryIndexEntry:
+        if not self.id.strip() or not self.claim_id.strip() or not self.entry_path.strip():
+            raise ValueError("memory index entry requires id, claim_id, and entry_path")
+        if not self.provenance:
+            raise ValueError("memory index entry requires provenance")
+        if not _has_run_artifact_provenance(self.provenance):
+            raise ValueError("memory index entry provenance requires a run artifact reference")
+        _validate_memory_text_boundary(
+            "memory index entry",
+            [self.summary, self.entry_path, *self.tags, *self.provenance],
+        )
+        return self
 
 
 class MemoryIndex(StrictBaseModel):
@@ -2628,6 +3354,121 @@ class AgentRunStatusReport(StrictBaseModel):
             if entry.agent in seen:
                 raise ValueError(f"duplicate agent_run_status entry: {entry.agent}")
             seen.add(entry.agent)
+        return self
+
+
+PressureState = Literal[
+    "pending_not_run_or_partial",
+    "completed_no_candidate_found_in_scope",
+    "candidate_present_needs_admissibility",
+    "admissible_refutation",
+    "inadmissible_pressure",
+]
+
+
+class PressureLateMarker(StrictBaseModel):
+    """Local late-pressure marker for later Update Inbox conversion.
+
+    This is not an Update Inbox entry. It is deterministic scheduling metadata
+    only: ``dedupe_key`` lets Task 05 convert it into exactly one inbox event
+    without changing proof/source/evidence/refutation/grade ownership here.
+    """
+
+    id: str
+    type: Literal["example_pressure", "counterexample_pressure"]
+    origin_stage: Literal["examples", "counterexamples"]
+    origin_artifact: str
+    origin_artifact_id: str
+    artifact_revision_or_hash: str
+    locked_claim_id: str
+    route_id_or_step_id: str
+    scope: Literal["whole_claim", "proof_step", "route"]
+    pressure_state: PressureState
+    lifecycle_state_at_creation: str
+    late_after_strategy: bool
+    dedupe_key: str
+    created_at: str
+    effect: Literal["scheduling_only"] = "scheduling_only"
+    advisory_only: Literal[True] = True
+    update_inbox_entry: Literal[False] = False
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_marker_scope(self) -> PressureLateMarker:
+        expected_type = (
+            "example_pressure" if self.origin_stage == "examples" else "counterexample_pressure"
+        )
+        if self.type != expected_type:
+            raise ValueError("late pressure marker type must match origin_stage")
+        if not self.dedupe_key.strip():
+            raise ValueError("late pressure marker requires a dedupe_key")
+        if self.origin_artifact.startswith("/") or ".." in self.origin_artifact.split("/"):
+            raise ValueError("late pressure origin_artifact must be run-relative")
+        if not self.artifact_revision_or_hash.strip():
+            raise ValueError("late pressure marker requires artifact_revision_or_hash")
+        if not self.route_id_or_step_id.strip():
+            raise ValueError("late pressure marker requires route_id_or_step_id")
+        return self
+
+
+class PressureStatusEntry(StrictBaseModel):
+    """Derived example/counterexample pressure state.
+
+    Advisory process context only. It records whether pressure is pending,
+    empty, admissible, inadmissible, or awaiting admissibility. It cannot carry
+    checked evidence or refutation authority; those remain owned by examples,
+    counterexamples, computation checks, and validators.
+    """
+
+    kind: Literal["examples", "counterexamples"]
+    pressure_state: PressureState
+    agent_status: Literal["not_run", "queued", "running", "done", "failed", "skipped", "no_board"]
+    artifact_path: str
+    candidate_count: int = Field(ge=0)
+    admissible_refutation_count: int = Field(ge=0, default=0)
+    inadmissible_pressure_count: int = Field(ge=0, default=0)
+    needs_admissibility_count: int = Field(ge=0, default=0)
+    late_markers: list[PressureLateMarker] = Field(default_factory=list)
+    effect: Literal["pressure_context_only"] = "pressure_context_only"
+    advisory_only: Literal[True] = True
+
+    @model_validator(mode="after")
+    def validate_counts_match_state(self) -> PressureStatusEntry:
+        if self.kind == "examples" and self.admissible_refutation_count:
+            raise ValueError("example pressure cannot carry refutation counts")
+        if self.pressure_state == "admissible_refutation" and not self.admissible_refutation_count:
+            raise ValueError("admissible_refutation state requires an admissible refutation count")
+        if self.pressure_state == "candidate_present_needs_admissibility" and not self.needs_admissibility_count:
+            raise ValueError(
+                "candidate_present_needs_admissibility state requires a pending-admissibility count"
+            )
+        if self.pressure_state == "inadmissible_pressure" and not self.inadmissible_pressure_count:
+            raise ValueError("inadmissible_pressure state requires an inadmissible pressure count")
+        if self.artifact_path.startswith("/") or ".." in self.artifact_path.split("/"):
+            raise ValueError("pressure artifact_path must be run-relative")
+        return self
+
+
+class PressureStatusReport(StrictBaseModel):
+    """Run-level async pressure sidecar.
+
+    Optional/additive. It is derived from existing artifacts and is intended for
+    UI/scheduling context only; it never changes grade, evidence, source,
+    theorem, proof, final-report, memory, or Update Inbox ownership.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    entries: list[PressureStatusEntry]
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_entries(self) -> PressureStatusReport:
+        kinds = [entry.kind for entry in self.entries]
+        if len(kinds) != len(set(kinds)):
+            raise ValueError("pressure_status entries must be unique by kind")
         return self
 
 
@@ -2843,6 +3684,8 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "loop_control": LoopControl,
     "strategy_synthesis": StrategySynthesis,
     "strategy_brief": StrategyBrief,
+    "time_allocation": TimeAllocationPlan,
+    "update_inbox": UpdateInboxReport,
     "human_choice": HumanChoice,
     "human_example_feedback": HumanExampleFeedback,
     "example_feedback_summary": ExampleFeedbackSummary,
@@ -2855,6 +3698,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "human_time_allocation_context": HumanTimeAllocationContext,
     "front_half_run": FrontHalfRunReport,
     "agent_run_status": AgentRunStatusReport,
+    "pressure_status": PressureStatusReport,
     "memory_entry": MemoryEntry,
     "memory_index": MemoryIndex,
     "memory_context": MemoryContext,

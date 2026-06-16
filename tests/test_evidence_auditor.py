@@ -19,6 +19,15 @@ from espresso_proof.verifier import audit_evidence, verify_check
 FIXTURES = Path("tests/fixtures")
 
 
+def _mark_claim_clear(run_dir: Path) -> None:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+
+
 def _run_with_machine_check(tmp_path: Path, *, kind: str, expression: str, expected: str) -> Path:
     # vague claim => idea_grade unclear with empty survived/failed (no evidence
     # cross-checks), so the computation can be audited in isolation.
@@ -45,6 +54,7 @@ def _run_with_machine_check(tmp_path: Path, *, kind: str, expression: str, expec
         ],
     }
     write_yaml(run_dir / artifacts["computation_checks"], comp)
+    _mark_claim_clear(run_dir)
     validate_run(run_dir)
     return run_dir
 
@@ -133,6 +143,7 @@ def test_examples_stage_never_self_certifies_machine_check(tmp_path: Path) -> No
     from tests.test_front_half_agents import _FakeClient
 
     run_dir = run_mock_critique("ea_demo", FIXTURES / "vague_claim_unclear" / "input.md", tmp_path)
+    _mark_claim_clear(run_dir)
     client = _FakeClient(
         {
             "examples": [

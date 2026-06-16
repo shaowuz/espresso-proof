@@ -152,6 +152,7 @@ def _looks_imprecise(
 def _understanding_claim(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     artifacts = context["manifest"]["artifacts"]
     current = dict(context["claim"])
+    current_ledger = dict(context.get("hypothesis_ledger") or {})
 
     raw_text = str(current["raw_text"])
     payload = {
@@ -190,7 +191,10 @@ def _understanding_claim(*, run_dir: Path, client: LLMClient, context: dict) -> 
     ambiguous_terms = safe_list(raw.get("ambiguous_terms")) or list(
         current.get("ambiguous_terms") or []
     )
-    missing_or_unclear = safe_list(raw.get("missing_or_unclear"))
+    if "missing_or_unclear" in raw:
+        missing_or_unclear = safe_list(raw.get("missing_or_unclear"))
+    else:
+        missing_or_unclear = list(current_ledger.get("missing_or_unclear") or [])
     notes = safe_list(raw.get("notes"))
 
     # Agent-supplied precision judgement, with a conservative safety floor: even
@@ -199,6 +203,8 @@ def _understanding_claim(*, run_dir: Path, client: LLMClient, context: dict) -> 
     # never upgrades any proof/source/evidence status.
     claim_precision = raw.get("claim_precision")
     if claim_precision not in {"precise", "imprecise"}:
+        claim_precision = current_ledger.get("claim_precision")
+    if claim_precision not in {"precise", "imprecise", "unclear"}:
         claim_precision = "unclear"
     if claim_precision == "precise" and _looks_imprecise(
         conclusion=conclusion, objects=objects, missing_or_unclear=missing_or_unclear
@@ -242,4 +248,3 @@ def _understanding_claim(*, run_dir: Path, client: LLMClient, context: dict) -> 
 # ---------------------------------------------------------------------------
 # S2 — 02 Literature Review (candidate references only)
 # ---------------------------------------------------------------------------
-

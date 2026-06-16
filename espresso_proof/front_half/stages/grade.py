@@ -10,7 +10,7 @@ from ...hypothesis_normalization import normalize_ambient_object_hypotheses
 from ...io import read_yaml, write_yaml
 from ...llm_agents import LLMClient, load_agent_context, safe_list, safe_text
 from ...memo import build_concise_memo
-from ...memory import write_run_memory
+from ...memory import build_grade_memory_entry, load_memory_index, write_run_memory
 from ...models import (
     Claim,
     ComputationChecks,
@@ -20,6 +20,7 @@ from ...models import (
     HypothesisLedger,
     IdeaGrade,
     LiteratureReviewReport,
+    MemoryEntry,
     Review,
     SourceGroundingReport,
     StrategyBrief,
@@ -116,17 +117,30 @@ def _grade_memory_memo(*, run_dir: Path, client: LLMClient, context: dict) -> di
         "proof_language_status": current.get("proof_language_status", "idea_sketch"),
     }
     IdeaGrade.model_validate(grade)
+    project_dir = run_dir.parents[1]
+    run_id = context["manifest"]["run_id"]
+    MemoryEntry.model_validate(
+        build_grade_memory_entry(
+            grade,
+            read_yaml(run_dir / artifacts["strategy_brief"]),
+            project_id=project_dir.name,
+            run_id=run_id,
+        )
+    )
+    load_memory_index(project_dir)
     write_yaml(run_dir / artifacts["idea_grade"], grade)
 
     # 21 Memory: refresh advisory memory from the (now live) artifacts. Every
     # entry is advisory-only (MemoryEntry has no status field).
-    project_dir = run_dir.parents[1]
     write_run_memory(
         project_dir,
         run_dir,
         project_id=project_dir.name,
-        run_id=context["manifest"]["run_id"],
+        run_id=run_id,
     )
+    from ...surface_warnings import refresh_final_report_disclosures
+
+    refresh_final_report_disclosures(run_dir)
 
     # 22 Concise Answer: ensure the memo renders from the live content (read-only;
     # raises here if the memo cannot be built, surfacing real breakage).
@@ -227,7 +241,7 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
         "missing_hypotheses": list(current.get("missing_hypotheses") or [])
         or list(ledger.get("missing_or_unclear") or []),
         "source_gaps": list(current.get("source_gaps") or [])
-        or (["No step is source_backed yet."] if source_gap else []),
+        or (["No step is reference-supported yet."] if source_gap else []),
         "repair_options": list(current.get("repair_options") or []),
         "next_cheapest_test": current.get("next_cheapest_test", "")
         or "Test the leading route on small/canonical cases and pin its key lemma.",

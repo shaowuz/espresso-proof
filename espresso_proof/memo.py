@@ -28,9 +28,11 @@ from .descriptions import (
 from .external_tool_runner import run_completed_cleanly
 from .failure_pattern_bank import failure_pattern_allocation_hints
 from .io import read_yaml
-from .proof_language import scrub_proof_language
+from .proof_language import scrub_proof_language, scrub_source_support_language
+from .research_bank import load_bankable_dict
 from .route_table import build_route_step_rows, render_route_step_table_lines
 from .subgoal_graph import render_proof_search_lines
+from .surface_warnings import collect_surface_warnings, render_warning_lines
 
 
 # Conservative defaults for a proof-route field that has no specific artifact
@@ -170,16 +172,19 @@ def render_proof_route_steps(
     # Self-safe: a step's echoed free text (e.g. needed_theorem) can never render
     # global proof-complete language, regardless of caller. Idempotent with the
     # whole-memo scrub in build_concise_memo. Never upgrades status.
-    return [scrub_proof_language(line) for line in lines]
+    return [scrub_source_support_language(line) for line in lines]
 
 
 def build_concise_memo(run_dir: Path) -> str:
     """Render a compact memo string from a run's validated artifacts.
 
-    Callers must run ``validate_run`` first; this function assumes the run is
-    valid and only reads/echoes artifact fields via the run manifest.
+    This is a final user-facing surface, so it validates before rendering and
+    then only reads/echoes artifact fields via the run manifest.
     """
     run_dir = Path(run_dir)
+    from .validators import validate_run
+
+    validate_run(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     artifacts = manifest.get("artifacts", {})
 
@@ -192,6 +197,9 @@ def build_concise_memo(run_dir: Path) -> str:
     strategy_brief = artifact("strategy_brief")
     source_grounding = artifact("source_grounding")
     computations = artifact("computation_checks")
+    examples = load_bankable_dict(run_dir, "examples", manifest)
+    counterexamples = load_bankable_dict(run_dir, "counterexamples", manifest)
+    tests = artifact("tests")
 
     status = grade.get("status", "unknown")
     score = grade.get("score", "?")
@@ -208,6 +216,11 @@ def build_concise_memo(run_dir: Path) -> str:
     if _ta_rel and (run_dir / _ta_rel).exists():
         theorem_applicability = read_yaml(run_dir / _ta_rel)
 
+    update_inbox: dict = {}
+    _ui_rel = optional_artifacts.get("update_inbox")
+    if _ui_rel and (run_dir / _ui_rel).exists():
+        update_inbox = read_yaml(run_dir / _ui_rel)
+
     # Autonomous literature search (optional): candidate sources found without a
     # human-provided source. Rendered as "Found by autonomous literature search"
     # + "Proposed, not checked"; it never claims reference support by itself.
@@ -221,7 +234,6 @@ def build_concise_memo(run_dir: Path) -> str:
         {ref.get("status") for ref in source_grounding.get("source_refs", []) if ref.get("status")}
         | {step.get("status") for step in source_grounding.get("steps", []) if step.get("status")}
     )
-
     top = (strategy_brief.get("top_strategies") or [])
     next_test = (grade.get("next_cheapest_test") or "none recorded").strip()
 
@@ -246,7 +258,7 @@ def build_concise_memo(run_dir: Path) -> str:
     # translate to the product vocabulary (same rewrite as the dashboard).
     evidence_summary = sorted({evidence_phrase(s) for s in source_statuses})
     shown_gaps = [
-        str(g).replace("source_backed", "reference-supported").rstrip(".")
+        scrub_source_support_language(g).rstrip(".")
         for g in source_gaps
     ]
     lines.append(
@@ -256,6 +268,21 @@ def build_concise_memo(run_dir: Path) -> str:
         + ("; ".join(evidence_summary) if evidence_summary else "none recorded")
         + "."
     )
+    warning_lines = render_warning_lines(collect_surface_warnings(
+        grade=grade,
+        review=review,
+        examples=examples,
+        counterexamples=counterexamples,
+        tests=tests,
+        source_grounding=source_grounding,
+        theorem_applicability=theorem_applicability,
+        update_inbox=update_inbox,
+    ))
+    if warning_lines:
+        lines.append("")
+        lines.append("Open blockers / pending checks:")
+        for warning in warning_lines:
+            lines.append(f"  - {warning}")
     # Proof-route step table (Goal 24): one row per local step, separating local
     # step evidence from the whole-claim/route status above. Built from validated
     # artifacts (source grounding + confirmed scoped computations), using the
@@ -292,8 +319,8 @@ def build_concise_memo(run_dir: Path) -> str:
                 lines.append(f"  Why relevant: {cand['why_relevant']}")
         if autonomous_retrieval.get("earned_source_backed"):
             lines.append(
-                "  A candidate was handed to source grounding and a reference now supports a step "
-                "(see the proof-route step above)."
+                "  A candidate was handed to source grounding; source_grounding currently "
+                "records reference support for at least one step (see the proof-route step above)."
             )
         elif autonomous_retrieval.get("grounded"):
             lines.append(
@@ -441,11 +468,15 @@ def build_concise_memo(run_dir: Path) -> str:
         mc = read_yaml(run_dir / optional["memory_context"])
         matched = mc.get("matched_entries", [])
         if matched:
+            schema_version = int(mc.get("schema_version") or 1)
             lines.append("")
             lines.append("Memory from prior runs (advisory; never changes status):")
             for m in matched:
                 # recommended_use / type are internal tokens; render as words.
-                use = str(m.get("recommended_use") or "").replace("_", " ")
+                if schema_version < 2 or m.get("revalidation_required"):
+                    use = "pending revalidation; no action"
+                else:
+                    use = str(m.get("recommended_use") or "").replace("_", " ")
                 kind = str(m.get("type") or "").replace("_", " ")
                 lines.append(
                     f"  [{use}] {m.get('summary')} "
@@ -507,6 +538,6 @@ def build_concise_memo(run_dir: Path) -> str:
     )
     # Display-layer safety: redact any global proof-complete overclaim that an
     # echoed free-text artifact field (objection / risk / explanation / summary)
-    # might carry. Typed status descriptions are unaffected (the sanitizer only
-    # matches global "the whole theorem is proved" language). Never upgrades status.
-    return scrub_proof_language("\n".join(lines))
+    # might carry, and translate raw source-support enum vocabulary. Typed status
+    # descriptions are unaffected. Never upgrades status.
+    return scrub_source_support_language("\n".join(lines))

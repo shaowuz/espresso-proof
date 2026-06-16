@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
@@ -21,6 +22,7 @@ from espresso_proof.memory import summarize_memory, write_memory_entry
 from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.proof_language import contains_proof_language, scrub_proof_language
 from espresso_proof.run_dashboard import render_run_dashboard
+from espresso_proof.surface_warnings import refresh_final_report_disclosures
 from espresso_proof.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
@@ -87,6 +89,7 @@ def _run_with_forged_overclaims(tmp_path: Path) -> tuple[Path, dict]:
     grade["next_cheapest_test"] = "None needed: Espresso proved the claim."
     grade["source_gaps"] = ["proof-close; no gaps remain."]
     write_yaml(run / artifacts["idea_grade"], grade)
+    refresh_final_report_disclosures(run)
     validate_run(run)  # forged free-text fields are not cross-validated; run stays valid
     return run, artifacts
 
@@ -116,25 +119,23 @@ def test_inspect_does_not_render_global_proof_language(tmp_path: Path) -> None:
     assert "Run is valid" in result.stdout
 
 
-def test_memory_summary_does_not_render_global_proof_language(tmp_path: Path) -> None:
+def test_memory_summary_rejects_global_proof_language(tmp_path: Path) -> None:
     run = run_mock_critique("g20mem", FIXTURES / "promising_but_unproved" / "input.md", tmp_path)
     project_dir = run.parent.parent
-    write_memory_entry(
-        project_dir,
-        {
-            "id": "mem_overclaim",
-            "timestamp": "2026-06-10T00:00:00+00:00",
-            "project": project_dir.name,
-            "type": "reviewer_objection",
-            "claim_id": "claim_001",
-            "summary": "A prior run noted: we proved the theorem, proof-close.",
-            "provenance": ["projects/x/runs/y/review.yaml"],
-            "reusable_lesson": "Espresso proved the claim last time.",
-        },
-    )
-    summary = summarize_memory(project_dir, claim_text="group order p^2 abelian")
-    assert summary  # non-empty
-    assert contains_proof_language(summary) is None
+    with pytest.raises(ValueError, match="memory entry cannot store current mathematical status"):
+        write_memory_entry(
+            project_dir,
+            {
+                "id": "mem_overclaim",
+                "timestamp": "2026-06-10T00:00:00+00:00",
+                "project": project_dir.name,
+                "type": "reviewer_objection",
+                "claim_id": "claim_001",
+                "summary": "A prior run noted: we proved the theorem, proof-close.",
+                "provenance": ["projects/x/runs/y/review.yaml"],
+                "reusable_lesson": "Espresso proved the claim last time.",
+            },
+        )
 
 
 # --- behavioral safety -----------------------------------------------------

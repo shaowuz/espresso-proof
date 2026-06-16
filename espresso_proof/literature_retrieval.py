@@ -28,6 +28,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .claim_clear import ensure_claim_clear_for_downstream
 from .io import read_yaml, write_yaml
 from .models import LiteratureRetrievalReport
 
@@ -160,6 +161,7 @@ def retrieve_sources(
 ) -> dict:
     """Write literature_retrieval.yaml (candidate sources) and register it."""
     run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     report = build_retrieval_report(
         run_dir,
         corpus_dir=corpus_dir,
@@ -197,6 +199,7 @@ def retrieve_and_ground(
     from .models import TheoremExtractionReport
 
     run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     report = retrieve_sources(
         run_dir, corpus_dir=corpus_dir, query=query, providers=["local_corpus"], max_results=max_results
     )
@@ -207,7 +210,13 @@ def retrieve_and_ground(
     elif hits:
         chosen = hits[0]
     if chosen is None or not chosen.get("local_path"):
-        return {"retrieval": report, "grounded": False, "reason": "no readable candidate source"}
+        return {
+            "retrieval": report,
+            "grounded": False,
+            "reason": "no readable candidate source",
+            "chosen_hit_id": None,
+            "chosen_local_path": "",
+        }
 
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])
@@ -226,4 +235,10 @@ def retrieve_and_ground(
     grounding = ground_run(
         run_dir=run_dir, theorem_extraction_path=run_dir / "theorem_extraction.yaml"
     )
-    return {"retrieval": report, "grounded": True, "source_grounding": grounding}
+    return {
+        "retrieval": report,
+        "grounded": True,
+        "source_grounding": grounding,
+        "chosen_hit_id": chosen["id"],
+        "chosen_local_path": chosen["local_path"],
+    }

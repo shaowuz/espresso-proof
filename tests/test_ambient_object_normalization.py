@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from espresso_proof.front_half_agents import run_front_half_agent_pass
+from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.hypothesis_matching import match_hypothesis_semantically
 from espresso_proof.hypothesis_normalization import (
     AMBIENT_GROUP_HYPOTHESIS,
@@ -279,6 +280,13 @@ def _p2_run_with_normalized_claim(tmp_path: Path) -> Path:
         ]
     )
     write_yaml(run_dir / "locked_claim.yaml", claim)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    ensure_claim_clear_for_downstream(run_dir)
     sg = read_yaml(run_dir / "source_grounding.yaml")
     sg["source_refs"] = []
     sg["steps"] = [

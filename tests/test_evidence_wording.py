@@ -18,9 +18,11 @@ from typer.testing import CliRunner
 
 from espresso_proof.cli import app
 from espresso_proof.descriptions import (
+    describe_proof_language,
     evidence_phrase,
     judgment_tier_phrase,
     objection_phrase,
+    route_source_phrase,
 )
 from espresso_proof.failure_pattern_bank import audit_failure_patterns
 from espresso_proof.mathematical_judgment import judge_run
@@ -102,6 +104,23 @@ def test_evidence_phrase_required_wording() -> None:
     for token in ("source_backed", "computation_checked", "instance_checked",
                   "human_needed", "not_found", "unverified"):
         assert token not in evidence_phrase(token)
+
+
+def test_source_checked_argument_wording_is_scoped_reference_support() -> None:
+    phrase = describe_proof_language("source_checked_argument")
+
+    assert phrase == "an argument with reference-supported steps (not a checked proof)"
+    assert "source-checked" not in phrase
+    assert "source checked" not in phrase
+    assert "verified proof" not in phrase
+
+
+def test_route_source_phrase_is_advisory_not_earned_evidence() -> None:
+    phrase = route_source_phrase("source_backed")
+
+    assert phrase == "route source label; verify step grounding"
+    assert phrase != evidence_phrase("source_backed")
+    assert "Reference supports this stated claim" not in phrase
 
 
 def test_objection_phrase_required_wording() -> None:
@@ -268,6 +287,11 @@ def _run_with_optional_artifacts(tmp_path: Path) -> Path:
     run = run_mock_critique(
         "wd", FIXTURES / "source_misapplication_very_general_to_all" / "input.md", tmp_path
     )
+    ledger_path = _artifact_path(run, "hypothesis_ledger")
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
     judge_run(run)
     audit_failure_patterns(run)
     verify_finite_groups(run, primes=[2, 3])
@@ -275,13 +299,10 @@ def _run_with_optional_artifacts(tmp_path: Path) -> Path:
 
 
 # NOTE on scope: these renderers translate every *status field* into evidence
-# wording. They still echo producer-authored free-text artifact fields verbatim
-# (e.g. a strategy route's ``main_risk`` prose, or a judgment finding's
-# ``explanation``), which may quote an internal token inside a sentence. Rewording
-# that upstream prose belongs to a separate goal (it touches artifact producers,
-# not the presentation layer). These tests therefore pin the renderer-controlled
-# label surfaces: no status enum is shown as a bracketed/labelled value, and the
-# required evidence phrases are used.
+# wording. They also scrub raw source-support enum vocabulary when it appears in
+# producer-authored free text. General mathematical prose remains producer text;
+# source/proof/evidence authority still belongs to validators and checked
+# artifacts, not to the renderer.
 
 
 def test_memo_label_surfaces_use_evidence_wording(tmp_path: Path) -> None:

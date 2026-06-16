@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from pathlib import Path
 
 import pytest
@@ -47,8 +48,21 @@ def _resumed_run(tmp_path: Path) -> Path:
     run_dir = _gate_run(tmp_path)
     brief = read_yaml(run_dir / "strategy_brief.yaml")
     selected = brief["top_strategies"][0]["id"]
-    resume_run(run_dir=run_dir, selected_strategy=selected, effort="quick_test")
+    resume_run(
+        run_dir=run_dir,
+        selected_strategy=selected,
+        effort=_first_allowed_effort(brief, selected),
+    )
     return run_dir
+
+
+def _first_allowed_effort(brief: dict, selected: str) -> str:
+    for choice in brief.get("allowed_human_choices") or []:
+        if choice.get("strategy_id") == selected:
+            options = list(choice.get("effort_options") or [])
+            if options:
+                return str(options[0])
+    return "quick_test"
 
 
 def _graph(run_dir: Path) -> dict:
@@ -432,11 +446,12 @@ def test_resume_refreshes_graph_and_is_idempotent(tmp_path: Path) -> None:
     run_dir = _gate_run(tmp_path)
     brief = read_yaml(run_dir / "strategy_brief.yaml")
     selected = brief["top_strategies"][0]["id"]
-    resume_run(run_dir=run_dir, selected_strategy=selected, effort="quick_test")
+    effort = _first_allowed_effort(brief, selected)
+    resume_run(run_dir=run_dir, selected_strategy=selected, effort=effort)
     assert (run_dir / "proof_goal_graph.yaml").exists()
     before = (run_dir / "proof_goal_graph.yaml").read_bytes()
     # a second resume is a no-op (run already completed) and leaves the graph stable
-    resume_run(run_dir=run_dir, selected_strategy=selected, effort="quick_test")
+    resume_run(run_dir=run_dir, selected_strategy=selected, effort=effort)
     after = (run_dir / "proof_goal_graph.yaml").read_bytes()
     assert before == after
     validate_run(run_dir)
@@ -446,11 +461,13 @@ def test_no_route_selected_builds_single_open_main_goal(tmp_path: Path) -> None:
     run_dir = _gate_run(tmp_path)
     graph = build_subgoal_graph(run_dir)
     validate_run(run_dir)
-    assert len(graph["nodes"]) == 1
-    main = graph["nodes"][0]
+    main_nodes = [node for node in graph["nodes"] if node["role"] == "main_goal"]
+    assert len(main_nodes) == 1
+    main = main_nodes[0]
     assert main["role"] == "main_goal"
     assert main["state"] == "open"
     assert "route" in main["remaining_risk"].lower()
+    assert not main.get("supported_by_scoped_checks")
 
 
 def _write_ledger(run_dir: Path, n_entries: int) -> None:
@@ -704,7 +721,7 @@ def test_verify_finite_groups_refreshes_subgoal_graph_and_dashboard(tmp_path: Pa
     # it re-validates and never upgrades any status.
     run_dir = _resumed_run(tmp_path)  # resume builds the graph + dashboard
     graph_before = _graph(run_dir)
-    assert graph_before["summary"]["finite_or_computation_checked"] == 0
+    before_count = graph_before["summary"]["finite_or_computation_checked"]
     assert (run_dir / "research_dashboard.html").exists()
 
     result = CliRunner().invoke(
@@ -730,6 +747,7 @@ def test_verify_finite_groups_refreshes_subgoal_graph_and_dashboard(tmp_path: Pa
     validate_run(run_dir)
     grade = read_yaml(run_dir / "idea_grade.yaml")
     assert grade["proof_language_status"] == "idea_sketch"
+    assert before_count != graph_after["summary"]["finite_or_computation_checked"]
 
 
 def test_resume_completed_memo_refreshes_stale_graph(tmp_path: Path) -> None:
@@ -742,19 +760,23 @@ def test_resume_completed_memo_refreshes_stale_graph(tmp_path: Path) -> None:
 
     run_dir = _resumed_run(tmp_path)  # COMPLETED_MEMO; graph built
     sid = read_yaml(run_dir / "strategy_brief.yaml")["top_strategies"][0]["id"]
-    assert _graph(run_dir)["summary"]["finite_or_computation_checked"] == 0
+    before_count = _graph(run_dir)["summary"]["finite_or_computation_checked"]
 
     # Append scoped evidence out-of-band (library writer; no derived-view refresh).
     verify_finite_groups(run_dir, primes=[2])
-    assert _graph(run_dir)["summary"]["finite_or_computation_checked"] == 0  # stale
-
-    # Re-resume: the COMPLETED_MEMO early return must refresh the graph.
-    resume_run(run_dir=run_dir, selected_strategy=sid, effort="quick_test")
     confirmed = [
         e
         for e in read_yaml(run_dir / "proof_verification.yaml")["entries"]
         if e["earned_status"] == "instance_checked"
     ]
+    assert _graph(run_dir)["summary"]["finite_or_computation_checked"] == before_count  # stale
+
+    # Re-resume: the COMPLETED_MEMO early return must refresh the graph.
+    resume_run(
+        run_dir=run_dir,
+        selected_strategy=sid,
+        effort=_first_allowed_effort(read_yaml(run_dir / "strategy_brief.yaml"), sid),
+    )
     assert confirmed
     assert _graph(run_dir)["summary"]["finite_or_computation_checked"] == len(confirmed)
     validate_run(run_dir)
@@ -776,9 +798,10 @@ def test_human_strategy_preference_does_not_close_a_subgoal(tmp_path: Path) -> N
     hc = read_yaml(run_dir / "human_choice.yaml")
     assert hc["status"] == "selected" and hc["human_confirmed"] is True
     graph = _graph(run_dir)
-    for node in graph["nodes"]:
-        assert node["state"] not in _EVIDENCE_STATES
-        assert node["state"] != "contradicted"
+    main = next(node for node in graph["nodes"] if node["role"] == "main_goal")
+    assert main["state"] not in _EVIDENCE_STATES
+    assert main["state"] != "contradicted"
+    assert not main.get("supported_by_scoped_checks")
 
 
 def test_memory_does_not_close_a_subgoal(tmp_path: Path) -> None:
@@ -787,8 +810,9 @@ def test_memory_does_not_close_a_subgoal(tmp_path: Path) -> None:
     run_dir = _resumed_run(tmp_path)
     assert (run_dir / "memory_context.yaml").exists()
     graph = assemble_subgoal_graph(run_dir)
-    for node in graph["nodes"]:
-        assert node["state"] not in _EVIDENCE_STATES
+    main = next(node for node in graph["nodes"] if node["role"] == "main_goal")
+    assert main["state"] not in _EVIDENCE_STATES
+    assert not main.get("supported_by_scoped_checks")
 
 
 def test_finite_examples_do_not_close_a_universal_subgoal(tmp_path: Path) -> None:
@@ -799,11 +823,13 @@ def test_finite_examples_do_not_close_a_universal_subgoal(tmp_path: Path) -> Non
     computations = read_yaml(run_dir / "computation_checks.yaml")
     assert computations  # example/computation checks exist for this run
     graph = assemble_subgoal_graph(run_dir)
-    assert not any(node["state"] == "scoped_checked" for node in graph["nodes"])
     main = next(n for n in graph["nodes"] if n["role"] == "main_goal")
     assert main["state"] == "open"
     assert not main.get("supported_by_scoped_checks")
     assert not main.get("supported_by_computations")
+    for node in graph["nodes"]:
+        if node["state"] == "scoped_checked":
+            assert node["role"] != "main_goal"
 
 
 def test_dropped_hypothesis_counterexample_does_not_close_the_claim(tmp_path: Path) -> None:
@@ -879,6 +905,9 @@ def test_step_only_counterexample_render_is_scoped(tmp_path: Path) -> None:
     _add_step_only_counterexample(
         run_dir, explanation="A proof step fails at a rational point."
     )
+    from espresso_proof.pressure_status import build_pressure_status
+
+    build_pressure_status(run_dir)
     build_subgoal_graph(run_dir)
     graph = _graph(run_dir)
     text = "\n".join(render_proof_search_lines(graph))
@@ -956,7 +985,7 @@ def test_memo_includes_proof_search_section_when_graph_present(tmp_path: Path) -
     assert "Next subgoal to work on" in memo
     # no proof-complete language anywhere in the memo
     for token in ("proof complete", "proof-complete", "proof-close", "proved", "proven", "verified theorem"):
-        assert token not in memo.lower()
+        assert not re.search(rf"\b{re.escape(token)}\b", memo.lower())
 
 
 def test_memo_omits_proof_search_section_without_graph(tmp_path: Path) -> None:

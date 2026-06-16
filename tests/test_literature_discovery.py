@@ -6,6 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
+from espresso_proof.claim_clear import ClaimClearBlockedError
 from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.literature_discovery import discover_local_literature
 from espresso_proof.live_search import parse_ads_json, parse_arxiv_atom, parse_crossref_json
@@ -22,6 +23,15 @@ from espresso_proof.validators import KernelValidationError, validate_run
 
 
 FIXTURES = Path("tests/fixtures")
+
+
+def _mark_claim_clear(run_dir: Path) -> None:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
 
 
 def test_local_literature_discovery_finds_hodge_candidates(tmp_path: Path) -> None:
@@ -54,6 +64,7 @@ def test_discover_literature_cli_writes_schema_valid_run_artifact(tmp_path: Path
         FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
         tmp_path,
     )
+    _mark_claim_clear(run_dir)
     runner = CliRunner()
 
     result = runner.invoke(
@@ -144,6 +155,7 @@ def test_live_discovery_cli_merges_fake_arxiv_and_web_results(tmp_path: Path) ->
         FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
         tmp_path,
     )
+    _mark_claim_clear(run_dir)
     runner = CliRunner()
 
     result = runner.invoke(
@@ -173,6 +185,7 @@ def test_pdf_ingestion_and_source_verification_can_source_back_exact_match(tmp_p
         FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
         tmp_path,
     )
+    _mark_claim_clear(run_dir)
     pdf_path = tmp_path / "source.pdf"
     pdf_path.write_bytes(
         b"%PDF-1.4\n"
@@ -233,6 +246,7 @@ def test_literature_review_agent_reads_source_and_compares_theorem(tmp_path: Pat
         FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
         tmp_path,
     )
+    _mark_claim_clear(run_dir)
     source_path = tmp_path / "hodge_source.txt"
     source_path.write_text(
         "Theorem 1.2. For all cubic fourfolds over base field C, "
@@ -267,6 +281,7 @@ def test_literature_review_agent_flags_very_general_theorem_for_universal_claim(
         FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
         tmp_path,
     )
+    _mark_claim_clear(run_dir)
     source_path = tmp_path / "very_general_source.txt"
     source_path.write_text(
         "Theorem 3.4. For a very general smooth cubic fourfold over base field C, "
@@ -302,6 +317,7 @@ def test_literature_review_agent_cannot_emit_source_backed_source(tmp_path: Path
         FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
         tmp_path,
     )
+    _mark_claim_clear(run_dir)
     source_path = tmp_path / "agent_source.txt"
     source_path.write_text(
         "Theorem 1.2. For all cubic fourfolds over base field C, "
@@ -330,6 +346,7 @@ def test_literature_review_agent_cli_writes_optional_artifact(tmp_path: Path) ->
         FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
         tmp_path,
     )
+    _mark_claim_clear(run_dir)
     source_path = tmp_path / "cli_source.txt"
     source_path.write_text(
         "Theorem 2.1. For all cubic fourfolds over base field C, "
@@ -361,12 +378,30 @@ def test_literature_review_agent_cli_writes_optional_artifact(tmp_path: Path) ->
     assert report.extracted_theorems
 
 
+def test_literature_review_agent_blocks_unclear_claim_before_source_read(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+
+    with pytest.raises(ClaimClearBlockedError, match="claim-clear gate"):
+        run_literature_review_agent(
+            run_dir=run_dir,
+            source_specs=[ReviewSourceSpec(source=str(tmp_path / "missing.txt"))],
+        )
+
+    assert not (run_dir / "literature_review_agent.yaml").exists()
+    validate_run(run_dir)
+
+
 def test_audit_theorem_applicability_cli_writes_condition_ledger(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
         "hodge_atoms",
         FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
         tmp_path,
     )
+    _mark_claim_clear(run_dir)
     source_path = tmp_path / "very_general_source.txt"
     source_path.write_text(
         "Theorem 3.4. For a very general smooth cubic fourfold over base field C, "
@@ -442,6 +477,9 @@ def test_source_backed_step_requires_theorem_applicability_artifact(tmp_path: Pa
     source_grounding["source_refs"][0]["authors"] = ["A. Author"]
     source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+    source_grounding["source_refs"][0]["statement_or_summary"] = (
+        "For a very general smooth cubic fourfold, the obstruction applies."
+    )
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
     source_grounding["steps"][0]["source_refs"] = [ref_id]
@@ -469,6 +507,9 @@ def test_source_backed_step_requires_applicable_theorem_conditions(tmp_path: Pat
     source_grounding["source_refs"][0]["authors"] = ["A. Author"]
     source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+    source_grounding["source_refs"][0]["statement_or_summary"] = (
+        "For a very general smooth cubic fourfold, the obstruction applies."
+    )
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
     source_grounding["steps"][0]["source_refs"] = [ref_id]
@@ -535,6 +576,9 @@ def _setup_source_backed_run(tmp_path: Path):
     source_grounding["source_refs"][0]["authors"] = ["A. Author"]
     source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+    source_grounding["source_refs"][0]["statement_or_summary"] = (
+        "For a smooth cubic fourfold, the obstruction applies."
+    )
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
     source_grounding["steps"][0]["source_refs"] = [ref_id]
@@ -733,6 +777,9 @@ def test_source_backed_step_requires_exact_applicability_locator(tmp_path: Path)
     source_grounding["source_refs"][0]["authors"] = ["A. Author"]
     source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+    source_grounding["source_refs"][0]["statement_or_summary"] = (
+        "For a smooth cubic fourfold, the obstruction applies."
+    )
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
     source_grounding["steps"][0]["source_refs"] = [ref_id]
@@ -759,7 +806,7 @@ def test_source_backed_step_requires_exact_applicability_locator(tmp_path: Path)
     manifest.setdefault("optional_artifacts", {})["theorem_applicability"] = "theorem_applicability.yaml"
     write_yaml(run_dir / "run_manifest.yaml", manifest)
 
-    with pytest.raises(KernelValidationError, match="exact applicability locator"):
+    with pytest.raises(KernelValidationError, match="locator does not match"):
         validate_run(run_dir)
 
 

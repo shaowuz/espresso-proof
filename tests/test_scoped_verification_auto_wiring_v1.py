@@ -16,6 +16,7 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
+from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.finite_group_verifier import cyclic_group_table
 from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.models import ScopedVerificationRequest
@@ -37,7 +38,15 @@ def _build(tmp_path: Path) -> Path:
 def run_mock_critique_pv(tmp_path: Path) -> Path:
     from espresso_proof.mock_pipeline import run_mock_critique
 
-    return run_mock_critique("aw", FIXTURES / "vague_claim_unclear" / "input.md", tmp_path)
+    run_dir = run_mock_critique("aw", FIXTURES / "vague_claim_unclear" / "input.md", tmp_path)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    ensure_claim_clear_for_downstream(run_dir)
+    return run_dir
 
 
 def _claim_id(run_dir: Path) -> str:

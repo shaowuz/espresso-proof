@@ -14,11 +14,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .claim_clear import ensure_claim_clear_for_downstream
 from .io import read_yaml, write_yaml
 from .llm_agents import LLMClient, append_prover_loop_round
 from .observability import append_agent_event, monotonic_ms, now_iso
 from .run_events import append_event
 from .run_lock import run_writer_lock
+from .surface_warnings import refresh_final_report_disclosures
 from .validators import validate_run
 
 # How many consecutive rounds with an identical blocker set count as no-progress.
@@ -33,6 +35,8 @@ STOP_REASONS = {
     "no_progress",
     "clean",
     "validation_error",
+    "time_allocation_ask_human",
+    "time_allocation_stop",
 }
 
 
@@ -41,7 +45,13 @@ def _snapshot_run(run_dir: Path) -> dict:
     mid-loop validation failure can be rolled back to the last valid state."""
 
     snap: dict = {}
-    for rel in ("prover_loop.yaml", "run_manifest.yaml"):
+    for rel in (
+        "prover_loop.yaml",
+        "run_manifest.yaml",
+        "time_allocation.yaml",
+        "update_inbox.yaml",
+        "final_report.md",
+    ):
         p = run_dir / rel
         snap[rel] = p.read_bytes() if p.exists() else None
     rounds_dir = run_dir / "prover_rounds"
@@ -138,6 +148,48 @@ def _grant_escalation_round(run_dir: Path, loop_path: str, attempts: list[dict])
     validate_run(run_dir)
 
 
+def _selected_route_allocation_stop(
+    run_dir: Path, selected_strategy_id: str | None
+) -> tuple[str, str] | None:
+    """Return a Time Allocation stop signal for the selected route, if present."""
+
+    if selected_strategy_id is None:
+        return None
+    try:
+        manifest = read_yaml(run_dir / "run_manifest.yaml")
+        rel = manifest.get("optional_artifacts", {}).get("time_allocation")
+        if not rel:
+            return None
+        plan = read_yaml(run_dir / rel)
+    except Exception:  # noqa: BLE001 - advisory schedule must fail closed elsewhere
+        return None
+    for entry in plan.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("route_id") != selected_strategy_id:
+            continue
+        action = entry.get("action")
+        if action in {"ask_human", "stop"}:
+            return str(action), str(entry.get("reason") or "")
+    return None
+
+
+def _record_time_allocation_stop(
+    run_dir: Path, *, loop_path: str, action: str, reason: str
+) -> None:
+    """Persist a scheduler stop without changing any attempt/math status."""
+
+    loop = read_yaml(run_dir / loop_path)
+    loop["loop_decision"] = action
+    loop["decision_reason"] = (
+        "Time Allocation selected "
+        f"{action} for the current route after reviewer-objection scheduling signals."
+        + (f" {reason}" if reason else "")
+    )
+    write_yaml(run_dir / loop_path, loop)
+    validate_run(run_dir)
+
+
 def continue_prover_loop(
     *,
     run_dir: Path,
@@ -185,6 +237,7 @@ def _continue_prover_loop_locked(
     max_rounds: int | None,
     client: LLMClient | None,
 ) -> dict:
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     validate_run(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     loop_path = manifest.get("optional_artifacts", {}).get("prover_loop")
@@ -252,6 +305,17 @@ def _continue_prover_loop_locked(
             stop_reason = "no_progress"
             break
 
+        allocation_stop = _selected_route_allocation_stop(
+            run_dir, loop.get("selected_strategy_id")
+        )
+        if allocation_stop is not None:
+            action, reason = allocation_stop
+            _record_time_allocation_stop(
+                run_dir, loop_path=loop_path, action=action, reason=reason
+            )
+            stop_reason = f"time_allocation_{action}"
+            break
+
         if escalate_now:
             # Fail closed: if granting the round's budget cannot keep the run valid,
             # stop the loop cleanly rather than propagate (the run is never left
@@ -287,6 +351,7 @@ def _continue_prover_loop_locked(
                 reviewer_set=reviewer_set,
                 client=client,
             )
+            refresh_final_report_disclosures(run_dir)
             validate_run(run_dir)
         except Exception as exc:  # noqa: BLE001 - fail closed + roll back
             # Restore the last valid state so a mid-loop failure never leaves a

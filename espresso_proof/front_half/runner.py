@@ -5,11 +5,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..claim_clear import claim_clear_for_downstream, record_claim_clear_block
 from ..io import read_yaml, write_yaml
 from ..llm_agents import LLMClient, load_agent_context
 from ..models import FrontHalfRunReport
 from ..observability import append_agent_event, monotonic_ms, now_iso
 from ..run_events import append_event
+from ..surface_warnings import refresh_final_report_disclosures
 from ..validators import validate_run
 from .registry import FRONT_HALF_STAGES, _STAGE_REGISTRY
 from . import stages as _stages  # noqa: F401 - ensure stage normalizers are registered
@@ -52,6 +54,21 @@ def run_front_half_agent_pass(
                 }
             )
             continue
+        gate = claim_clear_for_downstream(run_dir, stage=stage)
+        if not gate.clear:
+            record_claim_clear_block(run_dir, gate)
+            results.append(
+                {
+                    "stage": stage,
+                    "status": "skipped",
+                    "validation": "not_run",
+                    "errors": [
+                        "blocked by claim-clear gate: " + "; ".join(gate.reasons)
+                    ],
+                    "unsafe_language": [],
+                }
+            )
+            continue
         # Goal 54A: bracket each front-half agent call with provenance (events.jsonl
         # + agent_events.jsonl). Diagnostic only — never gates or upgrades status.
         provider = getattr(client, "provider", "unknown")
@@ -61,6 +78,7 @@ def run_front_half_agent_pass(
         try:
             context = load_agent_context(run_dir)
             outcome = normalizer(run_dir=run_dir, client=client, context=context) or {}
+            refresh_final_report_disclosures(run_dir)
             validate_run(run_dir)
         except Exception as exc:  # noqa: BLE001 - fail closed, record, optionally re-raise
             append_agent_event(

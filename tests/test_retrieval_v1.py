@@ -98,9 +98,16 @@ _HODGE_THM = (
 
 
 def _hodge_run(tmp_path: Path) -> Path:
-    return run_mock_critique(
+    run_dir = run_mock_critique(
         "hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path
     )
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+    return run_dir
 
 
 def test_candidate_with_locator_and_attribution_is_handed_to_grounding(tmp_path: Path) -> None:

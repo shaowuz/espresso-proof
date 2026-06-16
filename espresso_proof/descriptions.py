@@ -58,7 +58,7 @@ PROOF_LANGUAGE_DESCRIPTIONS: dict[str, str] = {
     "idea_sketch": "an idea sketch (not a checked proof)",
     "proof_candidate": "a candidate argument (not yet checked)",
     "source_checked_argument": (
-        "an argument with source-checked steps (not a full verified proof)"
+        "an argument with reference-supported steps (not a checked proof)"
     ),
     "computation_checked": (
         "a computation checked for a stated finite/computational scope "
@@ -66,6 +66,17 @@ PROOF_LANGUAGE_DESCRIPTIONS: dict[str, str] = {
     ),
     "lean_checked": "a Lean-checked proof",
     "human_confirmed": "a human-confirmed proof",
+}
+
+
+ROUTE_SOURCE_DESCRIPTIONS: dict[str, str] = {
+    "source_backed": "route source label; verify step grounding",
+    "candidate": "route source label: candidate only",
+    "unverified": "route source label: needs a check",
+    "misapplied": "route source label: applicability problem",
+    "not_found": "route source label: needs a source",
+    "mixed": "route source label: mixed support",
+    "missing": "route source label: missing support",
 }
 
 
@@ -82,6 +93,19 @@ def describe_proof_language(proof_language_status: str | None) -> str:
 
     return PROOF_LANGUAGE_DESCRIPTIONS.get(
         str(proof_language_status), "an unverified candidate (not a checked proof)"
+    )
+
+
+def route_source_phrase(source_status: str | None) -> str:
+    """Display wording for strategy-route source labels.
+
+    Route ``source_status`` is advisory ranking metadata. Earned source support
+    belongs to source-grounding steps, so route labels must never reuse the
+    source-grounding evidence wording.
+    """
+
+    return ROUTE_SOURCE_DESCRIPTIONS.get(
+        str(source_status), "route source label: not verified"
     )
 
 
@@ -124,7 +148,7 @@ EVIDENCE_PHRASES: dict[str, str] = {
     "source_backed": (
         "Reference supports this stated claim; see locator and applicability reason"
     ),
-    # A source-checked argument is reference support, not a machine check.
+    # Reference-supported steps are local support, not a machine check.
     "source_checked": (
         "Reference supports this stated claim; see locator and applicability reason"
     ),
@@ -204,6 +228,8 @@ LOOP_STOP_PHRASES: dict[str, str] = {
     "validation_error": "a validation problem stopped the loop safely",
     "loop_decision_ask_human": "the loop asked for your decision",
     "loop_decision_stop": "the loop chose to stop",
+    "time_allocation_ask_human": "the scheduler asked for your decision",
+    "time_allocation_stop": "the scheduler chose to stop",
 }
 
 

@@ -16,8 +16,9 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
-from .descriptions import describe_idea_status, evidence_phrase
+from .descriptions import describe_idea_status, route_source_phrase
 from .io import read_yaml
+from .proof_language import scrub_source_support_language
 from .research_bank import load_bankable_dict
 
 _NONE = "—"
@@ -36,7 +37,7 @@ def _h(value: object) -> str:
     """HTML-escape a value; conservative em dash for empty/None."""
 
     text = "" if value is None else str(value)
-    text = text.strip()
+    text = scrub_source_support_language(text.strip())
     return html.escape(text) if text else _NONE
 
 
@@ -44,10 +45,10 @@ def _example_result(value: object) -> str:
     return _EXAMPLE_RESULT_PHRASES.get(str(value), "Reported on examples (needs a check)")
 
 
-def _source_phrase(value: object) -> str:
+def _route_source_phrase(value: object) -> str:
     if not value:
         return _NONE
-    return html.escape(evidence_phrase(str(value)))
+    return html.escape(route_source_phrase(str(value)))
 
 
 def _row(label: str, value: str) -> str:
@@ -55,7 +56,11 @@ def _row(label: str, value: str) -> str:
 
 
 def _list_field(values: list | None) -> str:
-    items = [str(v).strip() for v in (values or []) if str(v).strip()]
+    items = [
+        scrub_source_support_language(str(v).strip())
+        for v in (values or [])
+        if str(v).strip()
+    ]
     if not items:
         return _NONE
     return "; ".join(html.escape(v) for v in items)
@@ -109,7 +114,7 @@ def _strategy_card(st: dict) -> str:
     lines.append(_row("Summary", _h(st.get("title"))))
     lines.append(_row("Status", html.escape(describe_idea_status(st.get("status")))))
     lines.append(_row("Score", _h(st.get("score"))))
-    lines.append(_row("Source", _source_phrase(st.get("source_status"))))
+    lines.append(_row("Source", _route_source_phrase(st.get("source_status"))))
     lines.append(_row("Reason", _h(st.get("why_this_route"))))
     lines.append(_row("Risk", _h(st.get("main_risk"))))
     lines.append(_row("Effort", _h(st.get("estimated_effort"))))

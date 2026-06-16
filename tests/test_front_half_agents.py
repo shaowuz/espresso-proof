@@ -11,13 +11,14 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from espresso_proof.claim_clear import CLAIM_CLEAR_BLOCKED_FRONT_HALF_STAGES
 from espresso_proof.cli import app
 from espresso_proof.front_half_agents import (
     FRONT_HALF_STAGES,
     registered_stages,
     run_front_half_agent_pass,
 )
-from espresso_proof.io import read_yaml
+from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.llm_agents import StubLLMClient
 from espresso_proof.mock_pipeline import run_mock_critique
 from espresso_proof.validators import validate_run
@@ -63,7 +64,9 @@ def test_front_half_pass_runs_registered_skips_rest_and_stays_valid(tmp_path: Pa
     by_stage = {s["stage"]: s["status"] for s in report["stages"]}
     registered = set(registered_stages())
     for stage, status in by_stage.items():
-        if stage in registered:
+        if stage in CLAIM_CLEAR_BLOCKED_FRONT_HALF_STAGES:
+            assert status == "skipped", report
+        elif stage in registered:
             assert status == "ok", report
         else:
             assert status == "skipped", report
@@ -83,10 +86,20 @@ class _FakeClient:
         return dict(self._payload)
 
 
+def _mark_claim_clear(run_dir: Path) -> None:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["missing_or_unclear"] = []
+    ledger["claim_precision"] = "precise"
+    write_yaml(ledger_path, ledger)
+
+
 def test_understanding_claim_strips_unsafe_model_fields(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
     original = read_yaml(run_dir / artifacts["locked_claim"])
 
@@ -141,6 +154,7 @@ def test_literature_review_downgrades_source_backed_to_candidate(tmp_path: Path)
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
 
     # A model trying to certify references as source_backed / misapplied.
@@ -190,6 +204,7 @@ def test_literature_review_with_stub_stays_valid(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
 
     run_front_half_agent_pass(
         run_dir=run_dir, client=StubLLMClient(), stages=["literature_review"]
@@ -201,6 +216,7 @@ def test_examples_cannot_self_certify_as_evidence(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
 
     # A model trying to declare an example "survived" and a computation "checked".
@@ -254,6 +270,7 @@ def test_examples_with_stub_stays_valid(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
 
     run_front_half_agent_pass(
         run_dir=run_dir, client=StubLLMClient(), stages=["examples"]
@@ -265,6 +282,7 @@ def test_counterexamples_dropped_hypothesis_and_proof_step_cannot_refute(tmp_pat
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
 
     # A model trying to refute the claim via a dropped hypothesis AND via a
@@ -334,6 +352,7 @@ def test_counterexamples_with_stub_stays_valid(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
 
     run_front_half_agent_pass(
         run_dir=run_dir, client=StubLLMClient(), stages=["counterexamples"]
@@ -391,6 +410,7 @@ def test_strategy_with_stub_stays_valid(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
 
     run_front_half_agent_pass(
         run_dir=run_dir, client=StubLLMClient(), stages=["strategy"]
@@ -402,6 +422,7 @@ def test_attacker_cannot_upgrade_evidence_or_refute(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
 
     # First seed counterexamples + admissibility tests (S4).
@@ -467,6 +488,7 @@ def test_attacker_with_stub_stays_valid(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
 
     run_front_half_agent_pass(
         run_dir=run_dir, client=StubLLMClient(), stages=["attacker"]
@@ -478,6 +500,7 @@ def test_source_theorem_cannot_self_certify_source_backed(tmp_path: Path) -> Non
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
 
     # A model trying to certify a source as source_backed with an exact locator
@@ -529,6 +552,7 @@ def test_source_theorem_with_stub_stays_valid(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
 
     run_front_half_agent_pass(
         run_dir=run_dir, client=StubLLMClient(), stages=["source_theorem"]
@@ -540,6 +564,7 @@ def test_grade_cannot_upgrade_status_or_proof_language(tmp_path: Path) -> None:
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
     before = read_yaml(run_dir / artifacts["idea_grade"])
 
@@ -578,7 +603,9 @@ def test_grade_cannot_upgrade_status_or_proof_language(tmp_path: Path) -> None:
 
 
 def test_full_front_half_pass_with_stub_is_valid(tmp_path: Path) -> None:
-    # All registered stages in order on an arbitrary claim, end to end.
+    # All registered stages in order on an arbitrary claim, end to end. The stub
+    # claim-understanding pass makes this fixture precise enough to continue,
+    # and downstream stages still cannot upgrade mathematical status.
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
@@ -588,7 +615,10 @@ def test_full_front_half_pass_with_stub_is_valid(tmp_path: Path) -> None:
 
     statuses = {s["stage"]: s["status"] for s in report["stages"]}
     for stage in registered_stages():
-        assert statuses[stage] == "ok", report
+        if stage in CLAIM_CLEAR_BLOCKED_FRONT_HALF_STAGES:
+            assert statuses[stage] == "skipped", report
+        else:
+            assert statuses[stage] == "ok", report
     # memo renders honestly (no proof-complete language) on the live skeleton.
     from espresso_proof.memo import build_concise_memo
 
@@ -683,6 +713,7 @@ def test_examples_stage_reconciles_seeded_tests_when_example_ids_change(
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("hodge_atoms", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
 
     # Precondition: the seeded scaffold references ex_special_cubic from tests.yaml.
@@ -747,7 +778,6 @@ def test_full_front_half_pass_on_seeded_hodge_scenario_stays_valid(tmp_path: Pat
 # Goal 19: stale "Too vague to test" placeholder objection is scrubbed for a
 # precise claim (display hygiene; never upgrades any status).
 # ---------------------------------------------------------------------------
-from espresso_proof.io import write_yaml  # noqa: E402
 from espresso_proof.memo import build_concise_memo  # noqa: E402
 
 _PENDING_NOTE = "Front-half review pending; real reviewers run in the Prover/Reviewers pass."

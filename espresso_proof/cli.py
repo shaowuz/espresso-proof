@@ -29,6 +29,7 @@ from .prover_loop_driver import continue_prover_loop
 from .run_lock import run_writer_lock
 from .llm_agents import external_agent_diagnostic
 from .llm_agents import openai_agent_diagnostic
+from .llm_agents import route_initial_reviewer_blockers_to_update_inbox
 from .llm_agents import run_llm_agent_pass
 from .llm_agents import write_initial_prover_round_artifacts
 from .failure_classifier import classify_failures
@@ -63,11 +64,21 @@ from .proof_verification import (
 from .symbolic_identity import SUPPORTED_RING_IDENTITIES
 from .benchmark import run_benchmark
 from .calibration import run_calibration
+from .claim_clear import (
+    CLAIM_CLEAR_BLOCKED_ON_DEMAND_AGENTS,
+    ClaimClearBlockedError,
+    ensure_claim_clear_for_downstream,
+)
 from .scorecard import render_scorecard_markdown, run_scorecard
 from .memo import build_concise_memo
 from .proof_language import scrub_proof_language
+from .surface_warnings import (
+    collect_surface_warnings,
+    refresh_final_report_disclosures,
+    render_warning_lines,
+)
 from .reviewer_checklist import review_checklist
-from .memory import summarize_memory, write_memory_entry
+from .memory import load_memory_index, summarize_memory, write_memory_entry
 from .mock_pipeline import run_mock_critique
 from .pdf_ingestion import (
     extract_candidate_locators,
@@ -99,6 +110,7 @@ from .models import (
     LLMAgentRunReport,
     LiteratureReviewAgentReport,
     LiteratureReviewReport,
+    MemoryEntry,
     ProverLoopReport,
     TheoremApplicabilityReport,
     TheoremExtractionReport,
@@ -108,6 +120,13 @@ from .validators import KernelValidationError, validate_run
 from .workflow_generator import generate_workflow_spec
 
 app = typer.Typer(help="Espresso Proof local kernel.")
+
+
+def _require_claim_clear_for_cli(run: Path) -> None:
+    try:
+        ensure_claim_clear_for_downstream(run, require_recorded_clear_gate=True)
+    except ClaimClearBlockedError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command()
@@ -197,6 +216,8 @@ def orchestrate(
             raise typer.BadParameter("--resume requires --select-strategy")
         if provider not in {"stub", "openai", "external"}:
             raise typer.BadParameter("provider must be stub, openai, or external")
+        validate_run(resume)
+        _require_claim_clear_for_cli(resume)
         if ground_source is not None:
             # Ground steps against a HUMAN-PROVIDED source BEFORE the loop via the
             # single auditable, transactional source-grounding stage: a step earns
@@ -341,6 +362,9 @@ def run_agent_command(
         skip_agent(run, agent_key, reason=reason)
         typer.echo(f"Agent {agent_key}: skipped (contributes no evidence).")
         return
+    if agent_key in CLAIM_CLEAR_BLOCKED_ON_DEMAND_AGENTS:
+        validate_run(run)
+        _require_claim_clear_for_cli(run)
     result = run_single_agent(
         run,
         agent_key,
@@ -601,6 +625,7 @@ def retrieve_sources_command(
     Retrieval never sets source_backed; only Source Grounding (exact locator +
     hypothesis match + attribution) earns it. A failed/empty search fails closed.
     """
+    _require_claim_clear_for_cli(run)
     providers = provider or ["local_corpus"]
     if ground:
         if corpus is None:
@@ -644,6 +669,7 @@ def retrieve_autonomous_command(
     """
     if llm_provider not in {"stub", "openai", "external"}:
         raise typer.BadParameter("llm-provider must be stub, openai, or external")
+    _require_claim_clear_for_cli(run)
     client = build_llm_client(
         provider=llm_provider,
         model=model,
@@ -861,6 +887,7 @@ def verify_exact_modexp_command(
     one computation only; never a universal proof). A non-confirming or failed run
     earns nothing.
     """
+    _require_claim_clear_for_cli(run)
     try:
         result = run_exact_modexp_adapter(
             run, base=base, exp=exp, mod=mod, expected=expected, entry_id=entry_id
@@ -892,10 +919,11 @@ def verify_finite_groups_command(
     status: checking p=2,3 does not prove the claim for all primes p. Natural-
     language prover/reviewer approval is not proof verification.
     """
+    _require_claim_clear_for_cli(run)
     primes = prime or [2, 3]
     report = verify_finite_groups(run, primes=primes)
-    validate_run(run)
     _refresh_derived_views(run)
+    validate_run(run)
     checked = sum(1 for e in report["entries"] if e["earned_status"] == "instance_checked")
     typer.echo(
         f"Verified {checked}/{len(report['entries'])} finite group(s) abelian "
@@ -938,6 +966,7 @@ def verify_identity_in_run_command(
     There is no 'proved' status: this is a finite/computational check, not a
     universal proof.
     """
+    _require_claim_clear_for_cli(run)
     data = read_yaml(table)
     entry = verify_identity_table_in_run(run, table=data, identity=identity, entry_id=entry_id, target=target)
     validate_run(run)
@@ -963,6 +992,7 @@ def verify_ring_identity_in_run_command(
     run. This is a finite/computational sanity check over Z/n, never a universal
     proof over a general ring or for all moduli.
     """
+    _require_claim_clear_for_cli(run)
     entry = verify_ring_identity_in_run(run, identity=identity, modulus=modulus, entry_id=entry_id, target=target)
     validate_run(run)
     _refresh_derived_views(run)
@@ -988,6 +1018,7 @@ def verify_matrix_rank_in_run_command(
     This is a finite/computational check of this specific matrix (e.g. witnessing a
     concrete rank/dimension jump), NEVER a universal proof about any family.
     """
+    _require_claim_clear_for_cli(run)
     try:
         parsed = json.loads(matrix)
     except json.JSONDecodeError as exc:
@@ -1021,6 +1052,7 @@ def auto_wire_verifications_command(
     this cannot manufacture a checked status from text. There is no 'proved'
     status: every result is a finite/computational check, not a universal proof.
     """
+    _require_claim_clear_for_cli(run)
     _earned_phrase = {
         "instance_checked": "checked in this finite/computational scope only",
         "unverified": "not established (no checked status)",
@@ -1119,6 +1151,17 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     examples = _artifact("examples")
     counterexamples = _artifact("counterexamples")
     computations = _artifact("computation_checks")
+    tests = _artifact("tests")
+    theorem_applicability = {}
+    theorem_applicability_path = _optional_artifact_path(
+        run, optional_artifacts, "theorem_applicability"
+    )
+    if theorem_applicability_path is not None:
+        theorem_applicability = read_yaml(theorem_applicability_path)
+    update_inbox = {}
+    update_inbox_path = _optional_artifact_path(run, optional_artifacts, "update_inbox")
+    if update_inbox_path is not None:
+        update_inbox = read_yaml(update_inbox_path)
 
     failed_reviewers = [
         reviewer["reviewer_id"]
@@ -1171,6 +1214,21 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
         "- evidence so far: "
         + ("; ".join(_evidence_summary) if _evidence_summary else "none recorded")
     )
+    warning_lines = render_warning_lines(collect_surface_warnings(
+        grade=grade,
+        review=review,
+        examples=examples,
+        counterexamples=counterexamples,
+        tests=tests,
+        source_grounding=source_grounding,
+        theorem_applicability=theorem_applicability,
+        update_inbox=update_inbox,
+    ))
+    if warning_lines:
+        _echo("")
+        _echo("Open Blockers / Pending Checks")
+        for line in warning_lines:
+            _echo(f"- {line}")
     _refs_by_id = {r.get("id"): r for r in source_grounding.get("source_refs", [])}
     for step in source_grounding.get("steps", []):
         if step.get("status") != "source_backed":
@@ -1217,11 +1275,7 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
             )
     else:
         _echo("- counterexamples: none")
-    theorem_applicability_path = _optional_artifact_path(
-        run, optional_artifacts, "theorem_applicability"
-    )
     if theorem_applicability_path is not None:
-        theorem_applicability = read_yaml(theorem_applicability_path)
         usages = theorem_applicability.get("usages", [])
         blocking_usages = [
             usage
@@ -1479,6 +1533,25 @@ def choose_strategy(
             "human_confirmed": True,
         }
         HumanChoice.model_validate(choice)
+        run_id = manifest["run_id"]
+        entry = {
+            "id": f"user_decision_{run_id}",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "project": manifest["project_id"],
+            "type": "user_decision",
+            "claim_id": strategy_brief["claim_id"],
+            "summary": (
+                f"Human chose strategy id {strategy} with {effort.value}; "
+                f"decision={decision.value}."
+            ),
+            "provenance": [
+                f"projects/{manifest['project_id']}/runs/{run_id}/{artifacts['human_choice']}",
+                f"projects/{manifest['project_id']}/runs/{run_id}/{artifacts['strategy_brief']}",
+            ],
+            "reusable_lesson": reason.strip(),
+        }
+        MemoryEntry.model_validate(entry)
+        load_memory_index(run.parents[1])
         write_yaml(run / artifacts["human_choice"], choice)
         manifest["current_state"] = _state_for_human_decision(decision)
         write_yaml(manifest_path, manifest)
@@ -1490,24 +1563,6 @@ def choose_strategy(
             raise
 
     project_dir = run.parents[1]
-    run_id = manifest["run_id"]
-    title = _strategy_title(strategy_brief, strategy)
-    entry = {
-        "id": f"user_decision_{run_id}",
-        "timestamp": datetime.now(UTC).isoformat(),
-        "project": manifest["project_id"],
-        "type": "user_decision",
-        "claim_id": strategy_brief["claim_id"],
-        "summary": (
-            f"Human chose {strategy} ({title}) with {effort.value}; "
-            f"decision={decision.value}."
-        ),
-        "provenance": [
-            f"projects/{manifest['project_id']}/runs/{run_id}/{artifacts['human_choice']}",
-            f"projects/{manifest['project_id']}/runs/{run_id}/{artifacts['strategy_brief']}",
-        ],
-        "reusable_lesson": reason.strip(),
-    }
     memory_path = write_memory_entry(
         project_dir,
         entry,
@@ -1533,6 +1588,7 @@ def discover_literature(
     if mode not in {"local", "live"}:
         raise typer.BadParameter("Literature Discovery supports --mode local or --mode live")
     validate_run(run)
+    _require_claim_clear_for_cli(run)
     manifest_path = run / "run_manifest.yaml"
     manifest = read_yaml(manifest_path)
     artifacts = manifest["artifacts"]
@@ -1616,6 +1672,7 @@ def verify_sources(
 ) -> None:
     """Run conservative Referencing verification from extracted theorem statements."""
     validate_run(run)
+    _require_claim_clear_for_cli(run)
     manifest = read_yaml(run / "run_manifest.yaml")
     extraction_path = theorem_extraction
     if extraction_path is None:
@@ -1638,12 +1695,14 @@ def audit_theorem_applicability_command(
     except KernelValidationError as exc:
         if "require theorem_applicability audit" not in str(exc):
             raise
+    _require_claim_clear_for_cli(run)
     report = audit_theorem_applicability(run)
     TheoremApplicabilityReport.model_validate(report)
     manifest_path = run / "run_manifest.yaml"
     manifest = read_yaml(manifest_path)
     manifest.setdefault("optional_artifacts", {})["theorem_applicability"] = "theorem_applicability.yaml"
     write_yaml(manifest_path, manifest)
+    refresh_final_report_disclosures(run)
     validate_run(run)
     typer.echo(f"Wrote theorem applicability audit to {run / 'theorem_applicability.yaml'}")
 
@@ -1657,6 +1716,7 @@ def verify_computations_command(
     Does not upgrade status. It records confirmed/refuted/error/unsupported per
     check; validation then forbids a refuted check from claiming checked.
     """
+    _require_claim_clear_for_cli(run)
     report = verify_computation_checks(run)
     validate_run(run)
     confirmed = sum(1 for r in report["results"] if r["verdict"] == "confirmed")
@@ -1677,6 +1737,7 @@ def audit_evidence_command(
     The machine earns the status; the agent never self-certifies. idea_grade is
     untouched."""
     validate_run(run)
+    _require_claim_clear_for_cli(run)
     computations = audit_evidence(run)
     checked = sum(1 for c in computations.get("checks", []) if c.get("status") == "checked")
     typer.echo(
@@ -1696,6 +1757,7 @@ def review_literature_agent(
 ) -> None:
     """Run the literature-review-first agent over candidate source text/PDFs."""
     validate_run(run)
+    _require_claim_clear_for_cli(run)
     sources = source or []
     ids = source_id or []
     titles = title or []
@@ -1742,6 +1804,7 @@ def retrieve_and_ground_command(
     a download/extraction error writes a failure/skip report and leaves the run
     valid without granting any source support. Records retrieval_resolution.yaml.
     """
+    _require_claim_clear_for_cli(run)
     report = retrieve_and_ground(
         run_dir=run,
         candidate_id=candidate,
@@ -1782,6 +1845,8 @@ def literature_scout_command(
     """
     if provider not in {"stub", "openai", "external"}:
         raise typer.BadParameter("provider must be stub, openai, or external")
+    validate_run(run)
+    _require_claim_clear_for_cli(run)
     client = build_llm_client(
         provider=provider,
         model=model,
@@ -1819,6 +1884,8 @@ def run_llm_agents(
         raise typer.BadParameter("provider must be stub, openai, or external")
     if reviewer_set not in {"generic", "espresso"}:
         raise typer.BadParameter("reviewer-set must be generic or espresso")
+    validate_run(run)
+    _require_claim_clear_for_cli(run)
     provider_diagnostic = _preflight_agent_provider(
         provider=provider,
         model=model,
@@ -1826,9 +1893,7 @@ def run_llm_agents(
         external_agent_command_env=external_agent_command_env,
         network_check=False,
     )
-    validate_run(run)
     manifest_path = run / "run_manifest.yaml"
-    manifest = read_yaml(manifest_path)
     report = run_llm_agent_pass(
         run_dir=run,
         provider=provider,
@@ -1840,11 +1905,13 @@ def run_llm_agents(
         provider_diagnostic=provider_diagnostic,
     )
     LLMAgentRunReport.model_validate(report)
+    manifest = read_yaml(manifest_path)
     artifacts = manifest["artifacts"]
     loop_report = build_prover_loop_report(
         agent_report=report,
         strategy_brief=read_yaml(run / artifacts["strategy_brief"]),
         human_choice=read_yaml(run / artifacts["human_choice"]),
+        run_dir=run,
     )
     ProverLoopReport.model_validate(loop_report)
     manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
@@ -1873,6 +1940,7 @@ def resolve_agent_gate(
     if decision not in {"continue", "revise", "stop"}:
         raise typer.BadParameter("decision must be continue, revise, or stop")
     validate_run(run)
+    _require_claim_clear_for_cli(run)
     # Cross-process writer lock (Goal 35B): gate resolution writes the loop +
     # initial round artifacts and must not race a concurrent resume.
     with run_writer_lock(run, action="gate resolution"):
@@ -1880,12 +1948,21 @@ def resolve_agent_gate(
         LLMAgentRunReport.model_validate(report)
         manifest = read_yaml(run / "run_manifest.yaml")
         artifacts = manifest["artifacts"]
+        human_choice = read_yaml(run / artifacts["human_choice"])
+        if decision == "continue":
+            route_initial_reviewer_blockers_to_update_inbox(
+                run_dir=run,
+                agent_report=report,
+                selected_strategy_id=human_choice.get("selected_strategy"),
+            )
         loop_report = build_prover_loop_report(
             agent_report=report,
             strategy_brief=read_yaml(run / artifacts["strategy_brief"]),
-            human_choice=read_yaml(run / artifacts["human_choice"]),
+            human_choice=human_choice,
+            run_dir=run,
         )
         ProverLoopReport.model_validate(loop_report)
+        manifest = read_yaml(run / "run_manifest.yaml")
         manifest.setdefault("optional_artifacts", {})["prover_loop"] = "prover_loop.yaml"
         manifest.setdefault("optional_artifacts", {})["prover_round_index"] = "prover_rounds/index.yaml"
         write_yaml(run / "prover_loop.yaml", loop_report)
@@ -1895,6 +1972,7 @@ def resolve_agent_gate(
             loop_report=loop_report,
         )
         write_yaml(run / "run_manifest.yaml", manifest)
+        refresh_final_report_disclosures(run)
         validate_run(run)
     typer.echo(f"Resolved LLM agent human gate as {decision}")
 
@@ -1917,6 +1995,7 @@ def run_prover_loop_round(
     if reviewer_set not in {"generic", "espresso"}:
         raise typer.BadParameter("reviewer-set must be generic or espresso")
     validate_run(run)
+    _require_claim_clear_for_cli(run)
     # Delegate to the single multi-round driver, capped to exactly one more round,
     # so there is one validate-per-round code path.
     manifest = read_yaml(run / "run_manifest.yaml")

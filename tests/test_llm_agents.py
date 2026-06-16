@@ -36,6 +36,15 @@ from espresso_proof.validators import KernelValidationError
 FIXTURES = Path("tests/fixtures")
 
 
+def _mark_claim_clear(run_dir: Path) -> None:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
+    ledger = read_yaml(ledger_path)
+    ledger["claim_precision"] = "precise"
+    ledger["missing_or_unclear"] = []
+    write_yaml(ledger_path, ledger)
+
+
 def external_agent_command(tmp_path: Path) -> str:
     script = tmp_path / "external_agent.py"
     script.write_text(
@@ -67,6 +76,7 @@ def test_stub_llm_agents_write_schema_valid_candidate_artifact(tmp_path: Path) -
         FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
         tmp_path,
     )
+    _mark_claim_clear(run_dir)
     runner = CliRunner()
 
     result = runner.invoke(
@@ -766,6 +776,7 @@ def test_resolve_agent_gate_does_not_upgrade_grade_or_source(tmp_path: Path) -> 
         FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
         tmp_path,
     )
+    _mark_claim_clear(run_dir)
     runner = CliRunner()
     result = runner.invoke(
         app,
@@ -814,6 +825,7 @@ def test_resolve_agent_gate_cannot_overwrite_resolved_gate(tmp_path: Path) -> No
         FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
         tmp_path,
     )
+    _mark_claim_clear(run_dir)
     runner = CliRunner()
     result = runner.invoke(
         app,
@@ -1509,6 +1521,7 @@ def test_openai_provider_requires_api_key(tmp_path: Path, monkeypatch) -> None:
         FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
         tmp_path,
     )
+    _mark_claim_clear(run_dir)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     runner = CliRunner()
 
