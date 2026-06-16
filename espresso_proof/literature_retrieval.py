@@ -210,7 +210,13 @@ def retrieve_and_ground(
     elif hits:
         chosen = hits[0]
     if chosen is None or not chosen.get("local_path"):
-        return {"retrieval": report, "grounded": False, "reason": "no readable candidate source"}
+        return {
+            "retrieval": report,
+            "grounded": False,
+            "reason": "no readable candidate source",
+            "chosen_hit_id": None,
+            "chosen_local_path": "",
+        }
 
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])
@@ -229,4 +235,10 @@ def retrieve_and_ground(
     grounding = ground_run(
         run_dir=run_dir, theorem_extraction_path=run_dir / "theorem_extraction.yaml"
     )
-    return {"retrieval": report, "grounded": True, "source_grounding": grounding}
+    return {
+        "retrieval": report,
+        "grounded": True,
+        "source_grounding": grounding,
+        "chosen_hit_id": chosen["id"],
+        "chosen_local_path": chosen["local_path"],
+    }

@@ -12,7 +12,7 @@ from espresso_proof.time_allocation import (
     write_time_allocation_plan,
 )
 from espresso_proof.update_inbox import append_update_inbox_event, load_update_inbox
-from espresso_proof.surface_warnings import pending_update_inbox_ids
+from espresso_proof.surface_warnings import pending_update_inbox_ids, refresh_final_report_disclosures
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.validators import validate_run
 
@@ -332,6 +332,40 @@ def test_failed_time_allocation_write_does_not_mark_inbox_applied(
     inbox = load_update_inbox(run_dir)
     assert inbox is not None
     assert inbox.entries[0].applied_at is None
+
+
+def test_failed_update_inbox_apply_rolls_back_time_allocation_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import espresso_proof.time_allocation as time_allocation_mod
+
+    run_dir = _fast_run(tmp_path)
+    append_update_inbox_event(run_dir, _reviewer_objection_event(run_dir))
+    refresh_final_report_disclosures(run_dir)
+    manifest_before = read_yaml(run_dir / "run_manifest.yaml")
+    allocation_before = (run_dir / TIME_ALLOCATION_FILENAME).read_bytes()
+
+    def fail_inbox_apply(run_dir: Path, entry_ids: set[str]) -> None:
+        assert entry_ids == {"upd_reviewer_001"}
+        raise RuntimeError("simulated update_inbox apply failure")
+
+    monkeypatch.setattr(
+        time_allocation_mod,
+        "mark_update_inbox_entries_applied",
+        fail_inbox_apply,
+    )
+
+    with pytest.raises(RuntimeError, match="simulated update_inbox apply failure"):
+        time_allocation_mod.write_time_allocation_plan(run_dir)
+
+    manifest_after = read_yaml(run_dir / "run_manifest.yaml")
+    assert manifest_after == manifest_before
+    assert (run_dir / TIME_ALLOCATION_FILENAME).read_bytes() == allocation_before
+    inbox = load_update_inbox(run_dir)
+    assert inbox is not None
+    assert inbox.entries[0].applied_at is None
+    validate_run(run_dir)
 
 
 @pytest.mark.parametrize("action,budget", [("source_pinning", "small"), ("cheap_check", "tiny")])

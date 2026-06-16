@@ -264,6 +264,7 @@ def validate_run(run_dir: Path) -> None:
     _validate_autonomous_literature_retrieval(
         autonomous_literature_retrieval,
         source_grounding,
+        theorem_extraction,
     )
     _validate_source_discipline_bindings(
         run_dir, manifest, source_grounding, theorem_extraction, theorem_applicability
@@ -1068,12 +1069,14 @@ def _load_optional_autonomous_literature_retrieval(
 def _validate_autonomous_literature_retrieval(
     report: AutonomousLiteratureRetrievalReport | None,
     source_grounding: SourceGroundingReport,
+    theorem_extraction: TheoremExtractionReport | None,
 ) -> None:
     """Bind autonomous retrieval's earned flag to source-grounding truth.
 
     The retrieval sidecar is provenance/scheduling context. If it records that
     grounding earned source support, the current validated source-grounding
-    artifact must actually contain an earned source-backed step.
+    artifact must actually contain earned source-backed refs/steps for the
+    candidate/source this retrieval handed to grounding.
     """
 
     if report is None or not report.earned_source_backed:
@@ -1082,10 +1085,73 @@ def _validate_autonomous_literature_retrieval(
         raise KernelValidationError(
             "autonomous_literature_retrieval earned_source_backed requires grounded=true"
         )
-    if not any(step.status == SourceStatus.source_backed for step in source_grounding.steps):
+    if not report.grounded_candidate_id or not report.grounded_retrieval_source_id:
+        raise KernelValidationError(
+            "autonomous_literature_retrieval earned_source_backed requires grounded candidate identity"
+        )
+    candidates_by_id = {candidate.id: candidate for candidate in report.candidates}
+    grounded_candidate = candidates_by_id.get(report.grounded_candidate_id)
+    if grounded_candidate is None:
+        raise KernelValidationError(
+            "autonomous_literature_retrieval grounded_candidate_id is not one of its candidates"
+        )
+    if grounded_candidate.provider != "local_corpus" or not grounded_candidate.local_path:
+        raise KernelValidationError(
+            "autonomous_literature_retrieval earned_source_backed requires a grounded local candidate"
+        )
+    expected_source_id = f"ret_{Path(grounded_candidate.local_path).stem}"
+    if report.grounded_retrieval_source_id != expected_source_id:
+        raise KernelValidationError(
+            "autonomous_literature_retrieval grounded source does not match grounded candidate"
+        )
+    if theorem_extraction is None:
+        raise KernelValidationError(
+            "autonomous_literature_retrieval earned_source_backed requires theorem_extraction binding"
+        )
+    allowed_ref_ids = {
+        f"verified_{theorem.id}"
+        for theorem in theorem_extraction.theorems
+        if theorem.source_ref_id == report.grounded_retrieval_source_id
+    }
+    reported_ref_ids = set(report.earned_source_ref_ids)
+    if not reported_ref_ids or not reported_ref_ids <= allowed_ref_ids:
+        raise KernelValidationError(
+            "autonomous_literature_retrieval earned source refs do not match grounded retrieval source"
+        )
+    refs_by_id = {ref.id: ref for ref in source_grounding.source_refs}
+    if any(
+        refs_by_id.get(ref_id) is None
+        or refs_by_id[ref_id].status != SourceStatus.source_backed
+        for ref_id in reported_ref_ids
+    ):
+        raise KernelValidationError(
+            "autonomous_literature_retrieval earned source refs are not source-grounding backed"
+        )
+    reported_step_ids = set(report.earned_proof_step_ids)
+    if not reported_step_ids:
         raise KernelValidationError(
             "autonomous_literature_retrieval earned_source_backed requires an "
             "earned source-grounding step"
+        )
+    steps_by_id = {step.proof_step_id: step for step in source_grounding.steps}
+    for step_id in reported_step_ids:
+        step = steps_by_id.get(step_id)
+        if step is None or step.status != SourceStatus.source_backed:
+            raise KernelValidationError(
+                "autonomous_literature_retrieval earned proof step is not source-backed"
+            )
+        if not set(step.source_refs) & reported_ref_ids:
+            raise KernelValidationError(
+                "autonomous_literature_retrieval earned proof step is not bound to earned source ref"
+            )
+    if not any(
+        step.status == SourceStatus.source_backed
+        and set(step.source_refs) & reported_ref_ids
+        for step in source_grounding.steps
+    ):
+        raise KernelValidationError(
+            "autonomous_literature_retrieval earned_source_backed requires an "
+            "earned source-grounding step bound to the grounded retrieval source"
         )
 
 

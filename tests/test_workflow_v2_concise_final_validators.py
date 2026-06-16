@@ -29,6 +29,8 @@ from espresso_proof.surface_warnings import (
     THEOREM_BLOCKERS,
     UPDATE_INBOX_PENDING,
     collect_surface_warnings,
+    final_report_disclosure_block,
+    final_report_missing_disclosures,
     refresh_final_report_disclosures,
     render_warning_lines,
 )
@@ -89,6 +91,29 @@ def _disclosure_text(run_dir: Path, *, omit: set[str] | None = None) -> str:
     warnings = [w for w in _warning_docs(run_dir) if w["category"] not in omit]
     lines = render_warning_lines(warnings)
     return "\n".join(["Open blockers / pending checks:", *[f"- {line}" for line in lines]])
+
+
+def test_warning_disclosures_scrub_raw_source_backed_vocabulary() -> None:
+    warnings = [
+        {
+            "category": "source_gaps",
+            "text": (
+                "No source-backed theorem; no source_backed step; "
+                "no source backed route."
+            ),
+        }
+    ]
+
+    lines = render_warning_lines(warnings)
+    block = final_report_disclosure_block(warnings)
+
+    for rendered in (lines[0], block):
+        lowered = rendered.lower()
+        assert "source-backed" not in lowered
+        assert "source_backed" not in lowered
+        assert "source backed" not in lowered
+        assert "reference-supported" in lowered
+    assert final_report_missing_disclosures(block, warnings) == []
 
 
 def _write_disclosed_final(

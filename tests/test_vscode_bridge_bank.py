@@ -92,6 +92,37 @@ def test_bridge_detail_target_works_on_both_layouts(tmp_path: Path, layout: str)
         assert phrase not in md.lower()
 
 
+def test_bridge_detail_markdown_scrubs_raw_status_vocabulary() -> None:
+    strategy_md = bridge.render_detail_markdown(
+        "strategy",
+        {
+            "id": "route_001",
+            "title": "A source-backed route",
+            "status": "plausible_direction",
+            "source_status": "source_backed",
+            "why_this_route": "Could use a source_backed theorem.",
+            "main_risk": "The source backed label is only advisory.",
+        },
+    )
+    literature_md = bridge.render_detail_markdown(
+        "literature",
+        {
+            "id": "lit_001",
+            "title": "Candidate",
+            "status": "candidate",
+            "why_relevant": "Mentions a source-backed theorem.",
+        },
+    )
+    rendered = (strategy_md + literature_md).lower()
+
+    assert "## artifact excerpt" not in rendered
+    assert "source-backed" not in rendered
+    assert "source_backed" not in rendered
+    assert "source backed" not in rendered
+    assert "route source label; verify step grounding" in rendered
+    assert "reference-supported" in rendered
+
+
 # ---------------------------------------------------------------------------
 # 4) Bridge read does not mutate artifacts.
 # ---------------------------------------------------------------------------

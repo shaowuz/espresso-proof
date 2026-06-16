@@ -234,11 +234,6 @@ def build_concise_memo(run_dir: Path) -> str:
         {ref.get("status") for ref in source_grounding.get("source_refs", []) if ref.get("status")}
         | {step.get("status") for step in source_grounding.get("steps", []) if step.get("status")}
     )
-    source_grounding_has_support = any(
-        step.get("status") == "source_backed"
-        for step in source_grounding.get("steps", [])
-    )
-
     top = (strategy_brief.get("top_strategies") or [])
     next_test = (grade.get("next_cheapest_test") or "none recorded").strip()
 
@@ -322,7 +317,7 @@ def build_concise_memo(run_dir: Path) -> str:
             )
             if cand.get("why_relevant"):
                 lines.append(f"  Why relevant: {cand['why_relevant']}")
-        if autonomous_retrieval.get("grounded") and source_grounding_has_support:
+        if autonomous_retrieval.get("earned_source_backed"):
             lines.append(
                 "  A candidate was handed to source grounding; source_grounding currently "
                 "records reference support for at least one step (see the proof-route step above)."

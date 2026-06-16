@@ -14,10 +14,12 @@ language. Missing optional fields render conservatively as an em dash.
 from __future__ import annotations
 
 import html
+import re
 from pathlib import Path
 
 from .descriptions import describe_idea_status, route_source_phrase
 from .io import read_yaml
+from .proof_language import scrub_proof_language
 from .research_bank import load_bankable_dict
 
 _NONE = "—"
@@ -36,7 +38,12 @@ def _h(value: object) -> str:
     """HTML-escape a value; conservative em dash for empty/None."""
 
     text = "" if value is None else str(value)
-    text = text.strip()
+    text = re.sub(
+        r"\bsource(?:[_ -])backed\b",
+        "reference-supported",
+        scrub_proof_language(text.strip()),
+        flags=re.IGNORECASE,
+    )
     return html.escape(text) if text else _NONE
 
 
@@ -55,7 +62,16 @@ def _row(label: str, value: str) -> str:
 
 
 def _list_field(values: list | None) -> str:
-    items = [str(v).strip() for v in (values or []) if str(v).strip()]
+    items = [
+        re.sub(
+            r"\bsource(?:[_ -])backed\b",
+            "reference-supported",
+            scrub_proof_language(str(v).strip()),
+            flags=re.IGNORECASE,
+        )
+        for v in (values or [])
+        if str(v).strip()
+    ]
     if not items:
         return _NONE
     return "; ".join(html.escape(v) for v in items)

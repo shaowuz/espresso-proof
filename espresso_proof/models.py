@@ -741,8 +741,27 @@ class AutonomousLiteratureRetrievalReport(StrictBaseModel):
     # (exact locator + hypothesis match + attribution). Retrieval never sets the
     # latter itself — it is read back from source_grounding after ground_run.
     grounded: bool = False
+    grounded_candidate_id: str | None = None
+    grounded_retrieval_source_id: str | None = None
+    earned_source_ref_ids: list[str] = Field(default_factory=list)
+    earned_proof_step_ids: list[str] = Field(default_factory=list)
     earned_source_backed: bool = False
     notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_earned_binding(self) -> AutonomousLiteratureRetrievalReport:
+        if self.earned_source_backed and (
+            not self.grounded
+            or not self.grounded_candidate_id
+            or not self.grounded_retrieval_source_id
+            or not self.earned_source_ref_ids
+            or not self.earned_proof_step_ids
+        ):
+            raise ValueError(
+                "earned_source_backed requires grounded candidate, retrieval source, "
+                "source ref, and proof step bindings"
+            )
+        return self
 
 
 class VerifierType(str, Enum):

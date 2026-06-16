@@ -24,8 +24,11 @@ def _text_items(value: Any) -> list[str]:
 
 
 def _display_text(value: Any) -> str:
-    text = scrub_proof_language(str(value).strip()).replace(
-        "source_backed", "reference-supported"
+    text = re.sub(
+        r"\bsource(?:[_ -])backed\b",
+        "reference-supported",
+        scrub_proof_language(str(value).strip()),
+        flags=re.IGNORECASE,
     )
     advisory_context_terms = (
         "memory",
@@ -322,7 +325,7 @@ def collect_surface_warnings(
 
 
 def render_warning_lines(warnings: list[dict[str, Any]]) -> list[str]:
-    return [str(warning.get("text") or "").strip() for warning in warnings if warning.get("text")]
+    return [_display_text(warning.get("text")) for warning in warnings if warning.get("text")]
 
 
 def final_report_missing_disclosures(
@@ -339,7 +342,7 @@ def final_report_missing_disclosures(
     missing: list[str] = []
     for warning in warnings:
         category = str(warning.get("category") or "")
-        required = " ".join(str(warning.get("text") or "").lower().split())
+        required = " ".join(_display_text(warning.get("text")).lower().split())
         if required and required not in lowered:
             missing.append(category)
     return missing

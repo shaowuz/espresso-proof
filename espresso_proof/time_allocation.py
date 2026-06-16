@@ -8,7 +8,9 @@ cannot upgrade proof/source/evidence/theorem/refutation/grade status.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
 from .io import read_yaml, write_yaml
@@ -27,6 +29,37 @@ _GRADED_ROUTE_FIELDS = {
     "estimated_effort",
     "next_loop_plan",
 }
+
+
+def _snapshot_files(paths: list[Path]) -> dict[Path, bytes | None]:
+    return {path: path.read_bytes() if path.exists() else None for path in paths}
+
+
+def _write_bytes_atomic(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+        os.chmod(tmp_name, 0o644)
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _restore_files(snapshot: dict[Path, bytes | None]) -> None:
+    for path, content in snapshot.items():
+        if content is None:
+            if path.exists():
+                path.unlink()
+            continue
+        _write_bytes_atomic(path, content)
 
 
 def _read_artifact(run_dir: Path, manifest: dict[str, Any], key: str) -> dict[str, Any]:
@@ -323,18 +356,29 @@ def write_time_allocation_plan(run_dir: Path) -> TimeAllocationPlan | None:
             update_inbox,
             allocation_route_ids,
         )
-        write_yaml(run_dir / TIME_ALLOCATION_FILENAME, plan.model_dump(mode="json"))
-        manifest = read_yaml(run_dir / "run_manifest.yaml")
-        manifest.setdefault("optional_artifacts", {})["time_allocation"] = TIME_ALLOCATION_FILENAME
-        depends_on = ["strategy_synthesis", "strategy_brief", "idea_grade"]
-        if "update_inbox" in manifest.get("optional_artifacts", {}):
-            depends_on.append("update_inbox")
-        manifest.setdefault("dependencies", {})["time_allocation"] = {
-            "depends_on": depends_on
-        }
-        write_yaml(run_dir / "run_manifest.yaml", manifest)
-        if "update_inbox" in manifest.get("optional_artifacts", {}):
-            mark_update_inbox_entries_applied(run_dir, consumed_update_ids)
+        snapshot = _snapshot_files(
+            [
+                run_dir / TIME_ALLOCATION_FILENAME,
+                run_dir / "run_manifest.yaml",
+                run_dir / "update_inbox.yaml",
+            ]
+        )
+        try:
+            write_yaml(run_dir / TIME_ALLOCATION_FILENAME, plan.model_dump(mode="json"))
+            manifest = read_yaml(run_dir / "run_manifest.yaml")
+            manifest.setdefault("optional_artifacts", {})["time_allocation"] = TIME_ALLOCATION_FILENAME
+            depends_on = ["strategy_synthesis", "strategy_brief", "idea_grade"]
+            if "update_inbox" in manifest.get("optional_artifacts", {}):
+                depends_on.append("update_inbox")
+            manifest.setdefault("dependencies", {})["time_allocation"] = {
+                "depends_on": depends_on
+            }
+            write_yaml(run_dir / "run_manifest.yaml", manifest)
+            if "update_inbox" in manifest.get("optional_artifacts", {}):
+                mark_update_inbox_entries_applied(run_dir, consumed_update_ids)
+        except Exception:
+            _restore_files(snapshot)
+            raise
         return plan
 
 

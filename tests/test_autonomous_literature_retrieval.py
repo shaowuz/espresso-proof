@@ -183,9 +183,9 @@ def test_stale_autonomous_earned_flag_requires_source_grounding_support(
     report["earned_source_backed"] = True
     write_yaml(report_path, report)
 
-    with pytest.raises(KernelValidationError, match="earned source-grounding step"):
+    with pytest.raises(KernelValidationError, match="earned_source_backed requires"):
         build_concise_memo(run_dir)
-    with pytest.raises(KernelValidationError, match="earned source-grounding step"):
+    with pytest.raises(KernelValidationError, match="earned_source_backed requires"):
         validate_run(run_dir)
 
 
@@ -229,6 +229,10 @@ def test_retrieval_handed_to_grounding_earns_support_with_locator_and_attributio
     )
     assert report["grounded"] is True
     assert report["earned_source_backed"] is True
+    assert report["grounded_candidate_id"]
+    assert report["grounded_retrieval_source_id"] == "ret_p2_groups"
+    assert report["earned_source_ref_ids"]
+    assert report["earned_proof_step_ids"] == ["ps_center"]
     sg = read_yaml(run_dir / "source_grounding.yaml")
     assert sg["steps"][0]["status"] == "source_backed", sg["steps"][0]
     backed = [r for r in sg["source_refs"] if r["status"] == "source_backed"]
@@ -241,6 +245,48 @@ def test_retrieval_handed_to_grounding_earns_support_with_locator_and_attributio
     lower = memo.lower()
     for phrase in ("proof-close", "proof complete", "we proved", "proved the claim"):
         assert phrase not in lower
+
+
+def test_retrieval_support_flag_is_not_satisfied_by_unrelated_existing_grounding(
+    tmp_path: Path,
+) -> None:
+    run_dir = _p2_run(tmp_path)
+    corpus = _p2_corpus(tmp_path)
+    first = run_autonomous_retrieval(
+        run_dir, client=StubLLMClient(), corpus_dir=corpus, providers=["local_corpus"], ground=True
+    )
+    assert first["earned_source_backed"] is True
+
+    empty_corpus = tmp_path / "empty_corpus"
+    empty_corpus.mkdir()
+    second = run_autonomous_retrieval(
+        run_dir,
+        client=_FakeClient({"queries": ["unmatched source query"]}),
+        corpus_dir=empty_corpus,
+        providers=["local_corpus"],
+        ground=True,
+    )
+
+    assert second["grounded"] is False
+    assert second["earned_source_backed"] is False
+    assert second["earned_source_ref_ids"] == []
+    assert second["earned_proof_step_ids"] == []
+    validate_run(run_dir)
+
+
+def test_forged_retrieval_binding_to_wrong_source_is_rejected(tmp_path: Path) -> None:
+    run_dir = _p2_run(tmp_path)
+    corpus = _p2_corpus(tmp_path)
+    run_autonomous_retrieval(
+        run_dir, client=StubLLMClient(), corpus_dir=corpus, providers=["local_corpus"], ground=True
+    )
+    report_path = run_dir / "autonomous_literature_retrieval.yaml"
+    report = read_yaml(report_path)
+    report["grounded_retrieval_source_id"] = "ret_other_source"
+    write_yaml(report_path, report)
+
+    with pytest.raises(KernelValidationError, match="grounded source does not match"):
+        validate_run(run_dir)
 
 
 def test_p2_demo_runs_without_manual_source(tmp_path: Path) -> None:
