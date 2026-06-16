@@ -644,6 +644,23 @@ def _validate_time_allocation(
         "verified",
     }
     raw = read_yaml(artifact_path)
+    expected_forbidden_effect = {
+        "proof",
+        "source",
+        "evidence",
+        "theorem_applicability",
+        "refutation",
+        "grade",
+    }
+    raw_forbidden_effect = raw.get("forbidden_status_effect")
+    if (
+        not isinstance(raw_forbidden_effect, list)
+        or set(raw_forbidden_effect) != expected_forbidden_effect
+        or len(raw_forbidden_effect) != len(expected_forbidden_effect)
+    ):
+        raise KernelValidationError(
+            "time_allocation forbidden_status_effect cannot be removed or weakened"
+        )
     if _contains_forbidden_allocation_token(raw, forbidden):
         raise KernelValidationError(
             "time_allocation cannot write proof/source/evidence/theorem/refutation/grade status"
@@ -745,6 +762,11 @@ def _contains_forbidden_update_inbox_token(value, forbidden_fields: set[str]) ->
     if isinstance(value, str):
         normalized = value.lower()
         if _first_forbidden_proof_language(normalized):
+            return True
+        if any(
+            re.search(rf"(?<![a-z0-9_]){re.escape(token)}(?![a-z0-9_])", normalized)
+            for token in forbidden_fields
+        ):
             return True
         return any(
             re.search(pattern, normalized)

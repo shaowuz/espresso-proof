@@ -137,6 +137,9 @@ def _grade_memory_memo(*, run_dir: Path, client: LLMClient, context: dict) -> di
         project_id=project_dir.name,
         run_id=run_id,
     )
+    from ...surface_warnings import refresh_final_report_disclosures
+
+    refresh_final_report_disclosures(run_dir)
 
     # 22 Concise Answer: ensure the memo renders from the live content (read-only;
     # raises here if the memo cannot be built, surfacing real breakage).
@@ -234,7 +237,7 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
         "missing_hypotheses": list(current.get("missing_hypotheses") or [])
         or list(ledger.get("missing_or_unclear") or []),
         "source_gaps": list(current.get("source_gaps") or [])
-        or (["No step is source_backed yet."] if source_gap else []),
+        or (["No step is reference-supported yet."] if source_gap else []),
         "repair_options": list(current.get("repair_options") or []),
         "next_cheapest_test": current.get("next_cheapest_test", "")
         or "Test the leading route on small/canonical cases and pin its key lemma.",

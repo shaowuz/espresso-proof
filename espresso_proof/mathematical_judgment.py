@@ -266,4 +266,7 @@ def judge_run(run_dir: Path) -> dict:
         "mathematical_judgment.yaml"
     )
     write_yaml(manifest_path, manifest)
+    from .surface_warnings import refresh_final_report_disclosures
+
+    refresh_final_report_disclosures(run_dir)
     return report

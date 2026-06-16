@@ -95,7 +95,14 @@ def test_failed_stage_recorded_not_dropped(tmp_path: Path) -> None:
 def test_resume_keeps_front_half_artifact_valid(tmp_path: Path) -> None:
     run_dir = _run(tmp_path)
     brief = read_yaml(run_dir / "strategy_brief.yaml")
-    resume_run(run_dir=run_dir, selected_strategy=brief["top_strategies"][0]["id"], effort="quick_test")
+    selected = brief["top_strategies"][0]["id"]
+    effort = next(
+        str(option)
+        for choice in brief["allowed_human_choices"]
+        if choice["strategy_id"] == selected
+        for option in choice["effort_options"]
+    )
+    resume_run(run_dir=run_dir, selected_strategy=selected, effort=effort)
     assert (run_dir / "front_half_run.yaml").exists()
     validate_run(run_dir)
     validate_front_half_run(run_dir)

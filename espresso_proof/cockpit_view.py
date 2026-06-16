@@ -81,6 +81,15 @@ def _clip_scrubbed(text: object, limit: int = 280) -> str:
     return scrub_proof_language(_clip(text, limit))
 
 
+def _clip_status_text(text: object, limit: int = 280) -> str:
+    return (
+        _clip_scrubbed(text, limit)
+        .replace("source_backed", "reference-supported")
+        .replace("checked_evidence", "checked evidence")
+        .replace("theorem_applicability_status", "theorem applicability status")
+    )
+
+
 def _my_feedback_map(run_dir: Path) -> dict:
     """Latest advisory feedback per strategy (Goal 43C). Display-only; a score
     is never evidence and never changes a tone."""
@@ -333,7 +342,9 @@ def build_snapshot(run_dir: Path, run_id: str, status: dict) -> dict:
         "computations": _computations(computations),
         "literature": _literature(literature),
         "open_warnings": status.get("open_warnings") or [],
-        "source_gaps": [_clip(g, 160) for g in ((grade or {}).get("source_gaps") or [])[:8]],
+        "source_gaps": [
+            _clip_status_text(g, 160) for g in ((grade or {}).get("source_gaps") or [])[:8]
+        ],
         "missing": {
             "claim": claim is None,
             "grade": grade is None,
@@ -435,6 +446,7 @@ def build_panel(run_dir: Path, run_id: str, status: dict, panel: str) -> dict:
     if panel == "literature":
         grade = _artifact(run_dir, "idea_grade")
         out["source_gaps"] = [
-            _clip(g, 160) for g in ((grade or {}).get("source_gaps") or [])[:8]
+            _clip_status_text(g, 160)
+            for g in ((grade or {}).get("source_gaps") or [])[:8]
         ]
     return out

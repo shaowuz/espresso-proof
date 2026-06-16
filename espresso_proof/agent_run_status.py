@@ -298,6 +298,21 @@ def set_agent_status(
     board["last_updated"] = now
     AgentRunStatusReport.model_validate(board)
     write_yaml(status_path(run_dir), board)
+    if agent in {"examples", "counterexamples"}:
+        manifest = read_yaml(run_dir / "run_manifest.yaml")
+        if "pressure_status" in manifest.get("optional_artifacts", {}):
+            from .pressure_status import build_pressure_status
+            from .validation.errors import KernelValidationError
+
+            try:
+                build_pressure_status(run_dir)
+            except KernelValidationError:
+                # pressure_status is derived from already-valid example and
+                # counterexample artifacts. If a caller is intentionally
+                # inspecting an invalid artifact (for example a display-layer
+                # negative test), the process board can still be updated; the
+                # kernel validator remains the authority and will reject the run.
+                pass
     return board
 
 

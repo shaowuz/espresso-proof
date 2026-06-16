@@ -477,6 +477,9 @@ def test_source_backed_step_requires_theorem_applicability_artifact(tmp_path: Pa
     source_grounding["source_refs"][0]["authors"] = ["A. Author"]
     source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+    source_grounding["source_refs"][0]["statement_or_summary"] = (
+        "For a very general smooth cubic fourfold, the obstruction applies."
+    )
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
     source_grounding["steps"][0]["source_refs"] = [ref_id]
@@ -504,6 +507,9 @@ def test_source_backed_step_requires_applicable_theorem_conditions(tmp_path: Pat
     source_grounding["source_refs"][0]["authors"] = ["A. Author"]
     source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+    source_grounding["source_refs"][0]["statement_or_summary"] = (
+        "For a very general smooth cubic fourfold, the obstruction applies."
+    )
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
     source_grounding["steps"][0]["source_refs"] = [ref_id]
@@ -570,6 +576,9 @@ def _setup_source_backed_run(tmp_path: Path):
     source_grounding["source_refs"][0]["authors"] = ["A. Author"]
     source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+    source_grounding["source_refs"][0]["statement_or_summary"] = (
+        "For a smooth cubic fourfold, the obstruction applies."
+    )
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
     source_grounding["steps"][0]["source_refs"] = [ref_id]
@@ -768,6 +777,9 @@ def test_source_backed_step_requires_exact_applicability_locator(tmp_path: Path)
     source_grounding["source_refs"][0]["authors"] = ["A. Author"]
     source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+    source_grounding["source_refs"][0]["statement_or_summary"] = (
+        "For a smooth cubic fourfold, the obstruction applies."
+    )
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
     source_grounding["steps"][0]["source_refs"] = [ref_id]
@@ -794,7 +806,7 @@ def test_source_backed_step_requires_exact_applicability_locator(tmp_path: Path)
     manifest.setdefault("optional_artifacts", {})["theorem_applicability"] = "theorem_applicability.yaml"
     write_yaml(run_dir / "run_manifest.yaml", manifest)
 
-    with pytest.raises(KernelValidationError, match="exact applicability locator"):
+    with pytest.raises(KernelValidationError, match="locator does not match"):
         validate_run(run_dir)
 
 

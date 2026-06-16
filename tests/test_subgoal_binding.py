@@ -20,16 +20,23 @@ from espresso_proof.orchestrator import orchestrate_run, resume_run
 from espresso_proof.subgoal_graph import assemble_subgoal_graph
 from espresso_proof.validators import validate_run
 
-FIXTURES = Path("tests/fixtures")
+
+def _claim(tmp_path: Path) -> Path:
+    path = tmp_path / "claim.md"
+    path.write_text(
+        "Let p be a prime. Every group G of order p^2 is abelian.\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def _resumed_run(tmp_path: Path) -> Path:
     result = orchestrate_run(
         project="g39",
-        input_path=FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        input_path=_claim(tmp_path),
         output_root=tmp_path,
         provider="stub",
-        front_half="mock",
+        front_half="stub",
     )
     run_dir = Path(result["run_dir"])
     brief = read_yaml(

@@ -234,5 +234,8 @@ def run_autonomous_retrieval(
         "autonomous_literature_retrieval.yaml"
     )
     write_yaml(run_dir / "run_manifest.yaml", manifest)
+    from .surface_warnings import refresh_final_report_disclosures
+
+    refresh_final_report_disclosures(run_dir)
     validate_run(run_dir)
     return report

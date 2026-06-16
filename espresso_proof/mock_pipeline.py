@@ -16,6 +16,13 @@ from .memory import write_run_memory
 from .surface_warnings import collect_surface_warnings, render_warning_lines
 from .validators import validate_run
 
+_ORDER_P_SQUARED_ABELIAN_LET_EXACT = re.compile(
+    r"let\s+p\s+be\s+(?:a\s+)?prime\s*\.?\s*"
+    r"(?:every|all|each)\s+(?:finite\s+)?groups?(?:\s+g)?\s+of\s+order\s+p(?:\^2|²)\s*"
+    r"(?:is|are)\s+abelian\s*\.?",
+    re.IGNORECASE,
+)
+
 _ORDER_6_GROUPS_ABELIAN_EXACT = re.compile(
     r"(?:every|all|each)\s+(?:finite\s+)?groups?\s+of\s+order\s+6\s+"
     r"(?:is|are)\s+abelian\s*\.?",
@@ -218,7 +225,11 @@ def _detect_scenario(input_path: Path, text: str) -> str:
     # (Kernel Safety review): the favorable scaffold must never catch
     # negated, weakened, or primality-free variants — those read literally
     # are DIFFERENT (false) claims and stay on the vague path.
-    if _ORDER_P_SQUARED_ABELIAN_EXACT.fullmatch(" ".join(lowered.split()).strip()):
+    normalized = " ".join(lowered.split()).strip()
+    if (
+        _ORDER_P_SQUARED_ABELIAN_EXACT.fullmatch(normalized)
+        or _ORDER_P_SQUARED_ABELIAN_LET_EXACT.fullmatch(normalized)
+    ):
         return "true_theorem_classical_source"
     if _finite_group_scenario_key(lowered):
         return "finite_group_claim"
@@ -1660,6 +1671,7 @@ def _true_theorem_classical_source(text: str, run_id: str) -> dict[str, object]:
     # real source verification, so nothing here may reach source_backed.
     artifacts = _vague_claim(text, run_id)
     claim = artifacts["locked_claim.yaml"]
+    claim["normalized_statement"] = "Every group of order p^2, where p is prime, is abelian."
     claim["objects"] = ["finite groups of order p^2, p prime"]
     claim["hypotheses"] = [
         {"name": "the group has order p^2", "status": "explicit", "source": "user"},

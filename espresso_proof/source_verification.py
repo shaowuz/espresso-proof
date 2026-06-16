@@ -110,6 +110,9 @@ def ground_run(*, run_dir: Path, theorem_extraction_path: Path) -> dict:
         "theorem_applicability.yaml"
     )
     write_yaml(manifest_path, manifest)
+    from .surface_warnings import refresh_final_report_disclosures
+
+    refresh_final_report_disclosures(run_dir)
     validate_run(run_dir)
     return read_yaml(run_dir / "source_grounding.yaml")
 

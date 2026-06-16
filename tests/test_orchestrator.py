@@ -52,6 +52,17 @@ def _first_strategy_id(run_dir: Path) -> str:
     return brief["top_strategies"][0]["id"]
 
 
+def _first_allowed_effort(run_dir: Path, selected_strategy: str) -> str:
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    brief = read_yaml(run_dir / manifest["artifacts"]["strategy_brief"])
+    for choice in brief.get("allowed_human_choices") or []:
+        if choice.get("strategy_id") == selected_strategy:
+            options = list(choice.get("effort_options") or [])
+            if options:
+                return str(options[0])
+    return "quick_test"
+
+
 @pytest.mark.parametrize("name", list(CLAIMS))
 def test_orchestrate_reaches_gate_for_arbitrary_claim(tmp_path: Path, name: str) -> None:
     claim_path = tmp_path / f"{name}.md"
@@ -72,10 +83,11 @@ def test_orchestrate_reaches_gate_for_arbitrary_claim(tmp_path: Path, name: str)
 
 def test_orchestrate_resume_to_memo_is_honest(tmp_path: Path) -> None:
     run_dir = _orchestrate(tmp_path, CLEAR_CLAIM, "clear", front_half="mock")
+    selected = _first_strategy_id(run_dir)
     memo = resume_run(
         run_dir=run_dir,
-        selected_strategy=_first_strategy_id(run_dir),
-        effort="quick_test",
+        selected_strategy=selected,
+        effort=_first_allowed_effort(run_dir, selected),
     )
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     assert manifest["current_state"] == "COMPLETED_MEMO"

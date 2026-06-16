@@ -356,7 +356,21 @@ def collect_surface_warnings_from_run(run_dir: Path) -> list[dict[str, Any]]:
     def artifact(key: str) -> dict[str, Any]:
         rel = artifacts.get(key)
         path = run_dir / rel if rel else None
-        return read_yaml(path) if path and path.exists() else {}
+        if not path or not path.exists():
+            return {}
+        if path.is_dir() and key in {"examples", "counterexamples"}:
+            from .research_bank import (
+                load_counterexamples_artifact,
+                load_examples_artifact,
+            )
+
+            loader = (
+                load_examples_artifact
+                if key == "examples"
+                else load_counterexamples_artifact
+            )
+            return loader(path).model_dump(mode="json")
+        return read_yaml(path)
 
     def optional_artifact(key: str) -> dict[str, Any]:
         rel = optional.get(key)

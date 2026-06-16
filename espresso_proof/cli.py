@@ -922,8 +922,8 @@ def verify_finite_groups_command(
     _require_claim_clear_for_cli(run)
     primes = prime or [2, 3]
     report = verify_finite_groups(run, primes=primes)
-    validate_run(run)
     _refresh_derived_views(run)
+    validate_run(run)
     checked = sum(1 for e in report["entries"] if e["earned_status"] == "instance_checked")
     typer.echo(
         f"Verified {checked}/{len(report['entries'])} finite group(s) abelian "

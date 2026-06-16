@@ -65,7 +65,13 @@ def _resumed_run(tmp_path: Path) -> Path:
     )
     brief = read_yaml(run_dir / "strategy_brief.yaml")
     selected = brief["top_strategies"][0]["id"]
-    resume_run(run_dir=run_dir, selected_strategy=selected, effort="quick_test")
+    effort = next(
+        str(option)
+        for choice in brief.get("allowed_human_choices") or []
+        if choice.get("strategy_id") == selected
+        for option in choice.get("effort_options") or []
+    )
+    resume_run(run_dir=run_dir, selected_strategy=selected, effort=effort)
     return run_dir
 
 
