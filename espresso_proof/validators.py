@@ -242,7 +242,7 @@ def validate_run(run_dir: Path) -> None:
     _validate_literature_retrieval(literature_retrieval, claim, manifest)
     _validate_proof_verification(proof_verification, claim, manifest, idea_grade)
     _validate_grade_proof_language_backed(
-        idea_grade, computation_verification, proof_verification
+        idea_grade, source_grounding, computation_verification, proof_verification
     )
     _validate_grade_10_requires_global_proof_status(idea_grade)
     _validate_external_tool_artifacts(
@@ -1349,6 +1349,7 @@ def _validate_proof_verification(
 
 def _validate_grade_proof_language_backed(
     idea_grade: IdeaGrade,
+    source_grounding: SourceGroundingReport,
     computation_verification: ComputationVerificationReport | None,
     proof_verification: ProofVerificationReport | None,
 ) -> None:
@@ -1358,6 +1359,9 @@ def _validate_grade_proof_language_backed(
     trusted verifier", so the VERIFIED statuses cannot be asserted from prose or a
     forged grade:
 
+    - ``source_checked_argument`` requires at least one source-grounding step
+      that actually earned ``source_backed``. This remains step-local reference
+      support, not a checked proof.
     - ``computation_checked`` requires an actual confirming MACHINE result -- a
       trusted+confirming proof-verification entry (computation/instance checked)
       or a confirmed computation-verification result. A scoped/finite computation
@@ -1369,7 +1373,17 @@ def _validate_grade_proof_language_backed(
       feedback may never upgrade proof status). Fail closed.
     """
     status = idea_grade.proof_language_status
-    if status == ProofLanguageStatus.computation_checked:
+    if status == ProofLanguageStatus.source_checked_argument:
+        if not any(
+            step.status == SourceStatus.source_backed
+            for step in source_grounding.steps
+        ):
+            raise KernelValidationError(
+                "idea_grade.proof_language_status=source_checked_argument requires "
+                "at least one earned source-grounding step; reviewer/source prose "
+                "cannot upgrade proof language"
+            )
+    elif status == ProofLanguageStatus.computation_checked:
         machine_confirmed = bool(
             proof_verification
             and any(

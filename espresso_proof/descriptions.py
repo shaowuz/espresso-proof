@@ -58,7 +58,7 @@ PROOF_LANGUAGE_DESCRIPTIONS: dict[str, str] = {
     "idea_sketch": "an idea sketch (not a checked proof)",
     "proof_candidate": "a candidate argument (not yet checked)",
     "source_checked_argument": (
-        "an argument with source-checked steps (not a full verified proof)"
+        "an argument with reference-supported steps (not a checked proof)"
     ),
     "computation_checked": (
         "a computation checked for a stated finite/computational scope "

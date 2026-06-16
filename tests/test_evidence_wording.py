@@ -18,6 +18,7 @@ from typer.testing import CliRunner
 
 from espresso_proof.cli import app
 from espresso_proof.descriptions import (
+    describe_proof_language,
     evidence_phrase,
     judgment_tier_phrase,
     objection_phrase,
@@ -102,6 +103,15 @@ def test_evidence_phrase_required_wording() -> None:
     for token in ("source_backed", "computation_checked", "instance_checked",
                   "human_needed", "not_found", "unverified"):
         assert token not in evidence_phrase(token)
+
+
+def test_source_checked_argument_wording_is_scoped_reference_support() -> None:
+    phrase = describe_proof_language("source_checked_argument")
+
+    assert phrase == "an argument with reference-supported steps (not a checked proof)"
+    assert "source-checked" not in phrase
+    assert "source checked" not in phrase
+    assert "verified proof" not in phrase
 
 
 def test_objection_phrase_required_wording() -> None:

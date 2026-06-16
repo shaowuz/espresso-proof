@@ -491,3 +491,22 @@ def test_supported_step_cannot_prove_route_final_status_or_grade_10(tmp_path: Pa
 
     with pytest.raises(KernelValidationError, match="forbidden proof language"):
         validate_run(run_dir)
+
+
+def test_source_checked_argument_requires_earned_source_grounding_step(
+    tmp_path: Path,
+) -> None:
+    run_dir = run_mock_critique(
+        "v2_source_theorem_no_grounding",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    _claim_clear(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    grade_path = run_dir / manifest["artifacts"]["idea_grade"]
+    grade = read_yaml(grade_path)
+    grade["proof_language_status"] = "source_checked_argument"
+    write_yaml(grade_path, grade)
+
+    with pytest.raises(KernelValidationError, match="source_checked_argument requires"):
+        validate_run(run_dir)
