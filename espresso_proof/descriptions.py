@@ -124,7 +124,7 @@ EVIDENCE_PHRASES: dict[str, str] = {
     "source_backed": (
         "Reference supports this stated claim; see locator and applicability reason"
     ),
-    # A source-checked argument is reference support, not a machine check.
+    # Reference-supported steps are local support, not a machine check.
     "source_checked": (
         "Reference supports this stated claim; see locator and applicability reason"
     ),
