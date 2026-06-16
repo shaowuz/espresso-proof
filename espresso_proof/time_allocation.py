@@ -13,6 +13,8 @@ from typing import Any
 
 from .io import read_yaml, write_yaml
 from .models import TimeAllocationPlan
+from .run_lock import run_writer_lock
+from .update_inbox import mark_update_inbox_entries_applied
 from .validation.errors import KernelValidationError
 
 TIME_ALLOCATION_FILENAME = "time_allocation.yaml"
@@ -123,6 +125,41 @@ def _reviewer_objection_round_counts(update_inbox: dict[str, Any] | None) -> dic
             )
         )
     return {route: len(rounds) for route, rounds in rounds_by_route.items()}
+
+
+def _consumed_reviewer_objection_entry_ids(
+    update_inbox: dict[str, Any] | None,
+    allocation_route_ids: set[str],
+) -> set[str]:
+    """Reviewer-objection entries consumed by this allocation snapshot.
+
+    Applied entries still count on future recomputation. The stamp records that
+    a valid scheduling pointer fed a persisted allocation, not that the
+    objection was resolved.
+    """
+
+    if not update_inbox or not allocation_route_ids:
+        return set()
+    consumed: set[str] = set()
+    for entry in update_inbox.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("type") != "reviewer_objection":
+            continue
+        if (
+            entry.get("effect") != "scheduling_only"
+            or entry.get("advisory_only") is not True
+        ):
+            continue
+        if entry.get("validator_ok") is not True:
+            continue
+        route = entry.get("route_id_or_step_id")
+        if not route or str(route) not in allocation_route_ids:
+            continue
+        entry_id = str(entry.get("id", "")).strip()
+        if entry_id:
+            consumed.add(entry_id)
+    return consumed
 
 
 def _unique(values: list[str]) -> list[str]:
@@ -272,21 +309,33 @@ def build_time_allocation_plan(run_dir: Path) -> TimeAllocationPlan | None:
 
 
 def write_time_allocation_plan(run_dir: Path) -> TimeAllocationPlan | None:
-    plan = build_time_allocation_plan(run_dir)
-    if plan is None:
-        return None
     run_dir = Path(run_dir)
-    write_yaml(run_dir / TIME_ALLOCATION_FILENAME, plan.model_dump(mode="json"))
-    manifest = read_yaml(run_dir / "run_manifest.yaml")
-    manifest.setdefault("optional_artifacts", {})["time_allocation"] = TIME_ALLOCATION_FILENAME
-    depends_on = ["strategy_synthesis", "strategy_brief", "idea_grade"]
-    if "update_inbox" in manifest.get("optional_artifacts", {}):
-        depends_on.append("update_inbox")
-    manifest.setdefault("dependencies", {})["time_allocation"] = {
-        "depends_on": depends_on
-    }
-    write_yaml(run_dir / "run_manifest.yaml", manifest)
-    return plan
+    with run_writer_lock(run_dir, action="write time allocation"):
+        plan = build_time_allocation_plan(run_dir)
+        if plan is None:
+            return None
+        manifest = read_yaml(run_dir / "run_manifest.yaml")
+        update_inbox = _read_optional(run_dir, manifest, "update_inbox")
+        allocation_route_ids = {
+            entry.route_id for entry in plan.entries if entry.route_id is not None
+        }
+        consumed_update_ids = _consumed_reviewer_objection_entry_ids(
+            update_inbox,
+            allocation_route_ids,
+        )
+        write_yaml(run_dir / TIME_ALLOCATION_FILENAME, plan.model_dump(mode="json"))
+        manifest = read_yaml(run_dir / "run_manifest.yaml")
+        manifest.setdefault("optional_artifacts", {})["time_allocation"] = TIME_ALLOCATION_FILENAME
+        depends_on = ["strategy_synthesis", "strategy_brief", "idea_grade"]
+        if "update_inbox" in manifest.get("optional_artifacts", {}):
+            depends_on.append("update_inbox")
+        manifest.setdefault("dependencies", {})["time_allocation"] = {
+            "depends_on": depends_on
+        }
+        write_yaml(run_dir / "run_manifest.yaml", manifest)
+        if "update_inbox" in manifest.get("optional_artifacts", {}):
+            mark_update_inbox_entries_applied(run_dir, consumed_update_ids)
+        return plan
 
 
 def ensure_prover_time_allocation_plan(run_dir: Path) -> TimeAllocationPlan:

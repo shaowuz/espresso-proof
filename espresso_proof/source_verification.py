@@ -80,7 +80,7 @@ def verify_source_grounding_from_theorems(
                 reason = "no exact locator"
             else:
                 reason = ", ".join(hypothesis_match.get("mismatches", [])) or "unclear hypothesis match"
-            step["note"] = f"Candidate theorem found, but source-backed verification is blocked by {reason}."
+            step["note"] = f"Candidate theorem found, but reference-support verification is blocked by {reason}."
 
     source_grounding["source_refs"] = list(existing_refs.values())
     SourceGroundingReport.model_validate(source_grounding)

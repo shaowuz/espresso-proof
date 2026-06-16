@@ -260,7 +260,7 @@ def build_failure_pattern_audit(run_dir: Path) -> dict:
                 step.get("proof_step_id", "step"),
                 "cited theorem hypotheses do not confirm the claim",
                 "The cited source may support a different statement; treat as a "
-                "ranking/time hint, not source-backed support.",
+                "ranking/time hint, not reference support.",
             )
             break  # one audited source signal is enough
 
