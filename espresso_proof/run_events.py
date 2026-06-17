@@ -47,6 +47,9 @@ EVENT_KINDS = (
     "server_job",
     "replay",
     "note",
+    # Goal 65 control-flow: the Prover pass was intentionally not run because the
+    # front half asked to stop before proof search (loop_control stop/ask_human).
+    "prover_pass_skipped",
 )
 
 
