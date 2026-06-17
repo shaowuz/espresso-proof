@@ -53,6 +53,8 @@ Core design documents:
 
 Supporting documents:
 
+- [CURRENT_STATE_FOR_NEW_CONTEXT.md](CURRENT_STATE_FOR_NEW_CONTEXT.md): short
+  current handoff for a fresh agent context.
 - [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md): shortest current map
   of active entry points, runtime folders, tests, mathematical data, and archive
   boundaries.
@@ -66,7 +68,9 @@ Supporting documents:
 - [docs/engineering/CLEANUP_GUIDE.md](docs/engineering/CLEANUP_GUIDE.md): cleanup-only collaboration contract, layer boundaries, hot files, and future refactor plan.
 - [docs/engineering/PRODUCT_PATH_BOUNDARIES.md](docs/engineering/PRODUCT_PATH_BOUNDARIES.md): canonical/dev-only/test-only/legacy/unsafe-to-delete boundaries.
 - [docs/research/](docs/research/): research survey and source material about AI theorem proving and math agents.
-- [docs/archive/](docs/archive/): older planning notes and collaborator handoffs preserved for history, not current product direction.
+- [docs/archive/](docs/archive/): older planning notes, status reports,
+  dogfood reports, porting notes, and collaborator handoffs preserved for
+  history, not current product direction.
 - [docs/AGENT_INFRA_REFERENCES.md](docs/AGENT_INFRA_REFERENCES.md): infrastructure references for LLM provider calls, human-gated agent execution, durable orchestration, and VS Code webviews.
 - [docs/REAL_AGENT_RUNBOOK.md](docs/REAL_AGENT_RUNBOOK.md): supported path for saving an OpenAI API key, checking the real provider, running OpenAI or external-command multiagent flow, and resolving the human gate.
 - [docs/LITERATURE_DISCOVERY.md](docs/LITERATURE_DISCOVERY.md): conservative literature discovery, source ingestion, and source verification behavior.
