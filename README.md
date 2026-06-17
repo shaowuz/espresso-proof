@@ -58,6 +58,9 @@ Supporting documents:
 - [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md): shortest current map
   of active entry points, runtime folders, tests, mathematical data, and archive
   boundaries.
+- [docs/engineering/CODEBASE_SPINE.md](docs/engineering/CODEBASE_SPINE.md):
+  short code map for user entrypoints, orchestration, trust boundaries,
+  artifact ownership, UI surfaces, and testing policy.
 - [docs/FILE_OVERVIEW.md](docs/FILE_OVERVIEW.md): explanation of what each repository file and folder is for.
 - [docs/goals/](docs/goals/): active goal queue only; historical goals live in
   `docs/archive/goals/`.

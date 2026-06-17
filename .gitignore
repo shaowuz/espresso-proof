@@ -1,7 +1,9 @@
 .venv/
 .eval_runs/
+eval_runs/
 .benchmark_runs/
 .espresso_agent_logs/
+.ai/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -10,6 +12,9 @@ espresso_proof.egg-info/
 projects/*/runs/
 projects/*/memory/
 runs/
+reports/
+tmp/
+espresso-proof-artifacts/
 
 # Local research scratch notes generated during proof-search runs. Keep them on
 # disk for the mathematician, but do not mix them into product/kernel commits.
