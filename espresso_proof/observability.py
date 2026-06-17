@@ -213,6 +213,48 @@ def read_agent_events(run_dir: Path) -> list[dict]:
     return out
 
 
+def _agent_call_key(record: dict) -> tuple:
+    """Identity for pairing a ``started`` agent-event with its terminal record.
+    Same (stage, agent_name, retry_index, round_index) = same call."""
+    return (
+        record.get("stage"),
+        record.get("agent_name"),
+        record.get("retry_index", 0),
+        record.get("round_index"),
+    )
+
+
+# Terminal statuses that close an open ``started`` agent call.
+_TERMINAL_AGENT_STATUSES = frozenset({"finished", "failed", "timed_out"})
+
+
+def latest_unfinished_agent_call(run_dir: Path) -> dict | None:
+    """Goal 65B: return the most recent agent call that recorded ``started`` but
+    no matching terminal (``finished``/``failed``/``timed_out``) record, or None.
+
+    This is the reconstruction primitive for a mid-call PROCESS death: when the
+    worker dies *inside* an external agent call (as in the order-3 postmortem),
+    no terminal record is ever written, so the dangling ``started`` record is the
+    only evidence of *where* the run died. Diagnostic only; fails closed."""
+    try:
+        open_calls: dict[tuple, dict] = {}
+        order: list[tuple] = []
+        for rec in read_agent_events(run_dir):
+            status = rec.get("agent_status")
+            key = _agent_call_key(rec)
+            if status == "started":
+                open_calls[key] = rec
+                order.append(key)
+            elif status in _TERMINAL_AGENT_STATUSES:
+                open_calls.pop(key, None)
+        for key in reversed(order):
+            if key in open_calls:
+                return open_calls[key]
+        return None
+    except Exception:  # noqa: BLE001 - diagnostics must never break a run
+        return None
+
+
 def write_timings(run_dir: Path, *, run_started_at: str | None = None) -> dict | None:
     """Aggregate ``events.jsonl`` + ``agent_events.jsonl`` into ``timings.yaml``.
 
@@ -318,6 +360,7 @@ __all__ = [
     "monotonic_ms",
     "append_agent_event",
     "read_agent_events",
+    "latest_unfinished_agent_call",
     "write_timings",
     "register_observability_artifacts",
 ]

@@ -341,6 +341,14 @@ def _continue_prover_loop_locked(
         _round_t0 = monotonic_ms()
         round_index = rounds_run + 1
         append_event(run_dir, "agent_call_started", stage="prover_loop_round", detail=f"round {round_index}")
+        # Goal 65B: record a "started" agent_event before the round so a mid-round
+        # process death leaves a dangling started record (see
+        # observability.latest_unfinished_agent_call).
+        append_agent_event(
+            run_dir, agent_name="prover_round", provider=provider, adapter=provider,
+            model=model, stage="prover_loop_round", agent_status="started",
+            started_at=_round_started, round_index=round_index,
+        )
         try:
             append_prover_loop_round(
                 run_dir=run_dir,

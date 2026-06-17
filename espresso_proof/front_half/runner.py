@@ -75,6 +75,14 @@ def run_front_half_agent_pass(
         started_at = now_iso()
         _t0 = monotonic_ms()
         append_event(run_dir, "agent_call_started", stage=stage)
+        # Goal 65B: record a "started" agent_event before the call so a mid-call
+        # process death leaves a dangling started record (see
+        # observability.latest_unfinished_agent_call).
+        append_agent_event(
+            run_dir, agent_name=stage, provider=provider, adapter=provider, stage=stage,
+            run_id=_run_id, agent_status="started", started_at=started_at,
+            model=getattr(client, "model", None),
+        )
         try:
             context = load_agent_context(run_dir)
             outcome = normalizer(run_dir=run_dir, client=client, context=context) or {}
