@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ...claim_normalization import normalize_simple_claim
 from ...hypothesis_normalization import normalize_ambient_object_hypotheses
 from ...io import read_yaml, write_yaml
 from ...llm_agents import LLMClient, load_agent_context, safe_list, safe_text
@@ -210,6 +211,35 @@ def _understanding_claim(*, run_dir: Path, client: LLMClient, context: dict) -> 
         conclusion=conclusion, objects=objects, missing_or_unclear=missing_or_unclear
     ):
         claim_precision = "imprecise"
+
+    # Goal 66: conservative fast-lock for recognized simple elementary claims.
+    # If the (stub/weak) understanding left the claim imprecise but the raw text
+    # is a high-confidence recognized pattern (a prime/concrete-order group is
+    # cyclic), lock a precise claim so the claim-clear gate is not brittle for
+    # standard phrasings. Advisory only: proposes a locked claim (still NOT
+    # human_confirmed) and upgrades NO proof/source/evidence/refutation status.
+    # The _looks_imprecise safety floor stays authoritative — the normalizer can
+    # never push through something the floor would reject.
+    if claim_precision != "precise":
+        norm = normalize_simple_claim(raw_text)
+        if norm is not None and not _looks_imprecise(
+            conclusion=norm["conclusion"],
+            objects=norm["objects"],
+            missing_or_unclear=norm["missing_or_unclear"],
+        ):
+            normalized = norm["normalized_statement"][:240]
+            objects = norm["objects"]
+            conclusion = norm["conclusion"]
+            hypotheses = normalize_ambient_object_hypotheses(
+                _normalize_hypotheses(norm["hypotheses"], fallback=[])
+            )
+            missing_or_unclear = norm["missing_or_unclear"]
+            claim_precision = "precise"
+            notes = notes + [
+                "claim normalized by the Goal-66 simple-claim normalizer "
+                "(advisory; locks a precise claim only; no proof/source/evidence "
+                "status implied)"
+            ]
 
     claim = {
         "id": current["id"],          # preserve id so downstream artifacts still resolve

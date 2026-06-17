@@ -477,3 +477,20 @@ def test_g65f_failed_agent_keeps_server_alive(client) -> None:
     # the server still answers run status afterwards (it stayed alive)
     code, st = call("GET", f"/api/runs/{run_id}/status")
     assert code == 200 and "agents" in st
+
+
+# --- Goal 66: simple prime-order group claim is not blocked via the API ------
+
+def test_g66_prime_order_group_claim_clears_via_api(client) -> None:
+    from espresso_proof.claim_clear import evaluate_claim_clear
+
+    wb, call, _ = client
+    run_id = _create_text(call, "prove that a group of order p is cyclic when p is a prime number")
+    run_dir = wb.resolve_run(run_id)
+    ledger = read_yaml(run_dir / "hypothesis_ledger.yaml")
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert ledger["claim_precision"] == "precise"
+    assert evaluate_claim_clear(run_dir).clear is True
+    assert manifest["current_state"] != "WAITING_CLAIM_CLARIFICATION"
+    # claim precision only — no earned math status
+    assert read_yaml(run_dir / "locked_claim.yaml")["human_confirmed"] is False
