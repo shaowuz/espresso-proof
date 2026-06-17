@@ -32,6 +32,27 @@ class SkillSelection:
     skills: tuple[str, ...]
     skill_text: str
     goal: GoalContext
+    request_type: str = "product_math"
+    # repo maintenance/goal files intentionally NOT injected for this request type
+    blocked_context: tuple[str, ...] = ()
+
+
+# Goal 65D (order-3 postmortem): a product mathematical run must NEVER auto-inject
+# repo maintenance context (the goal queue) into its prompt. The caller DECLARES
+# the request type; only an explicit maintenance/goal-running type may auto-load
+# the repo's CURRENT_CLAUDE_GOAL_QUEUE.md. Unknown/missing fails closed to the
+# restrictive product_math.
+PRODUCT_MATH = "product_math"
+_REQUEST_TYPES = frozenset({"product_math", "maintenance_goal", "dogfood_diagnostic", "reviewer"})
+_GOAL_LOADING_TYPES = frozenset({"maintenance_goal"})
+_DEFAULT_GOAL_REL = ("docs", "goals", "CURRENT_CLAUDE_GOAL_QUEUE.md")
+
+
+def _normalize_request_type(request_type: str | None) -> str:
+    """Fail closed: unknown/missing request type => product_math (no goal-file
+    auto-injection). The type is caller-DECLARED, never inferred from prompt text."""
+    rt = (request_type or "").strip().lower()
+    return rt if rt in _REQUEST_TYPES else PRODUCT_MATH
 
 
 _SKILLS: tuple[AgentSkill, ...] = (
@@ -106,9 +127,16 @@ def select_agent_skills(
     prompt: str,
     cwd: Path | None = None,
     active_goal_file: str | None = None,
+    request_type: str | None = PRODUCT_MATH,
 ) -> SkillSelection:
-    """Choose role skills and active goal text for a single agent call."""
+    """Choose role skills and active goal text for a single agent call.
 
+    Goal 65D: ``request_type`` is caller-declared. A ``product_math`` run (the
+    default, and the fail-closed value for any unknown type) does NOT auto-inject
+    the repo's maintenance goal queue; only ``maintenance_goal`` does. An explicit
+    ``active_goal_file`` is always honored."""
+
+    request_type = _normalize_request_type(request_type)
     text = f"{system}\n{prompt}".lower()
     chosen: list[AgentSkill] = []
     for skill in _SKILLS:
@@ -133,7 +161,15 @@ def select_agent_skills(
     if not chosen:
         chosen = [_skill_by_name("claim-understanding")]
 
-    goal = load_active_goal(cwd=cwd, active_goal_file=active_goal_file)
+    include_default_queue = request_type in _GOAL_LOADING_TYPES
+    goal = load_active_goal(
+        cwd=cwd, active_goal_file=active_goal_file, include_default_queue=include_default_queue
+    )
+    # Record the maintenance goal queue as blocked when this request type is not
+    # allowed to auto-load it (routing visibility for diagnostics).
+    blocked: tuple[str, ...] = ()
+    if not include_default_queue:
+        blocked = (str((cwd or Path.cwd()).joinpath(*_DEFAULT_GOAL_REL)),)
     skill_text = "\n\n".join([_read_skill(_SAFETY_FILE)] + [_read_skill(skill.file_name) for skill in chosen])
     stage = chosen[0].name
     return SkillSelection(
@@ -141,15 +177,27 @@ def select_agent_skills(
         skills=tuple(skill.name for skill in chosen),
         skill_text=skill_text,
         goal=goal,
+        request_type=request_type,
+        blocked_context=blocked,
     )
 
 
-def load_active_goal(*, cwd: Path | None = None, active_goal_file: str | None = None) -> GoalContext:
+def load_active_goal(
+    *,
+    cwd: Path | None = None,
+    active_goal_file: str | None = None,
+    include_default_queue: bool = True,
+) -> GoalContext:
+    """Load active-goal context for an agent prompt. An explicit ``active_goal_file``
+    is always honored; the repo's default ``CURRENT_CLAUDE_GOAL_QUEUE.md`` is
+    appended ONLY when ``include_default_queue`` is True (Goal 65D: product math
+    runs pass False so the maintenance queue is never auto-injected)."""
     base = cwd or Path.cwd()
     candidates: list[Path] = []
     if active_goal_file:
         candidates.append(Path(active_goal_file).expanduser())
-    candidates.append(base / "docs" / "goals" / "CURRENT_CLAUDE_GOAL_QUEUE.md")
+    if include_default_queue:
+        candidates.append(base / "docs" / "goals" / "CURRENT_CLAUDE_GOAL_QUEUE.md")
 
     for path in candidates:
         if not path.is_absolute():
