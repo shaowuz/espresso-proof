@@ -1,12 +1,35 @@
 # Espresso Proof
 
+## Canonical Product Path
+
+The official product path is now:
+
+```text
+React cockpit
+-> local loopback server
+-> external Codex agent
+-> artifact kernel
+-> visible trace / UI
+```
+
+Start product work from the React cockpit served by `espresso serve`. The CLI,
+VS Code extension, static dashboards, mock/stub providers, dogfood reports, and
+archived goals are development, test, or historical surfaces unless the maintainer
+explicitly says otherwise. See
+`docs/engineering/PRODUCT_PATH_BOUNDARIES.md` before cleanup.
+
 Espresso Proof is a customizable AI workflow platform for mathematical research. The first high-value workflow is proof-sketch critique plus idea grading, but that workflow is not the product boundary. The product boundary is a reusable runtime for project-specific mathematical workflows: `WorkflowSpec`, agent contracts, artifact graph, run manifest, memory, eval fixtures, human gates, source status, and Grade.
 
 It is not a Lean-heavy prover, not a chatbox, and not an agent zoo. The platform value is artifact-based, auditable, reusable workflow: every important claim, source status, example check, strategy decision, and human choice should live in project files, not only in conversation.
 
 Lean-light is intended adapter behavior after a Lean/Mathlib connector exists: use existing Mathlib results when they help; if they do not exist, continue with critique and counterexample checks. The current kernel does not include Mathlib integration.
 
-This repository now contains the first local engineering kernel: Pydantic schemas, a Typer CLI, mock critique pipeline, `agent_contracts.yaml`, `literature_review.yaml`, `tests.yaml`, `loop_control.yaml`, `strategy_synthesis.yaml`, `strategy_brief.yaml`, `human_choice.yaml`, optional `human_example_feedback.yaml`, optional `example_feedback_summary.yaml`, optional `llm_agent_run.yaml`, optional `prover_loop.yaml`, optional `prover_rounds/index.yaml`, and optional `theorem_applicability.yaml` artifacts, indexed memory writing/loading, cross-artifact validators, JSON Schema exports, fixture contracts under `tests/fixtures/`, a deterministic `generate-agent --mode v0` admission flow, conservative Literature Discovery commands, PDF/text theorem ingestion, conservative source verification, theorem-applicability auditing, a local VS Code side-panel prototype, a runnable `espresso run-flow` multiagent command, an initial human-gated LLM prover plus Espresso reviewer-set runtime, and two seeded domains: `hodge_atoms` and `coherent_base_change`. It still does not contain LLM tool execution, durable long-running workers, real Evidence Auditor adapters, Mathlib integration, or proof automation.
+This repository contains the local product kernel: React cockpit, loopback
+server, Pydantic schemas, artifact validators, JSON Schema exports, external
+Codex adapter, run manifest, memory, eval fixtures, source status, human gates,
+strategy/prover/reviewer artifacts, and two seeded domains: `hodge_atoms` and
+`coherent_base_change`. It also contains older CLI, VS Code, dashboard, mock,
+and dogfood surfaces. Those are not the canonical product path.
 
 ## Core Position
 
@@ -41,12 +64,13 @@ Supporting documents:
 - [docs/engineering/SYSTEM_ARCHITECTURE.md](docs/engineering/SYSTEM_ARCHITECTURE.md): system architecture, module responsibilities, local runtime, retrieval, UI, memory, and evaluation boundaries.
 - [docs/engineering/ESPRESSO_AGENT_PROTOCOL.md](docs/engineering/ESPRESSO_AGENT_PROTOCOL.md): source of truth for Codex/collaborator sessions, current capability boundaries, safe language, and validation discipline.
 - [docs/engineering/CLEANUP_GUIDE.md](docs/engineering/CLEANUP_GUIDE.md): cleanup-only collaboration contract, layer boundaries, hot files, and future refactor plan.
+- [docs/engineering/PRODUCT_PATH_BOUNDARIES.md](docs/engineering/PRODUCT_PATH_BOUNDARIES.md): canonical/dev-only/test-only/legacy/unsafe-to-delete boundaries.
 - [docs/research/](docs/research/): research survey and source material about AI theorem proving and math agents.
 - [docs/archive/](docs/archive/): older planning notes and collaborator handoffs preserved for history, not current product direction.
 - [docs/AGENT_INFRA_REFERENCES.md](docs/AGENT_INFRA_REFERENCES.md): infrastructure references for LLM provider calls, human-gated agent execution, durable orchestration, and VS Code webviews.
 - [docs/REAL_AGENT_RUNBOOK.md](docs/REAL_AGENT_RUNBOOK.md): supported path for saving an OpenAI API key, checking the real provider, running OpenAI or external-command multiagent flow, and resolving the human gate.
 - [docs/LITERATURE_DISCOVERY.md](docs/LITERATURE_DISCOVERY.md): conservative literature discovery, source ingestion, and source verification behavior.
-- [docs/UI_PLAN.md](docs/UI_PLAN.md): V1 VS Code side-panel scope and artifact-backed UI plan.
+- [docs/UI_PLAN.md](docs/UI_PLAN.md): legacy/dev-only VS Code side-panel scope and artifact-backed UI plan.
 - [.claude/skills/espresso-proof/SKILL.md](.claude/skills/espresso-proof/SKILL.md): project-discoverable Claude Code skill for running the current Espresso agent flow in chat.
 
 ## Project Playbooks
@@ -69,13 +93,15 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e ".[dev]"
 ```
 
-Before opening or merging a pull request, run:
+Before opening or merging a pull request, use local-first CI. For most cleanup
+work, start with the focused lane:
 
 ```text
-.venv/bin/python -m pytest -q
-.venv/bin/espresso eval --mode mock
-.venv/bin/espresso eval --schemas-only
+scripts/local_ci.sh quick
 ```
+
+Use `scripts/local_ci.sh full` for trust-boundary/runtime merges. GitHub Actions
+is manual/lightweight only.
 
 Use this branch pattern:
 
@@ -143,7 +169,7 @@ The highest-value next features are:
 
 Build the **Espresso Proof local workflow kernel first**, then the first proof-sketch critique workflow, then the AI workflow generator.
 
-The first engineering target is implemented as a mock/local kernel:
+The old CLI surface remains available for development and tests:
 
 ```text
 espresso init
@@ -157,7 +183,11 @@ espresso run-prover-loop-round
 espresso audit-theorem-applicability
 ```
 
-Current command scope is deliberately narrow. `critique-sketch` and `eval` run deterministic mock artifacts. `generate-agent --mode v0` classifies the prompt into a small deterministic domain set, writes a schema-valid draft `workflow_spec.yaml`, `agent_contracts.yaml`, `admission_check.yaml`, `playbook.md`, and `trial_fixture/`, then leaves `admitted: false` until human confirmation. `run-prover-loop-round` appends one resolved-gate prover/reviewer round to `prover_loop.yaml` and writes durable per-round prover/reviewer artifacts under `prover_rounds/`; it is not a durable long-running worker.
+These commands are not the canonical user product path. `critique-sketch` and
+`eval` run deterministic mock artifacts. `generate-agent --mode v0` writes a
+schema-valid draft workflow and leaves `admitted: false` until human
+confirmation. `run-prover-loop-round` appends one resolved-gate
+prover/reviewer round; it is not a durable long-running worker.
 
 The current product loop is:
 
