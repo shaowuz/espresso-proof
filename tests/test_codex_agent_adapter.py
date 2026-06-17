@@ -112,7 +112,7 @@ def test_codex_adapter_pins_model_effort_injects_goal_and_logs_full_prompt(tmp_p
     assert "-m" in argv
     assert argv[argv.index("-m") + 1] == "gpt-5.5"
     assert "-c" in argv
-    assert 'model_reasoning_effort="xhigh"' in argv
+    assert 'model_reasoning_effort="medium"' in argv
     assert "--ask-for-approval" not in argv
     full_prompt = argv[-1]
     assert "Active goal: test Codex external mode." in full_prompt
@@ -124,7 +124,7 @@ def test_codex_adapter_pins_model_effort_injects_goal_and_logs_full_prompt(tmp_p
     events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
     assert [event["event"] for event in events] == ["agent_start", "agent_finish"]
     assert events[0]["model"] == "gpt-5.5"
-    assert events[0]["effort"] == "xhigh"
+    assert events[0]["effort"] == "medium"
     assert events[0]["skills"] == ["literature-review"]
     assert events[1]["ok"] is True
     prompt_log = prompt_path.read_text(encoding="utf-8")
@@ -209,7 +209,7 @@ def test_external_client_records_codex_model_when_command_is_codex_adapter(
 
     client = ExternalCommandClient(model="gpt-4.1")
 
-    assert client.model == "gpt-5.5-xhigh"
+    assert client.model == "gpt-5.5-medium"
     assert client.timeout == 360
     assert client.complete_json(system="Return JSON only.", prompt="{}")["verdict"] == "needs_sources"
 
