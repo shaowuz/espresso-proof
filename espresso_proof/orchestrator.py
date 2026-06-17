@@ -31,6 +31,7 @@ from .llm_agents import (
     build_client,
     build_prover_loop_report,
     external_agent_diagnostic,
+    ExternalAgentTimeoutError,
     openai_agent_diagnostic,
     resolve_agent_gate,
     route_initial_reviewer_blockers_to_update_inbox,
@@ -419,11 +420,18 @@ def orchestrate_run(
                     provider_diagnostic=provider_diagnostic,
                 )
             except Exception as exc:  # noqa: BLE001 - record provenance, then re-raise
+                # Goal 65C: when the external agent timed out (and its process
+                # group was killed), record timeout metadata so a timeout is
+                # distinguishable from any other failure in agent_events.jsonl.
+                _timed_out = isinstance(exc, ExternalAgentTimeoutError)
+                _timeout_ms = exc.timeout_seconds * 1000 if _timed_out else None
                 append_agent_event(
                     run_dir, agent_name="llm_prover_reviewers", provider=provider,
                     adapter=provider, model=model, stage="llm_prover_reviewers",
-                    agent_status="failed", started_at=_started, finished_at=now_iso(),
+                    agent_status="timed_out" if _timed_out else "failed",
+                    started_at=_started, finished_at=now_iso(),
                     duration_ms=monotonic_ms() - _t0, error_summary=str(exc),
+                    timed_out=_timed_out, timeout_ms=_timeout_ms,
                 )
                 append_event(run_dir, "agent_call_failed", stage="llm_prover_reviewers", detail=str(exc))
                 raise
