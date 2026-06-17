@@ -159,6 +159,10 @@ def status_summary(run_dir: Path) -> dict[str, Any]:
     return {
         "state": state["state_label"],
         "proof_status": state["proof_label"],
+        # Goal 67C: honest provenance — a stub/template run is flagged so the UI
+        # never presents it as a real prover/reviewer loop. Fail-closed.
+        "template_fallback": state["template_fallback"],
+        "template_fallback_note": state["template_fallback_note"],
         "completed": state["completed"],
         "routes_preliminary": _evidence_incomplete(run_dir),
         "selected_route": {"id": initial["id"], "title": initial["title"]},
@@ -224,6 +228,7 @@ def _load_run_state(run_dir: Path) -> dict[str, Any]:
     llm_agent_run = optional_artifact("llm_agent_run")
 
     current_state = str(manifest.get("current_state", ""))
+    template_fallback = not _real_prover_ran(run_dir)  # Goal 67C (fail-closed)
     latest_attempt = _latest_attempt(loop, human_choice.get("selected_strategy"))
     completed = current_state == "COMPLETED_MEMO"
     repair_needed = completed and (
@@ -277,10 +282,12 @@ def _load_run_state(run_dir: Path) -> dict[str, Any]:
         "current_state": current_state,
         "completed": completed,
         "repair_needed": repair_needed,
+        "template_fallback": template_fallback,
+        "template_fallback_note": TEMPLATE_FALLBACK_NOTE if template_fallback else "",
         "cited_steps": cited_steps,
         "machine_checks": machine_checks,
-        "state_label": _state_label(current_state, repair_needed),
-        "proof_label": _proof_label(grade, repair_needed),
+        "state_label": _state_label(current_state, repair_needed, template_fallback),
+        "proof_label": _proof_label(grade, repair_needed, template_fallback),
         # Goal 54C: advisory human steering per route (score/priority/allocation).
         # Display only — it orders attention, never evidence.
         "time_allocation": _time_allocation_by_route(run_dir),
@@ -435,7 +442,34 @@ def _counterexample_pressure(state: dict[str, Any], agent_rows: list[dict]) -> s
 # --------------------------------------------------------------------------- #
 
 
-def _state_label(current_state: str, repair_needed: bool) -> str:
+# Goal 67C: a run is a "real prover run" only if a real (non-stub) model drove
+# the prover/reviewer stage. Otherwise it is a deterministic template fallback and
+# must NOT be shown as a real prover/reviewer loop.
+_REAL_PROVIDERS = frozenset({"external", "openai"})
+_PROVER_STAGES = frozenset({"llm_prover_reviewers", "prover_loop_round"})
+TEMPLATE_FALLBACK_NOTE = "Template fallback only — no real prover ran."
+
+
+def _real_prover_ran(run_dir: Path) -> bool:
+    """Goal 67C: True iff a REAL (non-stub) model drove the prover/reviewer stage,
+    read from the recorded ``provider`` on a prover-stage agent event. Fail-closed:
+    stub, absent, or unrecognized provenance -> False (template fallback), so a
+    stub/template run is never presented as a real prover loop. Never raises."""
+    try:
+        from .observability import read_agent_events
+
+        for rec in read_agent_events(run_dir):
+            if rec.get("stage") in _PROVER_STAGES and rec.get("provider") in _REAL_PROVIDERS:
+                return True
+        return False
+    except Exception:  # noqa: BLE001 - display helper; fail closed to template
+        return False
+
+
+def _state_label(current_state: str, repair_needed: bool, template_fallback: bool = False) -> str:
+    # Goal 67C: never label a template/stub run as a reviewed/ready real run.
+    if template_fallback and current_state == "COMPLETED_MEMO":
+        return "Template draft — no real prover ran"
     if current_state == "WAITING_LLM_AGENT_HUMAN_GATE":
         return "Waiting at your decision"
     if current_state == "COMPLETED_MEMO" and repair_needed:
@@ -445,7 +479,10 @@ def _state_label(current_state: str, repair_needed: bool) -> str:
     return current_state.replace("_", " ").title() or "Unknown"
 
 
-def _proof_label(grade: dict[str, Any], repair_needed: bool) -> str:
+def _proof_label(grade: dict[str, Any], repair_needed: bool, template_fallback: bool = False) -> str:
+    # Goal 67C: a template/stub run produced no real attempt — say so.
+    if template_fallback:
+        return "Template only — not a real attempt"
     if repair_needed:
         return "Needs repair"
     proof_status = str(grade.get("proof_language_status") or "")
