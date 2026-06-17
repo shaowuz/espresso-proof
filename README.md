@@ -30,7 +30,12 @@ Core design documents:
 
 Supporting documents:
 
+- [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md): shortest current map
+  of active entry points, runtime folders, tests, mathematical data, and archive
+  boundaries.
 - [docs/FILE_OVERVIEW.md](docs/FILE_OVERVIEW.md): explanation of what each repository file and folder is for.
+- [docs/goals/](docs/goals/): active goal queue only; historical goals live in
+  `docs/archive/goals/`.
 - [docs/product/](docs/product/): product strategy, human-in-the-loop design, idea grading, workflow synthesis, and prompt-building rules.
 - [docs/engineering/](docs/engineering/): local kernel, schemas, evals, implementation goals, and release gates.
 - [docs/engineering/SYSTEM_ARCHITECTURE.md](docs/engineering/SYSTEM_ARCHITECTURE.md): system architecture, module responsibilities, local runtime, retrieval, UI, memory, and evaluation boundaries.
