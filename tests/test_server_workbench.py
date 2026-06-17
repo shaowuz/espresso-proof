@@ -355,3 +355,65 @@ def test_claim_card_has_no_foreign_domain_hypotheses(tmp_path: Path) -> None:
     html = render_run_dashboard(rd, interactive=True)
     assert "base field C" not in html
     assert "Unclear conclusion" not in html or "concl" in html  # conclusion chip allowed, AG terms not
+
+
+# --- Goal 65C-2: lost-job / stalled detection (mid-call process death) -------
+
+def test_status_reports_stalled_after_mid_call_death(client) -> None:
+    """A run with an agent call that started but never finished, and no live job
+    progressing it, is reported as stalled (the order-3 dead-page failure) — a
+    visible last-active-stage signal instead of a silent dead page."""
+    from espresso_proof import observability as obs
+
+    wb, call, _ = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    # healthy completed run: nothing dangling
+    assert wb.status(run_id).get("stalled") is None
+    # simulate the worker dying INSIDE an external call: a started agent_event
+    # with no terminal record (exactly 65B's signal).
+    obs.append_agent_event(
+        run_dir, agent_name="llm_prover_reviewers", provider="external",
+        adapter="external", stage="llm_prover_reviewers", agent_status="started",
+    )
+    st = wb.status(run_id)
+    assert st["stalled"] is not None
+    assert st["stalled"]["stage"] == "llm_prover_reviewers"
+    assert "no proof" in st["stalled"]["message"].lower()
+    # diagnostic only: no mathematical-status field appears on the stalled signal
+    assert not any(
+        k in st["stalled"] for k in ("proved", "checked", "source_backed", "refuted", "grade")
+    )
+    validate_run(run_dir)  # the run is still valid; stalled is display-only
+
+
+def test_status_not_stalled_while_job_is_live(client) -> None:
+    """A dangling started call with a LIVE in-memory job is in-flight, not lost."""
+    from espresso_proof import observability as obs
+
+    wb, call, _ = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    obs.append_agent_event(
+        run_dir, agent_name="llm_prover_reviewers", provider="external",
+        adapter="external", stage="llm_prover_reviewers", agent_status="started",
+    )
+    with wb._jobs_lock:
+        wb._jobs["job-live"] = {"run_id": run_id, "state": "running"}
+    assert wb.status(run_id).get("stalled") is None
+
+
+def test_status_endpoint_exposes_stalled(client) -> None:
+    """The HTTP /status endpoint carries the stalled signal for the UI."""
+    from espresso_proof import observability as obs
+
+    wb, call, _ = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    obs.append_agent_event(
+        run_dir, agent_name="llm_prover_reviewers", provider="external",
+        adapter="external", stage="llm_prover_reviewers", agent_status="started",
+    )
+    status, st = call("GET", f"/api/runs/{run_id}/status")
+    assert status == 200
+    assert st["stalled"] and st["stalled"]["stage"] == "llm_prover_reviewers"

@@ -692,7 +692,11 @@ class Workbench:
         with self._status_cache_lock:
             cached = self._status_cache.get(run_id)
             if cached is not None and cached[0] == digest:
-                return json.loads(cached[1])  # deep copy via JSON round-trip
+                summary = json.loads(cached[1])  # deep copy via JSON round-trip
+                # Goal 65C: stalled/lost is recomputed live (depends on in-memory
+                # job state), never cached, so a process death surfaces immediately.
+                summary["stalled"] = self._run_stalled(run_id, run_dir)
+                return summary
         try:
             validate_run(run_dir)
         except Exception as exc:
@@ -714,7 +718,47 @@ class Workbench:
             # bound the cache (display-only; eviction is always safe)
             while len(self._status_cache) > 32:
                 self._status_cache.pop(next(iter(self._status_cache)))
+        # Goal 65C: attach the live stalled/lost signal AFTER caching, so it is
+        # recomputed on every poll and never frozen into the cache.
+        summary["stalled"] = self._run_stalled(run_id, run_dir)
         return summary
+
+    def _run_stalled(self, run_id: str, run_dir: Path) -> dict[str, Any] | None:
+        """Goal 65C: report when a run has an agent call that recorded ``started``
+        but no terminal record (the 65B dangling-start signal) AND no in-memory
+        job is progressing it — i.e. the worker/process died mid-call (the order-3
+        failure: the server vanished and the in-memory job table with it). This is
+        the diagnostic trail that turns a silent dead page into a visible
+        last-active-stage + recovery prompt. Display only: it carries NO
+        mathematical status and never upgrades proof/source/evidence/grade.
+        Returns None for a healthy or genuinely in-flight run; fails closed to
+        None on any error."""
+        try:
+            from .observability import latest_unfinished_agent_call
+
+            dangling = latest_unfinished_agent_call(run_dir)
+            if dangling is None:
+                return None
+            with self._jobs_lock:
+                live = any(
+                    job.get("run_id") == run_id
+                    and job.get("state") in {"queued", "running"}
+                    for job in self._jobs.values()
+                )
+            if live:
+                return None  # a real in-flight call, not a death
+            stage = dangling.get("stage") or "an agent step"
+            return {
+                "stage": stage,
+                "since": dangling.get("started_at"),
+                "message": (
+                    f"This run stopped responding during '{stage}'. No proof, "
+                    "source, or evidence status was earned. You can retry that step "
+                    "or choose another route."
+                ),
+            }
+        except Exception:  # noqa: BLE001 - diagnostics must never break status
+            return None
 
     def snapshot(self, run_id: str) -> dict[str, Any]:
         """Goal 43A: the typed cockpit view model (display-only, fail closed).
