@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .advisory_proof_sketch import capture_advisory_proof_sketch_from_latest_round
 from .claim_clear import ensure_claim_clear_for_downstream
 from .io import read_yaml, write_yaml
 from .llm_agents import LLMClient, append_prover_loop_round
@@ -359,6 +360,13 @@ def _continue_prover_loop_locked(
                 reviewer_set=reviewer_set,
                 client=client,
             )
+            # Goal 67B (deep-round path): preserve this round's (scrubbed,
+            # advisory-only) reasoning in the snapshot-surviving sidecar BEFORE
+            # validate_run. If the round is rejected (e.g. a step smuggled a
+            # status field) and _restore_run rolls it back, the round artifact is
+            # unlinked but this root sidecar survives, so the math is not lost.
+            # Pure sink: never upgrades any status; fail-closed.
+            capture_advisory_proof_sketch_from_latest_round(run_dir)
             refresh_final_report_disclosures(run_dir)
             validate_run(run_dir)
         except Exception as exc:  # noqa: BLE001 - fail closed + roll back

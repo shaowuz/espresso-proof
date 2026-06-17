@@ -40,7 +40,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .io import write_yaml
+from .io import read_yaml, write_yaml
 from .proof_language import (
     scrub_draft_status_claims,
     scrub_proof_language,
@@ -53,7 +53,12 @@ from .validators import (
     _prover_unchecked_support_misuse,
 )
 
-__all__ = ["ADVISORY_PROOF_SKETCH_FILENAME", "capture_advisory_proof_sketch", "read_advisory_proof_sketch"]
+__all__ = [
+    "ADVISORY_PROOF_SKETCH_FILENAME",
+    "capture_advisory_proof_sketch",
+    "capture_advisory_proof_sketch_from_latest_round",
+    "read_advisory_proof_sketch",
+]
 
 ADVISORY_PROOF_SKETCH_NOTE = (
     "Advisory only. Captured from a prover attempt the kernel did not accept. "
@@ -110,10 +115,14 @@ def _scrub_sketch_text(text: object) -> str:
     return " ".join(kept).strip()
 
 
-def capture_advisory_proof_sketch(run_dir: Path, agent_report: dict) -> Path | None:
+def capture_advisory_proof_sketch(
+    run_dir: Path, agent_report: dict, *, source: str = "prover_attempt"
+) -> Path | None:
     """Capture a prover attempt's scrubbed reasoning into the rollback-surviving
-    advisory sidecar. Returns the path written, or ``None`` if there was nothing
-    to capture or anything went wrong (fail-closed -- never raises)."""
+    advisory sidecar. ``source`` records provenance only (e.g. the initial
+    Prover+Reviewers pass vs a deep continuation round). Returns the path written,
+    or ``None`` if there was nothing to capture or anything went wrong
+    (fail-closed -- never raises)."""
     try:
         run_dir = Path(run_dir)
         attempt = (agent_report or {}).get("prover_attempt") or {}
@@ -130,7 +139,7 @@ def capture_advisory_proof_sketch(run_dir: Path, agent_report: dict) -> Path | N
             "trusted": False,
             "advisory_only": True,
             "scrubbed": True,
-            "source": "prover_attempt",
+            "source": source,
             "note": ADVISORY_PROOF_SKETCH_NOTE,
             "summary": summary,
             "steps": steps,
@@ -142,11 +151,46 @@ def capture_advisory_proof_sketch(run_dir: Path, agent_report: dict) -> Path | N
         return None
 
 
+def capture_advisory_proof_sketch_from_latest_round(run_dir: Path) -> Path | None:
+    """Goal 67B (deep-round path): capture the most recent prover-loop ROUND's
+    reasoning into the advisory sidecar.
+
+    The deep continuation loop (``prover_loop_driver.continue_prover_loop``) writes
+    each round to ``prover_rounds/round_*.yaml`` and rolls a rejected round back via
+    ``_restore_run`` (which unlinks the round artifact). Reading the latest round
+    here, BEFORE that rollback, and writing the (root) sidecar preserves the math:
+    ``_restore_run`` never blanket-deletes root files, so the sidecar survives.
+
+    Pure sink: reuses ``capture_advisory_proof_sketch`` (scrub with the kernel's
+    own detectors, ``trusted: false``, no status upgrade). Fail-closed."""
+    try:
+        run_dir = Path(run_dir)
+        rounds_dir = run_dir / "prover_rounds"
+        if not rounds_dir.is_dir():
+            return None
+        latest: dict | None = None
+        latest_idx = -1
+        for f in rounds_dir.glob("round_*.yaml"):
+            data = read_yaml(f)
+            if not isinstance(data, dict):
+                continue
+            idx = data.get("round_index")
+            if isinstance(idx, int) and idx > latest_idx:
+                latest_idx, latest = idx, data
+        if latest is None:
+            return None
+        return capture_advisory_proof_sketch(
+            run_dir,
+            {"prover_attempt": latest.get("prover_attempt")},
+            source="prover_loop_round",
+        )
+    except Exception:  # noqa: BLE001 - diagnostic capture must never break a run
+        return None
+
+
 def read_advisory_proof_sketch(run_dir: Path) -> dict | None:
     """Read the advisory sketch sidecar if present, else ``None`` (fail-closed)."""
     try:
-        from .io import read_yaml
-
         path = Path(run_dir) / ADVISORY_PROOF_SKETCH_FILENAME
         if not path.exists():
             return None

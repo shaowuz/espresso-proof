@@ -165,3 +165,71 @@ def test_status_summary_surfaces_sketch_without_status(tmp_path):
     # carries no mathematical-status field
     assert "proof_status" not in out
     assert "proof_label" not in out
+
+
+# --------------------------------------------------------------------------- #
+# deep-round path (prover_loop_driver continuation rounds)
+# --------------------------------------------------------------------------- #
+
+from espresso_proof.advisory_proof_sketch import (  # noqa: E402
+    capture_advisory_proof_sketch_from_latest_round,
+)
+
+
+def _write_round(run_dir, idx, steps, summary="Round sketch."):
+    rounds = run_dir / "prover_rounds"
+    rounds.mkdir(exist_ok=True)
+    write_yaml(
+        rounds / f"round_{idx:03d}_a_s.yaml",
+        {"round_index": idx, "prover_attempt": {"output_summary": summary, "proposed_steps": steps}},
+    )
+
+
+def test_latest_round_capture_picks_highest_round_index(tmp_path):
+    _write_round(tmp_path, 1, ["Round one. proof_status: proved"])
+    _write_round(tmp_path, 2, ["Round two: the order divides 3, so G is cyclic."])
+    path = capture_advisory_proof_sketch_from_latest_round(tmp_path)
+    assert path is not None
+    data = read_yaml(path)
+    assert data["source"] == "prover_loop_round"
+    assert data["trusted"] is False
+    assert "Round two" in " ".join(data["steps"])      # latest round captured
+    assert "Round one" not in " ".join(data["steps"])
+    for step in data["steps"]:
+        _assert_kernel_clean(step)
+
+
+def test_latest_round_capture_none_without_rounds(tmp_path):
+    assert capture_advisory_proof_sketch_from_latest_round(tmp_path) is None
+    (tmp_path / "prover_rounds").mkdir()
+    assert capture_advisory_proof_sketch_from_latest_round(tmp_path) is None
+
+
+def test_latest_round_capture_fail_closed_on_garbage(tmp_path):
+    rounds = tmp_path / "prover_rounds"
+    rounds.mkdir()
+    (rounds / "round_001_a_s.yaml").write_text("{not: [valid", encoding="utf-8")
+    # malformed YAML must not raise
+    assert capture_advisory_proof_sketch_from_latest_round(tmp_path) is None
+
+
+def test_deep_round_sidecar_survives_restore_run(tmp_path):
+    # The real deep-round rollback: prover_loop_driver._restore_run drops the new
+    # round artifact but must NOT touch the root advisory sidecar.
+    from espresso_proof.prover_loop_driver import _restore_run, _snapshot_run
+
+    write_yaml(tmp_path / "run_manifest.yaml", {"current_state": "X"})
+    snapshot = _snapshot_run(tmp_path)                       # before the round
+    _write_round(tmp_path, 2, ["Good round math. source_backed: true"])
+    assert capture_advisory_proof_sketch_from_latest_round(tmp_path) is not None
+    _restore_run(tmp_path, snapshot)                         # reject + roll back
+
+    # the round artifact is gone ...
+    assert not list((tmp_path / "prover_rounds").glob("round_002*.yaml"))
+    # ... but the advisory sidecar (root) survived with the scrubbed math.
+    sketch = read_advisory_proof_sketch(tmp_path)
+    assert sketch is not None
+    assert sketch["source"] == "prover_loop_round"
+    assert "Good round math" in " ".join(sketch["steps"])
+    for step in sketch["steps"]:
+        _assert_kernel_clean(step)
