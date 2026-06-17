@@ -30,14 +30,24 @@ from .run_lock import LOCK_FILENAME
 
 MANIFEST_NAME = "run_manifest.yaml"
 
+# Goal 67B: the advisory prover-sketch sidecar. Defined here (next to the
+# exclusion set that must list it) so the capture module can import the name
+# without stage_runner importing the heavier capture module (which would pull
+# validators into this low-level plumbing). Pure diagnostic sink — never a kernel
+# artifact, never consumed by validate_run.
+ADVISORY_PROOF_SKETCH_FILENAME = "advisory_proof_sketch.yaml"
+
 # Runtime plumbing files that are never part of a stage transaction: the
 # append-only diagnostic timeline + per-run observability logs (rolling them
 # back would erase the record of the failed stage they exist to explain — in
 # particular a failed agent call's record) and the writer lock file (unlinking
 # it would silently break a concurrently-held flock by splitting it across
 # inodes). Goal 54A: agent_events.jsonl / timings.yaml join events.jsonl here.
+# Goal 67B: advisory_proof_sketch.yaml joins them so a rolled-back prover attempt
+# does not erase its (scrubbed, advisory-only) mathematical reasoning.
 _SNAPSHOT_EXCLUDED_NAMES = frozenset(
-    {EVENTS_FILENAME, AGENT_EVENTS_FILENAME, TIMINGS_FILENAME, LOCK_FILENAME}
+    {EVENTS_FILENAME, AGENT_EVENTS_FILENAME, TIMINGS_FILENAME, LOCK_FILENAME,
+     ADVISORY_PROOF_SKETCH_FILENAME}
 )
 
 

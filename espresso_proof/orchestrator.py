@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .advisory_proof_sketch import capture_advisory_proof_sketch
 from .agent_run_status import init_agent_run_status
 from .claim_clear import (
     CLAIM_CLEAR,
@@ -462,6 +463,13 @@ def orchestrate_run(
                 loop_report=loop_report,
             )
             write_yaml(run_dir / "run_manifest.yaml", stage_manifest)
+            # Goal 67B: capture the prover attempt's (scrubbed, advisory-only)
+            # reasoning into a snapshot-EXCLUDED sidecar. If validate_run below
+            # rejects this round (e.g. a step smuggled a status field), the whole
+            # run rolls back and the attempt is dropped — but this sidecar
+            # survives the rollback, so the mathematics is not lost. Pure sink:
+            # never upgrades any status; fail-closed (never breaks the run).
+            capture_advisory_proof_sketch(run_dir, agent_report)
 
         # Whole-run snapshot: this stage creates the llm/prover artifacts and the
         # prover_rounds/ directory, all of which must be dropped on rollback.

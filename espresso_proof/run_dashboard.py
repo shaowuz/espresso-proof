@@ -32,6 +32,7 @@ _render_ctx = threading.local()
 def _interactive() -> bool:
     return bool(getattr(_render_ctx, "interactive", False))
 
+from .advisory_proof_sketch import read_advisory_proof_sketch
 from .agent_run_status import (
     AGENT_TITLES as _AGENT_TITLES,
     display_rows as _agent_display_rows,
@@ -163,6 +164,11 @@ def status_summary(run_dir: Path) -> dict[str, Any]:
         # never presents it as a real prover/reviewer loop. Fail-closed.
         "template_fallback": state["template_fallback"],
         "template_fallback_note": state["template_fallback_note"],
+        # Goal 67B: surface a captured advisory prover sketch (a prover attempt's
+        # scrubbed reasoning that survived a validation rollback). Pure
+        # presence/count + advisory note — NOT a mathematical-status field; it
+        # never upgrades proof/source/evidence/grade status.
+        "advisory_proof_sketch": _advisory_sketch_summary(run_dir),
         "completed": state["completed"],
         "routes_preliminary": _evidence_incomplete(run_dir),
         "selected_route": {"id": initial["id"], "title": initial["title"]},
@@ -186,6 +192,25 @@ def status_summary(run_dir: Path) -> dict[str, Any]:
             for r in _agent_display_rows(run_dir)
         ],
         "open_warnings": state["surface_warnings"],
+    }
+
+
+def _advisory_sketch_summary(run_dir: Path) -> dict[str, Any]:
+    """Goal 67B: status-neutral summary of any captured advisory prover sketch.
+
+    Returns ``present: False`` when there is no sidecar. When present, exposes the
+    advisory note + a step count only — never a proof/source/evidence status, and
+    the sidecar itself is already scrubbed of proof/status language at capture."""
+    sketch = read_advisory_proof_sketch(run_dir)
+    if not sketch:
+        return {"present": False}
+    steps = sketch.get("steps") or []
+    return {
+        "present": True,
+        "advisory_only": True,
+        "note": sketch.get("note", ""),
+        "step_count": len(steps) if isinstance(steps, list) else 0,
+        "has_summary": bool(sketch.get("summary")),
     }
 
 
