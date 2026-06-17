@@ -1,9 +1,10 @@
 """Espresso Product Workbench — a local, read-mostly interactive server.
 
 This is a small standard-library HTTP server (no web framework, no new stack)
-that turns the static dashboard into a clickable local product: type a problem,
-get a quick core run, click Run Examples / Counterexamples / Literature, Continue
-a route, Skip an agent — with live progress — without typing terminal commands.
+that serves the React cockpit when ``web/dist`` exists, with a legacy built-in
+HTML fallback for CI/dev. Type a problem, get a quick core run, click Run
+Examples / Counterexamples / Literature, Continue a route, Skip an agent — with
+live progress — without typing terminal commands.
 
 Every browser action goes through the EXISTING kernel path:
 ``orchestrate_run`` (fast core) / ``run_single_agent`` / ``skip_agent`` /
@@ -131,7 +132,7 @@ class Workbench:
     a human-readable error). It is never persisted as proof/evidence status.
     """
 
-    def __init__(self, runs_root: Path, *, provider: str = "stub") -> None:
+    def __init__(self, runs_root: Path, *, provider: str = "external") -> None:
         self.root = Path(runs_root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.provider = provider
@@ -1521,7 +1522,7 @@ textarea{width:100%;min-height:220px;padding:18px 20px;border:1px solid var(--es
 """.strip()
 
 
-def serve(runs_root: Path, *, host: str = "127.0.0.1", port: int = 8765, provider: str = "stub") -> None:
+def serve(runs_root: Path, *, host: str = "127.0.0.1", port: int = 8765, provider: str = "external") -> None:
     """Start the workbench server (blocking). Binds to localhost by default."""
 
     workbench = Workbench(runs_root, provider=provider)

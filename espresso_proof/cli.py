@@ -708,7 +708,7 @@ def serve_command(
     runs_root: Path = typer.Option(Path("."), "--runs-root", file_okay=False, help="Project-runs root (where projects/<name>/runs/<id> live or will be created)."),
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address (localhost by default)."),
     port: int = typer.Option(8765, "--port", min=1, max=65535),
-    provider: str = typer.Option("stub", "--provider", help="Agent provider for runs created from the UI (stub/openai/external)."),
+    provider: str = typer.Option("external", "--provider", help="Internal agent provider for UI fallback runs. Product default: external. stub is dev/test only."),
 ) -> None:
     """Start the local Product Workbench server (interactive browser UI).
 
@@ -718,6 +718,9 @@ def serve_command(
     path (validate_run); the server never upgrades proof/source/evidence status,
     confines every run id to the runs root, and never runs an arbitrary shell
     command from browser input.
+
+    This is the canonical product entry. It defaults to the external Codex-agent
+    path; pass --provider stub only for explicit dev/test smoke runs.
     """
     from .server import serve
 
@@ -771,11 +774,12 @@ def bank_dashboard_command(
     run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
     out: Path | None = typer.Option(None, "--out", help="Write the HTML here; otherwise print to stdout."),
 ) -> None:
-    """Render a read-only static HTML dashboard of a run's research banks.
+    """Render a dev-only static HTML dashboard of a run's research banks.
 
     Reads examples / counterexamples / strategies through the bank-aware loaders
     (bank directories OR single YAML) and never mutates any artifact. Statuses are
     shown as recorded in human-readable wording; no proof-complete language.
+    Canonical product viewing is the React cockpit served by ``espresso serve``.
     """
     validate_run(run)  # read-only; just confirms the run is valid before viewing
     html_text = render_bank_dashboard(run)
@@ -791,11 +795,12 @@ def run_dashboard_command(
     run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
     out: Path | None = typer.Option(None, "--out", help="Write the HTML here; default: <run>/research_dashboard.html."),
 ) -> None:
-    """Render the minimal interactive product dashboard for one run.
+    """Render the legacy/dev-only static dashboard for one run.
 
-    This is the primary human-facing run view: claim status, route picker,
-    reviewer repair state, and next command. It is read-only with respect to
-    mathematical artifacts; it never changes proof/source/evidence status.
+    The canonical human-facing run view is the React cockpit served by
+    ``espresso serve``. This command remains for diagnostics/static snapshots and
+    is read-only with respect to mathematical artifacts; it never changes
+    proof/source/evidence status.
     """
     validate_run(run)
     if out is None:

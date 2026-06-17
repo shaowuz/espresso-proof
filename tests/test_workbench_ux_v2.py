@@ -3,6 +3,7 @@ research timeline. All display-only; no UI element upgrades kernel status."""
 
 from __future__ import annotations
 
+from inspect import signature
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from espresso_proof.agent_runner import run_single_agent, skip_agent
 from espresso_proof.orchestrator import orchestrate_run
 from espresso_proof.research_timeline import build_timeline
 from espresso_proof.run_dashboard import render_run_dashboard
-from espresso_proof.server import Workbench, WorkbenchError, _index_page
+from espresso_proof.server import Workbench, WorkbenchError, _index_page, serve
 from espresso_proof.validators import validate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
@@ -77,6 +78,13 @@ def test_mode_maps_to_provider(tmp_path: Path) -> None:
     # Goal 32: "demo" is not a mode; unknown modes fall back to the server default
     assert wb._provider_for_mode("demo") == "stub"  # fallback, not a mode mapping
     assert wb._provider_for_mode(None) == "stub"  # falls back to server default
+
+
+def test_product_server_defaults_to_external_provider(tmp_path: Path) -> None:
+    """The canonical product server must not silently default to template runs."""
+
+    assert Workbench(tmp_path / "root")._provider_for_mode(None) == "external"
+    assert signature(serve).parameters["provider"].default == "external"
 
 
 def test_invalid_mode_rejected(tmp_path: Path) -> None:

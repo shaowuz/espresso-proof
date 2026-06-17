@@ -6,7 +6,7 @@ from typer.testing import CliRunner
 
 from espresso_proof.agent_run_status import set_agent_status
 from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
-from espresso_proof.cli import app
+from espresso_proof.cli import app, bank_dashboard_command, run_dashboard_command, serve_command
 from espresso_proof.io import read_yaml, write_yaml
 from espresso_proof.orchestrator import orchestrate_run, resume_run
 from espresso_proof.run_dashboard import render_run_dashboard, write_run_dashboard
@@ -107,6 +107,13 @@ def test_run_dashboard_cli_writes_default_and_custom_output(tmp_path: Path) -> N
     assert result.exit_code == 0, result.output
     assert custom.exists()
     assert "Every group" in custom.read_text(encoding="utf-8")
+
+
+def test_legacy_dashboard_cli_docstrings_mark_dev_only() -> None:
+    assert "legacy/dev-only static dashboard" in (run_dashboard_command.__doc__ or "")
+    assert "dev-only static HTML dashboard" in (bank_dashboard_command.__doc__ or "")
+    assert "canonical product entry" in (serve_command.__doc__ or "").lower()
+    assert "external Codex-agent" in (serve_command.__doc__ or "")
 
 
 def test_run_dashboard_is_read_only_for_yaml_artifacts(tmp_path: Path) -> None:

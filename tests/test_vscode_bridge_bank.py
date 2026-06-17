@@ -29,6 +29,20 @@ bridge = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bridge)
 
 
+def test_vscode_surface_is_marked_dev_only() -> None:
+    bridge_text = _BRIDGE_PATH.read_text(encoding="utf-8")
+    readme_text = Path("vscode-extension/README.md").read_text(encoding="utf-8")
+    package_text = Path("vscode-extension/package.json").read_text(encoding="utf-8")
+    main_js = Path("vscode-extension/media/main.js").read_text(encoding="utf-8")
+
+    assert "Dev-only VS Code prototype bridge" in bridge_text
+    assert "canonical product UI is the React cockpit" in bridge_text
+    assert "Dev-Only" in readme_text
+    assert "canonical product UI" in readme_text
+    assert "Espresso Proof Dev Prototype" in package_text
+    assert "dev-only local prototype" in main_js
+
+
 def _single_run(tmp_path: Path, name: str = "single") -> tuple[Path, Path]:
     workspace = (tmp_path / name).resolve()
     run_dir = run_mock_critique(
