@@ -480,16 +480,20 @@ def _state_label(current_state: str, repair_needed: bool, template_fallback: boo
 
 
 def _proof_label(grade: dict[str, Any], repair_needed: bool, template_fallback: bool = False) -> str:
-    # Goal 67C: a template/stub run produced no real attempt — say so.
-    if template_fallback:
-        return "Template only — not a real attempt"
-    if repair_needed:
-        return "Needs repair"
     proof_status = str(grade.get("proof_language_status") or "")
+    # A scoped/checked status is earned by a machine verifier or a human gate, NOT
+    # by the prover, so it is honest even in a template/stub run (no prover) — show
+    # it before the template-fallback note (Goal 67C/67A interaction fix).
     if proof_status == "computation_checked":
         return "Scoped check"
     if proof_status in {"lean_checked", "human_confirmed"}:
         return "Checked"
+    # Goal 67C: otherwise a template/stub run made no real prover attempt — say so
+    # instead of a prover-loop-derived "Needs repair"/"Sketched".
+    if template_fallback:
+        return "Template only — not a real attempt"
+    if repair_needed:
+        return "Needs repair"
     if "sketch" in proof_status:
         return "Sketched"
     return "Unknown"

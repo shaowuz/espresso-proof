@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ...claim_clarity import CORE_GAP_TERMS as _CORE_GAP_TERMS
 from ...claim_normalization import normalize_simple_claim
 from ...hypothesis_normalization import normalize_ambient_object_hypotheses
 from ...io import read_yaml, write_yaml
@@ -119,16 +120,8 @@ _IMPRECISE_CONCLUSION_MARKERS = (
     "to be determined",
 )
 _IMPRECISE_OBJECT_MARKERS = ("unspecified", "does something", "nice", "mirror")
-_CORE_GAP_TERMS = {
-    "objects",
-    "main objects",
-    "object",
-    "hypotheses",
-    "hypothesis",
-    "conclusion",
-    "claim",
-    "statement",
-}
+# Goal 67A: _CORE_GAP_TERMS is imported from claim_clarity (single source of truth
+# shared with the claim-clear gate) — see the import at the top of this module.
 
 
 def _looks_imprecise(
