@@ -41,10 +41,13 @@ def test_entry_page_is_a_wide_product_page(tmp_path: Path) -> None:
     assert "grid-template-columns:minmax(620px,1.15fr) minmax(500px,.85fr)" in html
     assert "@media (max-width:1224px)" in html
     assert "max-width:760px" not in html
-    # mode selector with human labels (no provider words on the surface)
-    assert "Fast preview" in html and "Codex deep run" in html
-    # Goal 32: demos are NOT a mode — the mode selector has exactly two modes
-    # and the demos live in a separate "Open demo" section.
+    # Product UI exposes the real-agent path only; deterministic smoke/stub
+    # remains backend-only for tests/demos, not a user mode.
+    assert "Real agent run" in html
+    assert "Fast preview" not in html
+    assert 'value="fast"' not in html
+    # Goal 32: demos are NOT a run mode; they live in a separate "Open demo"
+    # section.
     assert "Demo mode" not in html
     assert "Open demo" in html
     assert ">stub<" not in html and ">external<" not in html
@@ -68,6 +71,7 @@ def test_entry_page_has_no_proof_complete_language(tmp_path: Path) -> None:
 
 def test_mode_maps_to_provider(tmp_path: Path) -> None:
     wb = Workbench(tmp_path / "root", provider="stub")
+    # Backend mapping remains for smoke tests and explicit API callers.
     assert wb._provider_for_mode("fast") == "stub"
     assert wb._provider_for_mode("codex") == "external"
     # Goal 32: "demo" is not a mode; unknown modes fall back to the server default
@@ -209,3 +213,9 @@ def test_codex_mode_fails_closed_when_external_unconfigured(tmp_path: Path, monk
     assert job["state"] == "failed"
     assert job.get("error")  # a human-readable error, not a hang
     assert wb.list_runs() == []  # no run dir created, nothing upgraded
+
+
+def test_product_create_run_defaults_to_codex_mode() -> None:
+    """The built cockpit should not silently create template/stub runs."""
+    api = Path("web/src/lib/api.ts").read_text(encoding="utf-8")
+    assert 'mode = "codex"' in api

@@ -122,9 +122,15 @@ export async function fetchSnapshot(runId: string): Promise<Snapshot> {
   };
 }
 
-/** POST /api/runs → 202 {"job_id"} */
-export function createRun(text: string, mode?: string): Promise<{ job_id: string }> {
-  return post<{ job_id: string }>("/api/runs", mode ? { text, mode } : { text });
+/** POST /api/runs → 202 {"job_id"}
+ *
+ * Product cockpit runs use the real external agent path by default. The
+ * deterministic stub path remains available to backend tests and smoke
+ * harnesses, but it is not exposed from the UI because it produces template
+ * artifacts rather than useful mathematical work.
+ */
+export function createRun(text: string, mode = "codex"): Promise<{ job_id: string }> {
+  return post<{ job_id: string }>("/api/runs", { text, mode });
 }
 
 /** POST /api/runs/{id}/agents/{agent} → 202 {"job_id"} */

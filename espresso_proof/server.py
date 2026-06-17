@@ -65,9 +65,9 @@ _PROJECT_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _AGENT_ALIASES = {"failure-patterns": "failure_patterns"}
 
 # Human-facing run modes -> internal provider. Users never see provider words.
-# "Demo mode" reuses the deterministic fast path with a seeded prompt.
-# "Fast preview" and "Codex deep run" are MODES; demos are a separate
-# "Open demo" path (Goal 32) — never a mode or provider.
+# The product UI now starts real-agent runs only; the deterministic fast/stub
+# path remains for tests, smoke loops, demos, and explicit API callers.
+# Demos are a separate "Open demo" path (Goal 32) — never a mode or provider.
 _MODE_PROVIDER = {"fast": "stub", "codex": "external"}
 
 
@@ -88,8 +88,8 @@ def _friendly_error(raw: str) -> str:
     if "espresso_external_agent_command" in lowered or "openai_api_key" in lowered:
         return (
             "The Codex deep run is not set up on this machine. Your math state is "
-            "unchanged — no mathematical results were written. Switch to Fast "
-            "preview, or set up the Codex agent and retry."
+            "unchanged — no mathematical results were written. Set up the Codex "
+            "agent and retry."
         )
     if "rolled back" in lowered:
         # ONLY the StageRunner's own message guarantees an actual rollback —
@@ -101,17 +101,17 @@ def _friendly_error(raw: str) -> str:
     if "validation" in lowered:
         return (
             "This action did not pass Espresso's safety validation, so it stopped "
-            "without going further. Existing results are untouched. Retry, or "
-            "switch to Fast preview."
+            "without going further. Existing results are untouched. Retry after "
+            "checking the run diagnostics."
         )
     if "timed out" in lowered or "timeout" in lowered:
         return (
             "The step took too long and stopped safely. Existing results are "
-            "untouched. Retry, or switch to Fast preview."
+            "untouched. Retry after checking the run diagnostics."
         )
     return (
         "Something went wrong, so this step stopped safely. Existing results are "
-        "untouched. Retry, or switch to Fast preview."
+        "untouched. Retry after checking the run diagnostics."
     )
 
 
@@ -1032,7 +1032,7 @@ def _make_handler(workbench: Workbench):
                 emit("ack", {"label": "Draft only — not checked", "working": True})
                 ack_ms = monotonic_ms() - t0
                 # client=None → friendly deterministic fallback draft: instant and
-                # safe, and never the deep xhigh adapter. A bounded fast-model
+                # safe, and never the deep product adapter. A bounded fast-model
                 # profile can be injected here later without changing the contract.
                 draft = build_instant_draft(
                     message, run_id=run_dir.name if run_dir else "", created_at=now_iso()
@@ -1346,10 +1346,8 @@ def _index_page(workbench: Workbench) -> str:
     <h1>Study a claim</h1>
     <p class="lead">Type a mathematical claim. You get a quick initial read and 2-3 proof routes, then run evidence agents and continue a route — all in the browser, no terminal.</p>
     <textarea id="text" placeholder="e.g. Every group of order p^2, where p is prime, is abelian."></textarea>
-    <div class="modes" role="radiogroup" aria-label="Run mode">
-      <label class="mode"><input type="radio" name="mode" value="fast" checked><b>Fast preview</b><span>Quick deterministic read of the flow.</span></label>
-      <label class="mode"><input type="radio" name="mode" value="codex"><b>Codex deep run</b><span>Uses the real model. Slower, more meaningful.</span></label>
-    </div>
+    <input type="hidden" name="mode" value="codex">
+    <p class="mode-note"><b>Real agent run.</b> Uses the configured real agent; slower than a template smoke run, but meaningful.</p>
     <div class="go-row"><button id="go" type="button" class="go">Run Espresso</button></div>
     <div class="jobrow" id="jobrow" hidden>
       <div class="jr-head"><span class="jr-spin"></span><b id="jr-stage">Starting run…</b><span class="jr-elapsed" id="jr-elapsed"></span></div>
@@ -1359,7 +1357,6 @@ def _index_page(workbench: Workbench) -> str:
         <p class="err" id="jr-err"></p>
         <div class="jr-actions">
           <button type="button" class="go small" id="jr-retry">Retry</button>
-          <button type="button" class="ghost small" id="jr-fast" hidden>Switch to Fast preview</button>
         </div>
       </div>
     </div>
@@ -1384,7 +1381,7 @@ def _index_page(workbench: Workbench) -> str:
 <script>
 const go=document.getElementById("go"),err=document.getElementById("err");
 const textEl=document.getElementById("text");
-function selectedMode(){{const r=document.querySelector('input[name=mode]:checked');return r?r.value:"fast";}}
+function selectedMode(){{return "codex";}}
 // Open demo: one click creates a pre-validated showcase run (model-free,
 // deterministic) via its own endpoint — demos are NOT a run mode.
 document.querySelectorAll(".demo-open").forEach(b=>b.addEventListener("click",()=>{{
@@ -1415,15 +1412,14 @@ async function openDemo(demoId,btn){{
 }}
 // Durable job row: the click is acknowledged immediately, the row stays visible
 // while the background job works (stage + elapsed + alive bar), and a failure
-// offers Retry / Switch to Fast preview — never a frozen page or raw fetch error.
+// offers Retry — never a frozen page or raw fetch error.
 const jobrow=document.getElementById("jobrow"),jrStage=document.getElementById("jr-stage"),
   jrElapsed=document.getElementById("jr-elapsed"),jrNote=document.getElementById("jr-note"),
   jrFail=document.getElementById("jr-fail"),jrErr=document.getElementById("jr-err"),
-  jrRetry=document.getElementById("jr-retry"),jrFast=document.getElementById("jr-fast");
+  jrRetry=document.getElementById("jr-retry");
 function jobFailed(msg,wasCodex){{
   jrStage.textContent="Run failed";jobrow.classList.add("failed");
   jrNote.textContent="";jrFail.hidden=false;jrErr.textContent=msg;
-  jrFast.hidden=!wasCodex;
   go.disabled=false;go.textContent="Run Espresso";
 }}
 async function startRun(){{
@@ -1457,10 +1453,6 @@ async function startRun(){{
 }}
 go.addEventListener("click",startRun);
 jrRetry.addEventListener("click",startRun);
-jrFast.addEventListener("click",()=>{{
-  const m=document.querySelector('input[name=mode][value="fast"]');if(m)m.checked=true;
-  startRun();
-}});
 </script></body></html>"""
 
 

@@ -156,7 +156,7 @@ def test_friendly_error_for_missing_codex_command() -> None:
     msg = _friendly_error("ESPRESSO_EXTERNAL_AGENT_COMMAND is not set")
     assert "Codex deep run is not set up" in msg
     assert "math state is unchanged" in msg
-    assert "Fast preview" in msg
+    assert "Set up the Codex agent" in msg
     assert "ESPRESSO_EXTERNAL_AGENT_COMMAND" not in msg  # no env var as headline
 
 
