@@ -10,11 +10,18 @@ env:
 # targeting main and pushes to main. Normal branch pushes (and PRs to other
 # branches) trigger nothing. The full test/build/eval/UI suite is manual —
 # see .github/workflows/full-ci.yml (workflow_dispatch only).
+# Local CI is now the canonical gate — run `scripts/local_ci.sh quick` (this
+# lane) or `scripts/local_ci.sh full` on your machine; it needs no GitHub-hosted
+# Actions. These cloud lanes are kept for when Actions billing is restored, but
+# are MANUAL-ONLY (workflow_dispatch) so a billing-blocked account does not red-X
+# every PR. To re-enable automatic runs, uncomment the pull_request/push
+# triggers below.
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+  workflow_dispatch:
+  # pull_request:
+  #   branches: [main]
+  # push:
+  #   branches: [main]
 
 # Cancel superseded runs on the same ref/PR so we never pay for stale work.
 concurrency:
