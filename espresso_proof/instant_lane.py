@@ -32,7 +32,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .io import read_yaml, write_yaml
 from .observability import now_iso
-from .proof_language import contains_proof_language, scrub_proof_language
+from .proof_language import (
+    contains_proof_language,
+    scrub_draft_status_claims,
+    scrub_source_support_language,
+)
 
 INSTANT_FILE = "instant_conversation.yaml"
 VISIBLE_LABEL = "Draft only — not checked"
@@ -50,10 +54,14 @@ InstantEffort = Literal["minimal", "low"]
 
 
 def _scrub_text(text: object, limit: int = 600) -> str:
-    """Scrub proof-language and bound length. Every stored/streamed field passes
-    here, so a proof-complete overclaim can never reach the user."""
+    """Scrub proof-language, source-support vocabulary, and earned-status verdicts,
+    then bound length. Every stored/streamed field passes here, so neither a
+    proof-complete overclaim nor a 'source-backed'/'checked'/'refuted' verdict
+    (Goal 65E) can reach the user from an advisory draft."""
 
-    return scrub_proof_language(str(text or "")).strip()[:limit]
+    cleaned = scrub_source_support_language(str(text or ""))  # also runs scrub_proof_language
+    cleaned = scrub_draft_status_claims(cleaned)
+    return cleaned.strip()[:limit]
 
 
 def _scrub_list(items: object, *, max_items: int, limit: int = 240) -> list[str]:
