@@ -133,10 +133,51 @@ def scrub_source_support_language(text: object) -> str:
     )
 
 
+# Goal 65E: bare earned-status VERDICTS an advisory instant draft must never
+# assert. scrub_proof_language only blocks proof-COMPLETE overclaims and lets
+# "checked"/"verified"/"refuted" through, so the instant lane needs this extra
+# filter. It targets verdict FORMS only ("source-backed", "refuted", and
+# "is/are/was/were/been/now <checked|verified|...>") so advisory phrasing like
+# "needs to be checked" / "to be verified" is NOT matched.
+_DRAFT_STATUS_CLAIM_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_])(?:"
+    r"source[ _-]?backed"
+    r"|refuted"
+    r"|(?:is|are|was|were|been|now)\s+(?:checked|verified|proven|proved|confirmed|established|grounded)"
+    r")(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
+
+
+def contains_draft_status_claim(text: object) -> str | None:
+    """Return the first earned-status VERDICT phrase in ``text``, or None.
+
+    Used by the instant conversation lane (Goal 65E): an advisory pre-pipeline
+    draft references no validated artifact, so it must not assert source-backed /
+    refuted / checked-style verdicts. Advisory phrasing ("needs a check", "to be
+    verified") is deliberately not matched."""
+    if not text:
+        return None
+    match = _DRAFT_STATUS_CLAIM_PATTERN.search(str(text))
+    return match.group(0) if match else None
+
+
+def scrub_draft_status_claims(text: object) -> str:
+    """Redact earned-status verdict forms from advisory instant-draft text
+    (Goal 65E). Verdict phrasing like "is checked" / "refuted" / "source-backed"
+    becomes a neutral '[unverified]' marker; advisory phrasing is left intact.
+    Pure/never raises."""
+    if text is None:
+        return ""
+    return _DRAFT_STATUS_CLAIM_PATTERN.sub("[unverified]", str(text))
+
+
 __all__ = [
     "PROOF_COMPLETE_PHRASES",
     "REDACTION",
     "contains_proof_language",
+    "contains_draft_status_claim",
     "scrub_proof_language",
     "scrub_source_support_language",
+    "scrub_draft_status_claims",
 ]
