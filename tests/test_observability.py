@@ -142,8 +142,14 @@ def test_run_produces_observability_and_still_validates(tmp_path: Path):
 
     assert events and all("monotonic_ms" in e for e in events)
     assert {"agent_call_started", "agent_call_finished"} <= {e.get("kind") for e in events}
-    assert agent_events and all(a.get("agent_status") == "finished" for a in agent_events)
-    assert all(isinstance(a.get("duration_ms"), int) for a in agent_events)
+    # Goal 65B: each call now emits a "started" record (so a mid-call death is
+    # visible) plus a terminal record. Every started call here completed, so
+    # every started has a matching finished and there is no dangling call.
+    terminal = [a for a in agent_events if a.get("agent_status") != "started"]
+    assert terminal and all(a.get("agent_status") == "finished" for a in terminal)
+    assert all(isinstance(a.get("duration_ms"), int) for a in terminal)
+    assert any(a.get("agent_status") == "started" for a in agent_events)
+    assert obs.latest_unfinished_agent_call(run_dir) is None
     assert timings["stage_durations_ms"] and isinstance(timings["total_duration_ms"], int)
     # all three registered as OPTIONAL artifacts
     optional = read_yaml(run_dir / "run_manifest.yaml")["optional_artifacts"]
@@ -201,5 +207,54 @@ def test_resume_prover_rounds_emit_agent_events(tmp_path: Path):
     validate_run(run_dir)
     rounds = [a for a in obs.read_agent_events(run_dir) if a.get("stage") == "prover_loop_round"]
     assert rounds, "prover-loop rounds must emit agent_events for stall diagnosis"
-    assert all(isinstance(a.get("duration_ms"), int) for a in rounds)
+    # Goal 65B: a round emits a "started" record (duration None) then a terminal
+    # record (duration int); assert on the terminal records.
+    terminal_rounds = [a for a in rounds if a.get("agent_status") != "started"]
+    assert terminal_rounds
+    assert all(isinstance(a.get("duration_ms"), int) for a in terminal_rounds)
     assert all(isinstance(a.get("round_index"), int) for a in rounds)
+
+
+# --- Goal 65B: mid-call death reconstruction ---------------------------------
+
+def test_latest_unfinished_agent_call_detects_mid_call_death(tmp_path: Path):
+    """A call that records 'started' but no terminal record (the order-3
+    process-death shape) is recoverable as the dangling started record."""
+    # earlier call completed cleanly
+    obs.append_agent_event(tmp_path, agent_name="strategy", provider="external",
+                           adapter="external", stage="strategy", agent_status="started")
+    obs.append_agent_event(tmp_path, agent_name="strategy", provider="external",
+                           adapter="external", stage="strategy", agent_status="finished",
+                           duration_ms=24000)
+    # prover call started, then the worker died mid-call (no terminal record)
+    obs.append_agent_event(tmp_path, agent_name="llm_prover_reviewers", provider="external",
+                           adapter="external", stage="llm_prover_reviewers", agent_status="started")
+    dangling = obs.latest_unfinished_agent_call(tmp_path)
+    assert dangling is not None
+    assert dangling["stage"] == "llm_prover_reviewers"
+    assert dangling["agent_status"] == "started"
+
+
+def test_latest_unfinished_agent_call_none_when_all_paired(tmp_path: Path):
+    for status in ("started", "finished"):
+        obs.append_agent_event(tmp_path, agent_name="a", provider="stub", adapter="stub",
+                               stage="claim", agent_status=status, duration_ms=1)
+    assert obs.latest_unfinished_agent_call(tmp_path) is None
+
+
+def test_latest_unfinished_pairs_by_round_index(tmp_path: Path):
+    """round 1 finished, round 2 died mid-call -> round 2 is the dangling call."""
+    for rnd, statuses in ((1, ("started", "finished")), (2, ("started",))):
+        for status in statuses:
+            obs.append_agent_event(tmp_path, agent_name="prover_round", provider="external",
+                                   adapter="external", stage="prover_loop_round",
+                                   agent_status=status, round_index=rnd)
+    dangling = obs.latest_unfinished_agent_call(tmp_path)
+    assert dangling is not None and dangling["round_index"] == 2
+
+
+def test_started_event_cannot_carry_status_upgrade(tmp_path: Path):
+    """The new started record is still subject to the forbidden-key guard."""
+    obs.append_agent_event(tmp_path, agent_name="x", provider="stub", adapter="stub",
+                           stage="s", agent_status="started", source_backed=True)
+    assert obs.read_agent_events(tmp_path) == []  # dropped: forbidden key

@@ -346,6 +346,15 @@ def orchestrate_run(
             _started = now_iso()
             _t0 = monotonic_ms()
             append_event(run_dir, "agent_call_started", stage="llm_prover_reviewers")
+            # Goal 65B: record a "started" agent_event BEFORE the heavy external
+            # call so a mid-call PROCESS death (the order-3 postmortem failure)
+            # leaves a dangling started record — the only evidence of where the
+            # run died, recoverable via observability.latest_unfinished_agent_call.
+            append_agent_event(
+                run_dir, agent_name="llm_prover_reviewers", provider=provider,
+                adapter=provider, model=model, stage="llm_prover_reviewers",
+                agent_status="started", started_at=_started,
+            )
             try:
                 agent_report = run_llm_agent_pass(
                     run_dir=run_dir,
