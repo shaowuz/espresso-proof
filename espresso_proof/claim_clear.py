@@ -12,6 +12,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from .claim_clarity import is_blocking_missing_item
 from .io import read_yaml, write_yaml
 from .observability import now_iso
 
@@ -67,7 +68,9 @@ def _sha256(path: Path) -> str:
 def _blocking_items(raw: Any) -> list[str]:
     if not isinstance(raw, list):
         return ["hypothesis_ledger.missing_or_unclear is not a list"]
-    return [str(item).strip() for item in raw if str(item).strip()]
+    # Goal 67A: default-deny — every non-empty entry blocks UNLESS it is a
+    # conservative advisory clarification (and never if it names a core gap).
+    return [str(item).strip() for item in raw if is_blocking_missing_item(str(item))]
 
 
 def _existing_gate(run_dir: Path, manifest: dict[str, Any]) -> dict[str, Any] | None:
