@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import urllib.error
 import urllib.request
@@ -332,6 +333,29 @@ class OpenAIResponsesClient:
             raise RuntimeError(f"OpenAI response was not valid agent JSON: {text[:500]}") from exc
 
 
+class ExternalAgentTimeoutError(RuntimeError):
+    """Goal 65C: the external agent subprocess exceeded its timeout and its whole
+    process group was killed. Carries the timeout (seconds) so callers can record
+    timeout metadata (timed_out / timeout_ms) on the agent event."""
+
+    def __init__(self, timeout_seconds: int) -> None:
+        self.timeout_seconds = timeout_seconds
+        super().__init__(f"external agent command timed out after {timeout_seconds}s")
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """Goal 65C: kill the external agent's ENTIRE process group so a forking or
+    hung child cannot survive a timeout as an orphan that blocks the worker
+    thread. Best-effort; never raises. Falls back to killing the direct child."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001 - best-effort
+            pass
+
+
 class ExternalCommandClient:
     provider = "external"
 
@@ -362,26 +386,36 @@ class ExternalCommandClient:
             "model": self.model,
             "required_json_schema": AGENT_OUTPUT_SCHEMA,
         }
+        # Goal 65C: run the external agent in its OWN process group
+        # (start_new_session=True) so a timeout can reclaim the WHOLE group via
+        # os.killpg. The order-3 postmortem's prime suspect was a forking/hung
+        # external CLI that subprocess.run(timeout=) could not reclaim (it kills
+        # only the direct child), leaving an orphan that blocks the worker thread.
+        proc = subprocess.Popen(
+            self.command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
         try:
-            completed = subprocess.run(
-                self.command,
-                input=json.dumps(request),
-                check=False,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=self.timeout,
-            )
+            stdout, stderr = proc.communicate(input=json.dumps(request), timeout=self.timeout)
         except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(f"external agent command timed out after {self.timeout}s") from exc
-        if completed.returncode != 0:
-            detail = completed.stderr.strip() or completed.stdout.strip()
+            _kill_process_group(proc)
+            try:
+                proc.communicate(timeout=5)  # reap; no zombie / dangling pipe
+            except Exception:  # noqa: BLE001 - best-effort reap
+                pass
+            raise ExternalAgentTimeoutError(self.timeout) from exc
+        if proc.returncode != 0:
+            detail = (stderr or "").strip() or (stdout or "").strip()
             raise RuntimeError(f"external agent command failed: {detail}")
         try:
-            data = json.loads(completed.stdout)
+            data = json.loads(stdout)
         except json.JSONDecodeError as exc:
             raise RuntimeError(
-                f"external agent command did not return JSON: {completed.stdout[:500]}"
+                f"external agent command did not return JSON: {(stdout or '')[:500]}"
             ) from exc
         # A well-formed agent must return a JSON OBJECT. Valid-but-non-dict JSON
         # (a list / string / number / null) fails the same clean, classifiable
@@ -389,7 +423,7 @@ class ExternalCommandClient:
         # .get below.
         if not isinstance(data, dict):
             raise RuntimeError(
-                f"external agent command did not return a JSON object: {completed.stdout[:500]}"
+                f"external agent command did not return a JSON object: {(stdout or '')[:500]}"
             )
         if isinstance(data.get("output"), dict):
             return data["output"]
