@@ -417,3 +417,63 @@ def test_status_endpoint_exposes_stalled(client) -> None:
     status, st = call("GET", f"/api/runs/{run_id}/status")
     assert status == 200
     assert st["stalled"] and st["stalled"]["stage"] == "llm_prover_reviewers"
+
+
+# --- Goal 65F: browser/server troubleshooting gates --------------------------
+
+def test_g65f_stalled_signal_exposes_failure_state_fields(client) -> None:
+    """The UI must be able to show last active stage, elapsed time, and the last
+    successful step (not just a dead 'Could not reach the server' page)."""
+    from espresso_proof import observability as obs
+
+    wb, call, _ = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    obs.append_agent_event(
+        run_dir, agent_name="llm_prover_reviewers", provider="external",
+        adapter="external", stage="llm_prover_reviewers", agent_status="started",
+        started_at=obs.now_iso(),  # the real orchestrator start-event always sets this
+    )
+    _, st = call("GET", f"/api/runs/{run_id}/status")
+    stalled = st["stalled"]
+    assert stalled is not None
+    assert stalled["last_active_stage"] == "llm_prover_reviewers"
+    assert isinstance(stalled["elapsed_seconds"], int) and stalled["elapsed_seconds"] >= 0
+    # the front half completed, so there is a last successful step to show
+    assert stalled["last_successful_stage"]
+    assert "events.jsonl" in stalled["diagnostics"]
+    assert stalled["message"]
+
+
+def test_g65f_troubleshooting_state_is_status_neutral(client) -> None:
+    """No diagnostic/troubleshooting field may expose an earned math status for a
+    stalled/failed run."""
+    import json as _json
+
+    from espresso_proof import observability as obs
+
+    wb, call, _ = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    obs.append_agent_event(
+        run_dir, agent_name="llm_prover_reviewers", provider="external",
+        adapter="external", stage="llm_prover_reviewers", agent_status="started",
+    )
+    _, st = call("GET", f"/api/runs/{run_id}/status")
+    blob = _json.dumps(st["stalled"]).lower()
+    for forbidden in ("proved", "source_backed", "source-backed", '"checked"', "refuted"):
+        assert forbidden not in blob
+
+
+def test_g65f_failed_agent_keeps_server_alive(client) -> None:
+    """A failed agent job must surface as a job failure with the server still
+    answering (not a dead page)."""
+    wb, call, _ = client
+    run_id = _create_text(call, UNCLEAR_CLAIM)
+    status, d = call("POST", f"/api/runs/{run_id}/agents/examples")
+    assert status == 202
+    job = _await_job(call, d["job_id"])
+    assert job["state"] == "failed"  # the job failed, not the server
+    # the server still answers run status afterwards (it stayed alive)
+    code, st = call("GET", f"/api/runs/{run_id}/status")
+    assert code == 200 and "agents" in st

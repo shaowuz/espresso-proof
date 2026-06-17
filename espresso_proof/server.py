@@ -734,7 +734,9 @@ class Workbench:
         Returns None for a healthy or genuinely in-flight run; fails closed to
         None on any error."""
         try:
-            from .observability import latest_unfinished_agent_call
+            from datetime import UTC, datetime
+
+            from .observability import latest_unfinished_agent_call, read_agent_events
 
             dangling = latest_unfinished_agent_call(run_dir)
             if dangling is None:
@@ -748,9 +750,30 @@ class Workbench:
             if live:
                 return None  # a real in-flight call, not a death
             stage = dangling.get("stage") or "an agent step"
+            since = dangling.get("started_at")
+            # Goal 65F: give the UI the data to render a real failure state
+            # (last active stage, elapsed, last completed step) instead of only a
+            # dead "Could not reach the server" page. Display only — no math status.
+            elapsed_seconds = None
+            try:
+                if since:
+                    elapsed_seconds = max(
+                        0, int((datetime.now(UTC) - datetime.fromisoformat(since)).total_seconds())
+                    )
+            except Exception:  # noqa: BLE001
+                elapsed_seconds = None
+            last_successful_stage = None
+            for rec in read_agent_events(run_dir):
+                if rec.get("agent_status") == "finished" and rec.get("stage"):
+                    last_successful_stage = rec.get("stage")  # keep the latest
             return {
                 "stage": stage,
-                "since": dangling.get("started_at"),
+                "last_active_stage": stage,
+                "since": since,
+                "elapsed_seconds": elapsed_seconds,
+                "last_successful_stage": last_successful_stage,
+                # where to look — the per-run diagnostic trail (Goal 54A/65B)
+                "diagnostics": ["events.jsonl", "agent_events.jsonl"],
                 "message": (
                     f"This run stopped responding during '{stage}'. No proof, "
                     "source, or evidence status was earned. You can retry that step "
