@@ -105,6 +105,40 @@ def _reached(run_dir: Path, state: str) -> bool:
     return _state_index(manifest.get("current_state", "")) >= _state_index(state)
 
 
+# Goal 65 control-flow: next_action values for which the front half issued a HARD
+# terminal stop, so launching an expensive external Prover+Reviewers pass is
+# clearly wrong. ``ask_human`` is deliberately NOT here: the first Prover pass
+# runs BEFORE the human gate by design (the human needs its output to decide),
+# the stub/front half emits ``ask_human`` broadly — even for clear claims — and
+# ``should_stop``+``ask_human`` correctly governs loop CONTINUATION (enforced in
+# the prover-loop driver / resume), not the first pass. ``run_strategy_brief`` and
+# ``continue_loop`` likewise keep the normal Prover pass. Gating only the hard
+# ``stop`` is the correct, non-breaking control-flow guard.
+_STOP_BEFORE_PROVER_ACTIONS = frozenset({"stop"})
+
+
+def _stop_before_prover(run_dir: Path) -> dict:
+    """Goal 65 control-flow fix (order-3 postmortem): decide whether to SKIP the
+    expensive, crash-prone Prover+Reviewers pass because the front half issued a
+    hard terminal stop (``loop_control.should_stop`` with ``next_action`` ==
+    ``stop``). Returns ``{"stop": bool, "next_action": str | None}``. Fails closed
+    to ``stop=False`` (run the pass) if ``loop_control`` is absent/unreadable, so
+    the normal flow is preserved whenever the signal is unavailable. Control flow
+    only; reads no status and changes nothing.
+
+    NOTE: ``ask_human`` does NOT skip the first pass — see
+    ``_STOP_BEFORE_PROVER_ACTIONS`` — because that pass runs before the human gate
+    by design and ``ask_human`` is emitted broadly. Crash protection for that case
+    is server survival (65C), not skipping the pass."""
+    try:
+        loop_control = read_yaml(run_dir / "loop_control.yaml") or {}
+        next_action = loop_control.get("next_action")
+        stop = bool(loop_control.get("should_stop")) and next_action in _STOP_BEFORE_PROVER_ACTIONS
+        return {"stop": stop, "next_action": next_action}
+    except Exception:  # noqa: BLE001 - absent/unreadable loop_control => run the pass
+        return {"stop": False, "next_action": None}
+
+
 def _finish_without_llm_gate(
     run_dir: Path,
     *,
@@ -339,7 +373,26 @@ def orchestrate_run(
         auto_wire_scoped_verifications(run_dir)
 
     # Stage 3 — live Prover + Reviewers; stop at the human gate.
-    if not _reached(run_dir, "WAITING_LLM_AGENT_HUMAN_GATE"):
+    # Goal 65 control-flow fix (from the order-3 postmortem): if the front half
+    # already concluded the claim needs a human BEFORE proof search
+    # (loop_control.should_stop with next_action ask_human/stop), do NOT spend an
+    # expensive, crash-prone Prover+Reviewers external pass. Halt at the current
+    # state — kernel.classify_state already surfaces this as "stopped" — and let
+    # the human decide. next_action run_strategy_brief / continue_loop keep the
+    # normal prover flow. Control flow only; never changes proof/source/evidence/
+    # grade status. Reading loop_control fails closed to the normal pass.
+    _sbp = _stop_before_prover(run_dir)
+    if _sbp["stop"] and not _reached(run_dir, "WAITING_LLM_AGENT_HUMAN_GATE"):
+        append_event(
+            run_dir,
+            "prover_pass_skipped",
+            stage="llm_prover_reviewers",
+            detail=(
+                "front half asked to stop before proof search "
+                f"(next_action={_sbp['next_action']}); awaiting human"
+            ),
+        )
+    if not _sbp["stop"] and not _reached(run_dir, "WAITING_LLM_AGENT_HUMAN_GATE"):
         def _llm_prover_reviewers() -> None:
             # Goal 54A: bracket the deep Prover+Reviewers model pass with provenance
             # so a stall in the model call (vs validation/rendering) is visible.
@@ -433,7 +486,10 @@ def orchestrate_run(
     write_timings(run_dir)
     register_observability_artifacts(run_dir)
     final_manifest = read_yaml(run_dir / "run_manifest.yaml")
-    agent_run = read_yaml(run_dir / "llm_agent_run.yaml")
+    # Goal 65 control-flow fix: the Prover pass is skipped when the front half
+    # asked to stop before proof search, so llm_agent_run.yaml may not exist.
+    _agent_run_path = run_dir / "llm_agent_run.yaml"
+    agent_run = read_yaml(_agent_run_path) if _agent_run_path.exists() else {}
     dashboard = write_run_dashboard(run_dir)
     return {
         "run_dir": run_dir,
