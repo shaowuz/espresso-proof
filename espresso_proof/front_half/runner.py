@@ -5,14 +5,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ..claim_clear import claim_clear_for_downstream, record_claim_clear_block
-from ..io import read_yaml, write_yaml
-from ..llm_agents import LLMClient, load_agent_context
-from ..models import FrontHalfRunReport
-from ..observability import append_agent_event, monotonic_ms, now_iso
-from ..run_events import append_event
-from ..surface_warnings import refresh_final_report_disclosures
-from ..validators import validate_run
+from espresso_proof.claim.claim_clear import claim_clear_for_downstream, record_claim_clear_block
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.agents.llm_agents import LLMClient, load_agent_context
+from espresso_proof.kernel.models import FrontHalfRunReport
+from espresso_proof.kernel.observability import append_agent_event, monotonic_ms, now_iso
+from espresso_proof.kernel.run_events import append_event
+from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
+from espresso_proof.kernel.validators import validate_run
 from .registry import FRONT_HALF_STAGES, _STAGE_REGISTRY
 from . import stages as _stages  # noqa: F401 - ensure stage normalizers are registered
 

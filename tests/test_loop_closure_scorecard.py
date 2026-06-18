@@ -14,16 +14,16 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_text, read_yaml, write_text, write_yaml
-from espresso_proof.loop_closure_scorecard import (
+from espresso_proof.kernel.io import read_text, read_yaml, write_text, write_yaml
+from espresso_proof.evaluation.loop_closure_scorecard import (
     SCORECARD_FILE,
     SUMMARY_FILE,
     compute_loop_closure_scorecard,
     render_summary,
     write_loop_closure_scorecard,
 )
-from espresso_proof.loop_harness import run_loop_cycle
-from espresso_proof.loop_models import LoopClosureScorecard
+from espresso_proof.loop.loop_harness import run_loop_cycle
+from espresso_proof.kernel.loop_models import LoopClosureScorecard
 
 
 @pytest.fixture(scope="module")
@@ -94,7 +94,7 @@ def test_summary_uses_workflow_replay_language_not_proof() -> None:
 
 
 def _clean_safety():
-    from espresso_proof.loop_models import ScorecardSafety
+    from espresso_proof.kernel.loop_models import ScorecardSafety
 
     return ScorecardSafety()
 
@@ -252,6 +252,6 @@ def test_scorecard_is_advisory_and_not_a_kernel_artifact(smoke_cycle: Path, tmp_
         )
         assert SCORECARD_FILE not in names and SUMMARY_FILE not in names
         # the kernel run still validates with the scorecard sitting in the cycle.
-        from espresso_proof.validators import validate_run
+        from espresso_proof.kernel.validators import validate_run
 
         validate_run(run_dir)

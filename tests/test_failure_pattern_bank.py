@@ -17,16 +17,16 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from espresso_proof.failure_pattern_bank import (
+from espresso_proof.kernel.failure_pattern_bank import (
     ENFORCING_VALIDATORS,
     audit_failure_patterns,
     build_failure_pattern_audit,
     seed_failure_pattern_bank,
 )
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.models import FailurePatternAudit
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.validators import KernelValidationError, validate_run
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.models import FailurePatternAudit
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 FIXTURES = Path("tests/fixtures")
 
@@ -222,7 +222,7 @@ def test_new_candidate_patterns_match_claim_text(tmp_path: Path) -> None:
 
 
 def test_allocation_hints_from_audited_match(tmp_path: Path) -> None:
-    from espresso_proof.failure_pattern_bank import failure_pattern_allocation_hints
+    from espresso_proof.kernel.failure_pattern_bank import failure_pattern_allocation_hints
 
     run_dir = _build(tmp_path, "source_misapplication_very_general_to_all")
     audit = build_failure_pattern_audit(run_dir)
@@ -239,7 +239,7 @@ def test_allocation_hints_from_audited_match(tmp_path: Path) -> None:
 
 
 def test_allocation_hints_empty_without_audited() -> None:
-    from espresso_proof.failure_pattern_bank import failure_pattern_allocation_hints
+    from espresso_proof.kernel.failure_pattern_bank import failure_pattern_allocation_hints
 
     audit = {"matches": [{"pattern_id": "smooth_not_singular", "action": "warn", "tier": "candidate"}]}
     hints = failure_pattern_allocation_hints(audit)
@@ -249,7 +249,7 @@ def test_allocation_hints_empty_without_audited() -> None:
 
 def test_allocation_hints_is_read_only() -> None:
     from copy import deepcopy
-    from espresso_proof.failure_pattern_bank import failure_pattern_allocation_hints
+    from espresso_proof.kernel.failure_pattern_bank import failure_pattern_allocation_hints
 
     audit = {"matches": [{"pattern_id": "finite_check_not_universal", "action": "rank_downgrade",
                           "tier": "audited", "subject": "computation_checks", "explanation": "x"}]}

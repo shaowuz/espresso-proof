@@ -15,15 +15,15 @@ from pathlib import Path
 
 import pytest
 
-import espresso_proof.agent_runner as agent_runner
-from espresso_proof import agent_run_status as ars
-from espresso_proof.agent_runner import run_single_agent, skip_agent
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.memo import build_concise_memo
-from espresso_proof.models import AgentRunStatusEntry
-from espresso_proof.orchestrator import orchestrate_run
-from espresso_proof.run_dashboard import render_run_dashboard
-from espresso_proof.validators import KernelValidationError, validate_run
+import espresso_proof.orchestration.agent_runner as agent_runner
+from espresso_proof.kernel import agent_run_status as ars
+from espresso_proof.orchestration.agent_runner import run_single_agent, skip_agent
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.kernel.models import AgentRunStatusEntry
+from espresso_proof.orchestration.orchestrator import orchestrate_run
+from espresso_proof.orchestration.run_dashboard import render_run_dashboard
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 
@@ -228,7 +228,7 @@ def test_completion_order_does_not_matter(tmp_path: Path) -> None:
 
 
 def test_continue_route_works_before_evidence_finishes(tmp_path: Path) -> None:
-    from espresso_proof.orchestrator import resume_run
+    from espresso_proof.orchestration.orchestrator import resume_run
 
     run_dir = _fast_run(tmp_path)
     # no evidence agent has run; continue the (preliminary) route anyway.

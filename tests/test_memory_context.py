@@ -13,12 +13,12 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.memory import write_memory_entry
-from espresso_proof.memory_context import build_memory_context
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import MemoryContext
-from espresso_proof.validators import KernelValidationError, validate_run
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.memory.memory import write_memory_entry
+from espresso_proof.memory.memory_context import build_memory_context
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.models import MemoryContext
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 FIXTURES = Path("tests/fixtures")
 

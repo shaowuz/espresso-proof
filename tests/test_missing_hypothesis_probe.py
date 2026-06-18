@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof.counterexample_probes import propose_deterministic_counterexamples
-from espresso_proof.io import read_yaml, write_yaml
+from espresso_proof.verification.counterexample_probes import propose_deterministic_counterexamples
+from espresso_proof.kernel.io import read_yaml, write_yaml
 
 MAX_CLAIM = "Every continuous function f: R -> R attains a maximum value.\n"
 
@@ -65,9 +65,9 @@ def test_record_discipline_no_refutation_ever() -> None:
 
 
 def test_run_records_counterexample_and_validates(tmp_path: Path) -> None:
-    from espresso_proof.io import write_text
-    from espresso_proof.orchestrator import orchestrate_run
-    from espresso_proof.validators import validate_run
+    from espresso_proof.kernel.io import write_text
+    from espresso_proof.orchestration.orchestrator import orchestrate_run
+    from espresso_proof.kernel.validators import validate_run
 
     input_path = tmp_path / "input.md"
     write_text(input_path, MAX_CLAIM)
@@ -90,7 +90,7 @@ def test_run_records_counterexample_and_validates(tmp_path: Path) -> None:
     grade = read_yaml(run_dir / "idea_grade.yaml")
     assert grade["status"] != "refuted"
     # the registry-wired replay probe passes on the real run dir.
-    from espresso_proof.loop_replay import PROBLEM_PROBES
+    from espresso_proof.loop.loop_replay import PROBLEM_PROBES
 
     probe = PROBLEM_PROBES["missing_hypothesis_counterexample_recorded"]
     ok, note = probe(run_dir)
@@ -98,9 +98,9 @@ def test_run_records_counterexample_and_validates(tmp_path: Path) -> None:
 
 
 def test_cycle_clears_the_no_activity_finding(tmp_path: Path) -> None:
-    from espresso_proof.loop_harness import run_loop_cycle
-    from espresso_proof.loop_models import ReviewReport
-    from espresso_proof.loop_reviewers import run_review_pass
+    from espresso_proof.loop.loop_harness import run_loop_cycle
+    from espresso_proof.kernel.loop_models import ReviewReport
+    from espresso_proof.loop.loop_reviewers import run_review_pass
 
     cases_file = tmp_path / "cases.yaml"
     write_yaml(
@@ -147,7 +147,7 @@ def test_cycle_clears_the_no_activity_finding(tmp_path: Path) -> None:
 
 
 def test_replay_probe_missing_hypothesis(tmp_path: Path) -> None:
-    from espresso_proof.loop_replay import (
+    from espresso_proof.loop.loop_replay import (
         _probe_missing_hypothesis_counterexample_recorded as probe,
     )
 

@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml, write_text
-from espresso_proof.mock_pipeline import _detect_scenario, run_mock_critique
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.io import read_yaml, write_text
+from espresso_proof.orchestration.mock_pipeline import _detect_scenario, run_mock_critique
+from espresso_proof.kernel.validators import validate_run
 
 
 @pytest.mark.parametrize(

@@ -12,16 +12,16 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.autonomous_retrieval import run_autonomous_retrieval
-from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.literature_planner import plan_literature_search
-from espresso_proof.llm_agents import StubLLMClient
-from espresso_proof.memo import build_concise_memo
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import AutonomousRetrievalCandidate, LiteratureSearchPlan
+from espresso_proof.literature.autonomous_retrieval import run_autonomous_retrieval
+from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.literature.literature_planner import plan_literature_search
+from espresso_proof.agents.llm_agents import StubLLMClient
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.models import AutonomousRetrievalCandidate, LiteratureSearchPlan
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 _P2_THEOREM = (
@@ -317,8 +317,8 @@ def test_retrieval_with_empty_corpus_is_a_validated_no_op(tmp_path: Path) -> Non
     # Goal 37: retrieval that finds nothing (empty/absent corpus) must be a
     # no-op that fails closed — no candidates, no grounding attempt, no status
     # change anywhere, and the run still validates.
-    from espresso_proof.autonomous_retrieval import run_autonomous_retrieval
-    from espresso_proof.validators import validate_run
+    from espresso_proof.literature.autonomous_retrieval import run_autonomous_retrieval
+    from espresso_proof.kernel.validators import validate_run
 
     run_dir = _p2_run(tmp_path)
     sg_before = read_yaml(run_dir / "source_grounding.yaml")

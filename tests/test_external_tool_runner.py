@@ -12,17 +12,17 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.external_tool_runner import (
+from espresso_proof.kernel.external_tool_runner import (
     UnknownToolError,
     append_external_tool_run,
     run_and_record_external_tool,
     run_external_tool,
 )
-from espresso_proof.io import read_yaml
-from espresso_proof.memo import build_concise_memo
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.proof_language import contains_proof_language
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.io import read_yaml
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.proof_language import contains_proof_language
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 
@@ -80,7 +80,7 @@ def test_unknown_tool_is_refused(tmp_path: Path) -> None:
 def test_executor_passes_minimal_env_without_secrets(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("ESPRESSO_SECRET_TOKEN", "supersecret")
     captured: dict = {}
-    import espresso_proof.external_tool_runner as runner
+    import espresso_proof.kernel.external_tool_runner as runner
 
     real_run = runner.subprocess.run
 
@@ -124,7 +124,7 @@ def test_overclaiming_tool_output_is_scrubbed_from_conclusion(tmp_path: Path, mo
     # gate instead of crashing or persisting an overclaim.
     import sys as _sys
 
-    from espresso_proof import external_tool_runner as runner_mod
+    from espresso_proof.kernel import external_tool_runner as runner_mod
 
     overclaim_script = 'print("RESULT: we proved the theorem. proof-close.")'
     monkeypatch.setitem(

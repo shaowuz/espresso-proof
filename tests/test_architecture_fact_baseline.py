@@ -32,13 +32,13 @@ def test_foundational_root_modules_exist() -> None:
     # they must remain present in the root package.
     for module in (
         "cli.py",
-        "orchestrator.py",
-        "front_half_agents.py",
-        "prover_loop_driver.py",
-        "llm_agents.py",
-        "validators.py",
-        "models.py",
-        "memory.py",
+        "orchestration/orchestrator.py",
+        "agents/front_half_agents.py",
+        "orchestration/prover_loop_driver.py",
+        "agents/llm_agents.py",
+        "kernel/validators.py",
+        "kernel/models.py",
+        "memory/memory.py",
     ):
         assert (REPO_ROOT / "espresso_proof" / module).is_file(), f"missing root module {module}"
 

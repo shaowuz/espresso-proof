@@ -13,8 +13,8 @@ import time
 
 import pytest
 
-from espresso_proof.instant_lane import VISIBLE_LABEL, build_instant_draft
-from espresso_proof.proof_language import contains_draft_status_claim, scrub_draft_status_claims
+from espresso_proof.ui.instant_lane import VISIBLE_LABEL, build_instant_draft
+from espresso_proof.kernel.proof_language import contains_draft_status_claim, scrub_draft_status_claims
 
 ORDER3 = "prove that a group of order 3 is cyclic"
 

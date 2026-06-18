@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import espresso_proof.server as server_mod
-from espresso_proof.agent_runner import run_single_agent
+from espresso_proof.orchestration.agent_runner import run_single_agent
 from espresso_proof.server import Workbench, WorkbenchError
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
@@ -128,7 +128,7 @@ def test_status_exposes_agent_last_updated(tmp_path: Path) -> None:
 
 
 def test_agent_card_shows_updated_time_not_proof_progress(tmp_path: Path) -> None:
-    from espresso_proof.run_dashboard import render_run_dashboard
+    from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 
     wb, run_id = _wb_with_run(tmp_path)
     run_dir = wb.resolve_run(run_id)
@@ -164,7 +164,7 @@ def test_debug_info_is_confined_tail_limited_and_redacted(tmp_path: Path) -> Non
 def test_debug_link_lives_in_debug_drawer_only(tmp_path: Path) -> None:
     import re
 
-    from espresso_proof.run_dashboard import render_run_dashboard
+    from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 
     wb, run_id = _wb_with_run(tmp_path)
     run_dir = wb.resolve_run(run_id)
@@ -180,9 +180,9 @@ def test_debug_link_lives_in_debug_drawer_only(tmp_path: Path) -> None:
 
 
 def test_reload_during_running_job_shows_running(tmp_path: Path) -> None:
-    from espresso_proof.agent_run_status import set_agent_status
-    from espresso_proof.run_dashboard import render_run_dashboard
-    from espresso_proof.validators import validate_run
+    from espresso_proof.kernel.agent_run_status import set_agent_status
+    from espresso_proof.orchestration.run_dashboard import render_run_dashboard
+    from espresso_proof.kernel.validators import validate_run
 
     wb, run_id = _wb_with_run(tmp_path)
     run_dir = wb.resolve_run(run_id)

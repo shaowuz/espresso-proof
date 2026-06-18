@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.llm_agents import ExternalAgentTimeoutError, ExternalCommandClient
+from espresso_proof.agents.llm_agents import ExternalAgentTimeoutError, ExternalCommandClient
 
 
 def _set_cmd(monkeypatch, script: Path) -> None:

@@ -11,14 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.models import (
     CounterexampleReport,
     ExampleSelection,
     StrategySynthesis,
 )
-from espresso_proof.research_bank import (
+from espresso_proof.kernel.research_bank import (
     append_bank_item,
     load_bank,
     load_counterexamples_artifact,
@@ -26,7 +26,7 @@ from espresso_proof.research_bank import (
     load_strategy_synthesis_artifact,
 )
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 

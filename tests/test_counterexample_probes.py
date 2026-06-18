@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.counterexample_probes import (
+from espresso_proof.verification.counterexample_probes import (
     _dihedral_cayley,
     propose_deterministic_counterexamples,
 )
-from espresso_proof.finite_group_verifier import verify_group_abelian
-from espresso_proof.io import read_yaml
-from espresso_proof.models import CounterexampleTest
+from espresso_proof.verification.finite_group_verifier import verify_group_abelian
+from espresso_proof.kernel.io import read_yaml
+from espresso_proof.kernel.models import CounterexampleTest
 
 TRIVIAL_ORDER6_HYPOTHESIS = {
     "name": "G is a group of order 6",
@@ -34,7 +34,7 @@ def test_semidirect_tables_are_nonabelian_groups() -> None:
     # 21 = Z_7 x| Z_3 (r=2: 2^3 = 8 = 1 mod 7); 55 = Z_11 x| Z_5 and
     # 57 = Z_19 x| Z_3 exercise other (p, q, r) shapes; 183 = Z_61 x| Z_3
     # pins the largest in-cap odd construction.
-    from espresso_proof.counterexample_probes import (
+    from espresso_proof.verification.counterexample_probes import (
         _odd_pq_with_nonabelian_group,
         _semidirect_cayley,
     )
@@ -163,9 +163,9 @@ def test_probe_wired_into_full_run_and_kernel_valid(tmp_path: Path) -> None:
     # counterexample through the real runtime, the run stays kernel-valid, and
     # the finite-group scaffold locks the hypotheses precisely enough for the
     # admissible table witness to refute this exact universal claim.
-    from espresso_proof.io import write_text
-    from espresso_proof.orchestrator import orchestrate_run
-    from espresso_proof.validators import validate_run
+    from espresso_proof.kernel.io import write_text
+    from espresso_proof.orchestration.orchestrator import orchestrate_run
+    from espresso_proof.kernel.validators import validate_run
 
     input_path = tmp_path / "input.md"
     write_text(input_path, "Every group of order 6 is abelian.\n")
@@ -193,9 +193,9 @@ def test_probe_wired_into_full_run_and_kernel_valid(tmp_path: Path) -> None:
 
 
 def test_true_p2_run_unaffected(tmp_path: Path) -> None:
-    from espresso_proof.io import write_text
-    from espresso_proof.orchestrator import orchestrate_run
-    from espresso_proof.validators import validate_run
+    from espresso_proof.kernel.io import write_text
+    from espresso_proof.orchestration.orchestrator import orchestrate_run
+    from espresso_proof.kernel.validators import validate_run
 
     input_path = tmp_path / "input.md"
     write_text(input_path, "Every group of order p^2, where p is prime, is abelian.\n")

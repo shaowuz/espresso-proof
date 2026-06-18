@@ -9,15 +9,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.orchestrator import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.orchestrator import (
     _resolve_and_build_loop,
     orchestrate_run,
     resume_run,
 )
-import espresso_proof.prover_loop_driver as drv
-from espresso_proof.prover_loop_driver import continue_prover_loop
-from espresso_proof.validators import KernelValidationError, validate_run
+import espresso_proof.orchestration.prover_loop_driver as drv
+from espresso_proof.orchestration.prover_loop_driver import continue_prover_loop
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
 from tests.test_evidence_aware_grade import FakeClaude
 
 _FORBIDDEN = ("proof-close", "proof complete", "we proved", "proved the", "this establishes the theorem")

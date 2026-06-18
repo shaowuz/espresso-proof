@@ -18,16 +18,16 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.literature_retrieval import (
+from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.literature.literature_retrieval import (
     retrieve_and_ground,
     retrieve_local_corpus,
     retrieve_sources,
 )
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import LiteratureRetrievalReport, RetrievedSourceStatus
-from espresso_proof.validators import KernelValidationError, validate_run
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.models import LiteratureRetrievalReport, RetrievedSourceStatus
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 FIXTURES = Path("tests/fixtures")
 

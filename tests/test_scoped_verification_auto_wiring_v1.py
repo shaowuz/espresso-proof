@@ -16,16 +16,16 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
-from espresso_proof.finite_group_verifier import cyclic_group_table
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.models import ScopedVerificationRequest
-from espresso_proof.proof_verification import (
+from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
+from espresso_proof.verification.finite_group_verifier import cyclic_group_table
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.models import ScopedVerificationRequest
+from espresso_proof.verification.proof_verification import (
     AUTO_MAX_MODULUS,
     auto_wire_scoped_verifications,
     verify_identity_table_in_run,
 )
-from espresso_proof.validators import KernelValidationError, validate_run
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 FIXTURES = Path("tests/fixtures")
 LEFT_PROJ = [[0, 0], [1, 1]]  # non-commutative finite table
@@ -36,7 +36,7 @@ def _build(tmp_path: Path) -> Path:
 
 
 def run_mock_critique_pv(tmp_path: Path) -> Path:
-    from espresso_proof.mock_pipeline import run_mock_critique
+    from espresso_proof.orchestration.mock_pipeline import run_mock_critique
 
     run_dir = run_mock_critique("aw", FIXTURES / "vague_claim_unclear" / "input.md", tmp_path)
     manifest = read_yaml(run_dir / "run_manifest.yaml")

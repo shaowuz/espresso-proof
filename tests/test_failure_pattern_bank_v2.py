@@ -11,14 +11,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof.failure_pattern_bank import (
+from espresso_proof.kernel.failure_pattern_bank import (
     audit_failure_patterns,
     build_failure_pattern_audit,
     seed_failure_pattern_bank,
 )
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 _NEW_PATTERNS = ("finite_not_infinite", "compact_proper_complete_assumption")

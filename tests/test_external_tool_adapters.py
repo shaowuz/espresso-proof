@@ -13,13 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
-from espresso_proof.external_tool_adapters import run_exact_modexp_adapter
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.memo import build_concise_memo
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.proof_language import contains_proof_language
-from espresso_proof.validators import validate_run
+from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
+from espresso_proof.verification.external_tool_adapters import run_exact_modexp_adapter
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.proof_language import contains_proof_language
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 
@@ -138,7 +138,7 @@ def test_confirmed_entry_carries_reproducibility_provenance(tmp_path: Path) -> N
 def test_entries_without_reproducibility_fields_still_validate() -> None:
     # Additive-only schema change: pre-Goal-38 entries (no provenance fields)
     # must keep validating.
-    from espresso_proof.models import ProofVerificationEntry
+    from espresso_proof.kernel.models import ProofVerificationEntry
 
     entry = ProofVerificationEntry.model_validate(
         {

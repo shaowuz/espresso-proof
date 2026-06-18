@@ -15,12 +15,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.memo import build_concise_memo
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import ExternalToolRun, ExternalToolRunsReport
-from espresso_proof.proof_language import contains_proof_language
-from espresso_proof.validators import KernelValidationError, validate_run
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.models import ExternalToolRun, ExternalToolRunsReport
+from espresso_proof.kernel.proof_language import contains_proof_language
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 FIXTURES = Path("tests/fixtures")
 
@@ -57,7 +57,7 @@ def _base_run(**over) -> dict:
 
 # --- status-free by construction ------------------------------------------
 def test_external_tool_models_have_no_status_field() -> None:
-    from espresso_proof.models import ExternalToolCandidate
+    from espresso_proof.kernel.models import ExternalToolCandidate
     forbidden = {"source_backed", "proof_language_status", "earned_status",
                  "refutes_claim", "idea_status", "proof_status"}
     assert not (set(ExternalToolRun.model_fields) & forbidden)
@@ -135,7 +135,7 @@ def test_failed_or_timed_out_run_is_fail_closed_in_display(tmp_path: Path) -> No
 def test_tool_run_model_rejects_proof_complete_interpretation() -> None:
     import pytest as _pytest
 
-    from espresso_proof.models import ExternalToolRun
+    from espresso_proof.kernel.models import ExternalToolRun
 
     base = {
         "id": "t1",
@@ -156,8 +156,8 @@ def test_tool_run_model_rejects_proof_complete_interpretation() -> None:
 def test_tool_run_raw_stdout_may_carry_overclaim_but_display_scrubs() -> None:
     # stdout_excerpt is RAW audited evidence: it may contain the tool's own
     # overclaim text; the artifact stays valid and the display layer scrubs.
-    from espresso_proof.models import ExternalToolRun
-    from espresso_proof.proof_language import scrub_proof_language
+    from espresso_proof.kernel.models import ExternalToolRun
+    from espresso_proof.kernel.proof_language import scrub_proof_language
 
     run = ExternalToolRun.model_validate(
         {

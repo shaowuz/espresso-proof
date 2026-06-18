@@ -14,11 +14,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof import orchestrator
-from espresso_proof.orchestrator import _stop_before_prover, orchestrate_run
-from espresso_proof.io import write_yaml
-from espresso_proof.run_events import read_events
-from espresso_proof.validators import validate_run
+from espresso_proof.orchestration import orchestrator
+from espresso_proof.orchestration.orchestrator import _stop_before_prover, orchestrate_run
+from espresso_proof.kernel.io import write_yaml
+from espresso_proof.kernel.run_events import read_events
+from espresso_proof.kernel.validators import validate_run
 from tests.test_evidence_aware_grade import FakeClaude
 
 

@@ -1,4 +1,4 @@
-"""Tests for the advisory "AI review passed" signal (espresso_proof.ai_review).
+"""Tests for the advisory "AI review passed" signal (espresso_proof.kernel.ai_review).
 
 The signal is ADVISORY ONLY: it can never render green, never changes idea_grade
 or any other status, and ``no_blocking_objection`` is earned only with >=2
@@ -13,14 +13,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from espresso_proof.ai_review import DISCLAIMER, assess_ai_review, build_ai_review
-from espresso_proof.evidence_trust import EARNED_LEVELS, is_green, trust_tone
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.memo import build_concise_memo
-from espresso_proof.models import AIReviewAssessment, AIReviewVerdict
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.orchestrator import orchestrate_run
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.ai_review import DISCLAIMER, assess_ai_review, build_ai_review
+from espresso_proof.ui.evidence_trust import EARNED_LEVELS, is_green, trust_tone
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.kernel.models import AIReviewAssessment, AIReviewVerdict
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.orchestrator import orchestrate_run
+from espresso_proof.kernel.validators import validate_run
 
 
 # ---------------------------------------------------------------------------

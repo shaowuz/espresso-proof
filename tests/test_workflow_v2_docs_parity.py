@@ -56,7 +56,7 @@ def test_pending_pressure_is_not_evidence() -> None:
 
 def test_docs_match_runtime_source_theorem_before_strategy_order() -> None:
     from espresso_proof.front_half.registry import FRONT_HALF_STAGES
-    from espresso_proof.orchestrator import FAST_CORE_STAGES
+    from espresso_proof.orchestration.orchestrator import FAST_CORE_STAGES
 
     agent_flow = _normalized("AGENT_FLOW.md")
     protocol = _normalized("docs/engineering/ESPRESSO_AGENT_PROTOCOL.md")

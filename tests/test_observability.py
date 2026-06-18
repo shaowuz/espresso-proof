@@ -13,12 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof import observability as obs
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.orchestrator import orchestrate_run
-from espresso_proof.run_events import EVENT_KINDS, append_event, read_events
-from espresso_proof.stage_runner import StageRunner, StageError
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel import observability as obs
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.orchestrator import orchestrate_run
+from espresso_proof.kernel.run_events import EVENT_KINDS, append_event, read_events
+from espresso_proof.kernel.stage_runner import StageRunner, StageError
+from espresso_proof.kernel.validators import validate_run
 from tests.test_evidence_aware_grade import FakeClaude
 
 
@@ -196,8 +196,8 @@ def test_orchestrate_prover_pass_emits_agent_event(tmp_path: Path):
 
 
 def test_resume_prover_rounds_emit_agent_events(tmp_path: Path):
-    from espresso_proof.orchestrator import resume_run
-    from espresso_proof.io import read_yaml as _ry
+    from espresso_proof.orchestration.orchestrator import resume_run
+    from espresso_proof.kernel.io import read_yaml as _ry
     from tests.test_prover_loop_continuation import _ProverClient
     run_dir = _stub_run(tmp_path)
     brief = _ry(run_dir / _ry(run_dir / "run_manifest.yaml")["artifacts"]["strategy_brief"])

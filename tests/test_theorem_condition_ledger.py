@@ -5,21 +5,21 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.models import (
+from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.models import (
     LedgerCondition,
     MatchStatus,
     TheoremConditionLedger,
     TheoremConditionLedgerEntry,
 )
-from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.theorem_applicability import audit_theorem_applicability
-from espresso_proof.theorem_condition_ledger import (
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
+from espresso_proof.verification.theorem_condition_ledger import (
     LEDGER_FILENAME,
     build_theorem_condition_ledger,
 )
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 # A reviewer's verbatim source requests + the conditions to check against the claim.
 _SOURCE_REQUESTS = ["Cauchy theorem for finite groups", "Class equation argument"]
@@ -208,7 +208,7 @@ def test_builder_writes_empty_ledger_without_requests(tmp_path: Path) -> None:
     # The orchestrator always rebuilds the subgoal graph right after the ledger, so
     # the two stay consistent (Goal 57A cap-aware id check). Mirror that here: with
     # an empty ledger the rebuilt graph carries no subgoal_tcl_* nodes.
-    from espresso_proof.subgoal_graph import build_subgoal_graph
+    from espresso_proof.kernel.subgoal_graph import build_subgoal_graph
 
     build_subgoal_graph(run_dir)
     validate_run(run_dir)

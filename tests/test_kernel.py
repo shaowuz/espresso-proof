@@ -10,16 +10,16 @@ import yaml
 from typer.testing import CliRunner
 
 from espresso_proof.cli import _assert_fixture_expectations, app
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.kernel import KernelError, require_inside, safe_run_path, snapshot
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.memory import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.kernel import KernelError, require_inside, safe_run_path, snapshot
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.memory.memory import (
     load_memory_index,
     summarize_memory,
     write_memory_entry,
     write_run_memory,
 )
-from espresso_proof.models import (
+from espresso_proof.kernel.models import (
     AdmissionCheck,
     AgentContracts,
     ComputationChecks,
@@ -34,8 +34,8 @@ from espresso_proof.models import (
     SourceGroundingReport,
     WorkflowSpec,
 )
-from espresso_proof.validators import KernelValidationError, validate_run
-from espresso_proof.workflow_generator import classify_domain, generate_workflow_spec
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
+from espresso_proof.orchestration.workflow_generator import classify_domain, generate_workflow_spec
 
 
 FIXTURES = Path("tests/fixtures")
@@ -1882,7 +1882,7 @@ def test_failure_classification_rejects_unbacked_claim_refuted(tmp_path: Path) -
 
 
 def test_failure_classification_report_rejects_status_field() -> None:
-    from espresso_proof.models import FailureClassificationReport
+    from espresso_proof.kernel.models import FailureClassificationReport
 
     data = {
         "schema_version": 1,
@@ -1910,7 +1910,7 @@ def test_classify_failures_emits_budget_exhausted(tmp_path: Path) -> None:
     loop["next_action"] = "stop"
     loop_path.write_text(yaml.safe_dump(loop), encoding="utf-8")
 
-    from espresso_proof.failure_classifier import build_failure_classification
+    from espresso_proof.orchestration.failure_classifier import build_failure_classification
 
     report = build_failure_classification(run_dir)
     categories = {item["category"] for item in report["classifications"]}
@@ -1933,7 +1933,7 @@ def test_classify_failures_emits_no_progress(tmp_path: Path) -> None:
     loop["next_action"] = "ask_human"
     loop_path.write_text(yaml.safe_dump(loop), encoding="utf-8")
 
-    from espresso_proof.failure_classifier import build_failure_classification
+    from espresso_proof.orchestration.failure_classifier import build_failure_classification
 
     report = build_failure_classification(run_dir)
     categories = {item["category"] for item in report["classifications"]}
@@ -1980,7 +1980,7 @@ def test_subgoal_contradicted_cannot_stand_on_unbacked_refuted_grade(tmp_path: P
     # the grade itself now requiring an admissible checked counterexample, a
     # refuted grade cannot be sustained once the refutation is removed -- so a
     # contradicted subgoal can never stand on a forged/unbacked refuted grade.
-    from espresso_proof.subgoal_graph import build_subgoal_graph
+    from espresso_proof.kernel.subgoal_graph import build_subgoal_graph
 
     run_dir = _refuted_run(tmp_path)
     build_subgoal_graph(run_dir)  # builds + re-validates while the refutation is real

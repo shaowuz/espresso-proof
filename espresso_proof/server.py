@@ -30,17 +30,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from .agent_runner import ON_DEMAND_AGENTS, run_single_agent, skip_agent
-from .cockpit_view import PANELS, build_panel, build_snapshot
-from .orchestrator import orchestrate_run, resume_run
-from .run_events import append_event
-from .run_dashboard import (
+from espresso_proof.orchestration.agent_runner import ON_DEMAND_AGENTS, run_single_agent, skip_agent
+from espresso_proof.ui.cockpit_view import PANELS, build_panel, build_snapshot
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.kernel.run_events import append_event
+from espresso_proof.orchestration.run_dashboard import (
     render_run_dashboard,
     render_evidence_panel_html,
     render_topbar_status_html,
     status_summary,
 )
-from .validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 # Goal 43A: the built React cockpit (web/dist). When the build exists the
 # server serves it at "/" (the legacy index stays at /legacy and remains the
@@ -365,7 +365,7 @@ class Workbench:
         ``validate_run``, fail closed). Returns a ``job_id`` immediately.
         """
 
-        from .demos import DEMOS, create_demo_run
+        from espresso_proof.orchestration.demos import DEMOS, create_demo_run
 
         if demo_id not in DEMOS:
             raise WorkbenchError(404, "unknown demo")
@@ -439,8 +439,8 @@ class Workbench:
         job_id = self._new_job(run_id=run_id, action="continue", agent=None)
 
         def work() -> dict[str, Any]:
-            from .strategy_feedback import feedback_summary
-            from .latest_round import graph_stamp, write_latest_round_ledger
+            from espresso_proof.strategy.strategy_feedback import feedback_summary
+            from espresso_proof.ui.latest_round import graph_stamp, write_latest_round_ledger
 
             # advisory human ranking/time-allocation context for THIS round
             # (the existing taste_judgment channel; never evidence).
@@ -482,7 +482,7 @@ class Workbench:
         ``resolve_run`` and an allowlist of panel -> manifest artifact; a
         missing artifact (panel not run) is an honest 404."""
 
-        from .io import read_yaml
+        from espresso_proof.kernel.io import read_yaml
 
         name = self._DOWNLOADABLE.get(panel)
         if name is None:
@@ -520,7 +520,7 @@ class Workbench:
 
         from pydantic import ValidationError
 
-        from .research_notes import ResearchNote, append_note
+        from espresso_proof.claim.research_notes import ResearchNote, append_note
 
         allowed = {"target_kind", "target_id", "text"}
         if set(body) - allowed:
@@ -567,8 +567,8 @@ class Workbench:
 
         from pydantic import ValidationError
 
-        from .io import read_yaml
-        from .strategy_feedback import StrategyFeedback, append_feedback, latest_by_strategy
+        from espresso_proof.kernel.io import read_yaml
+        from espresso_proof.strategy.strategy_feedback import StrategyFeedback, append_feedback, latest_by_strategy
 
         # reject any unexpected key up front so a client cannot even ATTEMPT to
         # smuggle a status/evidence field through this advisory endpoint.
@@ -625,7 +625,7 @@ class Workbench:
         }
 
     def _strategy_ids(self, run_dir: Path) -> set[str]:
-        from .io import read_yaml
+        from espresso_proof.kernel.io import read_yaml
 
         manifest = read_yaml(run_dir / "run_manifest.yaml")
         brief_rel = manifest["artifacts"].get("strategy_brief")
@@ -638,7 +638,7 @@ class Workbench:
         """Effort options the kernel allows per strategy, from the brief's
         allowed_human_choices (the same source the validator checks)."""
 
-        from .io import read_yaml
+        from espresso_proof.kernel.io import read_yaml
 
         try:
             manifest = read_yaml(run_dir / "run_manifest.yaml")
@@ -737,7 +737,7 @@ class Workbench:
         try:
             from datetime import UTC, datetime
 
-            from .observability import latest_unfinished_agent_call, read_agent_events
+            from espresso_proof.kernel.observability import latest_unfinished_agent_call, read_agent_events
 
             dangling = latest_unfinished_agent_call(run_dir)
             if dangling is None:
@@ -883,8 +883,8 @@ class Workbench:
                 or (j.get("result") or {}).get("run_id") == run_id
             ]
         jobs = jobs[-20:]  # tail-limited
-        from .agent_run_status import load_agent_run_status
-        from .io import read_yaml
+        from espresso_proof.kernel.agent_run_status import load_agent_run_status
+        from espresso_proof.kernel.io import read_yaml
 
         board = load_agent_run_status(run_dir) or {}
         front_half: dict[str, Any] = {}
@@ -916,7 +916,7 @@ class Workbench:
         for manifest_path in sorted(self.root.glob("projects/*/runs/*/run_manifest.yaml")):
             run_dir = manifest_path.parent
             try:
-                from .io import read_yaml
+                from espresso_proof.kernel.io import read_yaml
 
                 manifest = read_yaml(manifest_path)
                 claim_rel = manifest["artifacts"].get("locked_claim")
@@ -977,7 +977,7 @@ def _make_handler(workbench: Workbench):
             and never upgrades status. A mid-stream error ends the stream with a
             safe ``done`` event so the client falls back to polling."""
 
-            from .chat_stream import stream_chat
+            from espresso_proof.ui.chat_stream import stream_chat
 
             try:
                 run_dir = workbench.resolve_run(run_id)
@@ -1013,13 +1013,13 @@ def _make_handler(workbench: Workbench):
             SIDECAR the kernel never reads; the transient (pre-run) path persists
             nothing. The caller has already sent the SSE response headers."""
 
-            from .instant_lane import (
+            from espresso_proof.ui.instant_lane import (
                 build_instant_draft,
                 instant_lane_metrics,
                 stream_instant_draft,
                 write_instant_conversation,
             )
-            from .observability import monotonic_ms, now_iso
+            from espresso_proof.kernel.observability import monotonic_ms, now_iso
 
             received = now_iso()
             t0 = monotonic_ms()
@@ -1325,7 +1325,7 @@ def _index_page(workbench: Workbench) -> str:
         f'<span class="st">{_html.escape(_STATE_WORDS.get(r["state"], r["state"].replace("_", " ").title()))}</span></li>'
         for r in runs
     )
-    from .demos import DEMOS
+    from espresso_proof.orchestration.demos import DEMOS
 
     demo_cards = "".join(
         f'<div class="demo-card">'

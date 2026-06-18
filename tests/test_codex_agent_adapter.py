@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.agent_skill_catalog import select_agent_skills
-from espresso_proof.llm_agents import ExternalCommandClient
+from espresso_proof.agents.agent_skill_catalog import select_agent_skills
+from espresso_proof.agents.llm_agents import ExternalCommandClient
 
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -4,17 +4,17 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.orchestrator import orchestrate_run
-from espresso_proof.time_allocation import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.orchestrator import orchestrate_run
+from espresso_proof.kernel.time_allocation import (
     TIME_ALLOCATION_FILENAME,
     build_time_allocation_plan,
     write_time_allocation_plan,
 )
-from espresso_proof.update_inbox import append_update_inbox_event, load_update_inbox
-from espresso_proof.surface_warnings import pending_update_inbox_ids, refresh_final_report_disclosures
+from espresso_proof.kernel.update_inbox import append_update_inbox_event, load_update_inbox
+from espresso_proof.kernel.surface_warnings import pending_update_inbox_ids, refresh_final_report_disclosures
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 
@@ -313,7 +313,7 @@ def test_failed_time_allocation_write_does_not_mark_inbox_applied(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import espresso_proof.time_allocation as time_allocation_mod
+    import espresso_proof.kernel.time_allocation as time_allocation_mod
 
     run_dir = _fast_run(tmp_path)
     _drop_time_allocation(run_dir)
@@ -338,7 +338,7 @@ def test_failed_update_inbox_apply_rolls_back_time_allocation_snapshot(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import espresso_proof.time_allocation as time_allocation_mod
+    import espresso_proof.kernel.time_allocation as time_allocation_mod
 
     run_dir = _fast_run(tmp_path)
     append_update_inbox_event(run_dir, _reviewer_objection_event(run_dir))

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path, PureWindowsPath
 
-from ..models import RunManifest
+from espresso_proof.kernel.models import RunManifest
 
 
 class ManifestPathValidationError(ValueError):

@@ -7,12 +7,12 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.orchestrator import _resolve_and_build_loop, orchestrate_run
-from espresso_proof.prover_loop_driver import continue_prover_loop
-from espresso_proof.update_inbox import load_update_inbox
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.orchestrator import _resolve_and_build_loop, orchestrate_run
+from espresso_proof.orchestration.prover_loop_driver import continue_prover_loop
+from espresso_proof.kernel.update_inbox import load_update_inbox
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 from tests.test_evidence_aware_grade import FakeClaude
 
 CLAIM = "Every group of order p^2, where p is a prime, is abelian."

@@ -14,14 +14,14 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.finite_group_verifier import (
+from espresso_proof.verification.finite_group_verifier import (
     cyclic_group_table,
     elementary_abelian_table,
     verify_group_abelian,
     verify_identity_on_table,
 )
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
 
 FIXTURES = Path("tests/fixtures")
 _FORBIDDEN = ("proved", "proof-close", "proof complete", "we proved")

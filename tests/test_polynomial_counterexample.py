@@ -14,11 +14,11 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.models import CounterexampleTest
-from espresso_proof.orchestrator import orchestrate_run
-from espresso_proof.validators import validate_run
-from espresso_proof.verifier import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.models import CounterexampleTest
+from espresso_proof.orchestration.orchestrator import orchestrate_run
+from espresso_proof.kernel.validators import validate_run
+from espresso_proof.verification.verifier import (
     VerifierError,
     find_polynomial_counterexample,
     persist_polynomial_witness,
@@ -77,7 +77,7 @@ def test_false_identity_produces_exact_rational_witness():
     subs = {var: Fraction(val) for var, val in assignment.items()}
     lhs = _parse_polynomial("(x + y)**3")
     rhs = _parse_polynomial("x**3 + y**3")
-    from espresso_proof.verifier import _poly_eval_at
+    from espresso_proof.verification.verifier import _poly_eval_at
 
     lhs_val = _poly_eval_at(lhs, subs)
     rhs_val = _poly_eval_at(rhs, subs)
@@ -150,7 +150,7 @@ def test_confirmed_identity_persists_nothing(tmp_path):
 def test_polynomial_witness_with_refutes_claim_true_is_rejected():
     check = _check("p_bad", "(x + y)**3", "x**3 + y**3")
     result = verify_check(check)
-    from espresso_proof.verifier import _polynomial_witness_test
+    from espresso_proof.verification.verifier import _polynomial_witness_test
 
     test = _polynomial_witness_test(check, result)
     # an attempt to escalate the step-only witness to a claim refutation is

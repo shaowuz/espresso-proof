@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof import research_bank as rb
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.research_bank import append_bank_item, load_bank
+from espresso_proof.kernel import research_bank as rb
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.research_bank import append_bank_item, load_bank
 from espresso_proof.validation.errors import KernelValidationError
 
 FIXTURES = Path("tests/fixtures")
@@ -183,7 +183,7 @@ def test_append_works_for_all_three_kinds(tmp_path: Path) -> None:
 
 
 def test_validate_run_with_banks_and_single_files(tmp_path: Path) -> None:
-    from espresso_proof.validators import validate_run
+    from espresso_proof.kernel.validators import validate_run
 
     # single-file run validates unchanged
     single = _run(tmp_path / "single")

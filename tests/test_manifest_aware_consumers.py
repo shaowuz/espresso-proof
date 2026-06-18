@@ -14,20 +14,20 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from espresso_proof.bank_dashboard import render_bank_dashboard
+from espresso_proof.ui.bank_dashboard import render_bank_dashboard
 from espresso_proof.cli import app
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.literature_planner import _route_titles
-from espresso_proof.llm_agents import load_agent_context
-from espresso_proof.memory import write_run_memory
-from espresso_proof.research_bank import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.literature.literature_planner import _route_titles
+from espresso_proof.agents.llm_agents import load_agent_context
+from espresso_proof.memory.memory import write_run_memory
+from espresso_proof.kernel.research_bank import (
     load_bankable_artifact,
     load_bankable_dict,
     materialize_run_banks,
 )
-from espresso_proof.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 _FORBIDDEN = ("proof-close", "proof complete", "we proved", "proved the claim")

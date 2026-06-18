@@ -14,11 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.models import ProverLoopAttempt, ProverLoopReviewPointer
-from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.subgoal_graph import assemble_subgoal_graph
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.models import ProverLoopAttempt, ProverLoopReviewPointer
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.kernel.subgoal_graph import assemble_subgoal_graph
+from espresso_proof.kernel.validators import validate_run
 
 
 def _claim(tmp_path: Path) -> Path:

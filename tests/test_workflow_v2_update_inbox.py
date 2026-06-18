@@ -6,18 +6,18 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.orchestrator import orchestrate_run
-from espresso_proof.update_inbox import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.orchestrator import orchestrate_run
+from espresso_proof.kernel.update_inbox import (
     UPDATE_INBOX_FILENAME,
     UpdateInboxConflictError,
     append_update_inbox_event,
     canonical_dedupe_key,
     load_update_inbox,
 )
-from espresso_proof.surface_warnings import refresh_final_report_disclosures
+from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 
@@ -247,7 +247,7 @@ def test_concurrent_append_retry_does_not_lose_entries(tmp_path: Path) -> None:
 
 
 def test_failed_append_transaction_does_not_advance_manifest_state(tmp_path: Path, monkeypatch) -> None:
-    import espresso_proof.update_inbox as update_inbox_mod
+    import espresso_proof.kernel.update_inbox as update_inbox_mod
 
     run_dir = _fast_run(tmp_path)
     original_write_yaml = update_inbox_mod.write_yaml

@@ -139,10 +139,10 @@ Shared work happens at the boundary:
 Start each coding session by pulling the latest `main`. If both people need to touch the same hot file, agree on the owner for that file before editing. Hot files include:
 
 ```text
-espresso_proof/mock_pipeline.py
-espresso_proof/validators.py
+espresso_proof/orchestration/mock_pipeline.py
+espresso_proof/kernel/validators.py
 espresso_proof/cli.py
-espresso_proof/models.py
+espresso_proof/kernel/models.py
 tests/test_kernel.py
 ```
 

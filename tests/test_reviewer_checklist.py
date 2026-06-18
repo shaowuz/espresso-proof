@@ -12,9 +12,9 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.io import read_text
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.reviewer_checklist import (
+from espresso_proof.kernel.io import read_text
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.evaluation.reviewer_checklist import (
     detect_proof_complete_language,
     find_invalid_source_backed,
     lint_reviewer_finding,

@@ -22,9 +22,9 @@ from pathlib import Path
 import pytest
 
 from espresso_proof import server as server_module
-from espresso_proof.cockpit_view import _EARNED_STATUSES, _tone, build_snapshot
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.run_dashboard import status_summary
+from espresso_proof.ui.cockpit_view import _EARNED_STATUSES, _tone, build_snapshot
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.run_dashboard import status_summary
 from espresso_proof.server import Workbench, _make_handler
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."

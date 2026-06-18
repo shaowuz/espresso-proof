@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import _detect_scenario
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import _detect_scenario
 
 P2_CLAIM = "Every group of order p^2, where p is prime, is abelian.\n"
 
 
 def test_replay_probe_true_theorem_source_engaged(tmp_path: Path) -> None:
-    from espresso_proof.loop_replay import _probe_true_theorem_source_engaged as probe
+    from espresso_proof.loop.loop_replay import _probe_true_theorem_source_engaged as probe
 
     ok, note = probe(tmp_path)
     assert not ok and "no source_grounding.yaml" in note
@@ -128,9 +128,9 @@ def test_p2_claim_routes_to_classical_source_scenario(tmp_path: Path) -> None:
 
 
 def test_p2_run_engages_grounding_and_validates(tmp_path: Path) -> None:
-    from espresso_proof.io import write_text
-    from espresso_proof.orchestrator import orchestrate_run
-    from espresso_proof.validators import validate_run
+    from espresso_proof.kernel.io import write_text
+    from espresso_proof.orchestration.orchestrator import orchestrate_run
+    from espresso_proof.kernel.validators import validate_run
 
     input_path = tmp_path / "input.md"
     write_text(input_path, P2_CLAIM)
@@ -164,9 +164,9 @@ def test_p2_run_engages_grounding_and_validates(tmp_path: Path) -> None:
 
 
 def test_ledger_engages_and_honest_p1_remains(tmp_path: Path) -> None:
-    from espresso_proof.loop_harness import run_loop_cycle
-    from espresso_proof.loop_models import ReviewReport
-    from espresso_proof.loop_reviewers import run_review_pass
+    from espresso_proof.loop.loop_harness import run_loop_cycle
+    from espresso_proof.kernel.loop_models import ReviewReport
+    from espresso_proof.loop.loop_reviewers import run_review_pass
 
     cases_file = tmp_path / "cases.yaml"
     write_yaml(

@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.loop_harness import run_loop_cycle
-from espresso_proof.loop_models import ActionableFinding, ReviewReport
-from espresso_proof.loop_reviewers import run_review_pass
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.loop.loop_harness import run_loop_cycle
+from espresso_proof.kernel.loop_models import ActionableFinding, ReviewReport
+from espresso_proof.loop.loop_reviewers import run_review_pass
 from tests.loop_gap_case import gap_cases
 
 REVIEWERS = (

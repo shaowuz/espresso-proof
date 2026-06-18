@@ -5,17 +5,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof.descriptions import (
+from espresso_proof.ui.descriptions import (
     PRODUCT_COPY,
     effort_phrase,
     loop_stop_phrase,
     product_copy,
 )
-from espresso_proof.memo import build_concise_memo
-from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.run_dashboard import render_run_dashboard
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 from espresso_proof.server import Workbench, _friendly_error, _index_page
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 
@@ -113,7 +113,7 @@ def test_memo_main_path_lexicon(tmp_path: Path) -> None:
 
 def test_memo_has_no_raw_effort_or_stop_enums(tmp_path: Path) -> None:
     run_dir = _run(tmp_path)
-    brief = __import__("espresso_proof.io", fromlist=["read_yaml"]).read_yaml(
+    brief = __import__("espresso_proof.kernel.io", fromlist=["read_yaml"]).read_yaml(
         run_dir / "strategy_brief.yaml"
     )
     sid = (brief.get("top_strategies") or [{}])[0].get("id") or "none"

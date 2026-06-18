@@ -13,11 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import RetrievalResolutionReport
-from espresso_proof.retrieval_grounding import retrieve_and_ground
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.models import RetrievalResolutionReport
+from espresso_proof.literature.retrieval_grounding import retrieve_and_ground
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURE = Path(__file__).parent / "fixtures" / "hodge_all_cubic_fourfolds" / "input.md"
 PGROUP_THEOREM = (

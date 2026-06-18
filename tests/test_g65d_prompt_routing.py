@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof.agent_skill_catalog import select_agent_skills
+from espresso_proof.agents.agent_skill_catalog import select_agent_skills
 
 _MATH_SYSTEM = "You are the literature-review agent."
 _MATH_PROMPT = "prove that a group of order 3 is cyclic"

@@ -17,8 +17,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..io import read_yaml
-from ..models import FrontHalfRunReport
+from espresso_proof.kernel.io import read_yaml
+from espresso_proof.kernel.models import FrontHalfRunReport
 from .errors import KernelValidationError
 from .manifest import ManifestPathValidationError, validate_relative_artifact_path
 
@@ -32,7 +32,7 @@ def validate_front_half_run(run_dir: Path) -> None:
         return  # optional + old-run compatible: absence is fine
 
     # local import to avoid any import cycle with front_half_agents
-    from ..front_half_agents import FRONT_HALF_STAGES
+    from espresso_proof.agents.front_half_agents import FRONT_HALF_STAGES
 
     path = run_dir / rel
     try:
