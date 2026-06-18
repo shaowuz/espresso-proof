@@ -1,6 +1,6 @@
 """Espresso Proof run dashboard — the Mathematical Proof Workspace.
 
-A read-only research cockpit for one run (see docs/design/UI_DESIGN_DIRECTIONS.md).
+A read-only research cockpit for one run.
 The claim and proof routes are the protagonists; the right-hand evidence panel
 lets a mathematician *read* the actual artifacts (candidate papers with clickable
 locators, tested examples, counterexample attempts, failure-pattern warnings)
