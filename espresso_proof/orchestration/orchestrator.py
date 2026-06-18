@@ -72,6 +72,16 @@ ORCHESTRATION_STATES: list[str] = [
     "CLAIM_CLEAR",
     "LITERATURE_DONE",
     "WAITING_LLM_AGENT_HUMAN_GATE",
+    # The human's strategy decision (recorded by `choose-strategy`, cli.py) is a
+    # persisted current_state >= the human gate. These MUST be in the ordered list,
+    # otherwise _state_index returns -1 and resume_run's boundary check
+    # (`_state_index(state) < _state_index(WAITING_LLM_AGENT_HUMAN_GATE)`) falsely
+    # rejects a re-resume of a run interrupted between recording the choice and
+    # COMPLETED_MEMO. They are mutually exclusive; relative order among the three
+    # does not matter, only that each sits after the gate and before COMPLETED_MEMO.
+    "HUMAN_CHOICE_CONTINUE_SELECTED",
+    "HUMAN_CHOICE_REVISE_SELECTED",
+    "HUMAN_CHOICE_STOP_SELECTED",
     "COMPLETED_MEMO",
 ]
 
