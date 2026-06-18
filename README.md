@@ -74,9 +74,7 @@ Supporting documents:
 - [docs/archive/](docs/archive/): older planning notes, status reports,
   dogfood reports, porting notes, and collaborator handoffs preserved for
   history, not current product direction.
-- [docs/AGENT_INFRA_REFERENCES.md](docs/AGENT_INFRA_REFERENCES.md): infrastructure references for LLM provider calls, human-gated agent execution, durable orchestration, and VS Code webviews.
 - [docs/REAL_AGENT_RUNBOOK.md](docs/REAL_AGENT_RUNBOOK.md): supported path for saving an OpenAI API key, checking the real provider, running OpenAI or external-command multiagent flow, and resolving the human gate.
-- [docs/LITERATURE_DISCOVERY.md](docs/LITERATURE_DISCOVERY.md): conservative literature discovery, source ingestion, and source verification behavior.
 - [docs/UI_PLAN.md](docs/UI_PLAN.md): legacy/dev-only VS Code side-panel scope and artifact-backed UI plan.
 - [.claude/skills/espresso-proof/SKILL.md](.claude/skills/espresso-proof/SKILL.md): project-discoverable Claude Code skill for running the current Espresso agent flow in chat.
 
