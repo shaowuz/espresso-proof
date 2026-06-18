@@ -143,6 +143,15 @@ export interface LiteratureView {
   route_relevance?: "direct" | "pressure" | "background" | "unknown";
 }
 
+export interface StrategySummary {
+  note: string;
+  status: string;
+  score: number | null;
+  reasons: string[];
+  source_gaps: string[];
+  next_cheapest_test: string;
+}
+
 export type MissingKey =
   | "claim"
   | "grade"
@@ -157,6 +166,7 @@ export interface Snapshot {
   claim: ClaimView;
   status: StatusView;
   strategies: StrategyView[];
+  strategy_summary?: StrategySummary;
   examples: ExampleView[];
   counterexamples: CounterexampleView[];
   computations: ComputationView[];
@@ -221,6 +231,7 @@ export interface ClaimPanel extends PanelBase {
 export interface StrategyPanel extends PanelBase {
   panel: "strategies";
   strategies: StrategyView[];
+  strategy_summary?: StrategySummary;
   ledger_context?: LedgerContext;
   latest_round?: LatestRound | null;
 }

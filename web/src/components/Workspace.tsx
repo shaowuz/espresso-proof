@@ -24,6 +24,7 @@ import type {
   StatusView,
   StrategyView,
   StrategyPanel,
+  StrategySummary,
 } from "../lib/types";
 import { continueRoute, errorText, postStrategyFeedback } from "../lib/api";
 import { useClaimPanel, useStrategiesPanel } from "../hooks/useCockpit";
@@ -470,6 +471,80 @@ function ActiveObjectBanner({
   );
 }
 
+function StrategySynthesisCard({ summary }: { summary: StrategySummary | undefined }) {
+  const [open, setOpen] = useState(false);
+  if (!summary) return null;
+  const detailCount =
+    summary.reasons.length + summary.source_gaps.length + (summary.next_cheapest_test ? 1 : 0);
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-[14px] leading-relaxed shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold uppercase tracking-wide text-stone-500">
+            Strategy synthesis
+          </p>
+          <p className="mt-1 text-stone-700">
+            <MathText>{summary.note}</MathText>
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+          {summary.score !== null && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setOpen((value) => !value)}
+              aria-expanded={open}
+              className="h-6 rounded-full px-2 text-[13px]"
+              title="Advisory grade details — not proof evidence"
+            >
+              score {summary.score}
+              <ChevronDown
+                className={cn("h-3 w-3 transition-transform", open && "rotate-180")}
+                aria-hidden
+              />
+            </Button>
+          )}
+          {summary.status !== "" && <Badge>{summary.status}</Badge>}
+        </div>
+      </div>
+      <Collapse open={open && detailCount > 0}>
+        <div className="mt-2 border-t border-stone-100 pt-2 text-[13px] text-stone-600">
+          {summary.reasons.length > 0 && (
+            <div className="mb-2">
+              <p className="font-semibold text-stone-500">Why score</p>
+              <ul className="mt-1 list-disc space-y-1 pl-4">
+                {summary.reasons.map((reason, index) => (
+                  <li key={`reason-${index}`}><MathText>{reason}</MathText></li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {summary.source_gaps.length > 0 && (
+            <div className="mb-2">
+              <p className="font-semibold text-stone-500">Source gaps</p>
+              <ul className="mt-1 list-disc space-y-1 pl-4 text-amber-800">
+                {summary.source_gaps.map((gap, index) => (
+                  <li key={`gap-${index}`}><MathText>{gap}</MathText></li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {summary.next_cheapest_test !== "" && (
+            <p>
+              <span className="font-semibold text-stone-500">Next cheapest test: </span>
+              <MathText>{summary.next_cheapest_test}</MathText>
+            </p>
+          )}
+          <p className="mt-2 text-[12px] italic text-stone-400">
+            Advisory grade only; it does not create proof, source, checked, or refuted status.
+          </p>
+        </div>
+      </Collapse>
+    </div>
+  );
+}
+
 // ─── StrategyCard ─────────────────────────────────────────────────────────────
 
 function StrategyCard({
@@ -647,6 +722,7 @@ export function Workspace({
         onRetry={() => void strat.refetch()}
       >
         <div className="flex flex-col gap-2">
+          <StrategySynthesisCard summary={strat.data?.strategy_summary} />
           {status?.routes_preliminary && (
             <Badge className="w-fit border-gray-200 bg-gray-100 text-gray-600">
               preliminary

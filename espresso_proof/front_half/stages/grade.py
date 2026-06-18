@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from espresso_proof.claim.hypothesis_normalization import normalize_ambient_object_hypotheses
-from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.io import read_yaml, write_text, write_yaml
 from espresso_proof.agents.llm_agents import LLMClient, load_agent_context, safe_list, safe_text
 from espresso_proof.ui.memo import build_concise_memo
 from espresso_proof.memory.memory import build_grade_memory_entry, load_memory_index, write_run_memory
@@ -20,6 +20,7 @@ from espresso_proof.kernel.models import (
     HypothesisLedger,
     IdeaGrade,
     LiteratureReviewReport,
+    LoopControl,
     MemoryEntry,
     Review,
     SourceGroundingReport,
@@ -45,6 +46,7 @@ from ..safety import (
     _NONTRIVIALITY,
     _coerce_satisfies,
     _default_investigation_route,
+    _is_vagueness_text,
     _neutralize_review_if_failed,
     _normalize_locator,
     _safe_lock_route,
@@ -253,13 +255,108 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     write_yaml(run_dir / artifacts["idea_grade"], grade)
 
     reconciled = _reconcile_strategy_after_regrade(run_dir, artifacts, grade)
+    scaffold_reconciled = 0
+    if precision == "precise":
+        scaffold_reconciled = _reconcile_precise_claim_scaffold_artifacts(
+            run_dir, artifacts
+        )
 
     notes = [f"regrade: precision={precision} -> status={status} (score {score})"]
     if reconciled:
         notes.append(f"reconciled {reconciled} scaffold strategy artifact(s)")
+    if scaffold_reconciled:
+        notes.append(f"reconciled {scaffold_reconciled} stale scaffold artifact(s)")
     if review_note:
         notes.append(review_note)
     return {"unsafe_language": [], "notes": notes}
+
+
+_GENERIC_MISSING_HYPOTHESES = {"objects", "hypotheses", "conclusion"}
+
+
+def _is_stale_claim_vagueness_text(text: object) -> bool:
+    lowered = str(text or "").lower()
+    return _is_vagueness_text(lowered) or any(
+        marker in lowered
+        for marker in (
+            "claim is unclear",
+            "needs restatement",
+            "too vague for test selection",
+            "too vague for productive looping",
+        )
+    )
+
+
+def _only_generic_missing_hypotheses(items: object) -> bool:
+    values = {str(item).strip().lower() for item in (items or []) if str(item).strip()}
+    return bool(values) and values.issubset(_GENERIC_MISSING_HYPOTHESES)
+
+
+def _reconcile_precise_claim_scaffold_artifacts(run_dir: Path, artifacts: dict) -> int:
+    """Clear stale generic scaffold text after a live claim-clear decision.
+
+    The generic scaffolder starts arbitrary claims in a safe "unclear" posture.
+    Once the front half has locked a precise claim, those stale placeholders must
+    not keep telling the UI/tests/memo that the same claim is too vague. This is
+    display/control hygiene only: it does not create checked tests, source
+    support, proof status, or a reviewer pass.
+    """
+
+    changed = 0
+
+    tests_path = run_dir / artifacts["tests"]
+    if tests_path.exists():
+        tests = read_yaml(tests_path) or {}
+        if _is_stale_claim_vagueness_text(tests.get("summary")) and not tests.get("tests"):
+            tests["target"] = "claim"
+            tests["summary"] = (
+                "No generated tests yet for this clear claim; later evidence/prover "
+                "stages should pressure-test the candidate routes."
+            )
+            TestReport.model_validate(tests)
+            write_yaml(tests_path, tests)
+            changed += 1
+
+    loop_path = run_dir / artifacts["loop_control"]
+    if loop_path.exists():
+        loop = read_yaml(loop_path) or {}
+        if loop.get("should_stop") is True and any(
+            _is_stale_claim_vagueness_text(reason)
+            for reason in loop.get("stop_reasons", [])
+        ):
+            loop["should_stop"] = False
+            loop["stop_reasons"] = []
+            loop["next_action"] = "run_strategy_brief"
+            LoopControl.model_validate(loop)
+            write_yaml(loop_path, loop)
+            changed += 1
+
+    review_path = run_dir / artifacts["review"]
+    if review_path.exists():
+        review = read_yaml(review_path) or {}
+        if _only_generic_missing_hypotheses(review.get("missing_hypotheses")):
+            review["missing_hypotheses"] = []
+            Review.model_validate(review)
+            write_yaml(review_path, review)
+            changed += 1
+
+    final_path = run_dir / artifacts["final_report"]
+    if final_path.exists():
+        text = final_path.read_text(encoding="utf-8")
+        base = text.split("\n\n## Current Disclosure", 1)[0]
+        if _is_stale_claim_vagueness_text(base):
+            write_text(
+                final_path,
+                "Front-half accepted the claim as clear and recorded candidate "
+                "planning artifacts. Trust labels remain with the validated "
+                "artifacts below.\n",
+            )
+            from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
+
+            refresh_final_report_disclosures(run_dir)
+            changed += 1
+
+    return changed
 
 
 def _has_theorem_applicability_failure(run_dir: Path, context: dict) -> bool:

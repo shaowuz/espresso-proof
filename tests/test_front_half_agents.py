@@ -793,6 +793,7 @@ def _seed_failed_vague_review(run_dir: Path, *, precise: bool) -> dict:
     review = read_yaml(run_dir / artifacts["review"])
     review["reviewers"][0]["verdict"] = "fail"
     review["strongest_objection"] = "The claim is not precise enough to test."
+    review["missing_hypotheses"] = ["objects", "hypotheses", "conclusion"]
     review["downgrade_reasons"] = ["Too vague to test.", "No source-backed theorem yet."]
     write_yaml(run_dir / artifacts["review"], review)
     return artifacts
@@ -827,6 +828,29 @@ def test_precise_claim_scrubs_stale_vague_objection(tmp_path: Path) -> None:
     # display hygiene only: the grade is not upgraded to a proof
     grade = read_yaml(run_dir / artifacts["idea_grade"])
     assert grade["proof_language_status"] == "idea_sketch"
+
+
+def test_precise_claim_reconciles_stale_scaffold_control_artifacts(tmp_path: Path) -> None:
+    run_dir, artifacts = _precise_run_with_failed_vague_review(tmp_path)
+
+    tests = read_yaml(run_dir / artifacts["tests"])
+    assert tests["target"] == "claim"
+    assert tests["tests"] == []
+    assert "vague" not in tests["summary"].lower()
+    assert "clear claim" in tests["summary"]
+
+    loop = read_yaml(run_dir / artifacts["loop_control"])
+    assert loop["should_stop"] is False
+    assert loop["stop_reasons"] == []
+    assert loop["next_action"] == "run_strategy_brief"
+
+    review = read_yaml(run_dir / artifacts["review"])
+    assert review["missing_hypotheses"] == []
+
+    report = (run_dir / artifacts["final_report"]).read_text(encoding="utf-8").lower()
+    assert "claim is unclear" not in report
+    assert "needs restatement" not in report
+    assert "front-half accepted the claim as clear" in report
 
 
 def test_imprecise_claim_still_uses_claim_lock_and_keeps_vague_language(tmp_path: Path) -> None:

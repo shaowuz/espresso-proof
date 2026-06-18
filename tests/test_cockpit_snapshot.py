@@ -194,6 +194,72 @@ def test_snapshot_literature_free_text_scrubs_raw_source_vocabulary(client) -> N
     assert "reference-supported" in rendered
 
 
+def test_snapshot_literature_includes_source_grounding_candidates(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    literature_path = run_dir / manifest["artifacts"]["literature_review"]
+    source_path = run_dir / manifest["artifacts"]["source_grounding"]
+    literature = read_yaml(literature_path)
+    literature["candidate_references"] = []
+    write_yaml(literature_path, literature)
+    write_yaml(
+        source_path,
+        {
+            "claim_id": read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"],
+            "source_refs": [
+                {
+                    "id": "src_dummit_foote",
+                    "type": "book",
+                    "title": "Dummit and Foote, Abstract Algebra",
+                    "authors": ["Dummit", "Foote"],
+                    "locator": {"kind": "theorem", "value": "Lagrange theorem"},
+                    "statement_or_summary": "Subgroup orders divide group order.",
+                    "hypothesis_match": {"matches": "unclear", "mismatches": []},
+                    "confidence": "medium",
+                    "status": "candidate",
+                }
+            ],
+            "steps": [],
+        },
+    )
+
+    snap = build_snapshot(run_dir, run_id, status_summary(run_dir))
+    rendered = json.dumps(snap["literature"], sort_keys=True).lower()
+
+    assert "dummit" in rendered
+    assert "lagrange theorem" in rendered
+    assert snap["literature"][0]["tone"] != "earned"
+    assert "source_backed" not in rendered
+
+
+def test_snapshot_strategy_summary_exposes_synthesis_and_grade(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    synthesis_path = run_dir / manifest["artifacts"]["strategy_synthesis"]
+    grade_path = run_dir / manifest["artifacts"]["idea_grade"]
+    synthesis = read_yaml(synthesis_path)
+    synthesis["synthesis_note"] = "Direct coset-counting is the best candidate route."
+    write_yaml(synthesis_path, synthesis)
+    grade = read_yaml(grade_path)
+    grade["status"] = "fragile"
+    grade["score"] = 40
+    grade["reasons"] = ["Standard route, but source_backed locator is absent."]
+    grade["source_gaps"] = ["No exact source locator yet."]
+    write_yaml(grade_path, grade)
+
+    snap = build_snapshot(run_dir, run_id, status_summary(run_dir))
+    summary = snap["strategy_summary"]
+
+    assert summary["score"] == 40
+    assert "Direct coset-counting" in summary["note"]
+    assert "reference-supported" in json.dumps(summary)
+    assert "source_backed" not in json.dumps(summary)
+
+
 def test_snapshot_missing_artifacts_yield_placeholders(tmp_path: Path) -> None:
     # a bare directory (no manifest): every panel flagged missing, all lists
     # empty, and the claim sentence still a safe display sentence.

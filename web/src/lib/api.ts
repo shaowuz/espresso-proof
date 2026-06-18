@@ -10,6 +10,7 @@ import type {
   RunListItem,
   Snapshot,
   StatusView,
+  StrategySummary,
   StrategyView,
 } from "./types";
 
@@ -113,6 +114,7 @@ export async function fetchSnapshot(runId: string): Promise<Snapshot> {
       agents: Array.isArray(status?.agents) ? status.agents : [],
     },
     strategies: Array.isArray(raw.strategies) ? raw.strategies : [],
+    strategy_summary: raw.strategy_summary as StrategySummary | undefined,
     examples: Array.isArray(raw.examples) ? raw.examples : [],
     counterexamples: Array.isArray(raw.counterexamples) ? raw.counterexamples : [],
     computations: Array.isArray(raw.computations) ? raw.computations : [],
@@ -216,6 +218,7 @@ export async function fetchPanel<T extends PanelBase>(
     return {
       ...base,
       strategies: Array.isArray(raw.strategies) ? (raw.strategies as StrategyView[]) : [],
+      strategy_summary: raw.strategy_summary as StrategySummary | undefined,
       ledger_context: raw.ledger_context as LedgerContext | undefined,
       latest_round: raw.latest_round as LatestRound | null | undefined,
     } as unknown as T;

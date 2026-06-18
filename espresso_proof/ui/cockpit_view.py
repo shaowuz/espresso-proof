@@ -296,12 +296,21 @@ def _computations(checks: dict | None) -> list[dict]:
     return items
 
 
-def _literature(review: dict | None) -> list[dict]:
+def _literature(review: dict | None, source_grounding: dict | None = None) -> list[dict]:
     items = []
+    seen: set[tuple[str, str]] = set()
+
+    def _append(item: dict) -> None:
+        key = (str(item.get("title") or ""), str((item.get("locator") or {}).get("value") or ""))
+        if key in seen:
+            return
+        seen.add(key)
+        items.append(item)
+
     for raw in (review or {}).get("candidate_references", [])[:24]:
         status = raw.get("status")
         locator = raw.get("locator") or {}
-        items.append(
+        _append(
             {
                 "id": _clip(raw.get("id"), 80),
                 "title": _clip_scrubbed(raw.get("title"), 160),
@@ -318,7 +327,53 @@ def _literature(review: dict | None) -> list[dict]:
                 "tone": _tone(status),
             }
         )
+    for raw in (source_grounding or {}).get("source_refs", [])[:24]:
+        if len(items) >= 24:
+            break
+        status = raw.get("status")
+        locator = raw.get("locator") or {}
+        hypothesis = raw.get("hypothesis_match") or {}
+        match = hypothesis.get("matches", "unclear") if isinstance(hypothesis, dict) else "unclear"
+        why = raw.get("statement_or_summary") or "candidate source; not yet verified"
+        if match not in {None, "", "unclear"}:
+            why = f"{why} Hypothesis match: {match}."
+        _append(
+            {
+                "id": _clip(raw.get("id"), 80),
+                "title": _clip_scrubbed(raw.get("title"), 160),
+                "authors": [_clip(a, 60) for a in (raw.get("authors") or [])[:6]],
+                "locator": {
+                    "kind": _clip(locator.get("kind"), 24),
+                    "value": _clip(locator.get("value"), 160),
+                },
+                "relevance": "candidate theorem/source",
+                "why": _clip_scrubbed(why),
+                "phrase": evidence_phrase(status),
+                "tone": _tone(status),
+            }
+        )
     return items
+
+
+def _strategy_summary(synthesis: dict | None, grade: dict | None) -> dict:
+    """Compact strategy synthesis + score display. Advisory only."""
+
+    grade = grade or {}
+    return {
+        "note": _clip_scrubbed(
+            (synthesis or {}).get("synthesis_note")
+            or "Candidate routes proposed and graded conservatively.",
+            520,
+        ),
+        "status": describe_grade(
+            status=grade.get("status"),
+            proof_language_status=grade.get("proof_language_status"),
+        ),
+        "score": grade.get("score") if isinstance(grade.get("score"), int) else None,
+        "reasons": [_clip_scrubbed(r, 360) for r in (grade.get("reasons") or [])[:4]],
+        "source_gaps": [_clip_status_text(g, 260) for g in (grade.get("source_gaps") or [])[:4]],
+        "next_cheapest_test": _clip_scrubbed(grade.get("next_cheapest_test"), 360),
+    }
 
 
 def build_snapshot(run_dir: Path, run_id: str, status: dict) -> dict:
@@ -329,10 +384,12 @@ def build_snapshot(run_dir: Path, run_id: str, status: dict) -> dict:
     claim = _artifact(run_dir, "locked_claim")
     grade = _artifact(run_dir, "idea_grade")
     brief = _artifact(run_dir, "strategy_brief")
+    synthesis = _artifact(run_dir, "strategy_synthesis")
     examples = _artifact(run_dir, "examples")
     counterexamples = _artifact(run_dir, "counterexamples")
     computations = _artifact(run_dir, "computation_checks")
     literature = _artifact(run_dir, "literature_review")
+    source_grounding = _artifact(run_dir, "source_grounding")
 
     selected = (status.get("selected_route") or {}).get("id")
     snapshot = {
@@ -348,12 +405,13 @@ def build_snapshot(run_dir: Path, run_id: str, status: dict) -> dict:
         },
         "status": status,
         "strategies": _strategies(brief, selected, _my_feedback_map(run_dir)),
+        "strategy_summary": _strategy_summary(synthesis, grade),
         "ledger_context": _ledger_context(run_dir, grade),
         "latest_round": load_latest_round(run_dir),
         "examples": _examples(examples),
         "counterexamples": _counterexamples(counterexamples),
         "computations": _computations(computations),
-        "literature": _literature(literature),
+        "literature": _literature(literature, source_grounding),
         "open_warnings": status.get("open_warnings") or [],
         "source_gaps": [
             _clip_status_text(g, 160) for g in ((grade or {}).get("source_gaps") or [])[:8]
@@ -432,8 +490,10 @@ def build_panel(run_dir: Path, run_id: str, status: dict, panel: str) -> dict:
     if panel == "strategies":
         brief = _artifact(run_dir, "strategy_brief")
         grade = _artifact(run_dir, "idea_grade")
+        synthesis = _artifact(run_dir, "strategy_synthesis")
         selected = (status.get("selected_route") or {}).get("id")
         out["strategies"] = _strategies(brief, selected, _my_feedback_map(run_dir))
+        out["strategy_summary"] = _strategy_summary(synthesis, grade)
         out["ledger_context"] = _ledger_context(run_dir, grade)
         out["latest_round"] = load_latest_round(run_dir)
         out["missing"] = brief is None
@@ -453,9 +513,15 @@ def build_panel(run_dir: Path, run_id: str, status: dict, panel: str) -> dict:
         "literature": _literature,
     }[panel]
     data = _artifact(run_dir, artifact_name)
-    out["items"] = builder(data)
-    out["missing"] = data is None
-    out["agent_state"] = _panel_agent_state(panel, data is not None, status)
+    source_grounding = _artifact(run_dir, "source_grounding") if panel == "literature" else None
+    if panel == "literature":
+        out["items"] = _literature(data, source_grounding)
+        present = data is not None or source_grounding is not None
+    else:
+        out["items"] = builder(data)
+        present = data is not None
+    out["missing"] = not present
+    out["agent_state"] = _panel_agent_state(panel, present, status)
     if panel == "literature":
         grade = _artifact(run_dir, "idea_grade")
         out["source_gaps"] = [

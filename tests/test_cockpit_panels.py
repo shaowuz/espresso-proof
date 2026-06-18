@@ -19,6 +19,8 @@ from pathlib import Path
 import pytest
 
 from espresso_proof.ui.cockpit_view import PANELS, build_panel
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
 from espresso_proof.server import Workbench, _make_handler
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
@@ -141,3 +143,51 @@ def test_panels_are_independent_slices(client) -> None:
     assert "strategies" not in ex and "literature" not in ex
     _, lit = call("GET", f"/api/runs/{run_id}/panel/literature")
     assert "source_gaps" in lit and "items" in lit
+
+
+def test_literature_panel_reads_source_grounding_candidates(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    run_dir = wb.resolve_run(run_id)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    literature_path = run_dir / manifest["artifacts"]["literature_review"]
+    source_path = run_dir / manifest["artifacts"]["source_grounding"]
+    literature = read_yaml(literature_path)
+    literature["candidate_references"] = []
+    write_yaml(literature_path, literature)
+    write_yaml(
+        source_path,
+        {
+            "claim_id": read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"],
+            "source_refs": [
+                {
+                    "id": "src_artin",
+                    "type": "book",
+                    "title": "Artin, Algebra",
+                    "authors": ["Artin"],
+                    "locator": {"kind": "section", "value": "Lagrange theorem"},
+                    "statement_or_summary": "Subgroup order divisibility.",
+                    "hypothesis_match": {"matches": "unclear", "mismatches": []},
+                    "confidence": "medium",
+                    "status": "candidate",
+                }
+            ],
+            "steps": [],
+        },
+    )
+    refresh_final_report_disclosures(run_dir)
+
+    _, lit = call("GET", f"/api/runs/{run_id}/panel/literature")
+
+    assert lit["missing"] is False
+    assert lit["items"][0]["title"] == "Artin, Algebra"
+    assert lit["items"][0]["tone"] != "earned"
+
+
+def test_strategies_panel_includes_synthesis_summary(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    _, strat = call("GET", f"/api/runs/{run_id}/panel/strategies")
+
+    assert strat["strategy_summary"]["note"]
+    assert "score" in strat["strategy_summary"]
