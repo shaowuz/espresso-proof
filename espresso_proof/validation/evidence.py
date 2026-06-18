@@ -18,7 +18,7 @@ they are intentionally not duplicated here.
 
 from __future__ import annotations
 
-from ..models import (
+from espresso_proof.kernel.models import (
     ComputationChecks,
     ComputationStatus,
     ComputationVerificationReport,

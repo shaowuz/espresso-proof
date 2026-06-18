@@ -16,21 +16,21 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
-from espresso_proof.finite_group_verifier import cyclic_group_table
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.memo import build_concise_memo
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.proof_verification import (
+from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
+from espresso_proof.verification.finite_group_verifier import cyclic_group_table
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.verification.proof_verification import (
     append_verification_entries,
     verify_identity_table_in_run,
     verify_ring_identity_in_run,
 )
-from espresso_proof.symbolic_identity import (
+from espresso_proof.verification.symbolic_identity import (
     SUPPORTED_RING_IDENTITIES,
     verify_ring_identity_mod,
 )
-from espresso_proof.validators import KernelValidationError, validate_run
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 FIXTURES = Path("tests/fixtures")
 # a non-commutative finite operation table (left-projection: a*b = a).

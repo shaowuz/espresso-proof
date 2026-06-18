@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from espresso_proof.instant_lane import (
+from espresso_proof.ui.instant_lane import (
     INSTANT_FILE,
     VISIBLE_LABEL,
     InstantConversation,
@@ -34,9 +34,9 @@ from espresso_proof.instant_lane import (
     stream_instant_draft,
     write_instant_conversation,
 )
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.orchestrator import orchestrate_run
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.orchestrator import orchestrate_run
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 

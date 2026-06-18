@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from espresso_proof.front_half_agents import run_front_half_agent_pass
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.surface_warnings import refresh_final_report_disclosures
-from espresso_proof.validators import validate_run
+from espresso_proof.agents.front_half_agents import run_front_half_agent_pass
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
+from espresso_proof.kernel.validators import validate_run
 
 
 class _FakeGeneratorClient:
@@ -150,9 +150,9 @@ def test_check_generator_enforces_per_step_and_per_run_caps(tmp_path: Path) -> N
 
 def test_check_generator_runtime_does_not_mutate_frozen_surfaces(tmp_path: Path) -> None:
     frozen = [
-        Path("espresso_proof/validators.py"),
-        Path("espresso_proof/models.py"),
-        Path("espresso_proof/verifier.py"),
+        Path("espresso_proof/kernel/validators.py"),
+        Path("espresso_proof/kernel/models.py"),
+        Path("espresso_proof/verification/verifier.py"),
         *sorted(Path("espresso_proof/validation").glob("*.py")),
     ]
     before = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in frozen}

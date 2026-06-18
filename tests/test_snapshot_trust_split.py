@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.kernel import load_run_snapshot, snapshot
-from espresso_proof.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.kernel import load_run_snapshot, snapshot
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
 
 FIXTURES = Path("tests/fixtures")
 

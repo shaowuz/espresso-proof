@@ -8,15 +8,15 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from espresso_proof import observability as obs
-from espresso_proof.run_dashboard import (
+from espresso_proof.kernel import observability as obs
+from espresso_proof.orchestration.run_dashboard import (
     TEMPLATE_FALLBACK_NOTE,
     _proof_label,
     _real_prover_ran,
     _state_label,
     status_summary,
 )
-from espresso_proof.orchestrator import orchestrate_run
+from espresso_proof.orchestration.orchestrator import orchestrate_run
 
 
 # --- pure label functions ----------------------------------------------------

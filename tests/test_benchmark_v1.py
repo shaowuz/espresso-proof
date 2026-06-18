@@ -12,7 +12,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from espresso_proof.benchmark import BENCHMARK_V1, run_benchmark
+from espresso_proof.evaluation.benchmark import BENCHMARK_V1, run_benchmark
 from espresso_proof.cli import app
 
 _CATEGORIES = {
@@ -56,9 +56,9 @@ def test_conservative_status_buckets(tmp_path: Path) -> None:
 
 
 def test_source_not_applicable_is_not_reference_supported(tmp_path: Path) -> None:
-    from espresso_proof.io import read_yaml
-    from espresso_proof.mock_pipeline import run_mock_critique
-    from espresso_proof.validators import validate_run
+    from espresso_proof.kernel.io import read_yaml
+    from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+    from espresso_proof.kernel.validators import validate_run
 
     run_dir = run_mock_critique(
         "hodge_atoms",
@@ -78,9 +78,9 @@ def test_source_not_applicable_is_not_reference_supported(tmp_path: Path) -> Non
 
 
 def test_checked_counterexample_scope_is_respected(tmp_path: Path) -> None:
-    from espresso_proof.io import read_yaml
-    from espresso_proof.mock_pipeline import run_mock_critique
-    from espresso_proof.validators import validate_run
+    from espresso_proof.kernel.io import read_yaml
+    from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+    from espresso_proof.kernel.validators import validate_run
 
     run_dir = run_mock_critique(
         "hodge_atoms",

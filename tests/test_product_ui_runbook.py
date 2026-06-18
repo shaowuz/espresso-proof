@@ -12,11 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.failure_pattern_bank import audit_failure_patterns
-from espresso_proof.kernel import KernelError, require_inside, snapshot
-from espresso_proof.mathematical_judgment import judge_run
-from espresso_proof.memory_context import build_memory_context
-from espresso_proof.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.failure_pattern_bank import audit_failure_patterns
+from espresso_proof.kernel.kernel import KernelError, require_inside, snapshot
+from espresso_proof.verification.mathematical_judgment import judge_run
+from espresso_proof.memory.memory_context import build_memory_context
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
 
 FIXTURES = Path("tests/fixtures")
 RUNBOOK = Path("docs/engineering/IVAN_PERSONAL_RUNBOOK.md")

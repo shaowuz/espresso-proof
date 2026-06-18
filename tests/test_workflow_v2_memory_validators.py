@@ -6,19 +6,19 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.front_half_agents import run_front_half_agent_pass
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.memo import build_concise_memo
-from espresso_proof.memory import (
+from espresso_proof.agents.front_half_agents import run_front_half_agent_pass
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.memory.memory import (
     load_memory_index,
     summarize_memory,
     write_memory_entry,
     write_run_memory,
 )
-from espresso_proof.memory_context import build_memory_context
-from espresso_proof.mock_pipeline import run_mock_critique
+from espresso_proof.memory.memory_context import build_memory_context
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 

@@ -6,20 +6,20 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.claim_clear import ClaimClearBlockedError
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.literature_discovery import discover_local_literature
-from espresso_proof.live_search import parse_ads_json, parse_arxiv_atom, parse_crossref_json
-from espresso_proof.literature_review_agent import ReviewSourceSpec, run_literature_review_agent
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import (
+from espresso_proof.claim.claim_clear import ClaimClearBlockedError
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.literature.literature_discovery import discover_local_literature
+from espresso_proof.literature.live_search import parse_ads_json, parse_arxiv_atom, parse_crossref_json
+from espresso_proof.literature.literature_review_agent import ReviewSourceSpec, run_literature_review_agent
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.models import (
     LiteratureReviewAgentReport,
     LiteratureReviewReport,
     TheoremApplicabilityReport,
     TheoremApplicabilityUsage,
 )
-from espresso_proof.pdf_ingestion import extract_text_from_pdf_bytes, extract_theorems
-from espresso_proof.validators import KernelValidationError, validate_run
+from espresso_proof.literature.pdf_ingestion import extract_text_from_pdf_bytes, extract_theorems
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 
 FIXTURES = Path("tests/fixtures")
@@ -901,9 +901,9 @@ def test_source_backed_step_applicability_usage_must_match_step_source_ref(tmp_p
 
 # --- Goal 37: live positive hits must validate (found_by schema fix) ---------
 def test_live_positive_hits_validate_in_literature_report() -> None:
-    from espresso_proof.literature_discovery import live_responses_to_literature_items
-    from espresso_proof.live_search import LiveSearchResponse, LiveSearchResult
-    from espresso_proof.models import LiteratureItem
+    from espresso_proof.literature.literature_discovery import live_responses_to_literature_items
+    from espresso_proof.literature.live_search import LiveSearchResponse, LiveSearchResult
+    from espresso_proof.kernel.models import LiteratureItem
 
     responses = [
         LiveSearchResponse(
@@ -953,7 +953,7 @@ def test_live_positive_hits_validate_in_literature_report() -> None:
 
 # --- Goal 37: typed near-miss source discipline ------------------------------
 def test_smooth_hypothesis_not_covered_by_singular_statement() -> None:
-    from espresso_proof.source_verification import check_hypothesis_applicability
+    from espresso_proof.verification.source_verification import check_hypothesis_applicability
 
     hypotheses = [{"name": "X is smooth", "status": "explicit", "source": "agent"}]
     result = check_hypothesis_applicability(
@@ -966,7 +966,7 @@ def test_smooth_hypothesis_not_covered_by_singular_statement() -> None:
 
 
 def test_projective_hypothesis_needs_proper_and_ample_not_proper_alone() -> None:
-    from espresso_proof.source_verification import check_hypothesis_applicability
+    from espresso_proof.verification.source_verification import check_hypothesis_applicability
 
     hypotheses = [{"name": "X is projective", "status": "explicit", "source": "agent"}]
     proper_only = check_hypothesis_applicability(
@@ -982,7 +982,7 @@ def test_projective_hypothesis_needs_proper_and_ample_not_proper_alone() -> None
 
 
 def test_characteristic_zero_not_covered_by_positive_characteristic() -> None:
-    from espresso_proof.source_verification import check_hypothesis_applicability
+    from espresso_proof.verification.source_verification import check_hypothesis_applicability
 
     hypotheses = [{"name": "characteristic zero", "status": "explicit", "source": "agent"}]
     result = check_hypothesis_applicability(
@@ -994,7 +994,7 @@ def test_characteristic_zero_not_covered_by_positive_characteristic() -> None:
 
 
 def test_extra_theorem_hypothesis_blocks_applicability() -> None:
-    from espresso_proof.theorem_applicability import (
+    from espresso_proof.verification.theorem_applicability import (
         _applicability_status,
         _condition_status_from_relation,
     )

@@ -1,0 +1,416 @@
+"""Proof Verification Bridge V0 (Six-Hour goal, Phase 4).
+
+Turns trusted-verifier runs into a recorded, SCOPED proof-verification status.
+Natural-language prover/reviewer approval is NOT proof verification and never
+reaches this bridge.
+
+What each verifier can earn:
+
+- ``finite_group_cayley`` (trusted, deterministic): ``instance_checked`` for the
+  specific finite group(s) it checked -- never a universal ``proved``.
+- ``exact_computation`` (trusted): ``computation_checked`` for the computation.
+- ``lean_bridge``: reserved; NOT executed in V0, so it earns only ``unverified``.
+- ``human_checked``: recorded as the separate ``human_attested`` status (a human
+  attestation, explicitly not machine verification).
+
+The report model has no ``proved`` status, and the validator fails closed: only a
+trusted backend with a confirming result may earn a checked status.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from pathlib import Path
+
+from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
+from espresso_proof.verification.finite_group_verifier import (
+    all_groups_of_order_p_squared,
+    verify_group_abelian,
+    verify_identity_on_table,
+)
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.models import ProofVerificationReport, ScopedVerificationRequests
+from espresso_proof.kernel.run_lock import run_writer_lock
+from espresso_proof.verification.symbolic_identity import verify_ring_identity_mod
+
+# Auto-wiring caps: stricter than the manual CLI caps because auto-wiring runs
+# unattended. A request beyond these is skipped (too expensive), never run.
+AUTO_MAX_TABLE_ORDER = 12
+AUTO_MAX_MODULUS = 50
+
+
+def build_finite_group_entries(claim_id: str, primes: list[int]) -> list[dict]:
+    """Machine-check that each group of order p^2 (for the given primes) is abelian.
+
+    Returns one ``instance_checked`` entry per (prime, group) when the verifier
+    confirms an abelian group; a non-confirming or malformed table yields an
+    ``unverified`` entry (fail closed). The scope_note states explicitly that this
+    covers only the enumerated orders, NOT all primes p.
+    """
+    entries: list[dict] = []
+    for p in primes:
+        order = p * p
+        for idx, (name, table) in enumerate(all_groups_of_order_p_squared(p), start=1):
+            result = verify_group_abelian(table)
+            confirmed = bool(result["is_group"] and result["is_abelian"])
+            entries.append(
+                {
+                    "id": f"pv_p{p}_g{idx}",
+                    "verifier_type": "finite_group_cayley",
+                    "claim_id": claim_id,
+                    "target": f"group {name} of order {order} (p={p})",
+                    "input_summary": f"Cayley table of {name}, order {order}",
+                    "result": result["detail"],
+                    "trusted": True,
+                    "confirmed": confirmed,
+                    "earned_status": "instance_checked" if confirmed else "unverified",
+                    "scope_note": (
+                        f"Machine-checked that {name} is an abelian group. Covers only the "
+                        f"enumerated groups of order {order} (p={p}); this is NOT a proof "
+                        "that every group of order p^2 is abelian for all primes p. That the "
+                        "two tables are ALL groups of this order is the classification "
+                        "theorem, not machine-verified here."
+                    ),
+                }
+            )
+    return entries
+
+
+def build_proof_verification(run_dir: Path, *, primes: list[int]) -> dict:
+    run_dir = Path(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])
+    entries = build_finite_group_entries(claim["id"], primes)
+    report = {
+        "schema_version": 1,
+        "claim_id": claim["id"],
+        "run_id": manifest["run_id"],
+        "generated_at": datetime.now(UTC).isoformat(),
+        "entries": entries,
+        "notes": [
+            "Proof verification bridge: only a trusted deterministic backend with a "
+            "confirming result earns a checked status.",
+            "instance_checked covers only the enumerated finite instances; it is NOT "
+            "a universal proof. There is no 'proved' status here.",
+            "Natural-language prover/reviewer approval is not proof verification.",
+        ],
+    }
+    ProofVerificationReport.model_validate(report)
+    return report
+
+
+def verify_finite_groups(run_dir: Path, *, primes: list[int]) -> dict:
+    """Write proof_verification.yaml and register it as an optional artifact."""
+    run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
+    report = build_proof_verification(run_dir, primes=primes)
+    write_yaml(run_dir / "proof_verification.yaml", report)
+    manifest_path = run_dir / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    manifest.setdefault("optional_artifacts", {})["proof_verification"] = (
+        "proof_verification.yaml"
+    )
+    write_yaml(manifest_path, manifest)
+    return report
+
+
+def build_identity_table_entry(claim_id: str, *, entry_id: str, table: object, identity: str, target: str = "") -> dict:
+    """Run ``verify_identity_on_table`` and shape one proof-verification entry.
+
+    Earns ``instance_checked`` only when the identity holds on the explicit finite
+    table (``trusted`` + ``confirmed``); a non-holding / malformed / unsupported
+    result fails closed to ``unverified``. The scope_note is the verifier's own
+    finite-scope note: it covers THIS table only, never a universal claim."""
+
+    result = verify_identity_on_table(table, identity)
+    confirmed = bool(result["holds"])
+    return {
+        "id": entry_id,
+        "verifier_type": "finite_identity_table",
+        "claim_id": claim_id,
+        "target": target or f"identity '{identity}' on a finite operation table of order {result['order']}",
+        "input_summary": f"finite operation table (order {result['order']}), identity={identity}",
+        "result": result["detail"] or ("holds on this finite table" if confirmed else "not established"),
+        "trusted": True,
+        "confirmed": confirmed,
+        "earned_status": "instance_checked" if confirmed else "unverified",
+        "scope_note": result["scope_note"],
+    }
+
+
+def build_ring_identity_entry(claim_id: str, *, entry_id: str, identity: str, modulus: object, target: str = "") -> dict:
+    """Run ``verify_ring_identity_mod`` and shape one proof-verification entry.
+
+    Earns ``instance_checked`` only when the identity holds for EVERY residue mod
+    n; otherwise fails closed to ``unverified``. The scope_note states this is a
+    finite/computational sanity check over Z/n, not a universal proof."""
+
+    result = verify_ring_identity_mod(identity, modulus)
+    confirmed = bool(result["holds"])
+    return {
+        "id": entry_id,
+        "verifier_type": "finite_ring_identity",
+        "claim_id": claim_id,
+        "target": target or f"algebraic identity '{identity}' over Z/{result['modulus']}",
+        "input_summary": f"identity={identity} over Z/{result['modulus']}",
+        "result": result["detail"] or ("holds for all residues" if confirmed else "not established"),
+        "trusted": True,
+        "confirmed": confirmed,
+        "earned_status": "instance_checked" if confirmed else "unverified",
+        "scope_note": result["scope_note"],
+    }
+
+
+def build_matrix_rank_entry(
+    claim_id: str,
+    *,
+    entry_id: str,
+    matrix: object,
+    expected_rank: object = None,
+    expected_determinant: object = None,
+    target: str = "",
+) -> dict:
+    """Run the matrix rank/determinant verifier and shape one proof-verification
+    entry. Earns ``instance_checked`` only when every provided expectation matches
+    for THIS explicit integer matrix; a mismatch / malformed / unsupported request
+    fails closed to ``unverified``. Scope is this one matrix, not any family."""
+    from espresso_proof.verification.matrix_verifier import verify_matrix_rank
+
+    result = verify_matrix_rank(
+        matrix, expected_rank=expected_rank, expected_determinant=expected_determinant
+    )
+    confirmed = result["verdict"] == "confirmed"
+    dims = (
+        f"{len(matrix)}x{len(matrix[0])}"
+        if isinstance(matrix, list) and matrix and isinstance(matrix[0], list)
+        else "?"
+    )
+    return {
+        "id": entry_id,
+        "verifier_type": "matrix_rank",
+        "claim_id": claim_id,
+        "target": target or f"rank/determinant of a {dims} integer matrix",
+        "input_summary": f"{dims} matrix; expected_rank={expected_rank}, expected_determinant={expected_determinant}",
+        "result": result["detail"] or result["verdict"],
+        "trusted": True,
+        "confirmed": confirmed,
+        "earned_status": "instance_checked" if confirmed else "unverified",
+        "scope_note": result["scope_note"],
+    }
+
+
+def verify_matrix_rank_in_run(
+    run_dir: Path,
+    *,
+    matrix: object,
+    entry_id: str,
+    expected_rank: object = None,
+    expected_determinant: object = None,
+    target: str = "",
+) -> dict:
+    """Connect the matrix rank/determinant verifier into the run's proof-verification flow."""
+    run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
+    entry = build_matrix_rank_entry(
+        claim_id, entry_id=entry_id, matrix=matrix,
+        expected_rank=expected_rank, expected_determinant=expected_determinant, target=target,
+    )
+    append_verification_entries(run_dir, [entry])
+    return entry
+
+
+def append_verification_entries(run_dir: Path, entries: list[dict]) -> dict:
+    """Append entries to proof_verification.yaml (creating + registering it with an
+    empty base if absent), validate the full report model, and write it back.
+
+    Binds claim_id / run_id to the run; duplicate entry ids are rejected so a
+    re-run cannot silently double-count a checked instance. Fails closed: the
+    report is validated before writing, so a malformed entry never lands.
+
+    Holds the cross-process run writer lock for the whole read-modify-write, so
+    two concurrent appends (CLI verifier commands, tool adapters) cannot lose
+    each other's entries (Goal 35B)."""
+
+    run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
+    with run_writer_lock(run_dir, action="verification append"):
+        return _append_verification_entries_locked(run_dir, entries)
+
+
+def _append_verification_entries_locked(run_dir: Path, entries: list[dict]) -> dict:
+    manifest_path = run_dir / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])
+    pv_path = run_dir / "proof_verification.yaml"
+    if pv_path.exists():
+        report = read_yaml(pv_path)
+    else:
+        report = {
+            "schema_version": 1,
+            "claim_id": claim["id"],
+            "run_id": manifest["run_id"],
+            "generated_at": datetime.now(UTC).isoformat(),
+            "entries": [],
+            "notes": [
+                "Proof verification bridge: only a trusted deterministic backend with a "
+                "confirming result earns a checked status.",
+                "instance_checked covers only the explicit finite instance checked; it is "
+                "NOT a universal proof. There is no 'proved' status here.",
+                "Natural-language prover/reviewer approval is not proof verification.",
+            ],
+        }
+    existing_ids = {e["id"] for e in report["entries"]}
+    for entry in entries:
+        if entry["id"] in existing_ids:
+            raise ValueError(f"duplicate proof_verification entry id {entry['id']!r}")
+        existing_ids.add(entry["id"])
+    report["entries"].extend(entries)
+    ProofVerificationReport.model_validate(report)  # fail closed before writing
+    write_yaml(pv_path, report)
+    manifest.setdefault("optional_artifacts", {})["proof_verification"] = "proof_verification.yaml"
+    write_yaml(manifest_path, manifest)
+    return report
+
+
+def verify_identity_table_in_run(run_dir: Path, *, table: object, identity: str, entry_id: str, target: str = "") -> dict:
+    """Connect ``verify_identity_on_table`` into the run's proof-verification flow."""
+    run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
+    entry = build_identity_table_entry(claim_id, entry_id=entry_id, table=table, identity=identity, target=target)
+    append_verification_entries(run_dir, [entry])
+    return entry
+
+
+def verify_ring_identity_in_run(run_dir: Path, *, identity: str, modulus: object, entry_id: str, target: str = "") -> dict:
+    """Connect ``verify_ring_identity_mod`` into the run's proof-verification flow."""
+    run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
+    entry = build_ring_identity_entry(claim_id, entry_id=entry_id, identity=identity, modulus=modulus, target=target)
+    append_verification_entries(run_dir, [entry])
+    return entry
+
+
+def load_scoped_verification_requests(run_dir: Path) -> dict | None:
+    """Read the strategy/prover stage's structured scoped-verification requests.
+
+    Looks at ``optional_artifacts['scoped_verification_requests']`` then the
+    conventional ``scoped_verification_requests.yaml``. Returns None if absent
+    (auto-wiring then does nothing). A PRESENT-but-malformed requests file is a
+    hard error (model_validate) so the producer cannot emit a broken structure;
+    individual incomplete requests are handled (skipped) by the wiring itself."""
+
+    run_dir = Path(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    rel = manifest.get("optional_artifacts", {}).get("scoped_verification_requests")
+    path = run_dir / rel if rel else run_dir / "scoped_verification_requests.yaml"
+    if not path.exists():
+        return None
+    data = read_yaml(path)
+    ScopedVerificationRequests.model_validate(data)  # fail closed on a malformed file
+    return data
+
+
+def auto_wire_scoped_verifications(
+    run_dir: Path,
+    *,
+    max_table_order: int = AUTO_MAX_TABLE_ORDER,
+    max_modulus: int = AUTO_MAX_MODULUS,
+) -> dict:
+    """Auto-run the strategy/prover stage's explicit scoped-verification requests
+    and append the results as proof-verification entries.
+
+    This is the non-manual path: a request that is CONCRETE and SAFE (right kind,
+    complete data, within cost caps, bound to this run's claim) is executed by the
+    existing trusted backend; a confirming result earns ``instance_checked``, a
+    non-confirming/malformed table earns ``unverified`` (fail closed). A request
+    that is structurally unusable (missing table/modulus, unsupported kind,
+    over-cap, claim mismatch) is SKIPPED with a reason and earns nothing.
+
+    Natural-language prose is never read -- only the structured requests artifact
+    -- so a run with no requests file (or prose-only strategy) auto-wires nothing.
+    Idempotent: an entry id already present is skipped. Re-validates the run (fail
+    closed). Never upgrades proof/theorem status; there is no ``proved`` status."""
+
+    from espresso_proof.kernel.validators import validate_run  # local import to avoid an import cycle
+
+    run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
+    summary: dict = {"appended": [], "skipped": []}
+
+    requests_doc = load_scoped_verification_requests(run_dir)
+    if requests_doc is None:
+        return summary
+
+    def skip(rid: object, reason: str) -> None:
+        summary["skipped"].append({"id": rid, "reason": reason})
+
+    if requests_doc.get("claim_id") != claim_id:
+        for req in requests_doc.get("requests", []):
+            skip(req.get("id"), "requests claim_id does not match the locked claim")
+        return summary
+
+    pv_path = run_dir / "proof_verification.yaml"
+    existing_ids = {e["id"] for e in read_yaml(pv_path)["entries"]} if pv_path.exists() else set()
+    entries: list[dict] = []
+    for req in requests_doc.get("requests", []):
+        rid = req.get("id")
+        entry_id = f"auto_{rid}"
+        if entry_id in existing_ids:
+            skip(rid, "already wired")
+            continue
+        kind = req.get("kind")
+        identity = req.get("identity")
+        target = req.get("target", "")
+        if kind == "finite_identity_table":
+            table = req.get("table")
+            if not isinstance(table, list) or not table:
+                skip(rid, "missing or empty operation table")
+                continue
+            if len(table) > max_table_order:
+                skip(rid, f"table order {len(table)} exceeds auto cap {max_table_order} (too expensive)")
+                continue
+            entry = build_identity_table_entry(claim_id, entry_id=entry_id, table=table, identity=identity, target=target)
+        elif kind == "finite_ring_identity":
+            modulus = req.get("modulus")
+            if not isinstance(modulus, int) or isinstance(modulus, bool) or modulus < 1:
+                skip(rid, "missing or invalid modulus")
+                continue
+            if modulus > max_modulus:
+                skip(rid, f"modulus {modulus} exceeds auto cap {max_modulus} (too expensive)")
+                continue
+            entry = build_ring_identity_entry(claim_id, entry_id=entry_id, identity=identity, modulus=modulus, target=target)
+        elif kind == "matrix_rank":
+            matrix = req.get("table")
+            if not isinstance(matrix, list) or not matrix or not isinstance(matrix[0], list):
+                skip(rid, "missing or malformed matrix (use the table field)")
+                continue
+            if len(matrix) > max_table_order or len(matrix[0]) > max_table_order:
+                skip(rid, f"matrix dimension exceeds auto cap {max_table_order} (too expensive)")
+                continue
+            if req.get("expected_rank") is None and req.get("expected_determinant") is None:
+                skip(rid, "no expected_rank or expected_determinant to check")
+                continue
+            entry = build_matrix_rank_entry(
+                claim_id, entry_id=entry_id, matrix=matrix,
+                expected_rank=req.get("expected_rank"),
+                expected_determinant=req.get("expected_determinant"), target=target,
+            )
+        else:
+            skip(rid, f"unsupported kind {kind!r}")
+            continue
+        entries.append(entry)
+        existing_ids.add(entry_id)
+        summary["appended"].append({"id": entry_id, "earned_status": entry["earned_status"]})
+
+    if entries:
+        append_verification_entries(run_dir, entries)
+    validate_run(run_dir)  # fail closed
+    return summary

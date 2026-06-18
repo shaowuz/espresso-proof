@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.loop_harness import DEFAULT_CASES, load_cases, run_loop_cycle
-from espresso_proof.loop_models import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.loop.loop_harness import DEFAULT_CASES, load_cases, run_loop_cycle
+from espresso_proof.kernel.loop_models import (
     BlockerReport,
     BottleneckReport,
     CampaignIndex,
@@ -126,10 +126,10 @@ def test_loop_records_carry_no_status_fields(cycle_env) -> None:
 
 
 def test_failed_case_is_recorded_and_cycle_continues(tmp_path: Path, monkeypatch) -> None:
-    import espresso_proof.loop_harness as harness
+    import espresso_proof.loop.loop_harness as harness
 
     real_orchestrate = None
-    from espresso_proof import orchestrator
+    from espresso_proof.orchestration import orchestrator
 
     real_orchestrate = orchestrator.orchestrate_run
 
@@ -215,8 +215,8 @@ def test_refutation_classification_on_synthetic_kernel_tests(tmp_path: Path) -> 
     # Non-vacuous classification test (Math Workflow reviewer): feed
     # schema-shaped CounterexampleTest dicts through _collect_refutations and
     # pin every failure class, including a REACHABLE claim_refuted.
-    from espresso_proof.loop_harness import DEFAULT_CASES, _collect_refutations
-    from espresso_proof.loop_models import DogfoodCase
+    from espresso_proof.loop.loop_harness import DEFAULT_CASES, _collect_refutations
+    from espresso_proof.kernel.loop_models import DogfoodCase
 
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -301,7 +301,7 @@ def test_refutation_classification_on_synthetic_kernel_tests(tmp_path: Path) -> 
 
 # --- Goal 44-53 autofix #1: deep-mode resume must pick a route-allowed effort ---
 
-from espresso_proof.loop_harness import _EFFORT_PREFERENCE, _select_allowed_effort
+from espresso_proof.loop.loop_harness import _EFFORT_PREFERENCE, _select_allowed_effort
 
 
 def _brief_with(effort_options_by_route: dict) -> dict:
@@ -355,7 +355,7 @@ def test_selected_effort_is_always_in_route_options(options):
 
 
 def test_effort_preference_values_are_valid_exploration_modes():
-    from espresso_proof.models import ExplorationMode
+    from espresso_proof.kernel.models import ExplorationMode
 
     valid = {m.value for m in ExplorationMode}
     assert set(_EFFORT_PREFERENCE) <= valid

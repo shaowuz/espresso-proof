@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from espresso_proof.models import ComputationChecks, ComputationVerificationReport
-from espresso_proof.validators import (
+from espresso_proof.kernel.models import ComputationChecks, ComputationVerificationReport
+from espresso_proof.kernel.validators import (
     KernelValidationError,
     _validate_computation_verification,
 )
-from espresso_proof.verifier import (
+from espresso_proof.verification.verifier import (
     VerifierError,
     _eval_arith,
     _matrix_determinant,

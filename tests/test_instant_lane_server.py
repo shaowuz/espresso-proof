@@ -17,10 +17,10 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.instant_lane import INSTANT_FILE, load_instant_conversation
-from espresso_proof.proof_language import contains_proof_language
+from espresso_proof.ui.instant_lane import INSTANT_FILE, load_instant_conversation
+from espresso_proof.kernel.proof_language import contains_proof_language
 from espresso_proof.server import Workbench, _make_handler
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 
@@ -159,7 +159,7 @@ def test_instant_draft_persists_only_advisory_sidecar(client) -> None:
     assert load_instant_conversation(run_dir) is not None
     # ...but it is NOT a kernel artifact, status artifacts are untouched, and the
     # run still validates.
-    from espresso_proof.io import read_yaml
+    from espresso_proof.kernel.io import read_yaml
 
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     names = set((manifest.get("artifacts") or {}).values()) | set(

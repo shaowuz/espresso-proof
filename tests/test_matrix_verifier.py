@@ -16,15 +16,15 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.matrix_verifier import verify_matrix_rank
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.proof_verification import (
+from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.verification.matrix_verifier import verify_matrix_rank
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.verification.proof_verification import (
     auto_wire_scoped_verifications,
     verify_matrix_rank_in_run,
 )
-from espresso_proof.validators import KernelValidationError, validate_run
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 FIXTURES = Path("tests/fixtures")
 

@@ -7,21 +7,21 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.kernel import snapshot as kernel_snapshot
-from espresso_proof.memory import write_memory_entry
-from espresso_proof.memory_context import build_memory_context
-from espresso_proof.memo import build_concise_memo
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.proof_language import contains_proof_language
-from espresso_proof.run_dashboard import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.kernel import snapshot as kernel_snapshot
+from espresso_proof.memory.memory import write_memory_entry
+from espresso_proof.memory.memory_context import build_memory_context
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.kernel.proof_language import contains_proof_language
+from espresso_proof.orchestration.run_dashboard import (
     render_run_dashboard,
     render_topbar_status_html,
     status_summary,
 )
-from espresso_proof.cockpit_view import build_snapshot
-from espresso_proof.surface_warnings import (
+from espresso_proof.ui.cockpit_view import build_snapshot
+from espresso_proof.kernel.surface_warnings import (
     COUNTEREXAMPLES_PENDING,
     EXAMPLES_PENDING,
     REVIEWER_BLOCKERS,
@@ -34,9 +34,9 @@ from espresso_proof.surface_warnings import (
     refresh_final_report_disclosures,
     render_warning_lines,
 )
-from espresso_proof.update_inbox import append_update_inbox_event
+from espresso_proof.kernel.update_inbox import append_update_inbox_event
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 

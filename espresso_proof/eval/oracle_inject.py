@@ -74,8 +74,8 @@ def inject_oracle_and_audit(run_dir: Path, prop: dict) -> dict:
         # machine-checked evidence (a confirming check pulls a true claim off likely_false). The
         # grade stage is deterministic from artifacts; the kernel re-validates. Never upgrades to proved.
         try:
-            from ..front_half_agents import run_front_half_agent_pass
-            from ..llm_agents import StubLLMClient
+            from espresso_proof.agents.front_half_agents import run_front_half_agent_pass
+            from espresso_proof.agents.llm_agents import StubLLMClient
             run_front_half_agent_pass(run_dir=run_dir, client=StubLLMClient(), stages=["regrade"])
             regraded = True
         except Exception:

@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.loop_harness import run_loop_cycle
-from espresso_proof.loop_models import AutofixPlan, GapLedger, TriageDecision
-from espresso_proof.loop_reviewers import run_review_pass
-from espresso_proof.loop_triage import build_autofix_plan, run_triage
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.loop.loop_harness import run_loop_cycle
+from espresso_proof.kernel.loop_models import AutofixPlan, GapLedger, TriageDecision
+from espresso_proof.loop.loop_reviewers import run_review_pass
+from espresso_proof.loop.loop_triage import build_autofix_plan, run_triage
 from tests.loop_gap_case import gap_cases
 
 
@@ -100,7 +100,7 @@ def test_kernel_safety_finding_outranks_capability(tmp_path: Path) -> None:
 
 def test_nonexistent_selected_gap_id_fails_closed(triaged_cycle: Path) -> None:
     decision = TriageDecision.model_validate(read_yaml(triaged_cycle / "triage.yaml"))
-    from espresso_proof.loop_triage import _load_reports, _validate_selected_exists
+    from espresso_proof.loop.loop_triage import _load_reports, _validate_selected_exists
 
     reports = _load_reports(triaged_cycle)
     bogus = decision.model_copy(update={"selected_gap_id": "finding_that_does_not_exist"})
@@ -147,7 +147,7 @@ def test_oversized_finding_becomes_goal_proposal(tmp_path: Path) -> None:
 def test_autofix_plan_budgets_and_denylist(triaged_cycle: Path) -> None:
     plan = build_autofix_plan(
         triaged_cycle,
-        files_expected_to_change=["espresso_proof/agent_runner.py", "tests/test_x.py"],
+        files_expected_to_change=["espresso_proof/orchestration/agent_runner.py", "tests/test_x.py"],
         focused_tests=["tests/test_x.py::test_y"],
         replay_cases=["order6_abelian_false"],
         why_this_gap_now="the false-theorem case produces zero counterexample tests",
@@ -175,7 +175,7 @@ def test_autofix_plan_budgets_and_denylist(triaged_cycle: Path) -> None:
     with pytest.raises(ValueError, match="protected safety surfaces"):
         build_autofix_plan(
             triaged_cycle,
-            files_expected_to_change=["espresso_proof/validators.py"],
+            files_expected_to_change=["espresso_proof/kernel/validators.py"],
             focused_tests=["t"],
             replay_cases=["c"],
             why_this_gap_now="would weaken a gate",
@@ -208,7 +208,7 @@ def test_probe_inflated_blocker_cannot_hijack_priority(tmp_path: Path) -> None:
     cycle_dir = run_loop_cycle(out_root=root, mode="smoke", cases_path=cases_file)
     run_review_pass(cycle_dir)
     # verdicts: probe-duty reviewers must NOT be BLOCKER from the probe alone.
-    from espresso_proof.loop_models import ReviewReport
+    from espresso_proof.kernel.loop_models import ReviewReport
 
     source_report = ReviewReport.model_validate(
         read_yaml(cycle_dir / "review_reports" / "source_applicability.yaml")

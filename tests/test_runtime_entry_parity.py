@@ -14,8 +14,8 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.io import read_yaml
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.io import read_yaml
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 
@@ -114,7 +114,7 @@ def test_run_flow_does_not_manufacture_human_confirmation(tmp_path: Path) -> Non
 def test_run_flow_fails_closed_on_invalid_artifact(tmp_path: Path, monkeypatch) -> None:
     # If a stage produces an artifact that fails validation, the wrapper (like
     # orchestrate) must raise rather than advance past the gate.
-    import espresso_proof.orchestrator as orch
+    import espresso_proof.orchestration.orchestrator as orch
 
     def boom(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003
         raise AssertionError("literature stage exploded")

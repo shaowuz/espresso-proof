@@ -9,16 +9,16 @@ from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.models import ProofGoalGraph, SubgoalNode
-from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.subgoal_graph import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.models import ProofGoalGraph, SubgoalNode
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.kernel.subgoal_graph import (
     assemble_subgoal_graph,
     build_subgoal_graph,
     render_proof_search_lines,
 )
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 
 # ---------------------------------------------------------------------------
@@ -619,7 +619,7 @@ def test_scoped_check_renders_finite_scope(tmp_path: Path) -> None:
 # dashboard / local UI rendering (Task 4)
 # ---------------------------------------------------------------------------
 def test_dashboard_renders_proof_state_section(tmp_path: Path) -> None:
-    from espresso_proof.run_dashboard import render_run_dashboard
+    from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 
     run_dir = _resumed_run(tmp_path)
     html = render_run_dashboard(run_dir)
@@ -648,7 +648,7 @@ def test_dashboard_blocked_row_shows_translated_reason_and_next_step(tmp_path: P
     # Goal 57 residual (item 3): the dashboard's blocked rows reach memo parity —
     # they render "why blocked" (translated, never the raw enum) and the suggested
     # next step. Inject a typed external-tool blocker, rebuild, and render.
-    from espresso_proof.run_dashboard import render_run_dashboard
+    from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 
     run_dir = _resumed_run(tmp_path)
     _add_external_tool_run(run_dir, "singular", exit_code=1)
@@ -664,7 +664,7 @@ def test_dashboard_blocked_row_shows_translated_reason_and_next_step(tmp_path: P
 
 
 def test_proof_state_section_has_no_proof_complete_language(tmp_path: Path) -> None:
-    from espresso_proof.run_dashboard import render_run_dashboard
+    from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 
     run_dir = _resumed_run(tmp_path)
     html = render_run_dashboard(run_dir)
@@ -675,7 +675,7 @@ def test_proof_state_section_has_no_proof_complete_language(tmp_path: Path) -> N
 
 
 def test_dashboard_renders_without_graph(tmp_path: Path) -> None:
-    from espresso_proof.run_dashboard import render_run_dashboard
+    from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 
     run_dir = _gate_run(tmp_path)  # no proof_goal_graph.yaml at the gate
     assert not (run_dir / "proof_goal_graph.yaml").exists()
@@ -685,7 +685,7 @@ def test_dashboard_renders_without_graph(tmp_path: Path) -> None:
 
 
 def test_dashboard_render_is_read_only_for_yaml(tmp_path: Path) -> None:
-    from espresso_proof.run_dashboard import render_run_dashboard
+    from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 
     run_dir = _resumed_run(tmp_path)
     before = {
@@ -755,8 +755,8 @@ def test_resume_completed_memo_refreshes_stale_graph(tmp_path: Path) -> None:
     # --auto-wire-verifications / --audit-evidence step) appends scoped evidence
     # before the idempotent early return. That early return must refresh the
     # proof-search graph so it does not stay stale relative to proof_verification.
-    from espresso_proof.orchestrator import resume_run
-    from espresso_proof.proof_verification import verify_finite_groups
+    from espresso_proof.orchestration.orchestrator import resume_run
+    from espresso_proof.verification.proof_verification import verify_finite_groups
 
     run_dir = _resumed_run(tmp_path)  # COMPLETED_MEMO; graph built
     sid = read_yaml(run_dir / "strategy_brief.yaml")["top_strategies"][0]["id"]
@@ -905,7 +905,7 @@ def test_step_only_counterexample_render_is_scoped(tmp_path: Path) -> None:
     _add_step_only_counterexample(
         run_dir, explanation="A proof step fails at a rational point."
     )
-    from espresso_proof.pressure_status import build_pressure_status
+    from espresso_proof.kernel.pressure_status import build_pressure_status
 
     build_pressure_status(run_dir)
     build_subgoal_graph(run_dir)
@@ -933,7 +933,7 @@ def test_graph_does_not_upgrade_grade_or_status(tmp_path: Path) -> None:
 # memo proof-search section + single-source rendering (dashboard <-> memo)
 # ---------------------------------------------------------------------------
 def test_render_proof_search_lines_uses_human_wording_and_disclaimer() -> None:
-    from espresso_proof.subgoal_graph import render_proof_search_lines
+    from espresso_proof.kernel.subgoal_graph import render_proof_search_lines
 
     graph = {
         "nodes": [
@@ -959,7 +959,7 @@ def test_render_proof_search_lines_uses_human_wording_and_disclaimer() -> None:
 
 
 def test_render_proof_search_lines_empty_graph_returns_nothing() -> None:
-    from espresso_proof.subgoal_graph import render_proof_search_lines
+    from espresso_proof.kernel.subgoal_graph import render_proof_search_lines
 
     assert render_proof_search_lines({}) == []
     assert render_proof_search_lines({"nodes": []}) == []
@@ -967,7 +967,7 @@ def test_render_proof_search_lines_empty_graph_returns_nothing() -> None:
 
 
 def test_render_proof_search_lines_truncates_long_statements() -> None:
-    from espresso_proof.subgoal_graph import render_proof_search_lines
+    from espresso_proof.kernel.subgoal_graph import render_proof_search_lines
 
     graph = {"nodes": [{"role": "main_goal", "statement": "x" * 500, "state": "open"}]}
     line = next(l for l in render_proof_search_lines(graph) if l.startswith("  Main goal"))
@@ -976,7 +976,7 @@ def test_render_proof_search_lines_truncates_long_statements() -> None:
 
 
 def test_memo_includes_proof_search_section_when_graph_present(tmp_path: Path) -> None:
-    from espresso_proof.memo import build_concise_memo
+    from espresso_proof.ui.memo import build_concise_memo
 
     run_dir = _resumed_run(tmp_path)  # resume auto-builds the subgoal graph
     assert (run_dir / "proof_goal_graph.yaml").exists()
@@ -989,7 +989,7 @@ def test_memo_includes_proof_search_section_when_graph_present(tmp_path: Path) -
 
 
 def test_memo_omits_proof_search_section_without_graph(tmp_path: Path) -> None:
-    from espresso_proof.memo import build_concise_memo
+    from espresso_proof.ui.memo import build_concise_memo
 
     run_dir = _gate_run(tmp_path)  # at the gate: no proof_goal_graph.yaml yet
     assert not (run_dir / "proof_goal_graph.yaml").exists()
@@ -998,7 +998,7 @@ def test_memo_omits_proof_search_section_without_graph(tmp_path: Path) -> None:
 
 
 def test_memo_render_is_read_only_for_yaml(tmp_path: Path) -> None:
-    from espresso_proof.memo import build_concise_memo
+    from espresso_proof.ui.memo import build_concise_memo
 
     run_dir = _resumed_run(tmp_path)
     before = {p.name: p.read_bytes() for p in run_dir.glob("*.yaml")}
@@ -1010,7 +1010,8 @@ def test_memo_render_is_read_only_for_yaml(tmp_path: Path) -> None:
 def test_dashboard_and_memo_share_one_wording_source() -> None:
     # The dashboard must render the proof-search state from the same wording
     # source as the memo (no second enum->wording map to drift out of sync).
-    from espresso_proof import run_dashboard, subgoal_graph
+    from espresso_proof.orchestration import run_dashboard
+    from espresso_proof.kernel import subgoal_graph
 
     assert run_dashboard._state_words is subgoal_graph.state_words
     assert run_dashboard._PROOF_SEARCH_NOTE is subgoal_graph.PROOF_SEARCH_NOTE
@@ -1021,7 +1022,7 @@ def test_dashboard_and_memo_share_one_wording_source() -> None:
 # Goal 15: surface proof_goal_graph.notes in memo + dashboard (display only)
 # ---------------------------------------------------------------------------
 def test_graph_notes_helper_filters_blank_and_strips() -> None:
-    from espresso_proof.subgoal_graph import graph_notes
+    from espresso_proof.kernel.subgoal_graph import graph_notes
 
     assert graph_notes(None) == []
     assert graph_notes({}) == []
@@ -1031,7 +1032,7 @@ def test_graph_notes_helper_filters_blank_and_strips() -> None:
 
 
 def test_render_proof_search_lines_shows_notes_when_present() -> None:
-    from espresso_proof.subgoal_graph import render_proof_search_lines
+    from espresso_proof.kernel.subgoal_graph import render_proof_search_lines
 
     graph = {
         "nodes": [{"role": "main_goal", "statement": "Show the claim.", "state": "open"}],
@@ -1045,7 +1046,7 @@ def test_render_proof_search_lines_shows_notes_when_present() -> None:
 
 
 def test_render_proof_search_lines_omits_notes_block_when_absent() -> None:
-    from espresso_proof.subgoal_graph import render_proof_search_lines
+    from espresso_proof.kernel.subgoal_graph import render_proof_search_lines
 
     graph = {"nodes": [{"role": "main_goal", "statement": "Show the claim.", "state": "open"}]}
     text = "\n".join(render_proof_search_lines(graph))
@@ -1054,7 +1055,7 @@ def test_render_proof_search_lines_omits_notes_block_when_absent() -> None:
 
 def test_memo_shows_graph_notes_when_present(tmp_path: Path) -> None:
     # A gate-run graph (no route selected yet) records a human-readable note.
-    from espresso_proof.memo import build_concise_memo
+    from espresso_proof.ui.memo import build_concise_memo
 
     run_dir = _gate_run(tmp_path)
     build_subgoal_graph(run_dir)
@@ -1068,7 +1069,7 @@ def test_memo_shows_graph_notes_when_present(tmp_path: Path) -> None:
 
 
 def test_dashboard_shows_graph_notes_when_present(tmp_path: Path) -> None:
-    from espresso_proof.run_dashboard import render_run_dashboard
+    from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 
     run_dir = _gate_run(tmp_path)
     build_subgoal_graph(run_dir)
@@ -1080,7 +1081,7 @@ def test_dashboard_shows_graph_notes_when_present(tmp_path: Path) -> None:
 
 
 def test_dashboard_notes_are_html_escaped() -> None:
-    from espresso_proof.run_dashboard import _proof_state_section
+    from espresso_proof.orchestration.run_dashboard import _proof_state_section
 
     graph = {
         "nodes": [{"role": "main_goal", "statement": "Show the claim.", "state": "open"}],
@@ -1093,7 +1094,7 @@ def test_dashboard_notes_are_html_escaped() -> None:
 
 
 def test_dashboard_omits_notes_block_when_absent() -> None:
-    from espresso_proof.run_dashboard import _proof_state_section
+    from espresso_proof.orchestration.run_dashboard import _proof_state_section
 
     graph = {"nodes": [{"role": "main_goal", "statement": "Show the claim.", "state": "open"}]}
     section = _proof_state_section({"graph": graph})
@@ -1102,8 +1103,8 @@ def test_dashboard_omits_notes_block_when_absent() -> None:
 
 
 def test_rendering_notes_does_not_mutate_graph_artifact(tmp_path: Path) -> None:
-    from espresso_proof.memo import build_concise_memo
-    from espresso_proof.run_dashboard import render_run_dashboard
+    from espresso_proof.ui.memo import build_concise_memo
+    from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 
     run_dir = _gate_run(tmp_path)
     build_subgoal_graph(run_dir)
@@ -1150,7 +1151,7 @@ def _inject_reviewer_requests(
 
 
 def _ledger_run(tmp_path: Path) -> Path:
-    from espresso_proof.theorem_condition_ledger import build_theorem_condition_ledger
+    from espresso_proof.verification.theorem_condition_ledger import build_theorem_condition_ledger
 
     run_dir = _resumed_run(tmp_path)
     _inject_reviewer_requests(run_dir, _TCL_SOURCE_REQUESTS, _TCL_MISSING_HYPOTHESES)

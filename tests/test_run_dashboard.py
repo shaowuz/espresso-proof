@@ -4,13 +4,13 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from espresso_proof.agent_run_status import set_agent_status
-from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
+from espresso_proof.kernel.agent_run_status import set_agent_status
+from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.cli import app, bank_dashboard_command, run_dashboard_command, serve_command
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.run_dashboard import render_run_dashboard, write_run_dashboard
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.orchestration.run_dashboard import render_run_dashboard, write_run_dashboard
+from espresso_proof.kernel.validators import validate_run
 
 
 def _claim(tmp_path: Path) -> Path:
@@ -158,7 +158,7 @@ def test_dashboard_unclear_counterexample_never_admissible(tmp_path: Path) -> No
     """Display can never be looser than the kernel: a counterexample with
     satisfies_all_claim_hypotheses == 'unclear' must NOT render as an admissible
     refutation, even if it carries refutes_claim (reviewer BLOCKER)."""
-    from espresso_proof.io import write_yaml
+    from espresso_proof.kernel.io import write_yaml
 
     run_dir = _fresh_run(tmp_path)
     ce_path = run_dir / "counterexamples.yaml"

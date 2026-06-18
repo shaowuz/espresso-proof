@@ -13,12 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.demos import DEMOS, create_demo_run, demo_for_project
-from espresso_proof.io import read_yaml
-from espresso_proof.memo import build_concise_memo
-from espresso_proof.run_dashboard import render_run_dashboard
+from espresso_proof.orchestration.demos import DEMOS, create_demo_run, demo_for_project
+from espresso_proof.kernel.io import read_yaml
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 from espresso_proof.server import Workbench, _index_page, _make_handler
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 _PROOF_WORDS = ("proof-close", "proof complete", "the theorem is proved", "we have proved")
 

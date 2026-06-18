@@ -7,8 +7,8 @@ import any stage module).
 
 from __future__ import annotations
 
-from ..llm_agents import safe_text
-from ..models import Review
+from espresso_proof.agents.llm_agents import safe_text
+from espresso_proof.kernel.models import Review
 
 # Valid hypothesis statuses (kernel enum). A model-supplied status outside this
 # set is coerced to "unclear" — never trusted verbatim.

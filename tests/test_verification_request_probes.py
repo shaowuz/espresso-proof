@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml
-from espresso_proof.models import ScopedVerificationRequests
-from espresso_proof.verification_request_probes import (
+from espresso_proof.kernel.io import read_yaml
+from espresso_proof.kernel.models import ScopedVerificationRequests
+from espresso_proof.verification.verification_request_probes import (
     propose_scoped_verification_requests,
 )
 
@@ -60,10 +60,10 @@ def test_requests_auto_wire_to_instance_checked_in_full_run(tmp_path: Path) -> N
     # symbolic p^2 dogfood case earns trusted confirmed instance_checked
     # entries, the run stays kernel-valid, and nothing claims a universal
     # proof.
-    from espresso_proof.io import write_text
-    from espresso_proof.orchestrator import orchestrate_run, resume_run
-    from espresso_proof.proof_verification import auto_wire_scoped_verifications
-    from espresso_proof.validators import validate_run
+    from espresso_proof.kernel.io import write_text
+    from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+    from espresso_proof.verification.proof_verification import auto_wire_scoped_verifications
+    from espresso_proof.kernel.validators import validate_run
 
     input_path = tmp_path / "input.md"
     write_text(input_path, "Every group of order p^2, where p is prime, is abelian.\n")
@@ -100,9 +100,9 @@ def test_requests_auto_wire_to_instance_checked_in_full_run(tmp_path: Path) -> N
 
 
 def test_unrelated_run_wires_nothing(tmp_path: Path) -> None:
-    from espresso_proof.io import write_text
-    from espresso_proof.orchestrator import orchestrate_run
-    from espresso_proof.proof_verification import auto_wire_scoped_verifications
+    from espresso_proof.kernel.io import write_text
+    from espresso_proof.orchestration.orchestrator import orchestrate_run
+    from espresso_proof.verification.proof_verification import auto_wire_scoped_verifications
 
     input_path = tmp_path / "input.md"
     write_text(input_path, "Every group of order 6 is abelian.\n")
@@ -122,8 +122,8 @@ def test_unrelated_run_wires_nothing(tmp_path: Path) -> None:
 def test_dogfood_harness_path_earns_instance_checked(tmp_path: Path) -> None:
     # The loop harness itself (run_loop_cycle -> _run_case) must auto-wire the
     # requests: a refactor dropping the auto_wire call has to fail this test.
-    from espresso_proof.io import write_yaml
-    from espresso_proof.loop_harness import run_loop_cycle
+    from espresso_proof.kernel.io import write_yaml
+    from espresso_proof.loop.loop_harness import run_loop_cycle
 
     cases_file = tmp_path / "cases.yaml"
     write_yaml(

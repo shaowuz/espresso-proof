@@ -13,14 +13,14 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from espresso_proof.calibration import (
+from espresso_proof.evaluation.calibration import (
     _source_support_false_positives,
     all_fixtures,
     run_calibration,
 )
 from espresso_proof.cli import app
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
 
 FIXTURES = Path("tests/fixtures")
 
@@ -89,7 +89,7 @@ def test_calibration_cli_fails_on_planted_regression(tmp_path: Path, monkeypatch
     # through the real aggregation (the detector itself is proven against a
     # real planted run by test_source_support_false_positive_detector_flags_
     # planted_regression above).
-    import espresso_proof.calibration as calibration_mod
+    import espresso_proof.evaluation.calibration as calibration_mod
 
     real = calibration_mod._source_support_false_positives
     flagged = {"count": 0}

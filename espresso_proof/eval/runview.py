@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from ..machine_check_guards import is_non_vacuous_machine_check, source_step_ids
+from espresso_proof.verification.machine_check_guards import is_non_vacuous_machine_check, source_step_ids
 
 
 # --------------------------------------------------------------------------- #

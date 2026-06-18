@@ -52,12 +52,12 @@ def test_kernel_doc_destaled_mock_only() -> None:
 
 def test_implemented_modules_referenced_exist() -> None:
     for rel in (
-        "espresso_proof/stage_runner.py",
-        "espresso_proof/source_grounding_stage.py",
+        "espresso_proof/kernel/stage_runner.py",
+        "espresso_proof/literature/source_grounding_stage.py",
         "espresso_proof/front_half/registry.py",
         "espresso_proof/front_half/runner.py",
         "espresso_proof/front_half/stages/understanding.py",
         "espresso_proof/validation/front_half.py",
-        "espresso_proof/memory_context.py",
+        "espresso_proof/memory/memory_context.py",
     ):
         assert (REPO / rel).is_file(), f"capability table implies {rel} exists"

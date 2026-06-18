@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof import evidence_trust as et
-from espresso_proof.agent_run_status import set_agent_status
-from espresso_proof.agent_runner import run_single_agent, skip_agent
-from espresso_proof.orchestrator import orchestrate_run
-from espresso_proof.research_timeline import build_timeline
-from espresso_proof.run_dashboard import render_run_dashboard
+from espresso_proof.ui import evidence_trust as et
+from espresso_proof.kernel.agent_run_status import set_agent_status
+from espresso_proof.orchestration.agent_runner import run_single_agent, skip_agent
+from espresso_proof.orchestration.orchestrator import orchestrate_run
+from espresso_proof.ui.research_timeline import build_timeline
+from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 from espresso_proof.server import Workbench, WorkbenchError, _index_page, serve
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 _PROOF_WORDS = ("proof-close", "proof complete", "the theorem is proved", "we have proved")
@@ -179,7 +179,7 @@ def test_run_page_has_no_proof_complete_language(tmp_path: Path) -> None:
 def test_timeline_dropped_hypothesis_is_not_admissible_refutation(tmp_path: Path) -> None:
     """A dropped-hypothesis counterexample must read as 'none refute', never as an
     admissible refutation — the timeline mirrors the kernel admissibility gate."""
-    from espresso_proof.io import read_yaml, write_yaml
+    from espresso_proof.kernel.io import read_yaml, write_yaml
 
     run_dir = _run(tmp_path)
     ce_path = run_dir / "counterexamples.yaml"

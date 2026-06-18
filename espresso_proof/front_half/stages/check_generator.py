@@ -12,16 +12,16 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ...io import read_yaml, write_yaml
-from ...llm_agents import LLMClient, safe_text
-from ...machine_check_guards import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.agents.llm_agents import LLMClient, safe_text
+from espresso_proof.verification.machine_check_guards import (
     RAIL_A_KINDS,
     dedupe_key,
     is_executable_machine_check,
     is_non_vacuous_machine_check,
     source_step_ids,
 )
-from ...models import ComputationChecks
+from espresso_proof.kernel.models import ComputationChecks
 from ..registry import register_stage
 
 

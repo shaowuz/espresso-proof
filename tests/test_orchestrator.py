@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from espresso_proof.claim_clear import ClaimClearBlockedError
+from espresso_proof.claim.claim_clear import ClaimClearBlockedError
 from espresso_proof.cli import app
-from espresso_proof.io import read_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.validators import KernelValidationError, validate_run
+from espresso_proof.kernel.io import read_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 # Three fresh, arbitrary claims: an open problem, a clearly-true textbook claim,
 # and a clearly-false claim. None match a mock scenario, so each scaffolds to the
@@ -150,7 +150,7 @@ def test_orchestrate_is_resumable_and_idempotent(tmp_path: Path) -> None:
 def test_orchestrate_blocks_on_invalid_artifact_and_does_not_advance(tmp_path: Path) -> None:
     # Fault injection: corrupt a front-half artifact after scaffolding, then drive
     # the orchestrator. It must fail closed (raise) and NOT advance the lifecycle.
-    from espresso_proof.io import write_yaml
+    from espresso_proof.kernel.io import write_yaml
 
     claim_path = tmp_path / "m23.md"
     claim_path.write_text(CLAIMS["m23"], encoding="utf-8")

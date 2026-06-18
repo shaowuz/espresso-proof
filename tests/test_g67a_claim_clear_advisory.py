@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.claim_clarity import is_advisory_missing_item, is_blocking_missing_item
-from espresso_proof.claim_clear import evaluate_claim_clear
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.orchestrator import orchestrate_run
+from espresso_proof.claim.claim_clarity import is_advisory_missing_item, is_blocking_missing_item
+from espresso_proof.claim.claim_clear import evaluate_claim_clear
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.orchestrator import orchestrate_run
 
 # the two real external-mode pedantic notes that wrongly blocked precise claims
 ADVISORY_NOTES = [
@@ -89,7 +89,7 @@ def test_goal66_hard_negative_still_blocks(tmp_path: Path):
 
 # --- 67C/67A interaction: an earned scoped/checked status beats template label --
 
-from espresso_proof.run_dashboard import _proof_label
+from espresso_proof.orchestration.run_dashboard import _proof_label
 
 
 def test_earned_checked_status_shows_even_in_template_run():

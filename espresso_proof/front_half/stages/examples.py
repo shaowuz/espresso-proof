@@ -6,12 +6,12 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ...hypothesis_normalization import normalize_ambient_object_hypotheses
-from ...io import read_yaml, write_yaml
-from ...llm_agents import LLMClient, load_agent_context, safe_list, safe_text
-from ...memo import build_concise_memo
-from ...memory import write_run_memory
-from ...models import (
+from espresso_proof.claim.hypothesis_normalization import normalize_ambient_object_hypotheses
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.agents.llm_agents import LLMClient, load_agent_context, safe_list, safe_text
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.memory.memory import write_run_memory
+from espresso_proof.kernel.models import (
     Claim,
     ComputationChecks,
     CounterexampleReport,
@@ -26,13 +26,13 @@ from ...models import (
     StrategySynthesis,
     TestReport,
 )
-from ...research_bank import load_bankable_dict
-from ...strategy_rules import (
+from espresso_proof.kernel.research_bank import load_bankable_dict
+from espresso_proof.kernel.strategy_rules import (
     HIGH_SCORE_THRESHOLD,
     STANDARD_SCORE_LIFT_LIMIT,
     collect_strategy_rule_violations,
 )
-from ...validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 from ..registry import register_stage
 from ..safety import (
     _CANDIDATE_SOURCE_STATUSES,

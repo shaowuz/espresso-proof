@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.orchestrator import orchestrate_run
-from espresso_proof.stage_runner import StageError, StageRunner
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.orchestrator import orchestrate_run
+from espresso_proof.kernel.stage_runner import StageError, StageRunner
+from espresso_proof.kernel.validators import validate_run
 
 
 def _valid_run(tmp_path: Path) -> Path:

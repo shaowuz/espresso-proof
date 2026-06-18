@@ -19,12 +19,12 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.agent_run_status import init_agent_run_status
-from espresso_proof.claim_clear import evaluate_claim_clear, write_claim_clear_gate
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.run_dashboard import render_run_dashboard
+from espresso_proof.kernel.agent_run_status import init_agent_run_status
+from espresso_proof.claim.claim_clear import evaluate_claim_clear, write_claim_clear_gate
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 from espresso_proof.server import Workbench, WorkbenchError, _make_handler
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 UNCLEAR_CLAIM = "Prove the thing about the nice mirror object."
@@ -260,10 +260,10 @@ def test_failed_agent_records_failed_and_preserves_run(client, monkeypatch) -> N
     assert _await_job(call, d["job_id"])["state"] == "done"
     good = _sha(run_dir / "examples.yaml")
     # force the next examples run to crash mid-way
-    import espresso_proof.agent_runner as ar
+    import espresso_proof.orchestration.agent_runner as ar
 
     def boom(run_dir, agent, *, client):  # noqa: ANN001
-        from espresso_proof.io import write_yaml
+        from espresso_proof.kernel.io import write_yaml
 
         write_yaml(Path(run_dir) / "examples.yaml", {"claim_id": "X", "examples": []})
         raise RuntimeError("boom")
@@ -321,7 +321,7 @@ def test_interactive_dashboard_uses_buttons_not_command_blocks(client) -> None:
 
 def test_static_dashboard_still_renders(tmp_path: Path) -> None:
     """Existing static dashboard generation must still work (server unavailable)."""
-    from espresso_proof.orchestrator import orchestrate_run
+    from espresso_proof.orchestration.orchestrator import orchestrate_run
 
     claim = tmp_path / "c.md"
     claim.write_text(CLAIM, encoding="utf-8")
@@ -340,7 +340,7 @@ def test_static_dashboard_still_renders(tmp_path: Path) -> None:
 def test_claim_card_has_no_foreign_domain_hypotheses(tmp_path: Path) -> None:
     """A group-theory claim must not render algebraic-geometry hypothesis chips
     (smooth / projective / base field C) leaked from mock defaults."""
-    from espresso_proof.orchestrator import orchestrate_run
+    from espresso_proof.orchestration.orchestrator import orchestrate_run
 
     claim = tmp_path / "c.md"
     claim.write_text(CLAIM, encoding="utf-8")
@@ -363,7 +363,7 @@ def test_status_reports_stalled_after_mid_call_death(client) -> None:
     """A run with an agent call that started but never finished, and no live job
     progressing it, is reported as stalled (the order-3 dead-page failure) — a
     visible last-active-stage signal instead of a silent dead page."""
-    from espresso_proof import observability as obs
+    from espresso_proof.kernel import observability as obs
 
     wb, call, _ = client
     run_id = _create(call)
@@ -389,7 +389,7 @@ def test_status_reports_stalled_after_mid_call_death(client) -> None:
 
 def test_status_not_stalled_while_job_is_live(client) -> None:
     """A dangling started call with a LIVE in-memory job is in-flight, not lost."""
-    from espresso_proof import observability as obs
+    from espresso_proof.kernel import observability as obs
 
     wb, call, _ = client
     run_id = _create(call)
@@ -405,7 +405,7 @@ def test_status_not_stalled_while_job_is_live(client) -> None:
 
 def test_status_endpoint_exposes_stalled(client) -> None:
     """The HTTP /status endpoint carries the stalled signal for the UI."""
-    from espresso_proof import observability as obs
+    from espresso_proof.kernel import observability as obs
 
     wb, call, _ = client
     run_id = _create(call)
@@ -424,7 +424,7 @@ def test_status_endpoint_exposes_stalled(client) -> None:
 def test_g65f_stalled_signal_exposes_failure_state_fields(client) -> None:
     """The UI must be able to show last active stage, elapsed time, and the last
     successful step (not just a dead 'Could not reach the server' page)."""
-    from espresso_proof import observability as obs
+    from espresso_proof.kernel import observability as obs
 
     wb, call, _ = client
     run_id = _create(call)
@@ -450,7 +450,7 @@ def test_g65f_troubleshooting_state_is_status_neutral(client) -> None:
     stalled/failed run."""
     import json as _json
 
-    from espresso_proof import observability as obs
+    from espresso_proof.kernel import observability as obs
 
     wb, call, _ = client
     run_id = _create(call)
@@ -482,7 +482,7 @@ def test_g65f_failed_agent_keeps_server_alive(client) -> None:
 # --- Goal 66: simple prime-order group claim is not blocked via the API ------
 
 def test_g66_prime_order_group_claim_clears_via_api(client) -> None:
-    from espresso_proof.claim_clear import evaluate_claim_clear
+    from espresso_proof.claim.claim_clear import evaluate_claim_clear
 
     wb, call, _ = client
     run_id = _create_text(call, "prove that a group of order p is cyclic when p is a prime number")

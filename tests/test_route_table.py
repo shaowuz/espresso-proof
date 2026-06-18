@@ -10,20 +10,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.memo import build_concise_memo
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.proof_language import contains_proof_language
-from espresso_proof.proof_verification import verify_finite_groups
-from espresso_proof.route_table import (
+from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.proof_language import contains_proof_language
+from espresso_proof.verification.proof_verification import verify_finite_groups
+from espresso_proof.ui.route_table import (
     ROUTE_TABLE_COLUMNS,
     build_route_step_rows,
     render_route_step_table_lines,
 )
-from espresso_proof.run_dashboard import render_run_dashboard
-from espresso_proof.surface_warnings import refresh_final_report_disclosures
-from espresso_proof.validators import validate_run
+from espresso_proof.orchestration.run_dashboard import render_run_dashboard
+from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 

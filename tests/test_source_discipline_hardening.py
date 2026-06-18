@@ -16,16 +16,16 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.pdf_ingestion import ingest_source_for_theorems
-from espresso_proof.source_verification import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.literature.pdf_ingestion import ingest_source_for_theorems
+from espresso_proof.verification.source_verification import (
     check_hypothesis_applicability,
     ground_run,
     term_present,
 )
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 THM = (
@@ -112,7 +112,7 @@ def test_legacy_refs_without_hash_still_validate(tmp_path: Path) -> None:
     write_yaml(run_dir / "source_grounding.yaml", sg)
     # additive field: pre-Goal-41 artifacts keep validating — but the audit
     # binding now notices the grounding bytes changed, so refresh the audit.
-    from espresso_proof.theorem_applicability import audit_theorem_applicability
+    from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
 
     audit_theorem_applicability(run_dir)
     validate_run(run_dir)
@@ -129,7 +129,7 @@ def test_grounding_edit_after_audit_fails_stale_audit(tmp_path: Path) -> None:
     with pytest.raises(KernelValidationError, match="stale"):
         validate_run(run_dir)
     # re-running the audit refreshes the binding and the run validates again.
-    from espresso_proof.theorem_applicability import audit_theorem_applicability
+    from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
 
     audit_theorem_applicability(run_dir)
     validate_run(run_dir)
@@ -137,7 +137,7 @@ def test_grounding_edit_after_audit_fails_stale_audit(tmp_path: Path) -> None:
 
 # --- 3. Chinese parse-time gate ----------------------------------------------
 def test_parse_time_gate_rejects_chinese_completion_markers() -> None:
-    from espresso_proof.validators import _first_forbidden_proof_language
+    from espresso_proof.kernel.validators import _first_forbidden_proof_language
 
     for text in ("至此定理得证。", "证毕", "我们证明了该定理", "命题已证明"):
         assert _first_forbidden_proof_language(text.lower()) is not None, text
@@ -162,7 +162,7 @@ def test_final_report_with_chinese_overclaim_fails_validation(tmp_path: Path) ->
 def test_ingestion_redacts_chinese_completion_markers() -> None:
     import re
 
-    from espresso_proof.llm_agents import FORBIDDEN_LANGUAGE, forbidden_pattern
+    from espresso_proof.agents.llm_agents import FORBIDDEN_LANGUAGE, forbidden_pattern
 
     text = "评审认为我们证明了该定理,证毕。"
     for phrase in FORBIDDEN_LANGUAGE:
@@ -175,7 +175,7 @@ def test_ingestion_redacts_chinese_completion_markers() -> None:
 def test_forbidden_language_superset_of_validator_gate() -> None:
     # invariant: every phrase the parse-time gate rejects is also redacted at
     # agent ingestion (Chinese entries must keep this in lockstep).
-    from espresso_proof.llm_agents import FORBIDDEN_LANGUAGE
+    from espresso_proof.agents.llm_agents import FORBIDDEN_LANGUAGE
 
     for phrase in ("证毕", "证明完毕", "证明完成", "定理得证", "命题得证",
                    "猜想得证", "定理已证明", "命题已证明",

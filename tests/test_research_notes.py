@@ -19,8 +19,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from espresso_proof.proof_language import contains_proof_language
-from espresso_proof.research_notes import (
+from espresso_proof.kernel.proof_language import contains_proof_language
+from espresso_proof.claim.research_notes import (
     NOTES_FILE,
     ResearchNote,
     append_note,

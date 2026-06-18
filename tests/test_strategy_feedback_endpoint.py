@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml
+from espresso_proof.kernel.io import read_yaml
 from espresso_proof.server import Workbench, _make_handler
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
@@ -198,7 +198,7 @@ def test_invalid_payload_rejected_and_run_preserved(client, payload) -> None:
     assert status == 400 and "invalid feedback" in body["error"]
     # the run is untouched and the sidecar was not partially written.
     assert _digest(run_dir, "idea_grade.yaml") == before
-    from espresso_proof.strategy_feedback import load_feedback
+    from espresso_proof.strategy.strategy_feedback import load_feedback
 
     assert load_feedback(run_dir).items == []
 
@@ -238,7 +238,7 @@ def test_continue_receives_feedback_and_writes_round_ledger(client) -> None:
     assert "ADVISORY" in hc["taste_judgment"]
     assert "90/100" in hc["taste_judgment"] and "press here" in hc["taste_judgment"]
     # the prover round context exposes it as advisory (never evidence).
-    from espresso_proof.llm_agents import _human_feedback_advisory
+    from espresso_proof.agents.llm_agents import _human_feedback_advisory
 
     assert "ADVISORY" in _human_feedback_advisory(run_dir)
     # the latest-round ledger is present, explanatory, advisory-only.
@@ -338,7 +338,7 @@ def test_concurrent_feedback_posts_preserve_all_items(client) -> None:
     with cf.ThreadPoolExecutor(max_workers=8) as ex:
         statuses = list(ex.map(post, range(12)))
     assert all(s == 200 for s in statuses)
-    from espresso_proof.strategy_feedback import load_feedback
+    from espresso_proof.strategy.strategy_feedback import load_feedback
 
     run_dir = wb.resolve_run(run_id)
     assert len(load_feedback(run_dir).items) == 12  # none dropped

@@ -5,12 +5,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof.agent_run_status import set_agent_status
-from espresso_proof.agent_runner import run_single_agent
-from espresso_proof.orchestrator import orchestrate_run
-from espresso_proof.run_dashboard import render_run_dashboard
+from espresso_proof.kernel.agent_run_status import set_agent_status
+from espresso_proof.orchestration.agent_runner import run_single_agent
+from espresso_proof.orchestration.orchestrator import orchestrate_run
+from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 from espresso_proof.server import Workbench, _index_page
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 

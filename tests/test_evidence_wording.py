@@ -17,23 +17,23 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.descriptions import (
+from espresso_proof.ui.descriptions import (
     describe_proof_language,
     evidence_phrase,
     judgment_tier_phrase,
     objection_phrase,
     route_source_phrase,
 )
-from espresso_proof.failure_pattern_bank import audit_failure_patterns
-from espresso_proof.mathematical_judgment import judge_run
-from espresso_proof.memo import (
+from espresso_proof.kernel.failure_pattern_bank import audit_failure_patterns
+from espresso_proof.verification.mathematical_judgment import judge_run
+from espresso_proof.ui.memo import (
     PROOF_ROUTE_STEP_HEADINGS,
     build_concise_memo,
     render_proof_route_steps,
 )
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.proof_verification import verify_finite_groups
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.verification.proof_verification import verify_finite_groups
 
 FIXTURES = Path("tests/fixtures")
 
@@ -444,7 +444,7 @@ def test_source_backed_step_is_step_scoped_not_global_proof() -> None:
     # reference_substep_not_global_theorem: a source-backed step renders as
     # support for THIS step only, with citation + locator, and never as a global
     # proof of the claim/route. No proof-complete language appears.
-    from espresso_proof.proof_language import contains_proof_language
+    from espresso_proof.kernel.proof_language import contains_proof_language
 
     block = "\n".join(render_proof_route_steps(_source_backed_step_grounding(), {"checks": []}))
     assert "this step only" in block
@@ -460,7 +460,7 @@ def test_source_backed_step_is_step_scoped_not_global_proof() -> None:
 
 
 def test_source_backed_evidence_phrase_is_reference_support_only() -> None:
-    from espresso_proof.proof_language import contains_proof_language
+    from espresso_proof.kernel.proof_language import contains_proof_language
 
     phrase = evidence_phrase("source_backed")
     assert "Reference supports" in phrase
@@ -470,7 +470,7 @@ def test_source_backed_evidence_phrase_is_reference_support_only() -> None:
 def test_source_backed_step_statement_with_proof_language_is_redacted() -> None:
     # A real guarantee (not fixture-dependent): even if a step's echoed free text
     # smuggles global proof-complete language, the rendered step redacts it.
-    from espresso_proof.proof_language import contains_proof_language
+    from espresso_proof.kernel.proof_language import contains_proof_language
 
     grounding = _source_backed_step_grounding()
     grounding["steps"][0]["needed_theorem"] = (

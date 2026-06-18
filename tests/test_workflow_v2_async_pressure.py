@@ -5,14 +5,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from espresso_proof.agent_run_status import set_agent_status
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.models import CounterexampleTest
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.orchestrator import orchestrate_run
-from espresso_proof.pressure_status import build_pressure_status
+from espresso_proof.kernel.agent_run_status import set_agent_status
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.models import CounterexampleTest
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.orchestrator import orchestrate_run
+from espresso_proof.kernel.pressure_status import build_pressure_status
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 FIXTURES = Path("tests/fixtures")
@@ -108,7 +108,7 @@ def test_pending_pressure_remains_visible(tmp_path: Path) -> None:
 def test_pressure_status_survives_examples_counterexamples_bank_materialization(
     tmp_path: Path,
 ) -> None:
-    from espresso_proof.research_bank import is_bank_dir, materialize_run_banks
+    from espresso_proof.kernel.research_bank import is_bank_dir, materialize_run_banks
 
     run_dir = run_mock_critique(
         "pressure_bank",

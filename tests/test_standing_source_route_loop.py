@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.loop_reviewers import source_support_fix
-from espresso_proof.loop_triage import _BROAD_FIX_MARKERS
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.loop.loop_reviewers import source_support_fix
+from espresso_proof.loop.loop_triage import _BROAD_FIX_MARKERS
 
 P2_CLAIM = "Every group of order p^2, where p is prime, is abelian.\n"
 
@@ -48,10 +48,10 @@ def test_routing_predicate_is_scoped() -> None:
 def test_engaged_candidate_p1_keeps_evidence_and_routes_to_proposal(
     tmp_path: Path,
 ) -> None:
-    from espresso_proof.loop_harness import run_loop_cycle
-    from espresso_proof.loop_models import ReviewReport
-    from espresso_proof.loop_reviewers import run_review_pass
-    from espresso_proof.loop_triage import run_triage
+    from espresso_proof.loop.loop_harness import run_loop_cycle
+    from espresso_proof.kernel.loop_models import ReviewReport
+    from espresso_proof.loop.loop_reviewers import run_review_pass
+    from espresso_proof.loop.loop_triage import run_triage
 
     cycle_dir = run_loop_cycle(
         out_root=tmp_path / "loop_runs",
@@ -98,9 +98,9 @@ def test_unengaged_grounding_still_a_bounded_target(tmp_path: Path) -> None:
     # must go back to the bounded-fix message, because a weak grounding
     # shape (e.g. missing attribution) is a gap the loop CAN fix and the
     # routing must not over-generalize.
-    from espresso_proof.loop_harness import run_loop_cycle
-    from espresso_proof.loop_models import ReviewReport
-    from espresso_proof.loop_reviewers import run_review_pass
+    from espresso_proof.loop.loop_harness import run_loop_cycle
+    from espresso_proof.kernel.loop_models import ReviewReport
+    from espresso_proof.loop.loop_reviewers import run_review_pass
 
     cycle_dir = run_loop_cycle(
         out_root=tmp_path / "loop_runs",
@@ -138,7 +138,7 @@ def test_unengaged_grounding_still_a_bounded_target(tmp_path: Path) -> None:
 
 
 def test_replay_probe_engaged_candidates_routed(tmp_path: Path) -> None:
-    from espresso_proof.loop_replay import (
+    from espresso_proof.loop.loop_replay import (
         _probe_engaged_candidates_routed_to_goal as probe,
     )
 

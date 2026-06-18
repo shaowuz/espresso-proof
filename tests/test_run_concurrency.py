@@ -12,12 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.run_events import EVENT_KINDS, EVENTS_FILENAME, append_event, read_events
-from espresso_proof.run_lock import RunLockedError, run_writer_lock
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.kernel.run_events import EVENT_KINDS, EVENTS_FILENAME, append_event, read_events
+from espresso_proof.kernel.run_lock import RunLockedError, run_writer_lock
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 
@@ -199,8 +199,8 @@ def test_events_timeline_valid_jsonl_and_no_env_leak(tmp_path: Path, monkeypatch
 
 
 def test_failed_stage_records_rollback_event_and_survives_restore(tmp_path: Path, monkeypatch) -> None:
-    from espresso_proof import source_grounding_stage
-    from espresso_proof.stage_runner import StageError
+    from espresso_proof.literature import source_grounding_stage
+    from espresso_proof.kernel.stage_runner import StageError
 
     run_dir = _gate_run(tmp_path)
     src = tmp_path / "src.txt"
@@ -239,7 +239,7 @@ def test_write_yaml_failure_preserves_previous_bytes(tmp_path: Path, monkeypatch
     write_yaml(target, {"ok": 1})
     original = target.read_bytes()
 
-    import espresso_proof.io as io_mod
+    import espresso_proof.kernel.io as io_mod
 
     def exploding_dump(data, handle, **kwargs):
         handle.write("partial: ")  # bytes hit the TEMP file, never the target

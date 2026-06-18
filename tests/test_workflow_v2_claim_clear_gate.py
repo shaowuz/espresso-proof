@@ -9,30 +9,30 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from espresso_proof.agent_runner import run_single_agent
-from espresso_proof.autonomous_retrieval import run_autonomous_retrieval
+from espresso_proof.orchestration.agent_runner import run_single_agent
+from espresso_proof.literature.autonomous_retrieval import run_autonomous_retrieval
 from espresso_proof.cli import app
-from espresso_proof.claim_clear import ClaimClearBlockedError, ensure_claim_clear_for_downstream
-from espresso_proof.front_half_agents import run_front_half_agent_pass
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.kernel import snapshot as kernel_snapshot
-import espresso_proof.llm_agents as llm_agents
-from espresso_proof.llm_agents import StubLLMClient
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.pdf_ingestion import ingest_source_for_theorems
-from espresso_proof.prover_loop_driver import continue_prover_loop
-from espresso_proof.retrieval_grounding import retrieve_and_ground
-from espresso_proof.run_dashboard import (
+from espresso_proof.claim.claim_clear import ClaimClearBlockedError, ensure_claim_clear_for_downstream
+from espresso_proof.agents.front_half_agents import run_front_half_agent_pass
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.kernel import snapshot as kernel_snapshot
+import espresso_proof.agents.llm_agents as llm_agents
+from espresso_proof.agents.llm_agents import StubLLMClient
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.literature.pdf_ingestion import ingest_source_for_theorems
+from espresso_proof.orchestration.prover_loop_driver import continue_prover_loop
+from espresso_proof.literature.retrieval_grounding import retrieve_and_ground
+from espresso_proof.orchestration.run_dashboard import (
     render_run_dashboard,
     render_topbar_status_html,
     status_summary,
 )
-from espresso_proof.cockpit_view import build_snapshot
-from espresso_proof.source_verification import ground_run
-from espresso_proof.theorem_applicability import audit_theorem_applicability
-from espresso_proof.validators import validate_run
-from espresso_proof.verifier import audit_evidence
+from espresso_proof.ui.cockpit_view import build_snapshot
+from espresso_proof.verification.source_verification import ground_run
+from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
+from espresso_proof.kernel.validators import validate_run
+from espresso_proof.verification.verifier import audit_evidence
 
 
 UNCLEAR_CLAIM = "Prove the thing about the nice mirror object."

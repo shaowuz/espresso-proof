@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.human_time_allocation import (
+from espresso_proof.strategy.human_time_allocation import (
     CONTEXT_FILE,
     PRIORITY_BONUS,
     RECENT_FEEDBACK_BONUS,
@@ -24,11 +24,11 @@ from espresso_proof.human_time_allocation import (
     time_allocation_prompt_context,
     write_time_allocation_context,
 )
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.models import HumanTimeAllocationContext
-from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.strategy_feedback import StrategyFeedback, append_feedback
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.models import HumanTimeAllocationContext
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.strategy.strategy_feedback import StrategyFeedback, append_feedback
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 CLEAR_CLAIM = "Every group of order p^2, where p is prime, is abelian.\n"
@@ -231,7 +231,7 @@ def test_clean_continuation_reduce_route_gets_cheap_check(tmp_path: Path, monkey
     # human priority drives the allocation: 'reduce' -> 'cheap_check' (distinct
     # from the pre-54C hardcoded 'expand'). Keep round 1 (the gate) with its real
     # blockers so the loop continues, then force the CONTINUATION review clean.
-    import espresso_proof.llm_agents as la
+    import espresso_proof.agents.llm_agents as la
 
     result = orchestrate_run(
         project="g54c_clean",
@@ -325,7 +325,7 @@ def test_proof_language_note_never_reaches_dashboard(tmp_path: Path) -> None:
     # A note containing proof-complete language cannot reach user-visible output
     # (the advisory packet carries scores/priority only — no free-text note), and
     # nothing it contains upgrades any status.
-    from espresso_proof.run_dashboard import render_run_dashboard
+    from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 
     result = orchestrate_run(
         project="g54c_scrub",

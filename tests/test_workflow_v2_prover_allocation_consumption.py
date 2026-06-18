@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-import espresso_proof.prover_loop_driver as drv
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.llm_agents import run_llm_agent_pass
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.orchestrator import _resolve_and_build_loop, orchestrate_run
-from espresso_proof.prover_loop_driver import continue_prover_loop
+import espresso_proof.orchestration.prover_loop_driver as drv
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.agents.llm_agents import run_llm_agent_pass
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.orchestrator import _resolve_and_build_loop, orchestrate_run
+from espresso_proof.orchestration.prover_loop_driver import continue_prover_loop
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 from tests.test_evidence_aware_grade import FakeClaude
 
 

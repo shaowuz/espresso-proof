@@ -16,12 +16,12 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.claim_clear import ClaimClearBlockedError
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.literature_scout import run_literature_scout
-from espresso_proof.llm_agents import StubLLMClient
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.validators import KernelValidationError, validate_run
+from espresso_proof.claim.claim_clear import ClaimClearBlockedError
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.literature.literature_scout import run_literature_scout
+from espresso_proof.agents.llm_agents import StubLLMClient
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 # Claim text that triggers the hodge_atoms mock scenario, whose scaffold seeds a
 # source_grounding with one proof step (step_001) — a real step to scout against.
@@ -220,7 +220,7 @@ def test_literature_scout_cli_stub(tmp_path: Path) -> None:
 
 
 def test_reviewer_source_requests_reads_canonical_review_fields() -> None:
-    from espresso_proof.literature_scout import _reviewer_source_requests
+    from espresso_proof.literature.literature_scout import _reviewer_source_requests
 
     review = {
         "source_risks": ["No source cited for the center lemma"],

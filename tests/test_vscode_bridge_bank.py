@@ -14,10 +14,10 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.kernel import KernelError, snapshot
-from espresso_proof.research_bank import load_bankable_dict, materialize_run_banks
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.kernel import KernelError, snapshot
+from espresso_proof.kernel.research_bank import load_bankable_dict, materialize_run_banks
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 _FORBIDDEN = ("proof-close", "proof complete", "we proved", "proved the claim")

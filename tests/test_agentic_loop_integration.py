@@ -14,9 +14,9 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 CLAIM = "If G / Z(G) is cyclic, then G is abelian."

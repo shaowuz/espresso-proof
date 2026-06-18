@@ -9,17 +9,17 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.loop_harness import load_cases, run_loop_cycle
-from espresso_proof.loop_models import ReplayResult, StopGate
-from espresso_proof.loop_replay import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.loop.loop_harness import load_cases, run_loop_cycle
+from espresso_proof.kernel.loop_models import ReplayResult, StopGate
+from espresso_proof.loop.loop_replay import (
     run_replay,
     write_capability_delta,
     write_learning_delta,
     write_next_cycle_policy,
 )
-from espresso_proof.loop_reviewers import run_review_pass
-from espresso_proof.loop_triage import run_triage
+from espresso_proof.loop.loop_reviewers import run_review_pass
+from espresso_proof.loop.loop_triage import run_triage
 from tests.loop_gap_case import gap_cases
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -159,14 +159,15 @@ def _build_tiny_repo(repo: Path) -> str:
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True, env=env)
     subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True, env=env)
     (repo / "espresso_proof").mkdir(exist_ok=True)
-    (repo / "espresso_proof" / "validators.py").write_text("x = 1\n")
+    (repo / "espresso_proof" / "kernel").mkdir(exist_ok=True)
+    (repo / "espresso_proof" / "kernel" / "validators.py").write_text("x = 1\n")
     (repo / "espresso_proof" / "other.py").write_text("y = 1\n")
     subprocess.run(["git", "add", "espresso_proof"], cwd=repo, check=True, env=env)
     subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True, env=env)
     base = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, env=env
     ).stdout.strip()
-    (repo / "espresso_proof" / "validators.py").write_text("x = 2\n")
+    (repo / "espresso_proof" / "kernel" / "validators.py").write_text("x = 2\n")
     (repo / "espresso_proof" / "other.py").write_text("y = 2\n")
     subprocess.run(["git", "add", "espresso_proof"], cwd=repo, check=True, env=env)
     subprocess.run(["git", "commit", "-qm", "change"], cwd=repo, check=True, env=env)
@@ -225,7 +226,7 @@ def test_fix_gate_refuses_protected_and_unplanned_paths(tmp_path: Path) -> None:
         cycle / "autofix_plan.yaml",
         {
             "cycle_id": "cycle_y", "selected_gap_id": "g", "why_this_gap_now": "w",
-            "files_expected_to_change": ["espresso_proof/agent_runner.py"],
+            "files_expected_to_change": ["espresso_proof/orchestration/agent_runner.py"],
             "max_files": 8, "max_effective_diff_lines": 800,
             "focused_tests": ["t"], "required_reviewers": ["Engineering", "Kernel Safety"],
             "replay_cases": ["c"], "abort_if": [],
@@ -275,7 +276,7 @@ def test_delta_writers_validate_and_stay_advisory(triaged: Path) -> None:
 
 
 def test_stop_gate_running_and_budget_semantics(tmp_path: Path, monkeypatch) -> None:
-    from espresso_proof import loop_stop_gate
+    from espresso_proof.loop import loop_stop_gate
 
     root = tmp_path / "loop_runs"
     cycle_dir = run_loop_cycle(

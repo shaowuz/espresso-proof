@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.strategy_feedback import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.strategy.strategy_feedback import (
     FEEDBACK_FILE,
     StrategyFeedback,
     append_feedback,

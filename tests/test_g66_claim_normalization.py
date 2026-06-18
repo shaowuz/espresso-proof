@@ -14,10 +14,10 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.claim_clear import evaluate_claim_clear
-from espresso_proof.claim_normalization import normalize_simple_claim, strip_command_wrapper
-from espresso_proof.io import read_yaml
-from espresso_proof.orchestrator import orchestrate_run
+from espresso_proof.claim.claim_clear import evaluate_claim_clear
+from espresso_proof.claim.claim_normalization import normalize_simple_claim, strip_command_wrapper
+from espresso_proof.kernel.io import read_yaml
+from espresso_proof.orchestration.orchestrator import orchestrate_run
 
 TARGET_CLAIMS = [
     "prove that a group of order p is cyclic when p is a prime number",

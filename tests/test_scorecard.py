@@ -13,7 +13,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.scorecard import (
+from espresso_proof.evaluation.scorecard import (
     SCORECARD_SCHEMA_VERSION,
     _probe_reviewer_quality,
     render_scorecard_markdown,
@@ -65,8 +65,8 @@ def test_reviewer_quality_probe_seeds_and_recalls_gold_flaws(tmp_path: Path) -> 
 def test_scorecard_fails_on_missed_gold_flaw(tmp_path: Path, monkeypatch) -> None:
     # A reviewer that stops flagging proof-complete language must fail the
     # scorecard (reviewer-quality gate bites through the real aggregation).
-    import espresso_proof.reviewer_checklist as checklist_mod
-    import espresso_proof.scorecard as scorecard_mod
+    import espresso_proof.evaluation.reviewer_checklist as checklist_mod
+    import espresso_proof.evaluation.scorecard as scorecard_mod
 
     monkeypatch.setattr(checklist_mod, "detect_proof_complete_language", lambda text: [])
     # scorecard imports review_checklist lazily from the module, so the patch
@@ -113,8 +113,8 @@ def test_scorecard_markdown_is_stable_for_trends(tmp_path: Path) -> None:
 
 def test_dogfood_replay_fails_on_proof_complete_memo(tmp_path: Path, monkeypatch) -> None:
     # Spec negative test: the replay cannot pass with proof-complete language.
-    import espresso_proof.memo as memo_mod
-    import espresso_proof.scorecard as scorecard_mod
+    import espresso_proof.ui.memo as memo_mod
+    import espresso_proof.evaluation.scorecard as scorecard_mod
 
     monkeypatch.setattr(
         memo_mod, "build_concise_memo", lambda run_dir: "We proved the theorem. proof-close."
@@ -128,11 +128,11 @@ def test_dogfood_replay_fails_on_unauthorized_source_backed(tmp_path: Path) -> N
     # Spec negative test: the replay cannot pass with unauthorized source
     # support. Plant a source_backed step into the replayed run's grounding by
     # intercepting the read — the probe must count it and fail.
-    import espresso_proof.scorecard as scorecard_mod
-    from espresso_proof.io import read_yaml as real_read_yaml
+    import espresso_proof.evaluation.scorecard as scorecard_mod
+    from espresso_proof.kernel.io import read_yaml as real_read_yaml
 
     def replay_with_planted_step(root: Path) -> dict:
-        import espresso_proof.scorecard as sc
+        import espresso_proof.evaluation.scorecard as sc
 
         original = sc.read_yaml
 
@@ -170,8 +170,8 @@ def test_matcher_discipline_probe_fails_on_regressed_matcher(tmp_path: Path, mon
     # behavior), the scorecard must fail.
     import re
 
-    import espresso_proof.source_verification as sv
-    import espresso_proof.scorecard as scorecard_mod
+    import espresso_proof.verification.source_verification as sv
+    import espresso_proof.evaluation.scorecard as scorecard_mod
 
     def lenient(term: str, lowered_statement: str) -> bool:
         return bool(re.search(r"\b" + re.escape(term) + r"\b", lowered_statement))

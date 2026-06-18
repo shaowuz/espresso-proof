@@ -11,13 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.front_half_agents import write_front_half_run
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.models import FrontHalfRunReport
-from espresso_proof.orchestrator import orchestrate_run, resume_run
+from espresso_proof.agents.front_half_agents import write_front_half_run
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.models import FrontHalfRunReport
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.validation.front_half import validate_front_half_run
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 _FORBIDDEN_FIELDS = (
     "source_backed",

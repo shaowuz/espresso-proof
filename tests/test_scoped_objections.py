@@ -25,16 +25,16 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.llm_agents import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.agents.llm_agents import (
     _normalize_scoped_objections,
     _pointer_scope_from_review,
     _review_pointer,
 )
-from espresso_proof.models import LLMAgentVerifierReview, ProverLoopReviewPointer, ScopedObjection
-from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.run_dashboard import _proof_state_section
-from espresso_proof.subgoal_graph import (
+from espresso_proof.kernel.models import LLMAgentVerifierReview, ProverLoopReviewPointer, ScopedObjection
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.orchestration.run_dashboard import _proof_state_section
+from espresso_proof.kernel.subgoal_graph import (
     assemble_subgoal_graph,
     build_subgoal_graph,
     render_proof_search_lines,

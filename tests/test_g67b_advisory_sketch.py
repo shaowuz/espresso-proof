@@ -13,15 +13,15 @@ from __future__ import annotations
 
 import pytest
 
-from espresso_proof.advisory_proof_sketch import (
+from espresso_proof.orchestration.advisory_proof_sketch import (
     ADVISORY_PROOF_SKETCH_FILENAME,
     _scrub_sketch_text,
     capture_advisory_proof_sketch,
     read_advisory_proof_sketch,
 )
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.stage_runner import StageRunner, StageError, _SNAPSHOT_EXCLUDED_NAMES
-from espresso_proof.validators import (
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.stage_runner import StageRunner, StageError, _SNAPSHOT_EXCLUDED_NAMES
+from espresso_proof.kernel.validators import (
     KernelValidationError,
     _first_forbidden_proof_language,
     _prover_status_smuggling_field,
@@ -154,7 +154,7 @@ def test_filename_is_registered_as_snapshot_excluded():
 # --------------------------------------------------------------------------- #
 
 def test_status_summary_surfaces_sketch_without_status(tmp_path):
-    from espresso_proof.run_dashboard import _advisory_sketch_summary
+    from espresso_proof.orchestration.run_dashboard import _advisory_sketch_summary
 
     assert _advisory_sketch_summary(tmp_path) == {"present": False}
     capture_advisory_proof_sketch(tmp_path, _agent_report(["Order divides 3."]))
@@ -171,7 +171,7 @@ def test_status_summary_surfaces_sketch_without_status(tmp_path):
 # deep-round path (prover_loop_driver continuation rounds)
 # --------------------------------------------------------------------------- #
 
-from espresso_proof.advisory_proof_sketch import (  # noqa: E402
+from espresso_proof.orchestration.advisory_proof_sketch import (  # noqa: E402
     capture_advisory_proof_sketch_from_latest_round,
 )
 
@@ -216,7 +216,7 @@ def test_latest_round_capture_fail_closed_on_garbage(tmp_path):
 def test_deep_round_sidecar_survives_restore_run(tmp_path):
     # The real deep-round rollback: prover_loop_driver._restore_run drops the new
     # round artifact but must NOT touch the root advisory sidecar.
-    from espresso_proof.prover_loop_driver import _restore_run, _snapshot_run
+    from espresso_proof.orchestration.prover_loop_driver import _restore_run, _snapshot_run
 
     write_yaml(tmp_path / "run_manifest.yaml", {"current_state": "X"})
     snapshot = _snapshot_run(tmp_path)                       # before the round

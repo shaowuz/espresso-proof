@@ -18,7 +18,7 @@ from .runview import RunView, analyze, read_run, score_run
 from .scorecard import (
     PropOutcome, attach_noise_band, build_scorecard, write_scorecard,
 )
-from ..verifier import audit_evidence
+from espresso_proof.verification.verifier import audit_evidence
 
 REPO = Path(__file__).resolve().parents[2]
 ESPRESSO = [str(REPO / ".venv" / "bin" / "espresso")]

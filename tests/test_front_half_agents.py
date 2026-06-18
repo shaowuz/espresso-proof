@@ -11,17 +11,17 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from espresso_proof.claim_clear import CLAIM_CLEAR_BLOCKED_FRONT_HALF_STAGES
+from espresso_proof.claim.claim_clear import CLAIM_CLEAR_BLOCKED_FRONT_HALF_STAGES
 from espresso_proof.cli import app
-from espresso_proof.front_half_agents import (
+from espresso_proof.agents.front_half_agents import (
     FRONT_HALF_STAGES,
     registered_stages,
     run_front_half_agent_pass,
 )
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.llm_agents import StubLLMClient
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.agents.llm_agents import StubLLMClient
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.validators import validate_run
 
 ARBITRARY_CLAIM = (
     "The Mathieu group M23 is realizable as a Galois group over Q.\n\n"
@@ -620,7 +620,7 @@ def test_full_front_half_pass_with_stub_is_valid(tmp_path: Path) -> None:
         else:
             assert statuses[stage] == "ok", report
     # memo renders honestly (no proof-complete language) on the live skeleton.
-    from espresso_proof.memo import build_concise_memo
+    from espresso_proof.ui.memo import build_concise_memo
 
     memo = build_concise_memo(run_dir)
     lowered = memo.lower()
@@ -778,7 +778,7 @@ def test_full_front_half_pass_on_seeded_hodge_scenario_stays_valid(tmp_path: Pat
 # Goal 19: stale "Too vague to test" placeholder objection is scrubbed for a
 # precise claim (display hygiene; never upgrades any status).
 # ---------------------------------------------------------------------------
-from espresso_proof.memo import build_concise_memo  # noqa: E402
+from espresso_proof.ui.memo import build_concise_memo  # noqa: E402
 
 _PENDING_NOTE = "Front-half review pending; real reviewers run in the Prover/Reviewers pass."
 
@@ -912,7 +912,7 @@ def _regrade_status(
     verification: dict | None = None,
 ) -> dict:
     from espresso_proof.front_half.stages.grade import _regrade
-    from espresso_proof.llm_agents import load_agent_context
+    from espresso_proof.agents.llm_agents import load_agent_context
 
     claim_path = tmp_path / "regrade_claim.md"
     claim_path.write_text(
@@ -1068,7 +1068,7 @@ def test_reconcile_tests_drops_dangling_example_reference(tmp_path: Path) -> Non
 
 def test_reconcile_tests_keeps_valid_bank_counterexample_reference(tmp_path: Path) -> None:
     from espresso_proof.front_half.stages.examples import _reconcile_tests_with_examples
-    from espresso_proof.research_bank import materialize_run_banks
+    from espresso_proof.kernel.research_bank import materialize_run_banks
 
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")
@@ -1149,7 +1149,7 @@ def test_reconcile_strategy_unclear_rewrites_stale_lock_route(tmp_path: Path) ->
 
 def test_reconcile_strategy_clamps_scores_to_lift_limit(tmp_path: Path) -> None:
     from espresso_proof.front_half.stages.grade import _reconcile_strategy_after_regrade
-    from espresso_proof.strategy_rules import score_lift_limit
+    from espresso_proof.kernel.strategy_rules import score_lift_limit
 
     claim_path = tmp_path / "claim.md"
     claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")

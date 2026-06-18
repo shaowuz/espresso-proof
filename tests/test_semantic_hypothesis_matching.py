@@ -12,17 +12,17 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.hypothesis_matching import match_hypothesis_semantically
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import SourceGroundingReport, SourceGroundingStep
-from espresso_proof.pdf_ingestion import ingest_source_for_theorems
-from espresso_proof.source_verification import (
+from espresso_proof.claim.hypothesis_matching import match_hypothesis_semantically
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.models import SourceGroundingReport, SourceGroundingStep
+from espresso_proof.literature.pdf_ingestion import ingest_source_for_theorems
+from espresso_proof.verification.source_verification import (
     check_hypothesis_applicability,
     term_present,
     verify_source_grounding_from_theorems,
 )
-from espresso_proof.theorem_applicability import _conditions_from_step
+from espresso_proof.verification.theorem_applicability import _conditions_from_step
 
 FIXTURES = Path("tests/fixtures")
 
@@ -188,7 +188,7 @@ def test_matched_reasons_surface_as_satisfied_conditions() -> None:
     # hypotheses and the CITED STATEMENT (it no longer echoes the grounding's
     # stored matched reasons), so satisfied conditions require a statement that
     # genuinely covers the hypotheses.
-    from espresso_proof.models import SourceRef
+    from espresso_proof.kernel.models import SourceRef
 
     step = SourceGroundingStep.model_validate(
         {

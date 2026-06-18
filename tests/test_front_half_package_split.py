@@ -12,7 +12,7 @@ import importlib
 
 
 def test_shim_public_imports_still_work() -> None:
-    shim = importlib.import_module("espresso_proof.front_half_agents")
+    shim = importlib.import_module("espresso_proof.agents.front_half_agents")
     for name in (
         "FRONT_HALF_STAGES",
         "FRONT_HALF_RUN_FILENAME",
@@ -27,7 +27,7 @@ def test_shim_public_imports_still_work() -> None:
 
 def test_package_and_shim_agree() -> None:
     from espresso_proof import front_half
-    from espresso_proof import front_half_agents as shim
+    from espresso_proof.agents import front_half_agents as shim
 
     assert front_half.FRONT_HALF_STAGES == shim.FRONT_HALF_STAGES
     assert front_half.run_front_half_agent_pass is shim.run_front_half_agent_pass

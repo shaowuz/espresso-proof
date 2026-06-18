@@ -11,10 +11,10 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.validators import KernelValidationError, validate_run
-from espresso_proof.verifier import audit_evidence, verify_check
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
+from espresso_proof.verification.verifier import audit_evidence, verify_check
 
 FIXTURES = Path("tests/fixtures")
 
@@ -139,7 +139,7 @@ def test_refuted_cannot_be_hand_flipped_to_checked(tmp_path: Path) -> None:
 def test_examples_stage_never_self_certifies_machine_check(tmp_path: Path) -> None:
     # A model that supplies a machine_check AND tries status=checked: the examples
     # normalizer stores the spec but keeps the computation human_needed.
-    from espresso_proof.front_half_agents import run_front_half_agent_pass
+    from espresso_proof.agents.front_half_agents import run_front_half_agent_pass
     from tests.test_front_half_agents import _FakeClient
 
     run_dir = run_mock_critique("ea_demo", FIXTURES / "vague_claim_unclear" / "input.md", tmp_path)

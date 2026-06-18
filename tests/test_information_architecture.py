@@ -6,13 +6,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof.agent_run_status import set_agent_status
-from espresso_proof.agent_runner import run_single_agent, skip_agent
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.orchestrator import orchestrate_run, resume_run
-from espresso_proof.pressure_status import build_pressure_status
-from espresso_proof.run_dashboard import render_run_dashboard
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.agent_run_status import set_agent_status
+from espresso_proof.orchestration.agent_runner import run_single_agent, skip_agent
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.kernel.pressure_status import build_pressure_status
+from espresso_proof.orchestration.run_dashboard import render_run_dashboard
+from espresso_proof.kernel.validators import validate_run
 
 # A precise finite-group claim that does not trigger the p^2 scoped-verification
 # probes: the run must stay at ZERO earned evidence while still clearing the V2

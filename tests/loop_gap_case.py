@@ -15,7 +15,7 @@ Kept in ONE place so the three consuming test files cannot drift.
 
 from __future__ import annotations
 
-from espresso_proof.loop_harness import DEFAULT_CASES
+from espresso_proof.loop.loop_harness import DEFAULT_CASES
 
 ORDER27_GAP_CASE = {
     "case_id": "order27_abelian_false",

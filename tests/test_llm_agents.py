@@ -10,9 +10,9 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.io import read_yaml
-from espresso_proof.io import write_yaml
-from espresso_proof.llm_agents import (
+from espresso_proof.kernel.io import read_yaml
+from espresso_proof.kernel.io import write_yaml
+from espresso_proof.agents.llm_agents import (
     OpenAIResponsesClient,
     StubLLMClient,
     collect_unsafe_language,
@@ -20,8 +20,8 @@ from espresso_proof.llm_agents import (
     make_verifier_review,
     safe_text,
 )
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import (
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.models import (
     LLMAgentAttempt,
     LLMAgentRunReport,
     LLMAgentVerifierReview,
@@ -29,8 +29,8 @@ from espresso_proof.models import (
     ProverRoundIndex,
     ProverRoundReport,
 )
-from espresso_proof.validators import validate_run
-from espresso_proof.validators import KernelValidationError
+from espresso_proof.kernel.validators import validate_run
+from espresso_proof.kernel.validators import KernelValidationError
 
 
 FIXTURES = Path("tests/fixtures")
@@ -350,7 +350,7 @@ def test_run_flow_openai_network_preflight_fails_before_writing_run(
     def fake_urlopen(request, timeout: int):
         raise RuntimeError("diagnostic network unavailable")
 
-    monkeypatch.setattr("espresso_proof.llm_agents.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("espresso_proof.agents.llm_agents.urllib.request.urlopen", fake_urlopen)
     runner = CliRunner()
 
     result = runner.invoke(
@@ -408,7 +408,7 @@ def test_run_flow_openai_network_preflight_writes_provider_diagnostic(
         calls.append(json.loads(request.data.decode("utf-8")))
         return FakeResponse()
 
-    monkeypatch.setattr("espresso_proof.llm_agents.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("espresso_proof.agents.llm_agents.urllib.request.urlopen", fake_urlopen)
     runner = CliRunner()
 
     result = runner.invoke(
@@ -1585,7 +1585,7 @@ def test_openai_client_uses_responses_structured_outputs_without_storing(monkeyp
         captured["payload"] = json.loads(request.data.decode("utf-8"))
         return FakeResponse()
 
-    monkeypatch.setattr("espresso_proof.llm_agents.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("espresso_proof.agents.llm_agents.urllib.request.urlopen", fake_urlopen)
     client = OpenAIResponsesClient(model="gpt-4.1", timeout=12)
 
     result = client.complete_json(system="Return JSON only.", prompt="Check this sketch.")
@@ -1634,7 +1634,7 @@ def test_agent_doctor_network_check_uses_openai_structured_output(monkeypatch) -
         captured["payload"] = json.loads(request.data.decode("utf-8"))
         return FakeResponse()
 
-    monkeypatch.setattr("espresso_proof.llm_agents.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("espresso_proof.agents.llm_agents.urllib.request.urlopen", fake_urlopen)
     runner = CliRunner()
 
     result = runner.invoke(
@@ -1722,7 +1722,7 @@ def test_safe_text_redaction_does_not_reintroduce_forbidden_word() -> None:
     # Regression: the redaction marker must NOT echo the forbidden phrase, or the
     # prover-round language guard would flag its own redaction (live agents tripped
     # this with words like "verified").
-    from espresso_proof.validators import _first_forbidden_proof_language
+    from espresso_proof.kernel.validators import _first_forbidden_proof_language
 
     redacted = safe_text("This result is verified and the proof is complete.")
     assert "verified" not in redacted.lower()
@@ -1738,7 +1738,7 @@ def test_forbidden_language_redaction_covers_validator() -> None:
     validator. Pins safe_text's FORBIDDEN_LANGUAGE as a superset of the validator
     forbidden set so the two layers cannot drift apart.
     """
-    from espresso_proof.validators import _first_forbidden_proof_language
+    from espresso_proof.kernel.validators import _first_forbidden_proof_language
 
     # One natural sentence per validator-forbidden phrase (lowercased to match the
     # validator's scan of the joined artifact text).

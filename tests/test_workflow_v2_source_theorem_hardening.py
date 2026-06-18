@@ -7,19 +7,19 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import (
+from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.models import (
     LiteratureReviewReport,
     SourceRef,
     TheoremApplicabilityUsage,
     LiteratureReviewAgentReport,
 )
-from espresso_proof.pdf_ingestion import ingest_source_for_theorems
-from espresso_proof.source_verification import ground_run
+from espresso_proof.literature.pdf_ingestion import ingest_source_for_theorems
+from espresso_proof.verification.source_verification import ground_run
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validators import validate_run
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 THM = (

@@ -9,14 +9,14 @@ import pytest
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
-from espresso_proof.claim_clear import ensure_claim_clear_for_downstream
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import run_mock_critique
-from espresso_proof.models import SourceGroundingReport
-from espresso_proof.orchestrator import orchestrate_run
-from espresso_proof.pdf_ingestion import ingest_source_for_theorems
-from espresso_proof.source_verification import ground_run
-from espresso_proof.validators import validate_run
+from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.kernel.models import SourceGroundingReport
+from espresso_proof.orchestration.orchestrator import orchestrate_run
+from espresso_proof.literature.pdf_ingestion import ingest_source_for_theorems
+from espresso_proof.verification.source_verification import ground_run
+from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 # A statement that shares >=2 significant terms + the claim's hypothesis terms
@@ -149,10 +149,10 @@ def test_ground_source_failure_rolls_back_run(tmp_path: Path, monkeypatch) -> No
     # a whole-run snapshot. If grounding fails AFTER partial writes (theorem
     # extraction registered, a partial source_grounding.yaml on disk), the run
     # directory must be restored byte-for-byte and stay kernel-valid.
-    from espresso_proof import source_grounding_stage
-    from espresso_proof.stage_runner import StageError
+    from espresso_proof.literature import source_grounding_stage
+    from espresso_proof.kernel.stage_runner import StageError
 
-    from espresso_proof.run_events import EVENTS_FILENAME
+    from espresso_proof.kernel.run_events import EVENTS_FILENAME
 
     run_dir = _hodge_run(tmp_path)
     src = tmp_path / "outside_src.txt"  # outside run_dir: not part of the snapshot
@@ -246,8 +246,8 @@ def test_tampered_hypothesis_match_blocked_by_independent_audit(tmp_path: Path) 
     # hand-edited hypothesis_match=True over a statement that does not cover
     # the claim hypotheses must fail closed: the audit blocks and the run no
     # longer validates with the step still source_backed.
-    from espresso_proof.theorem_applicability import audit_theorem_applicability
-    from espresso_proof.validators import KernelValidationError
+    from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
+    from espresso_proof.kernel.validators import KernelValidationError
 
     run_dir = _hodge_run(tmp_path)
     ext = _ingest(run_dir, THM, authors=["J.-P. Serre"], title="Topics in Galois Theory")
@@ -281,7 +281,7 @@ def test_tampered_hypothesis_match_blocked_by_independent_audit(tmp_path: Path) 
 def test_independent_audit_confirms_honest_grounding(tmp_path: Path) -> None:
     # The de-circularized audit must NOT break honest grounding: recomputing
     # coverage from the real cited statement reproduces the applicable verdict.
-    from espresso_proof.theorem_applicability import audit_theorem_applicability
+    from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
 
     run_dir = _hodge_run(tmp_path)
     ext = _ingest(run_dir, THM, authors=["J.-P. Serre"], title="Topics in Galois Theory")

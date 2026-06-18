@@ -6,38 +6,38 @@ from pathlib import Path
 
 import typer
 
-from .contracts import DEFAULT_AGENT_FLOW, default_agent_contracts
-from .descriptions import (
+from espresso_proof.kernel.contracts import DEFAULT_AGENT_FLOW, default_agent_contracts
+from espresso_proof.ui.descriptions import (
     describe_grade,
     describe_proof_language,
     evidence_phrase,
     judgment_tier_phrase,
     objection_phrase,
 )
-from .io import read_text, read_yaml, write_text, write_yaml
-from .literature_discovery import discover_literature as run_literature_discovery
-from .literature_review_agent import ReviewSourceSpec, run_literature_review_agent
-from .literature_scout import run_literature_scout
-from .retrieval_grounding import retrieve_and_ground
-from .llm_agents import append_prover_loop_round
-from .llm_agents import resolve_agent_gate as resolve_llm_agent_gate
-from .llm_agents import build_client as build_llm_client
-from .llm_agents import build_prover_loop_report
-from .front_half_agents import run_front_half_agent_pass
-from .orchestrator import orchestrate_run, resume_run
-from .prover_loop_driver import continue_prover_loop
-from .run_lock import run_writer_lock
-from .llm_agents import external_agent_diagnostic
-from .llm_agents import openai_agent_diagnostic
-from .llm_agents import route_initial_reviewer_blockers_to_update_inbox
-from .llm_agents import run_llm_agent_pass
-from .llm_agents import write_initial_prover_round_artifacts
-from .failure_classifier import classify_failures
-from .failure_pattern_bank import audit_failure_patterns, seed_failure_pattern_bank
-from .autonomous_retrieval import run_autonomous_retrieval
-from .bank_dashboard import render_bank_dashboard
-from .run_dashboard import render_run_dashboard, write_run_dashboard
-from .research_bank import (
+from espresso_proof.kernel.io import read_text, read_yaml, write_text, write_yaml
+from espresso_proof.literature.literature_discovery import discover_literature as run_literature_discovery
+from espresso_proof.literature.literature_review_agent import ReviewSourceSpec, run_literature_review_agent
+from espresso_proof.literature.literature_scout import run_literature_scout
+from espresso_proof.literature.retrieval_grounding import retrieve_and_ground
+from espresso_proof.agents.llm_agents import append_prover_loop_round
+from espresso_proof.agents.llm_agents import resolve_agent_gate as resolve_llm_agent_gate
+from espresso_proof.agents.llm_agents import build_client as build_llm_client
+from espresso_proof.agents.llm_agents import build_prover_loop_report
+from espresso_proof.agents.front_half_agents import run_front_half_agent_pass
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.orchestration.prover_loop_driver import continue_prover_loop
+from espresso_proof.kernel.run_lock import run_writer_lock
+from espresso_proof.agents.llm_agents import external_agent_diagnostic
+from espresso_proof.agents.llm_agents import openai_agent_diagnostic
+from espresso_proof.agents.llm_agents import route_initial_reviewer_blockers_to_update_inbox
+from espresso_proof.agents.llm_agents import run_llm_agent_pass
+from espresso_proof.agents.llm_agents import write_initial_prover_round_artifacts
+from espresso_proof.orchestration.failure_classifier import classify_failures
+from espresso_proof.kernel.failure_pattern_bank import audit_failure_patterns, seed_failure_pattern_bank
+from espresso_proof.literature.autonomous_retrieval import run_autonomous_retrieval
+from espresso_proof.ui.bank_dashboard import render_bank_dashboard
+from espresso_proof.orchestration.run_dashboard import render_run_dashboard, write_run_dashboard
+from espresso_proof.kernel.research_bank import (
     _BANKABLE_KINDS,
     append_bank_item,
     load_bankable_dict,
@@ -48,57 +48,57 @@ from .research_bank import (
 # retrieval_grounding.retrieve_and_ground (Goal 03, candidate/local_corpus). Alias
 # this one so it does not shadow the Goal 03 import above (which the
 # `retrieve-and-ground` command depends on).
-from .literature_retrieval import retrieve_and_ground as retrieve_and_ground_from_corpus
-from .literature_retrieval import retrieve_sources
-from .mathematical_judgment import judge_run
-from .memory_context import build_memory_context
-from .subgoal_graph import build_subgoal_graph
-from .finite_group_verifier import verify_identity_on_table
-from .proof_verification import (
+from espresso_proof.literature.literature_retrieval import retrieve_and_ground as retrieve_and_ground_from_corpus
+from espresso_proof.literature.literature_retrieval import retrieve_sources
+from espresso_proof.verification.mathematical_judgment import judge_run
+from espresso_proof.memory.memory_context import build_memory_context
+from espresso_proof.kernel.subgoal_graph import build_subgoal_graph
+from espresso_proof.verification.finite_group_verifier import verify_identity_on_table
+from espresso_proof.verification.proof_verification import (
     auto_wire_scoped_verifications,
     verify_finite_groups,
     verify_identity_table_in_run,
     verify_matrix_rank_in_run,
     verify_ring_identity_in_run,
 )
-from .symbolic_identity import SUPPORTED_RING_IDENTITIES
-from .benchmark import run_benchmark
-from .calibration import run_calibration
-from .claim_clear import (
+from espresso_proof.verification.symbolic_identity import SUPPORTED_RING_IDENTITIES
+from espresso_proof.evaluation.benchmark import run_benchmark
+from espresso_proof.evaluation.calibration import run_calibration
+from espresso_proof.claim.claim_clear import (
     CLAIM_CLEAR_BLOCKED_ON_DEMAND_AGENTS,
     ClaimClearBlockedError,
     ensure_claim_clear_for_downstream,
 )
-from .scorecard import render_scorecard_markdown, run_scorecard
-from .memo import build_concise_memo
-from .proof_language import scrub_proof_language
-from .surface_warnings import (
+from espresso_proof.evaluation.scorecard import render_scorecard_markdown, run_scorecard
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.kernel.proof_language import scrub_proof_language
+from espresso_proof.kernel.surface_warnings import (
     collect_surface_warnings,
     refresh_final_report_disclosures,
     render_warning_lines,
 )
-from .reviewer_checklist import review_checklist
-from .memory import load_memory_index, summarize_memory, write_memory_entry
-from .mock_pipeline import run_mock_critique
-from .pdf_ingestion import (
+from espresso_proof.evaluation.reviewer_checklist import review_checklist
+from espresso_proof.memory.memory import load_memory_index, summarize_memory, write_memory_entry
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.literature.pdf_ingestion import (
     extract_candidate_locators,
     extract_source_text,
     ingest_source_for_theorems,
     read_source_bytes,
 )
-from .source_verification import ground_run
-from .source_grounding_stage import prepare_source_grounding
-from .external_tool_runner import (
+from espresso_proof.verification.source_verification import ground_run
+from espresso_proof.literature.source_grounding_stage import prepare_source_grounding
+from espresso_proof.kernel.external_tool_runner import (
     DEFAULT_TIMEOUT_SECONDS,
     FAKE_TOOLS,
     UnknownToolError,
     run_and_record_external_tool,
     run_completed_cleanly,
 )
-from .external_tool_adapters import run_exact_modexp_adapter
-from .theorem_applicability import audit_theorem_applicability
-from .verifier import audit_evidence, verify_computation_checks
-from .models import (
+from espresso_proof.verification.external_tool_adapters import run_exact_modexp_adapter
+from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
+from espresso_proof.verification.verifier import audit_evidence, verify_computation_checks
+from espresso_proof.kernel.models import (
     AdmissionCheck,
     AgentContracts,
     ContinueDecision,
@@ -116,8 +116,8 @@ from .models import (
     TheoremExtractionReport,
     WorkflowSpec,
 )
-from .validators import KernelValidationError, validate_run
-from .workflow_generator import generate_workflow_spec
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
+from espresso_proof.orchestration.workflow_generator import generate_workflow_spec
 
 app = typer.Typer(help="Espresso Proof local kernel.")
 
@@ -347,7 +347,7 @@ def run_agent_command(
     proof/source/evidence/grade/claim status. Run agents in any order or in
     parallel processes -- the final valid state is the same.
     """
-    from .agent_runner import ON_DEMAND_AGENTS, run_single_agent, skip_agent
+    from espresso_proof.orchestration.agent_runner import ON_DEMAND_AGENTS, run_single_agent, skip_agent
 
     # Accept the hyphenated CLI spelling for the failure-pattern audit.
     agent_key = "failure_patterns" if agent in {"failure-patterns", "failure_patterns"} else agent
@@ -555,7 +555,7 @@ def build_subgoal_graph_command(
     proved, and a node may carry source_supported / scoped_checked only when it
     references support the kernel already earned. The validators remain the gate.
     """
-    from .theorem_condition_ledger import build_theorem_condition_ledger
+    from espresso_proof.verification.theorem_condition_ledger import build_theorem_condition_ledger
 
     # Goal 57A: ensure the advisory theorem-condition ledger exists before the
     # graph reads it (idempotent; empty ledger when there is no llm_agent_run).
@@ -722,7 +722,7 @@ def serve_command(
     This is the canonical product entry. It defaults to the external Codex-agent
     path; pass --provider stub only for explicit dev/test smoke runs.
     """
-    from .server import serve
+    from espresso_proof.server import serve
 
     if provider not in {"stub", "openai", "external"}:
         raise typer.BadParameter("provider must be stub, openai, or external")
@@ -820,8 +820,8 @@ def _refresh_derived_views(run: Path) -> None:
     through the same kernel gate and only reflects evidence the kernel already
     earned.
     """
-    from .subgoal_graph import build_subgoal_graph, remove_subgoal_graph
-    from .theorem_condition_ledger import build_theorem_condition_ledger
+    from espresso_proof.kernel.subgoal_graph import build_subgoal_graph, remove_subgoal_graph
+    from espresso_proof.verification.theorem_condition_ledger import build_theorem_condition_ledger
 
     if (run / "proof_goal_graph.yaml").exists():
         try:
@@ -2255,7 +2255,7 @@ def loop_cycle(
     observational: it never changes code, never opens PRs, and no loop record
     can upgrade any proof/source/evidence/grade/refutation/claim status.
     """
-    from .loop_harness import run_loop_cycle
+    from espresso_proof.loop.loop_harness import run_loop_cycle
 
     cycle_dir = run_loop_cycle(
         out_root=out, cases_path=cases, mode=mode, cycle_id=cycle_id, max_cases=max_cases
@@ -2287,7 +2287,7 @@ def loop_closure_scorecard_cmd(
         espresso loop-cycle --out <root> --mode smoke      # replay cycle
         espresso loop-closure-scorecard --cycle <replay_cycle> --before <baseline_cycle>
     """
-    from .loop_closure_scorecard import write_loop_closure_scorecard
+    from espresso_proof.evaluation.loop_closure_scorecard import write_loop_closure_scorecard
 
     required = list(require) if require else None
     scorecard = write_loop_closure_scorecard(cycle, required_handoffs=required, before_cycle_dir=before)
@@ -2311,7 +2311,7 @@ def loop_review(
     the cycle folder. Actionable findings always cite evidence paths;
     unevidenced impressions are advisory and can never drive an autofix.
     """
-    from .loop_reviewers import run_review_pass
+    from espresso_proof.loop.loop_reviewers import run_review_pass
 
     reports_dir = run_review_pass(cycle)
     typer.echo(f"Six review reports written to {reports_dir}")
@@ -2334,7 +2334,7 @@ def loop_triage(
     mandatory, replay cases required; protected safety surfaces refused).
     Never changes code.
     """
-    from .loop_triage import build_autofix_plan, run_triage
+    from espresso_proof.loop.loop_triage import build_autofix_plan, run_triage
 
     decision = run_triage(cycle)
     typer.echo(f"Selected gap: {decision.selected_gap_id} ({decision.selected_gap_kind})")
@@ -2373,9 +2373,9 @@ def loop_replay(
     improvement or without sibling/holdout no-regression evidence is never
     successful; a failed pre-merge replay BLOCKS the merge (exit 1).
     """
-    from .io import read_yaml as _read_yaml
-    from .loop_harness import load_cases
-    from .loop_replay import run_replay
+    from espresso_proof.kernel.io import read_yaml as _read_yaml
+    from espresso_proof.loop.loop_harness import load_cases
+    from espresso_proof.loop.loop_replay import run_replay
 
     # blinded holdouts: never cases that were in the reviewed cycle (those
     # were used to select the fix), never the trigger/siblings.
@@ -2420,7 +2420,7 @@ def loop_stop_gate_command(
     open P0/P1; hitting max_cycles/max_wall_time is STOP_BUDGET_EXHAUSTED,
     never acceptance.
     """
-    from .loop_stop_gate import evaluate_stop_gate
+    from espresso_proof.loop.loop_stop_gate import evaluate_stop_gate
 
     gate = evaluate_stop_gate(out, repo_root=Path.cwd())
     typer.echo(

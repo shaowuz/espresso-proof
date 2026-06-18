@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.llm_agents import _split_machine_answered_blockers
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.agents.llm_agents import _split_machine_answered_blockers
 
 BLOCKERS = [
     "Exact theorem supporting the main reduction.",
@@ -110,9 +110,9 @@ def test_nothing_answered_without_evidence_or_on_claim_mismatch(tmp_path: Path) 
 def test_e2e_p2_run_resolves_computation_request_and_keeps_source_requests(
     tmp_path: Path,
 ) -> None:
-    from espresso_proof.io import write_text
-    from espresso_proof.orchestrator import orchestrate_run, resume_run
-    from espresso_proof.validators import validate_run
+    from espresso_proof.kernel.io import write_text
+    from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+    from espresso_proof.kernel.validators import validate_run
 
     input_path = tmp_path / "input.md"
     write_text(input_path, "Every group of order p^2, where p is prime, is abelian.\n")
@@ -161,8 +161,8 @@ def test_e2e_p2_run_resolves_computation_request_and_keeps_source_requests(
 
 
 def test_e2e_run_without_evidence_keeps_all_blockers(tmp_path: Path) -> None:
-    from espresso_proof.io import write_text
-    from espresso_proof.orchestrator import orchestrate_run
+    from espresso_proof.kernel.io import write_text
+    from espresso_proof.orchestration.orchestrator import orchestrate_run
 
     input_path = tmp_path / "input.md"
     write_text(input_path, "Every group of order 6 is abelian.\n")
@@ -184,7 +184,7 @@ def test_e2e_run_without_evidence_keeps_all_blockers(tmp_path: Path) -> None:
 
 
 def test_blocker_taxonomy_routes_theorem_requests_to_source_gap(tmp_path: Path) -> None:
-    from espresso_proof.loop_harness import run_loop_cycle
+    from espresso_proof.loop.loop_harness import run_loop_cycle
 
     cases_file = tmp_path / "cases.yaml"
     write_yaml(
@@ -220,10 +220,10 @@ def test_registry_required_blocker_families_route_to_goal_proposals(tmp_path: Pa
     # P1 finding must carry the oversize marker, and triage must never SELECT
     # such a family as the cycle's gap (when one heads the priority order it
     # becomes a new-goal proposal and selection moves on).
-    from espresso_proof.loop_harness import run_loop_cycle
-    from espresso_proof.loop_models import ReviewReport
-    from espresso_proof.loop_reviewers import run_review_pass
-    from espresso_proof.loop_triage import run_triage
+    from espresso_proof.loop.loop_harness import run_loop_cycle
+    from espresso_proof.kernel.loop_models import ReviewReport
+    from espresso_proof.loop.loop_reviewers import run_review_pass
+    from espresso_proof.loop.loop_triage import run_triage
     from tests.loop_gap_case import gap_cases
 
     cases_file = tmp_path / "cases.yaml"
@@ -250,7 +250,7 @@ def test_registry_required_blocker_families_route_to_goal_proposals(tmp_path: Pa
 
 
 def test_replay_probe_computation_request_blockers_resolved(tmp_path: Path) -> None:
-    from espresso_proof.loop_replay import (
+    from espresso_proof.loop.loop_replay import (
         _probe_computation_request_blockers_resolved as probe,
     )
 
@@ -279,7 +279,7 @@ def test_replay_probe_computation_request_blockers_resolved(tmp_path: Path) -> N
 
 def test_classifier_provenance_tiers() -> None:
     # Goal 42E cycle 4: provenance decides first.
-    from espresso_proof.loop_harness import classify_blocker
+    from espresso_proof.loop.loop_harness import classify_blocker
 
     risk = "A sketch-only argument cannot become proof-complete evidence."
     assert classify_blocker(risk, provenance={"objection"}) == "reviewer_objection"
@@ -298,7 +298,7 @@ def test_standing_risks_classified_human_gated_in_cycle(tmp_path: Path) -> None:
     # End-to-end through the harness: objection/hypothesis blockers carry
     # human_judgment_needed in blockers.yaml, so the reviewer routes them to
     # goal proposals instead of bounded-fix selection.
-    from espresso_proof.loop_harness import run_loop_cycle
+    from espresso_proof.loop.loop_harness import run_loop_cycle
 
     cases_file = tmp_path / "cases.yaml"
     write_yaml(
@@ -334,10 +334,10 @@ def test_standing_risks_classified_human_gated_in_cycle(tmp_path: Path) -> None:
 def test_standing_risk_families_carry_redesign_marker(tmp_path: Path) -> None:
     # Two consecutive cycles -> recurring families; the standing-risk ones
     # must carry an oversize marker so triage proposes instead of selecting.
-    from espresso_proof.loop_harness import run_loop_cycle
-    from espresso_proof.loop_models import ReviewReport
-    from espresso_proof.loop_reviewers import run_review_pass
-    from espresso_proof.loop_triage import _is_oversized, run_triage
+    from espresso_proof.loop.loop_harness import run_loop_cycle
+    from espresso_proof.kernel.loop_models import ReviewReport
+    from espresso_proof.loop.loop_reviewers import run_review_pass
+    from espresso_proof.loop.loop_triage import _is_oversized, run_triage
     from tests.loop_gap_case import gap_cases
 
     cases_file = tmp_path / "cases.yaml"
@@ -362,7 +362,7 @@ def test_standing_risk_families_carry_redesign_marker(tmp_path: Path) -> None:
 
 
 def test_replay_probe_standing_risks_classified(tmp_path: Path) -> None:
-    from espresso_proof.loop_replay import (
+    from espresso_proof.loop.loop_replay import (
         _probe_standing_risks_classified_human_gated as probe,
     )
 

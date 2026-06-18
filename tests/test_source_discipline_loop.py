@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof.io import read_yaml, write_yaml
-from espresso_proof.mock_pipeline import _detect_scenario
+from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.mock_pipeline import _detect_scenario
 
 DISCIPLINE_CLAIM = (
     "Every cubic fourfold has a nontrivial Hodge atom obstruction, so all "
@@ -31,9 +31,9 @@ def test_universal_irrationality_routes_to_source_misapplication(tmp_path: Path)
 
 
 def test_discipline_run_records_refusal_and_holds_candidate(tmp_path: Path) -> None:
-    from espresso_proof.io import write_text
-    from espresso_proof.orchestrator import orchestrate_run
-    from espresso_proof.validators import validate_run
+    from espresso_proof.kernel.io import write_text
+    from espresso_proof.orchestration.orchestrator import orchestrate_run
+    from espresso_proof.kernel.validators import validate_run
 
     input_path = tmp_path / "input.md"
     write_text(input_path, DISCIPLINE_CLAIM)
@@ -59,9 +59,9 @@ def test_discipline_run_records_refusal_and_holds_candidate(tmp_path: Path) -> N
 
 
 def test_refusal_reaches_ledger_and_reviewer_treats_it_as_earned(tmp_path: Path) -> None:
-    from espresso_proof.loop_harness import run_loop_cycle
-    from espresso_proof.loop_models import ReviewReport
-    from espresso_proof.loop_reviewers import run_review_pass
+    from espresso_proof.loop.loop_harness import run_loop_cycle
+    from espresso_proof.kernel.loop_models import ReviewReport
+    from espresso_proof.loop.loop_reviewers import run_review_pass
 
     cases_file = tmp_path / "cases.yaml"
     write_yaml(
@@ -113,9 +113,9 @@ def test_refusal_reaches_ledger_and_reviewer_treats_it_as_earned(tmp_path: Path)
 def test_true_theorem_case_still_gets_the_p1(tmp_path: Path) -> None:
     # the earned-refusal carve-out is for the source_sensitive family ONLY: a
     # true theorem with sources stuck at candidate is still a real gap.
-    from espresso_proof.loop_harness import run_loop_cycle
-    from espresso_proof.loop_models import ReviewReport
-    from espresso_proof.loop_reviewers import run_review_pass
+    from espresso_proof.loop.loop_harness import run_loop_cycle
+    from espresso_proof.kernel.loop_models import ReviewReport
+    from espresso_proof.loop.loop_reviewers import run_review_pass
 
     cases_file = tmp_path / "cases.yaml"
     write_yaml(
@@ -153,9 +153,9 @@ def test_unclear_conditions_alone_do_not_count_as_refusal(tmp_path: Path) -> Non
     # missing_or_unclear_hypotheses came only from unclear/not_checked
     # applicability conditions (external-mode shape: the misapplication
     # machinery never engaged) must still draw the P1, never the advisory.
-    from espresso_proof.loop_harness import run_loop_cycle
-    from espresso_proof.loop_models import ReviewReport
-    from espresso_proof.loop_reviewers import run_review_pass
+    from espresso_proof.loop.loop_harness import run_loop_cycle
+    from espresso_proof.kernel.loop_models import ReviewReport
+    from espresso_proof.loop.loop_reviewers import run_review_pass
 
     cases_file = tmp_path / "cases.yaml"
     write_yaml(
@@ -217,7 +217,7 @@ def test_unclear_conditions_alone_do_not_count_as_refusal(tmp_path: Path) -> Non
 def test_mismatch_notes_survive_condition_truncation(tmp_path: Path) -> None:
     # the recorded mismatch is the refusal signal: it takes the ledger slots
     # first and can never be crowded out by eight unclear conditions.
-    from espresso_proof.loop_harness import _collect_theorem_use, load_cases
+    from espresso_proof.loop.loop_harness import _collect_theorem_use, load_cases
 
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -270,7 +270,7 @@ def test_mismatch_notes_survive_condition_truncation(tmp_path: Path) -> None:
 
 
 def test_replay_probe_source_mismatch_refusal(tmp_path: Path) -> None:
-    from espresso_proof.loop_replay import recorded_misapplication_refusal as probe
+    from espresso_proof.loop.loop_replay import recorded_misapplication_refusal as probe
 
     ok, note = probe(tmp_path)
     assert not ok and "no source_grounding.yaml" in note
