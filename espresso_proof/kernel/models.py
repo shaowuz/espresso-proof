@@ -3161,11 +3161,36 @@ class MemoryIndex(StrictBaseModel):
         return self
 
 
+class RunState(str, Enum):
+    """Closed, kernel-enforced set of run_manifest ``current_state`` values.
+
+    A ``str`` Enum so every existing string comparison (``== "COMPLETED_MEMO"``)
+    and ``ORCHESTRATION_STATES.index(state)`` keeps working, and a plain YAML
+    string coerces to a member on load (StrictBaseModel only forbids extra keys;
+    it is not strict-typed). ``WAITING_HUMAN_MAJOR_DECISION`` is the legacy genesis
+    state written by ``run_mock_critique``; ``EVIDENCE_FANOUT_RUNNING`` is reserved
+    for the context-lane fan-out (subgoal 3) and is not emitted yet.
+    """
+
+    SCAFFOLDED = "SCAFFOLDED"
+    WAITING_HUMAN_MAJOR_DECISION = "WAITING_HUMAN_MAJOR_DECISION"
+    WAITING_CLAIM_CLARIFICATION = "WAITING_CLAIM_CLARIFICATION"
+    FRONT_HALF_DONE = "FRONT_HALF_DONE"
+    CLAIM_CLEAR = "CLAIM_CLEAR"
+    EVIDENCE_FANOUT_RUNNING = "EVIDENCE_FANOUT_RUNNING"
+    LITERATURE_DONE = "LITERATURE_DONE"
+    WAITING_LLM_AGENT_HUMAN_GATE = "WAITING_LLM_AGENT_HUMAN_GATE"
+    HUMAN_CHOICE_CONTINUE_SELECTED = "HUMAN_CHOICE_CONTINUE_SELECTED"
+    HUMAN_CHOICE_REVISE_SELECTED = "HUMAN_CHOICE_REVISE_SELECTED"
+    HUMAN_CHOICE_STOP_SELECTED = "HUMAN_CHOICE_STOP_SELECTED"
+    COMPLETED_MEMO = "COMPLETED_MEMO"
+
+
 class RunManifest(StrictBaseModel):
     run_id: str
     project_id: str
     created_at: str
-    current_state: str
+    current_state: RunState
     input_file: str
     artifacts: dict[str, str]
     optional_artifacts: dict[str, str] = Field(default_factory=dict)
