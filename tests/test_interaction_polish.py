@@ -76,12 +76,11 @@ def test_running_and_failed_agents_show_no_done_styling(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_entry_page_has_durable_job_row_with_retry_and_fast_switch(tmp_path: Path) -> None:
+def test_entry_page_has_durable_job_row_with_retry(tmp_path: Path) -> None:
     wb = Workbench(tmp_path / "root", provider="stub")
     html = _index_page(wb)
     assert 'id="jobrow"' in html
     assert 'id="jr-retry"' in html and "Retry" in html
-    assert 'id="jr-fast"' in html and "Switch to Fast preview" in html
     assert "Check that Espresso is still running" in html
     # the long-wait copy exists for deep runs
     assert "Codex is still working" in html
