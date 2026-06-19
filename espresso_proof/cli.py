@@ -385,6 +385,105 @@ def run_agent_command(
     )
 
 
+@app.command("run-agents")
+def run_agents_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    agents: str | None = typer.Option(
+        None,
+        "--agents",
+        help="Comma-separated subset (examples,counterexamples,literature,failure-patterns). Default: all.",
+    ),
+    serial: bool = typer.Option(
+        False, "--serial", help="Force the serial path (default: parallel compute, serial commit)."
+    ),
+    max_workers: int = typer.Option(4, "--max-workers", help="Bound on concurrent lane compute()s."),
+    provider: str = typer.Option("stub", "--provider"),
+    model: str = typer.Option("gpt-4.1", "--model"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND", "--external-agent-command-env"
+    ),
+) -> None:
+    """Run a BATCH of on-demand evidence agents (parallel compute, serial commit).
+
+    The default path computes the context lanes concurrently off the run writer
+    lock, then commits them serially on this thread in the deterministic order
+    (counterexamples then examples; they share tests.yaml). It converges to the
+    SAME valid run as running each agent serially -- the kernel re-validates the
+    whole run after every commit and nothing here upgrades any status. This is
+    opt-in: the fast-core orchestrate pass still defers evidence (stays
+    PRELIMINARY) until you invoke a batch / run-agent.
+    """
+    from espresso_proof.orchestration.agent_runner import ON_DEMAND_AGENTS
+    from espresso_proof.orchestration.evidence_coordinator import (
+        run_evidence_batch,
+        run_evidence_batch_auto,
+    )
+
+    if provider not in {"stub", "openai", "external"}:
+        raise typer.BadParameter("provider must be stub, openai, or external")
+
+    if agents is None:
+        requested = list(ON_DEMAND_AGENTS)
+    else:
+        requested = []
+        for raw in agents.split(","):
+            name = raw.strip()
+            if not name:
+                continue
+            key = "failure_patterns" if name in {"failure-patterns", "failure_patterns"} else name
+            if key not in ON_DEMAND_AGENTS:
+                raise typer.BadParameter(
+                    "--agents entries must be among: examples, counterexamples, literature, failure-patterns"
+                )
+            requested.append(key)
+        if not requested:
+            raise typer.BadParameter("--agents resolved to an empty set")
+
+    # Same friendly precheck as run-agent: the claim must be clear before the
+    # claim-clear-gated lanes run (run_single_agent also enforces this at commit).
+    if any(a in CLAIM_CLEAR_BLOCKED_ON_DEMAND_AGENTS for a in requested):
+        validate_run(run)
+        _require_claim_clear_for_cli(run)
+
+    if serial:
+        # The serial path takes no pool; --max-workers is a no-op there.
+        out = run_evidence_batch(
+            run,
+            requested,
+            provider=provider,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+        )
+    else:
+        out = run_evidence_batch_auto(
+            run,
+            requested,
+            provider=provider,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+            max_workers=max_workers,
+        )
+
+    agent_results = out["agents"]
+    failed = [a for a, r in agent_results.items() if r.get("status") == "failed"]
+    for agent_key, result in agent_results.items():
+        status = result.get("status")
+        if status == "failed":
+            typer.echo(f"Agent {agent_key}: FAILED and rolled back. {result.get('error', '')}")
+        else:
+            typer.echo(f"Agent {agent_key}: {status}.")
+    path_word = "serial" if serial else "parallel"
+    typer.echo(
+        f"Batch ({path_word}) done over {len(agent_results)} agent(s); the kernel re-validated "
+        "the run after every commit (no status upgraded). Per-lane timing in agent_events.jsonl."
+    )
+    if failed:
+        raise typer.Exit(code=1)
+
+
 @app.command("run-flow")
 def run_flow(
     input: Path = typer.Option(..., "--input", "-i", exists=True, dir_okay=False),

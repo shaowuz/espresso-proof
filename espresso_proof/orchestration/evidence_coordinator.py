@@ -16,10 +16,18 @@ the ``agent_run_status`` board.
 from __future__ import annotations
 
 import concurrent.futures as _cf
+import os
 import time
 from pathlib import Path
 
 from espresso_proof.agents.llm_agents import build_client
+from espresso_proof.kernel.io import read_yaml
+from espresso_proof.kernel.observability import (
+    append_agent_event,
+    monotonic_ms,
+    now_iso,
+    write_timings,
+)
 from espresso_proof.kernel.run_lock import DEFAULT_TIMEOUT_SECONDS, RunLockedError
 from espresso_proof.orchestration.agent_runner import (
     ON_DEMAND_AGENTS,
@@ -144,6 +152,33 @@ def _commit_lane_with_lock_retry(
             time.sleep(backoff_seconds * attempt)
 
 
+def _timed_compute(run_dir: Path, agent: str, **kwargs) -> dict:
+    """Time one lane's pure compute on a worker thread. NEVER raises -- a compute
+    failure is captured so the coordinator can fall back to inline recompute. The
+    agent_events record is written later, on the COORDINATOR thread, to avoid
+    concurrent writers to agent_events.jsonl.
+    """
+    started_at = now_iso()
+    t0 = monotonic_ms()
+    try:
+        candidate = compute_agent(run_dir, agent, **kwargs)
+        return {
+            "agent": agent,
+            "candidate": candidate,
+            "started_at": started_at,
+            "duration_ms": monotonic_ms() - t0,
+            "error": None,
+        }
+    except Exception as exc:  # noqa: BLE001 - captured for inline fallback
+        return {
+            "agent": agent,
+            "candidate": None,
+            "started_at": started_at,
+            "duration_ms": monotonic_ms() - t0,
+            "error": str(exc)[:500],
+        }
+
+
 def run_evidence_batch_parallel(
     run_dir: Path,
     agents: list[str] | None = None,
@@ -194,17 +229,20 @@ def run_evidence_batch_parallel(
             external_agent_command_env=external_agent_command_env,
         )
 
+    run_id = (read_yaml(run_dir / "run_manifest.yaml") or {}).get("run_id")
+
     # PHASE 1 -- parallel COMPUTE (off the lock) of the precompute lanes only. A
     # lane whose compute raises is NOT dropped: it is committed via the inline
     # recompute path below (candidate stays None), reproducing the serial
-    # fail-closed behavior exactly.
-    candidates: dict[str, object] = {}
+    # fail-closed behavior exactly. Timing is captured per lane and the
+    # observability event is written later on the coordinator thread.
+    timed: dict[str, dict] = {}
     if precompute:
         pool_size = max(1, min(max_workers, len(precompute)))
         with _cf.ThreadPoolExecutor(max_workers=pool_size) as executor:
             futures = {
                 executor.submit(
-                    compute_agent,
+                    _timed_compute,
                     run_dir,
                     agent,
                     provider=provider,
@@ -216,24 +254,40 @@ def run_evidence_batch_parallel(
                 for agent in precompute
             }
             for future in _cf.as_completed(futures):
-                agent = futures[future]
-                try:
-                    candidates[agent] = future.result()
-                except Exception:
-                    # compute failed off-lock; fall back to inline commit (recompute)
-                    candidates[agent] = None
+                info = future.result()  # _timed_compute never raises
+                timed[info["agent"]] = info
 
     # PHASE 2 -- serial COMMIT on the coordinator thread, in deterministic order.
     # Precompute lanes commit their candidate; any deferred lane (failure_patterns)
     # has candidate=None, so run_single_agent recomputes it inline at THIS point --
     # after the precompute lanes have committed -- exactly like the serial batch,
     # where it reads the now-committed counterexamples / computation_checks.
+    # Per-lane compute + commit timing is recorded to agent_events.jsonl (which is
+    # snapshot-excluded, so it survives StageRunner rollbacks) on this thread.
     results: dict[str, dict] = {}
     for agent in ordered:
-        results[agent] = _commit_lane_with_lock_retry(
+        info = timed.get(agent)
+        if info is not None:
+            append_agent_event(
+                run_dir,
+                agent_name=agent,
+                provider=provider,
+                adapter="evidence_batch",
+                stage="evidence_compute",
+                agent_status="failed" if info["error"] else "finished",
+                started_at=info["started_at"],
+                duration_ms=info["duration_ms"],
+                model=model,
+                run_id=run_id,
+                error_summary=info["error"],
+            )
+
+        commit_started = now_iso()
+        c0 = monotonic_ms()
+        result = _commit_lane_with_lock_retry(
             run_dir,
             agent,
-            candidates.get(agent),
+            info["candidate"] if info is not None else None,
             provider=provider,
             model=model,
             api_key_env=api_key_env,
@@ -241,11 +295,78 @@ def run_evidence_batch_parallel(
             retries=commit_retries,
             backoff_seconds=commit_backoff_seconds,
         )
+        append_agent_event(
+            run_dir,
+            agent_name=agent,
+            provider=provider,
+            adapter="evidence_batch",
+            stage="evidence_commit",
+            agent_status="failed" if result.get("status") == "failed" else "finished",
+            started_at=commit_started,
+            duration_ms=monotonic_ms() - c0,
+            model=model,
+            run_id=run_id,
+            error_summary=result.get("error"),
+        )
+        results[agent] = result
+
+    # Aggregate the per-lane timings into timings.yaml (diagnostic; fails closed).
+    write_timings(run_dir)
     return {"agents": results}
+
+
+# Default-on feature flag: the batch entrypoints use the parallel coordinator by
+# default and fall back to the serial path when this is turned off. Both paths
+# produce a byte-identical run (proven in subgoal 05), so the flag is purely an
+# operational escape hatch.
+PARALLEL_ENV = "ESPRESSO_EVIDENCE_PARALLEL"
+_FLAG_OFF = {"false", "0", "no", "off"}
+
+
+def evidence_parallel_enabled() -> bool:
+    """Whether the batch entrypoints use the parallel coordinator (default true)."""
+    return os.environ.get(PARALLEL_ENV, "true").strip().lower() not in _FLAG_OFF
+
+
+def run_evidence_batch_auto(
+    run_dir: Path,
+    agents: list[str] | None = None,
+    *,
+    provider: str = "stub",
+    model: str = "gpt-4.1",
+    api_key_env: str = "OPENAI_API_KEY",
+    external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+    max_workers: int = DEFAULT_MAX_WORKERS,
+) -> dict:
+    """Run the evidence batch via the parallel coordinator by default, or the
+    serial path when ``ESPRESSO_EVIDENCE_PARALLEL`` is off. This is the single
+    entrypoint the CLI / server should call. Both paths converge to the same run.
+    """
+    if evidence_parallel_enabled():
+        return run_evidence_batch_parallel(
+            run_dir,
+            agents,
+            provider=provider,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+            max_workers=max_workers,
+        )
+    return run_evidence_batch(
+        run_dir,
+        agents,
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+    )
 
 
 __all__ = [
     "run_evidence_batch",
     "run_evidence_batch_parallel",
+    "run_evidence_batch_auto",
+    "evidence_parallel_enabled",
     "order_for_commit",
+    "PARALLEL_ENV",
 ]

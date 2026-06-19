@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from espresso_proof.orchestration.agent_runner import ON_DEMAND_AGENTS, run_single_agent, skip_agent
+from espresso_proof.orchestration.evidence_coordinator import run_evidence_batch_auto
 from espresso_proof.ui.cockpit_view import PANELS, build_panel, build_snapshot
 from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
 from espresso_proof.kernel.run_events import append_event
@@ -404,6 +405,40 @@ class Workbench:
             kwargs={"lock": self._run_lock(run_id)}, daemon=True,
         ).start()
         return {"job_id": job_id, "agent": agent}
+
+    def start_agents_batch(self, run_id: str, agents: list[str] | None = None) -> dict[str, Any]:
+        """Run a BATCH of on-demand evidence agents (parallel compute, serial commit).
+
+        Same fail-closed / re-validate-after-every-commit discipline as
+        ``start_agent``; converges to the same valid run as running them one by one.
+        Opt-in -- the fast-core pass still defers evidence until a batch is invoked.
+        """
+        run_dir = self.resolve_run(run_id)
+        requested: list[str] | None = None
+        if agents is not None:
+            requested = []
+            for raw in agents:
+                a = _AGENT_ALIASES.get(raw, raw)
+                if a not in ON_DEMAND_AGENTS:
+                    raise WorkbenchError(400, f"unknown agent: {raw}")
+                requested.append(a)
+            if not requested:
+                raise WorkbenchError(400, "no agents requested")
+        resolved = requested if requested is not None else list(ON_DEMAND_AGENTS)
+        job_id = self._new_job(run_id=run_id, action="agents-batch", agent=",".join(resolved))
+
+        def work() -> dict[str, Any]:
+            result = run_evidence_batch_auto(run_dir, requested, provider=self.provider)
+            failed = [a for a, r in result["agents"].items() if r.get("status") == "failed"]
+            if failed:
+                raise WorkbenchError(500, f"evidence agents failed: {', '.join(failed)}")
+            return result
+
+        threading.Thread(
+            target=self._run_job, args=(job_id, work),
+            kwargs={"lock": self._run_lock(run_id)}, daemon=True,
+        ).start()
+        return {"job_id": job_id, "agents": resolved}
 
     def skip(self, run_id: str, agent: str, *, reason: str | None = None) -> dict[str, Any]:
         run_dir = self.resolve_run(run_id)
@@ -1242,6 +1277,12 @@ def _make_handler(workbench: Workbench):
                     return
                 if len(parts) == 5 and parts[:2] == ["api", "runs"] and parts[3] == "agents":
                     self._send_json(workbench.start_agent(parts[2], parts[4]), status=202)
+                    return
+
+                if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "agents-batch":
+                    self._send_json(
+                        workbench.start_agents_batch(parts[2], body.get("agents")), status=202
+                    )
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "continue":
                     self._send_json(
