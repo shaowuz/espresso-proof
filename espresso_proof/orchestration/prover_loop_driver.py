@@ -16,6 +16,7 @@ from pathlib import Path
 
 from espresso_proof.orchestration.advisory_proof_sketch import capture_advisory_proof_sketch_from_latest_round
 from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
+from espresso_proof.claim.persisted_claim_normalization import normalize_persisted_claim_ledger
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.agents.llm_agents import LLMClient, append_prover_loop_round
 from espresso_proof.kernel.observability import append_agent_event, monotonic_ms, now_iso
@@ -238,6 +239,11 @@ def _continue_prover_loop_locked(
     max_rounds: int | None,
     client: LLMClient | None,
 ) -> dict:
+    # Phase 2: the third lock-holding reuse entry point (CLI run-prover-loop-round
+    # reaches this directly via continue_prover_loop, bypassing resume). Normalize
+    # an old/external persisted run before the claim-clear gate; idempotent no-op on
+    # already-normalized runs; claim-clear NEUTRAL. We hold run_writer_lock here.
+    normalize_persisted_claim_ledger(run_dir)
     ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     validate_run(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")

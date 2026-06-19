@@ -40,6 +40,7 @@ from espresso_proof.claim.claim_clear import (
     CLAIM_CLEAR_BLOCKED_ON_DEMAND_AGENTS,
     ensure_claim_clear_for_downstream,
 )
+from espresso_proof.claim.persisted_claim_normalization import normalize_persisted_claim_ledger
 from espresso_proof.kernel.failure_pattern_bank import (
     audit_failure_patterns,
     build_failure_pattern_audit,
@@ -298,6 +299,11 @@ def _run_single_agent_locked(
     if not has_status(run_dir):
         init_agent_run_status(run_dir)
     if agent in CLAIM_CLEAR_BLOCKED_ON_DEMAND_AGENTS:
+        # Phase 2: normalize an old / external persisted run before the claim-clear
+        # gate so an on-demand evidence agent sees the consolidated hypotheses. We
+        # hold the run writer lock here; the helper is idempotent + claim-clear
+        # NEUTRAL (never flips precision / unblocks a blocked claim).
+        normalize_persisted_claim_ledger(run_dir)
         ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
 
     # Build the client BEFORE marking the agent running: a misconfigured provider

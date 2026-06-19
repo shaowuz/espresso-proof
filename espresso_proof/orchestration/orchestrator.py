@@ -24,6 +24,7 @@ from espresso_proof.claim.claim_clear import (
     evaluate_claim_clear,
     write_claim_clear_gate,
 )
+from espresso_proof.claim.persisted_claim_normalization import normalize_persisted_claim_ledger
 from espresso_proof.agents.front_half_agents import run_front_half_agent_pass, write_front_half_run
 from espresso_proof.validation.front_half import validate_front_half_run
 from espresso_proof.kernel.io import read_text, read_yaml, write_yaml
@@ -593,6 +594,11 @@ def _resume_run_locked(
 
     run_dir = Path(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
+    # Phase 2: bring an old / external / denormalized persisted run up to the
+    # normalized (meaning-preserving) hypothesis shape BEFORE the claim-clear gate.
+    # We hold the run writer lock here (resume_run), so the helper may write; it is
+    # idempotent (no-op on already-normalized runs) and claim-clear NEUTRAL.
+    normalize_persisted_claim_ledger(run_dir)
     ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     state = manifest.get("current_state", "")
     if state == "COMPLETED_MEMO":
