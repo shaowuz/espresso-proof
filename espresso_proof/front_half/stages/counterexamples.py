@@ -169,9 +169,13 @@ def _normalize_admissibility_tests(
     return items
 
 
-@register_stage("counterexamples")
-def _counterexamples(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
-    artifacts = context["manifest"]["artifacts"]
+def compute_counterexamples(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
+    """Pure compute for the counterexamples lane (subgoal 04 compute/commit split).
+
+    Builds and validates the candidate artifacts in memory (including the
+    deterministic machine probes, which read only the claim dict) and writes
+    NOTHING under ``run_dir``. Returns ``{"artifacts": {...}, "note": str}``.
+    """
     claim = context["claim"]
     claim_id = claim["id"]
     examples = (context.get("examples") or {}).get("examples", [])
@@ -230,15 +234,37 @@ def _counterexamples(*, run_dir: Path, client: LLMClient, context: dict) -> dict
     CounterexampleReport.model_validate(counterexample_report)
     TestReport.model_validate(test_report)
 
-    write_yaml(run_dir / artifacts["counterexamples"], counterexample_report)
-    write_yaml(run_dir / artifacts["tests"], test_report)
+    note = (
+        f"counterexamples wrote {len(counterexamples) - len(probe_tests)} agent "
+        f"candidate(s) (refutes_claim forced False), {len(probe_tests)} "
+        f"deterministic machine probe(s), {len(test_items)} admissibility test(s)"
+    )
+    return {
+        "artifacts": {
+            "counterexamples": counterexample_report,
+            "tests": test_report,
+        },
+        "note": note,
+    }
+
+
+def persist_counterexamples(
+    run_dir: Path, artifacts: dict, candidate_artifacts: dict
+) -> None:
+    """Write the counterexamples lane's precomputed artifacts (blind full write;
+    counterexamples is the producer of tests.yaml, examples only reconciles it)."""
+    write_yaml(run_dir / artifacts["counterexamples"], candidate_artifacts["counterexamples"])
+    write_yaml(run_dir / artifacts["tests"], candidate_artifacts["tests"])
+
+
+@register_stage("counterexamples")
+def _counterexamples(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
+    artifacts = context["manifest"]["artifacts"]
+    result = compute_counterexamples(run_dir=run_dir, client=client, context=context)
+    persist_counterexamples(run_dir, artifacts, result["artifacts"])
     return {
         "unsafe_language": [],
-        "notes": [
-            f"counterexamples wrote {len(counterexamples) - len(probe_tests)} agent "
-            f"candidate(s) (refutes_claim forced False), {len(probe_tests)} "
-            f"deterministic machine probe(s), {len(test_items)} admissibility test(s)"
-        ],
+        "notes": [result["note"]],
     }
 
 

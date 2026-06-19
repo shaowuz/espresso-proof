@@ -332,10 +332,12 @@ def failure_pattern_allocation_hints(audit: dict) -> dict:
     }
 
 
-def audit_failure_patterns(run_dir: Path) -> dict:
-    """Write failure_pattern_audit.yaml and register it as an optional artifact."""
+def persist_failure_pattern_audit(run_dir: Path, report: dict) -> dict:
+    """Write a precomputed failure-pattern audit + register it as an optional
+    artifact (subgoal 04 compute/commit split: the write half of
+    ``audit_failure_patterns``). ``report`` comes from ``build_failure_pattern_audit``.
+    """
     run_dir = Path(run_dir)
-    report = build_failure_pattern_audit(run_dir)
     write_yaml(run_dir / "failure_pattern_audit.yaml", report)
     manifest_path = run_dir / "run_manifest.yaml"
     manifest = read_yaml(manifest_path)
@@ -344,3 +346,11 @@ def audit_failure_patterns(run_dir: Path) -> dict:
     )
     write_yaml(manifest_path, manifest)
     return report
+
+
+def audit_failure_patterns(run_dir: Path) -> dict:
+    """Compute + write failure_pattern_audit.yaml and register it as an optional
+    artifact (the pure compute is ``build_failure_pattern_audit``)."""
+    run_dir = Path(run_dir)
+    report = build_failure_pattern_audit(run_dir)
+    return persist_failure_pattern_audit(run_dir, report)

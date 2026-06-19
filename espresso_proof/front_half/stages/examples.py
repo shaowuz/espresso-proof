@@ -198,9 +198,15 @@ def _normalize_computation_checks(
     return checks
 
 
-@register_stage("examples")
-def _examples(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
-    artifacts = context["manifest"]["artifacts"]
+def compute_examples(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
+    """Pure compute for the examples lane (subgoal 04 compute/commit split).
+
+    Builds and validates the candidate artifacts in memory and writes NOTHING
+    under ``run_dir``. Returns ``{"artifacts": {...}, "note": str}``. The
+    ``tests.yaml`` reconciliation is deliberately NOT done here: it is a live
+    read-modify-write that must happen at commit time, AFTER counterexamples has
+    committed (see ``persist_examples``).
+    """
     claim = context["claim"]
     claim_id = claim["id"]
     literature = context.get("literature_review") or {}
@@ -235,20 +241,46 @@ def _examples(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     ExampleSelection.model_validate(example_selection)
     ComputationChecks.model_validate(computation_checks)
 
-    write_yaml(run_dir / artifacts["examples"], example_selection)
-    write_yaml(run_dir / artifacts["computation_checks"], computation_checks)
-
-    # SAFETY/CONSISTENCY: replacing examples.yaml can orphan seeded tests.yaml
-    # entries whose evidence references point at scaffold ids. Drop the stale
-    # test entry rather than inventing/rewriting evidence links. This is a soft
-    # normalization before validate_run; kernel reference checks remain strict.
-    dropped = _reconcile_tests_with_examples(
-        run_dir, artifacts, claim_id, {ex["id"] for ex in examples}
-    )
     note = (
         f"examples wrote {len(examples)} candidate example(s), "
         f"{len(checks)} unverified computation proposal(s) (status human_needed)"
     )
+    return {
+        "artifacts": {
+            "examples": example_selection,
+            "computation_checks": computation_checks,
+        },
+        "note": note,
+    }
+
+
+def persist_examples(
+    run_dir: Path, artifacts: dict, candidate_artifacts: dict, claim_id: str
+) -> int:
+    """Write the examples lane's precomputed artifacts, then reconcile tests.yaml
+    against the LIVE on-disk state. Returns the count of dropped stale tests.
+
+    SAFETY/CONSISTENCY: replacing examples.yaml can orphan seeded tests.yaml
+    entries whose evidence references point at scaffold ids. Drop the stale test
+    entry rather than inventing/rewriting evidence links. This is a soft
+    normalization before validate_run; kernel reference checks remain strict.
+    """
+    write_yaml(run_dir / artifacts["examples"], candidate_artifacts["examples"])
+    write_yaml(
+        run_dir / artifacts["computation_checks"],
+        candidate_artifacts["computation_checks"],
+    )
+    example_ids = {ex["id"] for ex in candidate_artifacts["examples"]["examples"]}
+    return _reconcile_tests_with_examples(run_dir, artifacts, claim_id, example_ids)
+
+
+@register_stage("examples")
+def _examples(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
+    artifacts = context["manifest"]["artifacts"]
+    claim_id = context["claim"]["id"]
+    result = compute_examples(run_dir=run_dir, client=client, context=context)
+    dropped = persist_examples(run_dir, artifacts, result["artifacts"], claim_id)
+    note = result["note"]
     if dropped:
         note += f"; dropped {dropped} stale test reference(s)"
     return {
