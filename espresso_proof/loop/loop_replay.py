@@ -136,8 +136,10 @@ def _probe_standing_risks_classified_human_gated(run_dir: Path) -> tuple[bool, s
     loop autofix can resolve them. The loop's classifier must say so, so
     triage routes them to goal proposals instead of bounded-fix selection."""
 
-    from espresso_proof.loop.loop_harness import (
-        _blocker_provenance,
+    # Phase 3: reuse the shared blocker-provenance module directly (was importing
+    # these from the harness-only loop_harness; now both share one leaf module).
+    from espresso_proof.loop.blocker_provenance import (
+        blocker_provenance as _blocker_provenance,
         classify_blocker,
         provenance_is_human_gated,
     )
