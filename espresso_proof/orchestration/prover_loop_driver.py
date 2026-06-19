@@ -17,6 +17,7 @@ from pathlib import Path
 from espresso_proof.orchestration.advisory_proof_sketch import capture_advisory_proof_sketch_from_latest_round
 from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.claim.persisted_claim_normalization import normalize_persisted_claim_ledger
+from espresso_proof.loop.blocker_provenance import blocker_provenance, classify_blocker
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.agents.llm_agents import LLMClient, append_prover_loop_round
 from espresso_proof.kernel.observability import append_agent_event, monotonic_ms, now_iso
@@ -27,6 +28,26 @@ from espresso_proof.kernel.validators import validate_run
 
 # How many consecutive rounds with an identical blocker set count as no-progress.
 NO_PROGRESS_WINDOW = 2
+
+# Phase 4: the ONLY blocker classes a bounded extra prover round may target. A
+# proof step can be re-attempted and a missing computation can be attempted; every
+# other class is human-gated (source_gap / reviewer_objection / human_judgment_needed
+# / missing_definition) and a bounded loop can never resolve it. STRICT gating
+# (decided): escalate only if the WHOLE latest-round blocker set is repairable.
+_REPAIRABLE_BLOCKER_CLASSES = frozenset({"failed_proof_step", "missing_computation"})
+
+
+def _blockers_all_repairable(
+    blocker_texts: list[str], provenance: dict[str, set[str]]
+) -> bool:
+    """Phase 4 STRICT gate: True iff there is at least one blocker AND every blocker
+    classifies as a bounded-repairable class. Any human-gated blocker -> False (the
+    loop must route to a human instead of a bounded retry)."""
+    classes = [
+        classify_blocker(t, provenance=provenance.get(str(t).strip(), set()))
+        for t in blocker_texts
+    ]
+    return bool(classes) and all(c in _REPAIRABLE_BLOCKER_CLASSES for c in classes)
 
 # Closed set of stop reasons (advisory string; carries no status).
 STOP_REASONS = {
@@ -273,6 +294,28 @@ def _continue_prover_loop_locked(
             and all(by_round[r] == by_round[latest] for r in window)
         )
 
+        # Phase 4: classify the latest round's blockers (shared blocker_provenance).
+        # The bounded extra round may only target proof-step / computation-repair
+        # classes; if ANY blocker is human-gated, escalation is withheld (STRICT).
+        # Fail CLOSED: any error reading/classifying provenance -> not repairable ->
+        # no escalation (never grant a retry on uncertain classification).
+        latest_classes: list[str] = []
+        latest_all_repairable = False
+        if latest_has_blockers:
+            try:
+                prov = blocker_provenance(run_dir)
+                latest_classes = [
+                    classify_blocker(t, provenance=prov.get(str(t).strip(), set()))
+                    for t in by_round[latest]
+                ]
+                latest_all_repairable = _blockers_all_repairable(by_round[latest], prov)
+            except Exception as exc:  # noqa: BLE001 - fail closed on a classification error
+                latest_all_repairable = False
+                notes.append(
+                    f"escalation classification unavailable ({exc}); failing closed "
+                    "(no escalation)"
+                )
+
         # --- STOP checks (before appending another round) ---
         if decision in {"ask_human", "stop"}:
             stop_reason = f"loop_decision_{decision}"
@@ -288,7 +331,7 @@ def _continue_prover_loop_locked(
         # the highest-value blocked subgoal -- append_prover_loop_round selects and
         # NAMES that subgoal. The grant only bumps the time-allocation budget (never
         # a math status); the kernel re-validates the appended round.
-        escalate_now = (
+        budget_escalation_eligible = (
             (budget_rounds_hit or budget_calls_hit)
             and not escalated
             and latest_has_blockers
@@ -301,6 +344,18 @@ def _continue_prover_loop_locked(
             # caller-supplied max_rounds (e.g. a deliberate single-round probe).
             and max_rounds is None
         )
+        # Phase 4 STRICT gate: only grant the round when the WHOLE latest blocker
+        # set is bounded-repairable. If a human-gated blocker stands, route to the
+        # human instead of burning a round on a partial fix that can never clear
+        # the run (record the decision as a scheduling note only).
+        escalate_now = budget_escalation_eligible and latest_all_repairable
+        if budget_escalation_eligible and not latest_all_repairable:
+            human_gated = sorted(set(latest_classes) - _REPAIRABLE_BLOCKER_CLASSES)
+            notes.append(
+                "no escalation: human-gated blocker(s) present "
+                f"({', '.join(human_gated)}); routing to human instead of a bounded "
+                "retry (Phase 4 classification gate)"
+            )
         if (budget_rounds_hit or budget_calls_hit) and not escalate_now:
             stop_reason = "budget_rounds" if budget_rounds_hit else "budget_agent_calls"
             break
@@ -335,8 +390,9 @@ def _continue_prover_loop_locked(
                 break
             escalated = True
             notes.append(
-                "escalated one targeted repair round: unresolved blocking objections "
-                "remained at the effort budget (Goals 44-53 option A)"
+                "escalated one targeted repair round: only bounded-repairable blockers "
+                f"remained ({', '.join(sorted(set(latest_classes)))}) at the effort "
+                "budget (Goals 44-53 option A; Phase 4 STRICT classification gate)"
             )
 
         # --- append exactly one round; fail closed AND roll back on error ---

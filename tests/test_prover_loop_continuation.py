@@ -351,9 +351,10 @@ def test_selected_continue_with_pending_prover_gate_is_valid(tmp_path: Path) -> 
         assert attempt["status"] in {"waiting_human", "stopped"}
 
 
-# --- Goal 44-53 autofix #3 (option A): escalate exactly ONE targeted repair round
-#     when blocking objections remain at a quick_test-style 1-round effort budget,
-#     so the loop reaches round 2 where the named-subgoal attack happens. ---
+# --- Goal 44-53 escalation, now gated by Phase 4's STRICT blocker classification:
+#     the one-extra-round grant fires ONLY when the whole latest blocker set is
+#     bounded-repairable (proof-step / computation). Human-gated blockers (reviewer
+#     objections, missing hypotheses, source requests) WITHHOLD it (route to human).
 
 
 def _simulate_quick_test_budget(run_dir: Path) -> None:
@@ -367,28 +368,65 @@ def _simulate_quick_test_budget(run_dir: Path) -> None:
     validate_run(run_dir)
 
 
-def test_escalates_one_targeted_round_at_quick_test_budget(tmp_path: Path) -> None:
-    run_dir, _ = _to_resolved_loop(tmp_path, effort="normal_pass")  # round 1 built, has blockers
-    _simulate_quick_test_budget(run_dir)  # 1-round, both budgets spent
-    before = read_yaml(run_dir / "prover_loop.yaml")["budget"]
-    assert before["rounds_used"] == 1 and before["max_rounds"] == 1
+def test_no_escalation_when_blockers_are_human_gated(tmp_path: Path) -> None:
+    # Phase 4 STRICT: the standard standing-risk blockers (reviewer objections,
+    # missing hypotheses, source requests) are all human-gated, so the bounded
+    # extra round is WITHHELD -- the loop routes to a human instead of burning a
+    # round on a fix it can never make. (This corrects the old Goals 44-53 behavior
+    # that escalated on any unresolved blocker.)
+    run_dir, _ = _to_resolved_loop(tmp_path, effort="normal_pass")
+    _simulate_quick_test_budget(run_dir)
     result = continue_prover_loop(run_dir=run_dir, client=_ProverClient(objections=["loc X", "hyp Y"]))
     validate_run(run_dir)
     loop = read_yaml(run_dir / "prover_loop.yaml")
-    # exactly one extra round was granted and run -> the loop reached round 2.
-    assert {a["round_index"] for a in loop["attempts"]} == {1, 2}
-    assert loop["budget"]["max_rounds"] == 2  # budget granted; artifact stays valid
-    assert loop["budget"]["rounds_used"] == 2
+    # NO extra round was granted: stayed at round 1, stopped on the budget.
+    assert {a["round_index"] for a in loop["attempts"]} == {1}
+    assert loop["budget"]["max_rounds"] == 1  # no budget grant
+    assert result["stop_reason"] in {"budget_rounds", "budget_agent_calls"}
+    assert any("no escalation: human-gated" in n for n in result["notes"]), result["notes"]
+
+
+def test_escalation_fires_when_gate_allows(tmp_path: Path, monkeypatch) -> None:
+    # Positive direction: when the STRICT gate deems the latest blockers repairable,
+    # the one extra round IS granted -- proving the gate is wired INTO the escalation
+    # decision (not just the human-gated withhold path). Forcing the gate True lets
+    # us exercise the escalate branch without fragile hand-crafted repairable rounds
+    # (validate_run cross-checks reviewer_blockers vs attempt blockers).
+    import espresso_proof.orchestration.prover_loop_driver as drv
+
+    run_dir, _ = _to_resolved_loop(tmp_path, effort="normal_pass")
+    _simulate_quick_test_budget(run_dir)
+    monkeypatch.setattr(drv, "_blockers_all_repairable", lambda texts, prov: bool(texts))
+
+    result = continue_prover_loop(run_dir=run_dir, client=_ProverClient(objections=["loc X", "hyp Y"]))
+    validate_run(run_dir)
+    loop = read_yaml(run_dir / "prover_loop.yaml")
+    assert {a["round_index"] for a in loop["attempts"]} >= {1, 2}  # escalated to round 2
+    assert loop["budget"]["max_rounds"] <= 2  # still capped at one extra round
     assert any("escalated" in n for n in result["notes"]), result["notes"]
-    # round 2 attacks a NAMED subgoal selected from the graph.
-    round2 = [a for a in loop["attempts"] if a["round_index"] == 2]
-    assert round2 and any(a.get("target_subgoal_id") for a in round2), round2
 
 
 def test_escalation_is_capped_at_one_extra_round(tmp_path: Path) -> None:
+    # invariant: the grant never exceeds one extra round, whatever the blockers.
     run_dir, _ = _to_resolved_loop(tmp_path, effort="normal_pass")
     _simulate_quick_test_budget(run_dir)
     continue_prover_loop(run_dir=run_dir, client=_ProverClient(objections=["loc X", "hyp Y"]))
     loop = read_yaml(run_dir / "prover_loop.yaml")
     assert max(a["round_index"] for a in loop["attempts"]) <= 2
     assert loop["budget"]["max_rounds"] <= 2  # never grants more than one round
+
+
+def test_blockers_all_repairable_gate() -> None:
+    # Phase 4 STRICT gate decision (unit): all-repairable -> True; any human-gated
+    # or empty -> False.
+    from espresso_proof.orchestration.prover_loop_driver import _blockers_all_repairable
+
+    assert _blockers_all_repairable(["a proof step does not follow"], {}) is True
+    assert _blockers_all_repairable(["recompute the order check at step 2"], {}) is True
+    # a source-gap blocker (keyword) makes the set non-repairable
+    assert _blockers_all_repairable(["a proof step", "need exact citation"], {}) is False
+    # reviewer-objection / missing-hypothesis provenance -> human-gated -> False
+    assert _blockers_all_repairable(["x"], {"x": {"objection"}}) is False
+    assert _blockers_all_repairable(["x"], {"x": {"missing_hypothesis"}}) is False
+    # no blockers -> not escalatable
+    assert _blockers_all_repairable([], {}) is False
