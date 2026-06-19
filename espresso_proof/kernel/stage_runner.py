@@ -37,6 +37,11 @@ MANIFEST_NAME = "run_manifest.yaml"
 # artifact, never consumed by validate_run.
 ADVISORY_PROOF_SKETCH_FILENAME = "advisory_proof_sketch.yaml"
 
+# Phase 5: the advisory repair-target sidecar — which prior reviewer objections a
+# continuation round was asked to repair. Same diagnostic-sink contract as the
+# advisory proof sketch (never a kernel artifact, never consumed by validate_run).
+REPAIR_TARGET_FILENAME = "repair_target.yaml"
+
 # Runtime plumbing files that are never part of a stage transaction: the
 # append-only diagnostic timeline + per-run observability logs (rolling them
 # back would erase the record of the failed stage they exist to explain — in
@@ -44,10 +49,12 @@ ADVISORY_PROOF_SKETCH_FILENAME = "advisory_proof_sketch.yaml"
 # it would silently break a concurrently-held flock by splitting it across
 # inodes). Goal 54A: agent_events.jsonl / timings.yaml join events.jsonl here.
 # Goal 67B: advisory_proof_sketch.yaml joins them so a rolled-back prover attempt
-# does not erase its (scrubbed, advisory-only) mathematical reasoning.
+# does not erase its (scrubbed, advisory-only) mathematical reasoning. Phase 5:
+# repair_target.yaml joins them so a rolled-back repair round still records which
+# objections it was asked to address.
 _SNAPSHOT_EXCLUDED_NAMES = frozenset(
     {EVENTS_FILENAME, AGENT_EVENTS_FILENAME, TIMINGS_FILENAME, LOCK_FILENAME,
-     ADVISORY_PROOF_SKETCH_FILENAME}
+     ADVISORY_PROOF_SKETCH_FILENAME, REPAIR_TARGET_FILENAME}
 )
 
 

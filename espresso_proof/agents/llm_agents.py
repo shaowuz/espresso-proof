@@ -1407,10 +1407,31 @@ def append_prover_loop_round(
             ),
         }
     )
+    # Phase 5: feed the prior round's reviewer objections that NAMED this subgoal
+    # back to the prover so a repair attempt can directly address them (instead of
+    # only seeing the same free-text blockers). Advisory prompt context only — the
+    # round's outputs are re-validated by the kernel, and the pairing is recorded in
+    # a snapshot-excluded, never-validated sidecar (can never upgrade any status).
+    from espresso_proof.orchestration.repair_target import (
+        capture_repair_target,
+        collect_repair_target_objections,
+    )
+
+    repair_target_objections = collect_repair_target_objections(
+        run_dir, target_subgoal.get("id")
+    )
+    capture_repair_target(
+        run_dir,
+        round_index=next_round,
+        strategy_id=selected_strategy_id,
+        target_subgoal_id=target_subgoal.get("id"),
+        objections=repair_target_objections,
+    )
     round_context = {
         **context,
         "previous_prover_loop_attempt": parent_attempt,
         "reviewer_blockers_to_repair": parent_attempt.get("blockers", []),
+        "repair_target_objections": repair_target_objections,
         "loop_decision": loop_report.get("loop_decision"),
         "time_allocation": parent_attempt.get("time_allocation"),
         "time_allocation_plan": time_context,
