@@ -3168,8 +3168,16 @@ class RunState(str, Enum):
     and ``ORCHESTRATION_STATES.index(state)`` keeps working, and a plain YAML
     string coerces to a member on load (StrictBaseModel only forbids extra keys;
     it is not strict-typed). ``WAITING_HUMAN_MAJOR_DECISION`` is the legacy genesis
-    state written by ``run_mock_critique``; ``EVIDENCE_FANOUT_RUNNING`` is reserved
-    for the context-lane fan-out (subgoal 3) and is not emitted yet.
+    state written by ``run_mock_critique``.
+
+    Note: a prior ``EVIDENCE_FANOUT_RUNNING`` member (reserved for a never-built
+    context-lane fan-out SEED/RUN/JOIN barrier) was removed — it was never emitted,
+    was absent from ``ORCHESTRATION_STATES`` (so a persisted run carrying it gave a
+    misleading "not at the human gate" error on resume), and the evidence fan-out is
+    intentionally opt-in (no barrier). A persisted run with that string now fails
+    enum validation as an unknown value (clean fail-closed). Re-add this member only
+    when the real fan-out barrier is actually implemented and wired into
+    ``ORCHESTRATION_STATES`` with resume tests.
     """
 
     SCAFFOLDED = "SCAFFOLDED"
@@ -3177,7 +3185,6 @@ class RunState(str, Enum):
     WAITING_CLAIM_CLARIFICATION = "WAITING_CLAIM_CLARIFICATION"
     FRONT_HALF_DONE = "FRONT_HALF_DONE"
     CLAIM_CLEAR = "CLAIM_CLEAR"
-    EVIDENCE_FANOUT_RUNNING = "EVIDENCE_FANOUT_RUNNING"
     LITERATURE_DONE = "LITERATURE_DONE"
     WAITING_LLM_AGENT_HUMAN_GATE = "WAITING_LLM_AGENT_HUMAN_GATE"
     HUMAN_CHOICE_CONTINUE_SELECTED = "HUMAN_CHOICE_CONTINUE_SELECTED"
