@@ -24,6 +24,7 @@ TRUST_LABELS: dict[str, str] = {
     "scope_checked": "Checked in this finite/computational scope",
     "smoke_checked": "Smoke-checked",
     "ai_reviewed": "AI-reviewed — no blocking objection (advisory, not a verification)",
+    "agent_consensus": "Mock-checked — agent consensus, not a machine check",
     "candidate": "Candidate",
     "needs_check": "Needs check",
     "running": "Running",
@@ -43,6 +44,8 @@ TRUST_TONE: dict[str, str] = {
     # ADVISORY ONLY (amber) and must NEVER be in EARNED_LEVELS / render green:
     # absence of an objection is not a verification, a proof, or checked evidence.
     "ai_reviewed": "candidate",
+    # Agent-consensus mock check: amber/advisory, NEVER in EARNED_LEVELS / green.
+    "agent_consensus": "candidate",
     "candidate": "candidate",
     "needs_check": "missing",
     "running": "running",

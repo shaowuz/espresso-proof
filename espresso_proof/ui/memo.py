@@ -283,6 +283,30 @@ def build_concise_memo(run_dir: Path) -> str:
         lines.append("Open blockers / pending checks:")
         for warning in warning_lines:
             lines.append(f"  - {warning}")
+    # Phase 6: when the run carries the agent-consensus mock check, disclose it as
+    # advisory (agent consensus only, not a machine check) and note how many residual
+    # (non-fatal) gaps remain. The residual TEXT lives in agent_consensus_review.yaml
+    # (not rendered here -- it is reviewer free text and the memo is scanned for
+    # forbidden proof language); the memo discloses the count + a pointer.
+    if proof_status == "agent_consensus_mock_checked":
+        residual_count = 0
+        _acr_rel = optional_artifacts.get("agent_consensus_review")
+        if _acr_rel and (run_dir / _acr_rel).exists():
+            _acr = read_yaml(run_dir / _acr_rel)
+            if isinstance(_acr, dict):
+                for entry in _acr.get("entries", []) or []:
+                    if isinstance(entry, dict):
+                        residual_count += len(entry.get("residual_objections") or [])
+        lines.append("")
+        lines.append("Agent-consensus mock check: three reviewers found no fatal flaw.")
+        lines.append(
+            "  Agent consensus only, not a machine check -- advisory, not a checked "
+            "or source-backed status."
+        )
+        lines.append(
+            f"  {residual_count} residual (non-fatal) gap(s) remain; "
+            "see agent_consensus_review.yaml."
+        )
     # Proof-route step table (Goal 24): one row per local step, separating local
     # step evidence from the whole-claim/route status above. Built from validated
     # artifacts (source grounding + confirmed scoped computations), using the

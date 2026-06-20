@@ -57,6 +57,10 @@ COMPUTATION_CHECKED_DESCRIPTION = (
 PROOF_LANGUAGE_DESCRIPTIONS: dict[str, str] = {
     "idea_sketch": "an idea sketch (not a checked proof)",
     "proof_candidate": "a candidate argument (not yet checked)",
+    "agent_consensus_mock_checked": (
+        "a mock check: three agents found no fatal flaw (agent consensus only, "
+        "not a machine check; advisory)"
+    ),
     "source_checked_argument": (
         "an argument with reference-supported steps (not a checked proof)"
     ),

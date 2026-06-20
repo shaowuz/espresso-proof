@@ -28,7 +28,7 @@ from espresso_proof.agents.llm_agents import (
     build_client,
     load_agent_context,
 )
-from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.io import read_yaml, write_text, write_yaml
 from espresso_proof.kernel.models import (
     AgentConsensusReview,
     AgentConsensusVerdict,
@@ -204,20 +204,26 @@ def seal_agent_consensus(
     manifest = read_yaml(manifest_path)
     grade_path = run_dir / manifest["artifacts"]["idea_grade"]
     consensus_path = run_dir / AGENT_CONSENSUS_FILENAME
+    final_report_rel = manifest["artifacts"].get("final_report")
+    final_report_path = run_dir / final_report_rel if final_report_rel else None
     snapshot = {
         "manifest": manifest_path.read_bytes(),
         "grade": grade_path.read_bytes(),
         "had_consensus": consensus_path.exists(),
         "consensus": consensus_path.read_bytes() if consensus_path.exists() else None,
+        "had_final_report": bool(final_report_path and final_report_path.exists()),
+        "final_report": final_report_path.read_bytes() if final_report_path and final_report_path.exists() else None,
     }
     try:
         record = build_agent_consensus_review(run_dir, entries)
         grade = read_yaml(grade_path)
         current_status = grade.get("proof_language_status")
+        status_changed = False
         if record["consensus"]:
             grade["proof_language_status"] = ProofLanguageStatus.agent_consensus_mock_checked.value
             IdeaGrade.model_validate(grade)
             write_yaml(grade_path, grade)
+            status_changed = True
         elif current_status == ProofLanguageStatus.agent_consensus_mock_checked.value:
             # Honest downgrade: a re-seal that no longer reaches consensus must not
             # leave a stale amber status. Drop to proof_candidate (a weaker status
@@ -225,6 +231,13 @@ def seal_agent_consensus(
             grade["proof_language_status"] = ProofLanguageStatus.proof_candidate.value
             IdeaGrade.model_validate(grade)
             write_yaml(grade_path, grade)
+            status_changed = True
+        # Surface the change in the static memo so final_report.md discloses the
+        # mock check (or its removal) -- the live renderers already reflect it.
+        if status_changed and final_report_path is not None:
+            from espresso_proof.ui.memo import build_concise_memo
+
+            write_text(final_report_path, build_concise_memo(run_dir))
         validate_run(run_dir)
         return record
     except Exception:
@@ -240,6 +253,11 @@ def seal_agent_consensus(
                 _atomic_write_bytes(consensus_path, snapshot["consensus"])
             elif consensus_path.exists():
                 consensus_path.unlink()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if snapshot["had_final_report"] and final_report_path is not None:
+                _atomic_write_bytes(final_report_path, snapshot["final_report"])
         except Exception:  # noqa: BLE001
             pass
         raise

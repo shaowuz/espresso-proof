@@ -513,6 +513,10 @@ def _proof_label(grade: dict[str, Any], repair_needed: bool, template_fallback: 
         return "Scoped check"
     if proof_status in {"lean_checked", "human_confirmed"}:
         return "Checked"
+    # Agent-consensus mock check: amber/advisory, produced by the seal action (a real
+    # action, honest even in a stub run) -- show it, but never as "Checked"/green.
+    if proof_status == "agent_consensus_mock_checked":
+        return "Mock-checked (agent consensus, not a machine check)"
     # Goal 67C: otherwise a template/stub run made no real prover attempt — say so
     # instead of a prover-loop-derived "Needs repair"/"Sketched".
     if template_fallback:
