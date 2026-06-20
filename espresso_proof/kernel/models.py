@@ -50,6 +50,10 @@ class IdeaStatus(str, Enum):
 class ProofLanguageStatus(str, Enum):
     idea_sketch = "idea_sketch"
     proof_candidate = "proof_candidate"
+    # Agent-consensus mock-check: three reviewers adversarially found no fatal flaw.
+    # Advisory/amber, NOT machine-verified; strictly weaker than any reference- or
+    # machine-backed status below it (it makes no source/computation claim).
+    agent_consensus_mock_checked = "agent_consensus_mock_checked"
     source_checked_argument = "source_checked_argument"
     computation_checked = "computation_checked"
     lean_checked = "lean_checked"
@@ -3677,9 +3681,87 @@ class AIReviewAssessment(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class AgentConsensusVerdict(str, Enum):
+    """One reviewer's ADVERSARIAL verdict for the agent-consensus mock-check.
+
+    The reviewer actively hunts for a flaw that would BREAK the argument. A residual
+    source/definition gap is NOT a fatal flaw (it is surfaced, not blocking); only an
+    argument-breaking error is. ``unclear`` means the reviewer could not confirm
+    soundness (including when a missing source prevents judging applicability) — it
+    BLOCKS the consensus, the conservative resolution of the fuzzy fatal/residual line.
+    """
+
+    no_fatal_flaw_found = "no_fatal_flaw_found"
+    fatal_flaw_found = "fatal_flaw_found"
+    unclear = "unclear"
+
+
+class AgentConsensusEntry(StrictBaseModel):
+    reviewer_id: Literal["strategy_reviewer", "evidence_reviewer", "line_proof_reviewer"]
+    verdict: AgentConsensusVerdict
+    looked_for: str  # which fatal-flaw classes this reviewer actively hunted
+    finding: str  # the active "no fatal flaw because ..." / "fatal flaw: ..." statement
+    residual_objections: list[str] = Field(default_factory=list)  # non-fatal, surfaced
+
+
+class AgentConsensusReview(StrictBaseModel):
+    """Agent-consensus mock-check (NOT machine-verified) — the kernel record that the
+    three Espresso reviewers each ran ADVERSARIALLY and the consensus outcome.
+
+    the maintainer's deliberate, clearly-labelled exception to "agents never grant status":
+    when all three reviewers return ``no_fatal_flaw_found`` the run may carry
+    ``proof_language_status = agent_consensus_mock_checked`` — an AMBER, advisory tier
+    strictly weaker than ``source_checked_argument``. It is honest by construction:
+
+    - it has NO proof/source/evidence/grade/checked status field (StrictBaseModel
+      forbids extras), so it can never set or upgrade a machine-verified status;
+    - the ``bound_*`` hashes pin it to the exact claim/source/review/prover_loop it
+      was rendered against, so the kernel REVOKES it (rejects the run) once any of
+      those change — a stale consensus can never ride a modified proof;
+    - ``consensus`` is re-derived here from the entries (unanimous no-fatal-flaw), so
+      it cannot disagree with the per-reviewer verdicts;
+    - any ``fatal_flaw_found`` or ``unclear`` blocks it; residual (non-fatal)
+      objections are recorded for surfacing, never silently dropped.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    bound_claim_hash: str
+    bound_source_grounding_hash: str
+    bound_review_hash: str
+    bound_prover_loop_hash: str = ""
+    entries: list[AgentConsensusEntry] = Field(default_factory=list)
+    consensus: bool
+    disclaimer: str
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_consensus(self) -> AgentConsensusReview:
+        required = {"strategy_reviewer", "evidence_reviewer", "line_proof_reviewer"}
+        seen = {entry.reviewer_id for entry in self.entries}
+        if seen != required:
+            raise ValueError(
+                "agent_consensus_review requires exactly the three distinct espresso "
+                "reviewers (strategy_reviewer, evidence_reviewer, line_proof_reviewer)"
+            )
+        all_clear = all(
+            entry.verdict == AgentConsensusVerdict.no_fatal_flaw_found
+            for entry in self.entries
+        )
+        if self.consensus != all_clear:
+            raise ValueError(
+                "consensus must equal unanimous no_fatal_flaw_found across all three "
+                "reviewers"
+            )
+        return self
+
+
 MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "claim": Claim,
     "ai_review": AIReviewAssessment,
+    "agent_consensus_review": AgentConsensusReview,
     "agent_contracts": AgentContracts,
     "admission_check": AdmissionCheck,
     "hypothesis_ledger": HypothesisLedger,

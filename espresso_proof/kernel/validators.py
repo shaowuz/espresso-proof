@@ -12,6 +12,8 @@ from espresso_proof.kernel.research_bank import (
     load_strategy_synthesis_artifact,
 )
 from espresso_proof.kernel.models import (
+    AgentConsensusReview,
+    AgentConsensusVerdict,
     AgentContracts,
     AgentRunStatusReport,
     AIReviewAssessment,
@@ -213,6 +215,7 @@ def validate_run(run_dir: Path) -> None:
     time_allocation = _load_optional_time_allocation(run_dir, manifest)
     update_inbox = _load_optional_update_inbox(run_dir, manifest)
     _load_optional_ai_review(run_dir, manifest, claim)
+    agent_consensus_review = _load_optional_agent_consensus_review(run_dir, manifest, claim)
     human_feedback, feedback_summary = _load_optional_human_feedback(run_dir, manifest)
 
     _validate_claim_id_consistency(
@@ -242,7 +245,11 @@ def validate_run(run_dir: Path) -> None:
     _validate_literature_retrieval(literature_retrieval, claim, manifest)
     _validate_proof_verification(proof_verification, claim, manifest, idea_grade)
     _validate_grade_proof_language_backed(
-        idea_grade, source_grounding, computation_verification, proof_verification
+        idea_grade,
+        source_grounding,
+        computation_verification,
+        proof_verification,
+        agent_consensus_review,
     )
     _validate_grade_10_requires_global_proof_status(idea_grade)
     _validate_external_tool_artifacts(
@@ -273,6 +280,9 @@ def validate_run(run_dir: Path) -> None:
         manifest, claim, source_grounding, theorem_applicability, theorem_extraction
     )
     _validate_review_outcome(review, idea_grade)
+    _validate_agent_consensus_review(
+        agent_consensus_review, review, idea_grade, manifest, run_dir
+    )
     _validate_loop_control(loop_control)
     _validate_strategy_synthesis(
         strategy_synthesis,
@@ -1446,6 +1456,7 @@ def _validate_grade_proof_language_backed(
     source_grounding: SourceGroundingReport,
     computation_verification: ComputationVerificationReport | None,
     proof_verification: ProofVerificationReport | None,
+    agent_consensus_review: AgentConsensusReview | None = None,
 ) -> None:
     """A "verified-proof" grade status must be backed by a real trusted result.
 
@@ -1467,7 +1478,18 @@ def _validate_grade_proof_language_backed(
       feedback may never upgrade proof status). Fail closed.
     """
     status = idea_grade.proof_language_status
-    if status == ProofLanguageStatus.source_checked_argument:
+    if status == ProofLanguageStatus.agent_consensus_mock_checked:
+        # Agent-consensus mock-check: amber/advisory, NOT machine-verified. Requires
+        # a unanimous adversarial consensus artifact; reviewer prose alone cannot
+        # upgrade the proof language. The hash binding + cross-checks live in
+        # _validate_agent_consensus_review.
+        if agent_consensus_review is None or not agent_consensus_review.consensus:
+            raise KernelValidationError(
+                "idea_grade.proof_language_status=agent_consensus_mock_checked requires "
+                "a unanimous agent_consensus_review (no_fatal_flaw_found from all three "
+                "reviewers); reviewer prose cannot upgrade proof language"
+            )
+    elif status == ProofLanguageStatus.source_checked_argument:
         if not any(
             step.status == SourceStatus.source_backed
             for step in source_grounding.steps
@@ -1526,6 +1548,9 @@ def _validate_grade_10_requires_global_proof_status(idea_grade: IdeaGrade) -> No
     weak_or_scoped_statuses = {
         ProofLanguageStatus.idea_sketch,
         ProofLanguageStatus.proof_candidate,
+        # Agent consensus is amber/advisory, never a global machine-checked proof,
+        # so it can never imply a perfect score.
+        ProofLanguageStatus.agent_consensus_mock_checked,
         ProofLanguageStatus.source_checked_argument,
         ProofLanguageStatus.computation_checked,
     }
@@ -1690,6 +1715,156 @@ def _load_optional_ai_review(
             "rebuild ai_review.yaml before rendering the advisory signal"
         )
     return assessment
+
+
+def _load_optional_agent_consensus_review(
+    run_dir: Path,
+    manifest: RunManifest,
+    claim: Claim,
+) -> AgentConsensusReview | None:
+    """Agent-consensus mock-check record. Fails closed.
+
+    ``AgentConsensusReview`` (StrictBaseModel) carries NO proof/source/evidence/
+    grade/checked status FIELD, so a smuggled field name is rejected at load. But
+    StrictBaseModel does not police forbidden TOKENS inside the free-text fields, so
+    we additionally scan every reviewer-authored text field (which Slice C renders)
+    for a status smuggle. The model validator already enforces the three distinct
+    reviewers + ``consensus`` == unanimous no-fatal-flaw. Light binding: claim_id /
+    run_id must match the run; the heavy provenance gate (hash binding, reviewer
+    cross-check, refuted/failed incompatibility) is ``_validate_agent_consensus_review``.
+    """
+
+    optional = manifest.optional_artifacts
+    if "agent_consensus_review" not in optional:
+        return None
+    consensus = validate_yaml_model(
+        run_dir / optional["agent_consensus_review"],
+        AgentConsensusReview,
+    )
+    if consensus.claim_id != claim.id:
+        raise KernelValidationError(
+            f"agent_consensus_review claim_id {consensus.claim_id!r} does not match "
+            f"the run claim {claim.id!r}"
+        )
+    if consensus.run_id != manifest.run_id:
+        raise KernelValidationError(
+            f"agent_consensus_review run_id {consensus.run_id!r} does not match the "
+            f"run {manifest.run_id!r}"
+        )
+    # Free-text fields cannot smuggle a status (no reviewer prose may set
+    # proof/source/evidence/grade status). The detector exempts honest
+    # "not source_backed" disclaimers, so the record's own disclaimer is safe.
+    for entry in consensus.entries:
+        for text in (entry.looked_for, entry.finding, *entry.residual_objections):
+            smuggle = _prover_status_smuggling_field(str(text))
+            if smuggle:
+                raise KernelValidationError(
+                    f"agent_consensus_review entry ({entry.reviewer_id}) text smuggles a "
+                    f"status field {smuggle!r}; reviewer prose cannot set proof status"
+                )
+    for text in (consensus.disclaimer, *consensus.notes):
+        smuggle = _prover_status_smuggling_field(str(text))
+        if smuggle:
+            raise KernelValidationError(
+                f"agent_consensus_review text smuggles a status field {smuggle!r}"
+            )
+    return consensus
+
+
+def _validate_agent_consensus_review(
+    consensus: AgentConsensusReview | None,
+    review: Review,
+    idea_grade: IdeaGrade,
+    manifest: RunManifest,
+    run_dir: Path,
+) -> None:
+    """Provenance gate for the agent-consensus mock-check (fail-closed).
+
+    The status is amber/advisory, but it DOES occupy a ``proof_language_status``
+    slot, so it earns the same fail-closed provenance treatment as
+    ``source_checked_argument``: the consensus must be a unanimous adversarial pass
+    by the ACTUAL three reviewers of THIS run, hash-bound to the current
+    claim/source/review/prover_loop, and it is revoked the moment any of those
+    change. The kernel never computes the agents' judgement (that is the whole point
+    of an explicitly agent-consensus tier) — it enforces that a structurally valid,
+    current, unanimous consensus exists and that no stronger/contradicting signal
+    coexists.
+    """
+    status_uses_it = (
+        idea_grade.proof_language_status
+        == ProofLanguageStatus.agent_consensus_mock_checked
+    )
+    if consensus is None:
+        if status_uses_it:
+            raise KernelValidationError(
+                "idea_grade.proof_language_status=agent_consensus_mock_checked requires "
+                "an agent_consensus_review artifact"
+            )
+        return
+
+    # 1. Reviewer cross-check: the consensus reviewers must be exactly the reviewers
+    #    that actually reviewed this run (no citing reviewers who did not review it).
+    consensus_ids = {entry.reviewer_id for entry in consensus.entries}
+    review_ids = {reviewer.reviewer_id for reviewer in review.reviewers}
+    if consensus_ids != review_ids:
+        raise KernelValidationError(
+            "agent_consensus_review reviewers must match the run's Review reviewers"
+        )
+
+    # 2. A reviewer that FAILED the standard review cannot claim no_fatal_flaw here.
+    failed = {
+        reviewer.reviewer_id
+        for reviewer in review.reviewers
+        if reviewer.verdict == ReviewerVerdict.failed
+    }
+    for entry in consensus.entries:
+        if (
+            entry.reviewer_id in failed
+            and entry.verdict == AgentConsensusVerdict.no_fatal_flaw_found
+        ):
+            raise KernelValidationError(
+                f"reviewer {entry.reviewer_id} failed the review but claims "
+                "no_fatal_flaw_found in the agent consensus"
+            )
+
+    # 3. Hash binding (revoke on change): the bound_* hashes must equal the CURRENT
+    #    artifact hashes, so a stale consensus cannot ride a modified proof.
+    artifacts = manifest.artifacts
+    prover_loop_rel = manifest.optional_artifacts.get("prover_loop")
+    expected = {
+        "bound_claim_hash": artifact_revision_hash(run_dir, artifacts["locked_claim"]),
+        "bound_source_grounding_hash": artifact_revision_hash(
+            run_dir, artifacts["source_grounding"]
+        ),
+        "bound_review_hash": artifact_revision_hash(run_dir, artifacts["review"]),
+        "bound_prover_loop_hash": (
+            artifact_revision_hash(run_dir, prover_loop_rel) if prover_loop_rel else ""
+        ),
+    }
+    for field_name, expected_hash in expected.items():
+        if getattr(consensus, field_name) != expected_hash:
+            raise KernelValidationError(
+                f"agent_consensus_review.{field_name} does not match the current run "
+                "artifacts; the consensus is stale and must be re-sealed"
+            )
+
+    if not status_uses_it:
+        return
+
+    # 4. The status path requires a unanimous consensus (belt; model enforces the
+    #    consensus<->entries consistency).
+    if not consensus.consensus:
+        raise KernelValidationError(
+            "agent_consensus_mock_checked requires a unanimous no_fatal_flaw_found "
+            "consensus from all three reviewers"
+        )
+
+    # 5. A refuted claim can never carry a mock-checked proof.
+    if idea_grade.status == IdeaStatus.refuted:
+        raise KernelValidationError(
+            "a refuted claim cannot carry "
+            "proof_language_status=agent_consensus_mock_checked"
+        )
 
 
 def _validate_subgoal_graph(
@@ -2203,6 +2378,9 @@ def _validate_review_outcome(review: Review, idea_grade: IdeaGrade) -> None:
                 f"failed reviewers cannot produce promising grade: {failed_reviewers}"
             )
         strong_statuses = {
+            # A failed reviewer also blocks the agent-consensus mock-check: a
+            # unanimous no-fatal-flaw is impossible if a reviewer failed the run.
+            ProofLanguageStatus.agent_consensus_mock_checked,
             ProofLanguageStatus.source_checked_argument,
             ProofLanguageStatus.computation_checked,
             ProofLanguageStatus.lean_checked,
@@ -2774,6 +2952,9 @@ def _prover_status_smuggling_field(text: str) -> str | None:
         for field in (
             "proof_status",
             "proof_language_status",
+            "agent_consensus_mock_checked",
+            "agent_consensus",
+            "mock_checked",
             "source_status",
             "source_backed_status",
             "source_backed",
@@ -2966,6 +3147,10 @@ def _validate_final_report_language(
     weak_statuses = {
         ProofLanguageStatus.idea_sketch,
         ProofLanguageStatus.proof_candidate,
+        # Agent-consensus mock-check is amber/NOT machine-verified, so its final
+        # report is held to the same no-forbidden-proof-language bar as the other
+        # weak statuses (it may never print "proof-close"/"proved"/"verified").
+        ProofLanguageStatus.agent_consensus_mock_checked,
         ProofLanguageStatus.source_checked_argument,
         ProofLanguageStatus.computation_checked,
     }
