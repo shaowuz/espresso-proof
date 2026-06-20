@@ -178,14 +178,34 @@ class StubLLMClient:
 
     def complete_json(self, *, system: str, prompt: str) -> dict:
         lowered = system.lower()
-        if "adversarial fatal-flaw review" in lowered:
+        if "line-numbered proof writer" in lowered:
+            # Goal 69: a real structured parity proof of n^2 - n even (consecutive
+            # integers route), each line with a concrete justification + dependencies.
+            return {
+                "proof_kind": "consecutive_integers",
+                "lines": [
+                    {"line_id": "L1", "statement": "n^2 - n = n(n-1) for every integer n.",
+                     "justification": "Algebraic factoring: distribute n(n-1) = n^2 - n.", "depends_on": []},
+                    {"line_id": "L2", "statement": "n and n-1 are consecutive integers.",
+                     "justification": "They differ by 1 by definition of consecutive integers.", "depends_on": []},
+                    {"line_id": "L3", "statement": "Among any two consecutive integers exactly one is even.",
+                     "justification": "Integers alternate parity, so of n and n-1 one is even.", "depends_on": ["L2"]},
+                    {"line_id": "L4", "statement": "Therefore 2 divides n(n-1).",
+                     "justification": "A product with an even factor is divisible by 2.", "depends_on": ["L3"]},
+                    {"line_id": "L5", "statement": "Hence n^2 - n is even for every integer n.",
+                     "justification": "Combine L1 and L4: n^2 - n = n(n-1) is divisible by 2.", "depends_on": ["L1", "L4"]},
+                ],
+            }
+        if "proof-consensus review" in lowered:
+            import re as _re
+
+            line_ids = _re.findall(r"['\"]?line_id['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]", prompt)
             return {
                 "verdict": "no_fatal_flaw_found",
-                "looked_for": "logical gaps, false steps, misapplied theorems, counterexamples",
-                "finding": "Stub adversarial review found no argument-breaking flaw.",
-                "residual_objections": [
-                    "Exact source locators still pending (residual, non-fatal).",
-                ],
+                "looked_for": "non-sequiturs, misapplied lemmas, missing cases",
+                "finding": "Stub proof-consensus review found no argument-breaking flaw in the line-numbered proof.",
+                "cited_line_ids": sorted(set(line_ids)) or ["L1"],
+                "residual_objections": ["Exact textbook locators still pending (residual, non-fatal)."],
             }
         if "strategy reviewer" in lowered:
             return {
@@ -1878,48 +1898,69 @@ def verifier_system_prompt(index: int, *, reviewer_role: str = "verifier") -> st
     )
 
 
-def adversarial_verifier_system_prompt(reviewer_role: str) -> str:
-    """Phase 6: the three reviewers run ADVERSARIALLY for the agent-consensus mock
-    check. Each actively hunts for an argument-BREAKING flaw and returns a verdict in
-    {no_fatal_flaw_found, fatal_flaw_found, unclear}. A residual gap (missing exact
-    source, definition to pin, style) is NOT fatal -- it goes in residual_objections
-    and does not block. If the reviewer cannot CONFIRM the absence of a fatal flaw
-    (including because a missing source prevents judging applicability), it returns
-    'unclear' (which blocks consensus). This is an advisory mock check, NOT machine
-    verification, and may never upgrade any status.
-    """
-    role_focus = {
-        "strategy_reviewer": (
-            "the proof STRATEGY: a FATAL flaw is a strategic error that means the route "
-            "cannot prove the locked claim (theorem drift that changes the claim, a "
-            "missing reduction the route depends on, a false key lemma)."
-        ),
-        "evidence_reviewer": (
-            "the EVIDENCE: a FATAL flaw is a counterexample that breaks the claim, or "
-            "evidence used dishonestly as if checked. A missing source locator is NOT "
-            "fatal (residual)."
-        ),
-        "line_proof_reviewer": (
-            "the LINE-BY-LINE proof: a FATAL flaw is a step that does not follow, a "
-            "misapplied theorem (used outside its hypotheses), or a logical gap that "
-            "breaks the chain. A step merely needing an exact citation is NOT fatal "
-            "(residual)."
-        ),
-    }.get(reviewer_role, "the proof: a FATAL flaw is any argument-breaking error.")
+def line_numbered_proof_writer_system_prompt() -> str:
+    """Goal 69: write a STRUCTURED, line-numbered proof (not a route / plan). Each
+    line has a statement AND a justification AND its line dependencies. This is a
+    CANDIDATE proof: it never claims to be machine-verified, source-backed, or proved;
+    the kernel re-validates and the only seal it can earn is the explicitly-amber
+    agent-consensus mock check."""
     return (
-        "ADVERSARIAL FATAL-FLAW REVIEW. You are an Espresso reviewer running an "
-        "adversarial mock check (this is NOT machine verification). Actively hunt for a "
-        f"fatal flaw in {role_focus} "
-        "A residual gap (a missing exact source/citation, a definition that should be "
-        "pinned, stylistic issues) is NOT fatal -- list those under residual_objections; "
-        "they do not block. If you CANNOT confirm the argument is free of a fatal flaw "
-        "(including because a missing source prevents you from judging whether a theorem "
-        "applies), return 'unclear' -- do not guess. "
+        "LINE-NUMBERED PROOF WRITER. Write a real, structured, line-numbered proof of "
+        "the claim -- NOT a route, plan, or list of 'steps to try'. Carry out the "
+        "argument: each line must actually assert a mathematical statement and give a "
+        "concrete justification for WHY it follows (a rule of inference, an explicit "
+        "algebraic manipulation, a case, or a cited lemma whose hypotheses you state). "
+        "Number the lines and record, for each line, the earlier line_ids it depends "
+        "on. If a line genuinely rests on an uncited external theorem, still give the "
+        "justification and record the gap in that line's 'gaps'. This is a CANDIDATE "
+        "proof only: do NOT claim it is proved, verified, machine-checked, or source-"
+        "backed -- the kernel decides status. "
+        "Return JSON only: {\"proof_kind\": short label (e.g. parity_case_split | "
+        "consecutive_integers | induction), \"lines\": [{\"line_id\": e.g. L1, "
+        "\"statement\": the asserted math, \"justification\": why it follows, "
+        "\"depends_on\": [earlier line_ids], \"source_refs\": [optional candidate refs], "
+        "\"gaps\": [optional acknowledged holes]}]}."
+    )
+
+
+def proof_consensus_system_prompt(reviewer_id: str) -> str:
+    """Goal 69: the three reviewers review the LINE-NUMBERED PROOF (not route text)
+    adversarially, and MUST cite the proof line_id(s) they examined. Each hunts for an
+    argument-BREAKING flaw and returns {no_fatal_flaw_found, fatal_flaw_found,
+    unclear}. A residual gap (a fixable missing citation, a definition to pin) is NOT
+    fatal -> residual_objections. If a reviewer cannot CONFIRM soundness it returns
+    'unclear' (blocks). Advisory mock check, NOT machine verification."""
+    role_focus = {
+        "line_proof_reviewer": (
+            "LINE-PROOF REVIEWER: check that EACH line actually follows from its stated "
+            "justification and its depends_on lines. A FATAL flaw is a line that does "
+            "not follow, a non-sequitur, or a broken dependency chain."
+        ),
+        "theorem_lemma_applicability_reviewer": (
+            "THEOREM/LEMMA APPLICABILITY REVIEWER: check that every cited theorem/lemma "
+            "ACTUALLY applies -- its hypotheses are met by the line that invokes it. A "
+            "FATAL flaw is a misapplied theorem (used outside its hypotheses) or a false "
+            "lemma. A merely uncited-but-true standard fact is residual, not fatal."
+        ),
+        "adversarial_gap_reviewer": (
+            "ADVERSARIAL GAP REVIEWER: actively attack the proof for a HOLE that breaks "
+            "it -- a missing case, an unjustified leap, a hidden assumption, or a "
+            "counterexample to the claim. A FATAL flaw is a gap that makes the argument "
+            "invalid."
+        ),
+    }.get(reviewer_id, "review the proof for any argument-breaking flaw.")
+    return (
+        "PROOF-CONSENSUS REVIEW (advisory mock check, NOT machine verification). You "
+        f"review the LINE-NUMBERED PROOF provided. {role_focus} "
+        "You MUST cite the specific line_id(s) you examined in cited_line_ids; a verdict "
+        "that cites no line is not a review. A residual (non-fatal, fixable) gap goes in "
+        "residual_objections and does NOT block. If you cannot CONFIRM the proof is free "
+        "of a fatal flaw, return 'unclear' -- do not guess. "
         "Return JSON only: {\"verdict\": one of no_fatal_flaw_found|fatal_flaw_found|"
-        "unclear, \"looked_for\": the fatal-flaw classes you actively checked, "
-        "\"finding\": your concrete finding, \"residual_objections\": [non-fatal gaps]}. "
-        "You may NEVER set or upgrade proof/source/evidence/grade status; this verdict is "
-        "advisory only and never proves, refutes, or checks anything."
+        "unclear, \"looked_for\": the fatal-flaw classes you checked, \"finding\": your "
+        "concrete finding referencing line_ids, \"cited_line_ids\": [the line_ids you "
+        "examined], \"residual_objections\": [non-fatal gaps]}. You may NEVER set or "
+        "upgrade proof/source/evidence/grade status; this verdict is advisory only."
     )
 
 

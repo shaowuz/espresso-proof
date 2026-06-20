@@ -3681,6 +3681,70 @@ class AIReviewAssessment(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class ProofLine(StrictBaseModel):
+    """One line of a structured, line-numbered proof (Goal 69). It is a CANDIDATE
+    proof line: ``justification`` says WHY the line follows (a rule of inference, an
+    algebraic step, a cited lemma); ``depends_on`` lists earlier ``line_id`` values it
+    rests on; ``source_refs`` are candidate references (NEVER earned source_backed
+    status); ``gaps`` records any acknowledged hole in this line. The model carries no
+    proof/source/checked status field (StrictBaseModel forbids extras)."""
+
+    line_id: str
+    statement: str
+    justification: str
+    depends_on: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+
+
+class LineNumberedProof(StrictBaseModel):
+    """Goal 69: a structured, line-numbered proof artifact — the ONLY thing the
+    agent-consensus mock-check may seal.
+
+    A strategy / route / proposed_steps list / advisory_proof_sketch is a PLAN, not a
+    proof, and is explicitly NOT sealable. This artifact is a real proof object: each
+    line has a statement AND a justification AND its dependencies. It remains ADVISORY
+    (``status`` is pinned ``advisory``) and carries no proof/source/checked status
+    field, so producing it never earns trusted status — only the kernel's hard gates
+    (or the explicitly-labelled mock check) move proof language, and even the mock
+    check stays amber / not-machine-verified.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    strategy_id: str
+    proof_kind: str
+    status: Literal["advisory"] = "advisory"
+    lines: list[ProofLine] = Field(default_factory=list)
+    generated_at: str = ""
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_lines(self) -> LineNumberedProof:
+        if not self.lines:
+            raise ValueError(
+                "line_numbered_proof must have at least one line (a route is not a proof)"
+            )
+        seen: set[str] = set()
+        for line in self.lines:
+            if not line.line_id.strip():
+                raise ValueError("every proof line needs a non-empty line_id")
+            if line.line_id in seen:
+                raise ValueError(f"duplicate line_id {line.line_id!r}")
+            if not line.statement.strip():
+                raise ValueError(f"line {line.line_id} needs a non-empty statement")
+            if not line.justification.strip():
+                # A line without a justification is a route step, not a proof line.
+                raise ValueError(f"line {line.line_id} needs a non-empty justification")
+            for dep in line.depends_on:
+                if dep not in seen:
+                    raise ValueError(
+                        f"line {line.line_id} depends_on {dep!r} which is not an earlier line"
+                    )
+            seen.add(line.line_id)
+        return self
+
+
 class AgentConsensusVerdict(str, Enum):
     """One reviewer's ADVERSARIAL verdict for the agent-consensus mock-check.
 
@@ -3696,11 +3760,26 @@ class AgentConsensusVerdict(str, Enum):
     unclear = "unclear"
 
 
+PROOF_CONSENSUS_REVIEWERS = (
+    "line_proof_reviewer",
+    "theorem_lemma_applicability_reviewer",
+    "adversarial_gap_reviewer",
+)
+
+
 class AgentConsensusEntry(StrictBaseModel):
-    reviewer_id: Literal["strategy_reviewer", "evidence_reviewer", "line_proof_reviewer"]
+    # Goal 69: the three reviewers review the LINE-NUMBERED PROOF (not route text).
+    reviewer_id: Literal[
+        "line_proof_reviewer",
+        "theorem_lemma_applicability_reviewer",
+        "adversarial_gap_reviewer",
+    ]
     verdict: AgentConsensusVerdict
     looked_for: str  # which fatal-flaw classes this reviewer actively hunted
     finding: str  # the active "no fatal flaw because ..." / "fatal flaw: ..." statement
+    # Goal 69: a reviewer's verdict must cite the proof line_id(s) it rests on; a PASS
+    # that references no line is not a real review of the line-numbered proof.
+    cited_line_ids: list[str] = Field(default_factory=list)
     residual_objections: list[str] = Field(default_factory=list)  # non-fatal, surfaced
 
 
@@ -3729,8 +3808,11 @@ class AgentConsensusReview(StrictBaseModel):
     run_id: str
     generated_at: str
     bound_claim_hash: str
-    bound_source_grounding_hash: str
-    bound_review_hash: str
+    # Goal 69: the consensus binds the LINE-NUMBERED PROOF it reviewed (not route
+    # text). Any edit to the proof after review changes this hash -> seal fails closed.
+    bound_line_numbered_proof_hash: str = ""
+    bound_source_grounding_hash: str = ""
+    bound_review_hash: str = ""
     bound_prover_loop_hash: str = ""
     entries: list[AgentConsensusEntry] = Field(default_factory=list)
     consensus: bool
@@ -3739,12 +3821,12 @@ class AgentConsensusReview(StrictBaseModel):
 
     @model_validator(mode="after")
     def validate_consensus(self) -> AgentConsensusReview:
-        required = {"strategy_reviewer", "evidence_reviewer", "line_proof_reviewer"}
+        required = set(PROOF_CONSENSUS_REVIEWERS)
         seen = {entry.reviewer_id for entry in self.entries}
         if seen != required:
             raise ValueError(
-                "agent_consensus_review requires exactly the three distinct espresso "
-                "reviewers (strategy_reviewer, evidence_reviewer, line_proof_reviewer)"
+                "agent_consensus_review requires exactly the three distinct proof "
+                f"reviewers {sorted(required)}"
             )
         all_clear = all(
             entry.verdict == AgentConsensusVerdict.no_fatal_flaw_found
@@ -3762,6 +3844,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "claim": Claim,
     "ai_review": AIReviewAssessment,
     "agent_consensus_review": AgentConsensusReview,
+    "line_numbered_proof": LineNumberedProof,
     "agent_contracts": AgentContracts,
     "admission_check": AdmissionCheck,
     "hypothesis_ledger": HypothesisLedger,

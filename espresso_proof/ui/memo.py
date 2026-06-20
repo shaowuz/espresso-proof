@@ -298,10 +298,13 @@ def build_concise_memo(run_dir: Path) -> str:
                     if isinstance(entry, dict):
                         residual_count += len(entry.get("residual_objections") or [])
         lines.append("")
-        lines.append("Agent-consensus mock check: three reviewers found no fatal flaw.")
         lines.append(
-            "  Agent consensus only, not a machine check -- advisory, not a checked "
-            "or source-backed status."
+            "Agent-consensus mock check: three agents ran an adversarial pass and "
+            "surfaced no argument-breaking flaw."
+        )
+        lines.append(
+            "  Agent consensus only, not a machine check -- advisory; it is not a "
+            "checked or source-backed status."
         )
         lines.append(
             f"  {residual_count} residual (non-fatal) gap(s) remain; "

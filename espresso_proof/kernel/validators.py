@@ -48,6 +48,7 @@ from espresso_proof.kernel.models import (
     ExampleStatus,
     IdeaGrade,
     IdeaStatus,
+    LineNumberedProof,
     LLMAgentRunReport,
     LiteratureReviewAgentReport,
     LiteratureReviewReport,
@@ -215,6 +216,7 @@ def validate_run(run_dir: Path) -> None:
     time_allocation = _load_optional_time_allocation(run_dir, manifest)
     update_inbox = _load_optional_update_inbox(run_dir, manifest)
     _load_optional_ai_review(run_dir, manifest, claim)
+    line_numbered_proof = _load_optional_line_numbered_proof(run_dir, manifest, claim)
     agent_consensus_review = _load_optional_agent_consensus_review(run_dir, manifest, claim)
     human_feedback, feedback_summary = _load_optional_human_feedback(run_dir, manifest)
 
@@ -281,7 +283,7 @@ def validate_run(run_dir: Path) -> None:
     )
     _validate_review_outcome(review, idea_grade)
     _validate_agent_consensus_review(
-        agent_consensus_review, review, idea_grade, manifest, run_dir
+        agent_consensus_review, review, idea_grade, manifest, run_dir, line_numbered_proof
     )
     _validate_loop_control(loop_control)
     _validate_strategy_synthesis(
@@ -1771,24 +1773,53 @@ def _load_optional_agent_consensus_review(
     return consensus
 
 
+def _load_optional_line_numbered_proof(
+    run_dir: Path,
+    manifest: RunManifest,
+    claim: Claim,
+) -> LineNumberedProof | None:
+    """Goal 69: the structured line-numbered proof. Fails closed. Malformed / route-
+    shaped YAML is rejected by ``LineNumberedProof`` (StrictBaseModel + the
+    per-line validator). Light binding: claim_id must match the run."""
+    optional = manifest.optional_artifacts
+    if "line_numbered_proof" not in optional:
+        return None
+    proof = validate_yaml_model(
+        run_dir / optional["line_numbered_proof"], LineNumberedProof
+    )
+    if proof.claim_id != claim.id:
+        raise KernelValidationError(
+            f"line_numbered_proof claim_id {proof.claim_id!r} does not match the run "
+            f"claim {claim.id!r}"
+        )
+    return proof
+
+
 def _validate_agent_consensus_review(
     consensus: AgentConsensusReview | None,
     review: Review,
     idea_grade: IdeaGrade,
     manifest: RunManifest,
     run_dir: Path,
+    line_numbered_proof: LineNumberedProof | None = None,
 ) -> None:
     """Provenance gate for the agent-consensus mock-check (fail-closed).
 
-    The status is amber/advisory, but it DOES occupy a ``proof_language_status``
-    slot, so it earns the same fail-closed provenance treatment as
-    ``source_checked_argument``: the consensus must be a unanimous adversarial pass
-    by the ACTUAL three reviewers of THIS run, hash-bound to the current
-    claim/source/review/prover_loop, and it is revoked the moment any of those
-    change. The kernel never computes the agents' judgement (that is the whole point
-    of an explicitly agent-consensus tier) — it enforces that a structurally valid,
-    current, unanimous consensus exists and that no stronger/contradicting signal
-    coexists.
+    Goal 69: the mock check may ONLY seal a structured line-numbered proof. A route /
+    proposed_steps list / advisory_proof_sketch is NOT sealable. The gate enforces:
+
+    - a ``line_numbered_proof.yaml`` exists when the status is sealed (missing /
+      malformed / route-only -> fail closed);
+    - the consensus hash-binds claim + line_numbered_proof (+ source/review/prover_loop),
+      so editing the proof after review revokes the seal (fail closed);
+    - every PASS (no_fatal_flaw_found) reviewer cites real proof line_id(s) -- a PASS
+      that references no line is not a review of the proof;
+    - the three distinct proof reviewers reached a unanimous no-fatal-flaw consensus.
+
+    The kernel never computes the agents' judgement (it is an explicitly agent-
+    consensus, amber, NOT-machine-verified tier) -- it enforces that a structurally
+    valid, current, unanimous review OF THE LINE-NUMBERED PROOF exists, and that no
+    stronger/contradicting signal coexists.
     """
     status_uses_it = (
         idea_grade.proof_language_status
@@ -1802,16 +1833,31 @@ def _validate_agent_consensus_review(
             )
         return
 
-    # 1. Reviewer cross-check: the consensus reviewers must be exactly the reviewers
-    #    that actually reviewed this run (no citing reviewers who did not review it).
-    consensus_ids = {entry.reviewer_id for entry in consensus.entries}
-    review_ids = {reviewer.reviewer_id for reviewer in review.reviewers}
-    if consensus_ids != review_ids:
+    # 1. A line-numbered proof MUST exist for a consensus to mean anything (Goal 69).
+    #    A route / proposed_steps / advisory sketch is not a proof and is not sealable.
+    #    The seal helper also checks this upfront (fail-fast); THIS validator gate is
+    #    the authoritative BACKSTOP that blocks a hand-forged consensus bypassing the
+    #    seal helper (e.g. a manually written agent_consensus_review.yaml).
+    if line_numbered_proof is None:
         raise KernelValidationError(
-            "agent_consensus_review reviewers must match the run's Review reviewers"
+            "agent_consensus_review requires a line_numbered_proof.yaml; a route / "
+            "proposed_steps / advisory_proof_sketch is not a sealable proof"
         )
 
-    # 2. A reviewer that FAILED the standard review cannot claim no_fatal_flaw here.
+    # 2. Every PASS must cite real proof line_id(s) (Goal 69 rule 4): a no-fatal-flaw
+    #    verdict that references no line is not a review of the line-numbered proof.
+    proof_line_ids = {line.line_id for line in line_numbered_proof.lines}
+    for entry in consensus.entries:
+        if entry.verdict == AgentConsensusVerdict.no_fatal_flaw_found:
+            cited = [lid for lid in entry.cited_line_ids if lid in proof_line_ids]
+            if not cited:
+                raise KernelValidationError(
+                    f"reviewer {entry.reviewer_id} returned no_fatal_flaw_found but did "
+                    "not cite any line_id of the line-numbered proof"
+                )
+
+    # 3. A line_proof reviewer that FAILED the standard kernel review cannot claim
+    #    no_fatal_flaw here (the one role that overlaps the front-half review set).
     failed = {
         reviewer.reviewer_id
         for reviewer in review.reviewers
@@ -1827,12 +1873,18 @@ def _validate_agent_consensus_review(
                 "no_fatal_flaw_found in the agent consensus"
             )
 
-    # 3. Hash binding (revoke on change): the bound_* hashes must equal the CURRENT
-    #    artifact hashes, so a stale consensus cannot ride a modified proof.
+    # 4. Hash binding (revoke on change): the bound_* hashes must equal the CURRENT
+    #    artifact hashes -- crucially the line-numbered proof, so editing the proof
+    #    after review fails the seal closed.
     artifacts = manifest.artifacts
-    prover_loop_rel = manifest.optional_artifacts.get("prover_loop")
+    optional = manifest.optional_artifacts
+    prover_loop_rel = optional.get("prover_loop")
+    proof_rel = optional.get("line_numbered_proof")
     expected = {
         "bound_claim_hash": artifact_revision_hash(run_dir, artifacts["locked_claim"]),
+        "bound_line_numbered_proof_hash": (
+            artifact_revision_hash(run_dir, proof_rel) if proof_rel else ""
+        ),
         "bound_source_grounding_hash": artifact_revision_hash(
             run_dir, artifacts["source_grounding"]
         ),
@@ -1851,15 +1903,15 @@ def _validate_agent_consensus_review(
     if not status_uses_it:
         return
 
-    # 4. The status path requires a unanimous consensus (belt; model enforces the
+    # 5. The status path requires a unanimous consensus (belt; model enforces the
     #    consensus<->entries consistency).
     if not consensus.consensus:
         raise KernelValidationError(
             "agent_consensus_mock_checked requires a unanimous no_fatal_flaw_found "
-            "consensus from all three reviewers"
+            "consensus from all three proof reviewers"
         )
 
-    # 5. A refuted claim can never carry a mock-checked proof.
+    # 6. A refuted claim can never carry a mock-checked proof.
     if idea_grade.status == IdeaStatus.refuted:
         raise KernelValidationError(
             "a refuted claim cannot carry "

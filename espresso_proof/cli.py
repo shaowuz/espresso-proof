@@ -2081,6 +2081,37 @@ def resolve_agent_gate(
     typer.echo(f"Resolved LLM agent human gate as {decision}")
 
 
+@app.command("write-proof")
+def write_proof(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    provider: str = typer.Option("stub", "--provider"),
+    model: str = typer.Option("gpt-4.1", "--model"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND", "--external-agent-command-env"
+    ),
+) -> None:
+    """Goal 69: write a structured line_numbered_proof.yaml (each line has a statement
+    + justification + dependencies) -- a real proof object, NOT a route. Advisory only;
+    it is the ONLY artifact the agent-consensus mock check may seal."""
+    from espresso_proof.orchestration.proof_writer import write_line_numbered_proof
+
+    validate_run(run)
+    _require_claim_clear_for_cli(run)
+    with run_writer_lock(run, action="line-numbered proof writer"):
+        record = write_line_numbered_proof(
+            run,
+            provider=provider,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+        )
+    typer.echo(
+        f"Wrote line_numbered_proof.yaml ({len(record['lines'])} lines, "
+        f"kind={record['proof_kind']}, advisory only)."
+    )
+
+
 @app.command("seal-consensus")
 def seal_consensus(
     run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
@@ -2091,21 +2122,29 @@ def seal_consensus(
         "ESPRESSO_EXTERNAL_AGENT_COMMAND", "--external-agent-command-env"
     ),
 ) -> None:
-    """Run the three reviewers adversarially and SEAL the run with the agent-consensus
-    mock check (proof_language_status=agent_consensus_mock_checked) iff all three find
-    no fatal flaw. Amber/advisory, NOT machine-verified; transactional + re-validated."""
-    from espresso_proof.orchestration.agent_consensus_seal import seal_agent_consensus
+    """Run the three proof reviewers over the line_numbered_proof and SEAL the run with
+    the agent-consensus mock check (proof_language_status=agent_consensus_mock_checked)
+    iff all three find no fatal flaw and cite proof line_ids. Fails closed if there is
+    no line-numbered proof (route-only). Amber/advisory, NOT machine-verified."""
+    from espresso_proof.orchestration.agent_consensus_seal import (
+        NoLineNumberedProofError,
+        seal_agent_consensus,
+    )
 
     validate_run(run)
     _require_claim_clear_for_cli(run)
     with run_writer_lock(run, action="agent consensus seal"):
-        record = seal_agent_consensus(
-            run,
-            provider=provider,
-            model=model,
-            api_key_env=api_key_env,
-            external_agent_command_env=external_agent_command_env,
-        )
+        try:
+            record = seal_agent_consensus(
+                run,
+                provider=provider,
+                model=model,
+                api_key_env=api_key_env,
+                external_agent_command_env=external_agent_command_env,
+            )
+        except NoLineNumberedProofError as exc:
+            typer.echo(f"Not sealed: {exc}")
+            raise typer.Exit(code=1) from exc
     if record["consensus"]:
         typer.echo(
             "Sealed: agent_consensus_mock_checked (amber, NOT machine-verified). "
