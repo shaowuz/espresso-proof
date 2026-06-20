@@ -178,6 +178,15 @@ class StubLLMClient:
 
     def complete_json(self, *, system: str, prompt: str) -> dict:
         lowered = system.lower()
+        if "adversarial fatal-flaw review" in lowered:
+            return {
+                "verdict": "no_fatal_flaw_found",
+                "looked_for": "logical gaps, false steps, misapplied theorems, counterexamples",
+                "finding": "Stub adversarial review found no argument-breaking flaw.",
+                "residual_objections": [
+                    "Exact source locators still pending (residual, non-fatal).",
+                ],
+            }
         if "strategy reviewer" in lowered:
             return {
                 "summary": "Strategy reviewer sees a plausible route but flags theorem drift and missing genericity control.",
@@ -1866,6 +1875,51 @@ def verifier_system_prompt(index: int, *, reviewer_role: str = "verifier") -> st
         "severity (P0|P1|P2|P3), and a suggested_next_action. An objection only blocks or prioritizes "
         "repair; it never proves, refutes, or closes anything. "
         "Do not upgrade proof, evidence, source, or grade status. Return JSON only."
+    )
+
+
+def adversarial_verifier_system_prompt(reviewer_role: str) -> str:
+    """Phase 6: the three reviewers run ADVERSARIALLY for the agent-consensus mock
+    check. Each actively hunts for an argument-BREAKING flaw and returns a verdict in
+    {no_fatal_flaw_found, fatal_flaw_found, unclear}. A residual gap (missing exact
+    source, definition to pin, style) is NOT fatal -- it goes in residual_objections
+    and does not block. If the reviewer cannot CONFIRM the absence of a fatal flaw
+    (including because a missing source prevents judging applicability), it returns
+    'unclear' (which blocks consensus). This is an advisory mock check, NOT machine
+    verification, and may never upgrade any status.
+    """
+    role_focus = {
+        "strategy_reviewer": (
+            "the proof STRATEGY: a FATAL flaw is a strategic error that means the route "
+            "cannot prove the locked claim (theorem drift that changes the claim, a "
+            "missing reduction the route depends on, a false key lemma)."
+        ),
+        "evidence_reviewer": (
+            "the EVIDENCE: a FATAL flaw is a counterexample that breaks the claim, or "
+            "evidence used dishonestly as if checked. A missing source locator is NOT "
+            "fatal (residual)."
+        ),
+        "line_proof_reviewer": (
+            "the LINE-BY-LINE proof: a FATAL flaw is a step that does not follow, a "
+            "misapplied theorem (used outside its hypotheses), or a logical gap that "
+            "breaks the chain. A step merely needing an exact citation is NOT fatal "
+            "(residual)."
+        ),
+    }.get(reviewer_role, "the proof: a FATAL flaw is any argument-breaking error.")
+    return (
+        "ADVERSARIAL FATAL-FLAW REVIEW. You are an Espresso reviewer running an "
+        "adversarial mock check (this is NOT machine verification). Actively hunt for a "
+        f"fatal flaw in {role_focus} "
+        "A residual gap (a missing exact source/citation, a definition that should be "
+        "pinned, stylistic issues) is NOT fatal -- list those under residual_objections; "
+        "they do not block. If you CANNOT confirm the argument is free of a fatal flaw "
+        "(including because a missing source prevents you from judging whether a theorem "
+        "applies), return 'unclear' -- do not guess. "
+        "Return JSON only: {\"verdict\": one of no_fatal_flaw_found|fatal_flaw_found|"
+        "unclear, \"looked_for\": the fatal-flaw classes you actively checked, "
+        "\"finding\": your concrete finding, \"residual_objections\": [non-fatal gaps]}. "
+        "You may NEVER set or upgrade proof/source/evidence/grade status; this verdict is "
+        "advisory only and never proves, refutes, or checks anything."
     )
 
 

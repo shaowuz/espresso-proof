@@ -2081,6 +2081,41 @@ def resolve_agent_gate(
     typer.echo(f"Resolved LLM agent human gate as {decision}")
 
 
+@app.command("seal-consensus")
+def seal_consensus(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    provider: str = typer.Option("stub", "--provider"),
+    model: str = typer.Option("gpt-4.1", "--model"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND", "--external-agent-command-env"
+    ),
+) -> None:
+    """Run the three reviewers adversarially and SEAL the run with the agent-consensus
+    mock check (proof_language_status=agent_consensus_mock_checked) iff all three find
+    no fatal flaw. Amber/advisory, NOT machine-verified; transactional + re-validated."""
+    from espresso_proof.orchestration.agent_consensus_seal import seal_agent_consensus
+
+    validate_run(run)
+    _require_claim_clear_for_cli(run)
+    with run_writer_lock(run, action="agent consensus seal"):
+        record = seal_agent_consensus(
+            run,
+            provider=provider,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+        )
+    if record["consensus"]:
+        typer.echo(
+            "Sealed: agent_consensus_mock_checked (amber, NOT machine-verified). "
+            "Residual gaps remain open; see agent_consensus_review.yaml."
+        )
+    else:
+        blocking = [e["reviewer_id"] for e in record["entries"] if e["verdict"] != "no_fatal_flaw_found"]
+        typer.echo(f"Not sealed: no unanimous consensus (blocking reviewers: {blocking}).")
+
+
 @app.command("run-prover-loop-round")
 def run_prover_loop_round(
     run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
