@@ -37,6 +37,7 @@ from espresso_proof.kernel.models import (
     AgentConsensusVerdict,
     IdeaGrade,
     LineNumberedProof,
+    ProofGapResolutionReport,
     ProofLanguageStatus,
 )
 from espresso_proof.kernel.pressure_status import artifact_revision_hash
@@ -46,7 +47,7 @@ AGENT_CONSENSUS_FILENAME = "agent_consensus_review.yaml"
 CONSENSUS_DISCLAIMER = (
     "Agent consensus only: three reviewers adversarially found no fatal flaw. This is "
     "NOT machine-verified and NOT a checked/source-backed/proved status -- it is an "
-    "advisory mock check and may be wrong; residual gaps below remain open."
+    "advisory mock check and may be wrong; reviewer residual risks may remain."
 )
 _VERDICT_VALUES = {v.value for v in AgentConsensusVerdict}
 
@@ -153,6 +154,84 @@ def _proof_review_context(run_dir: Path, proof: dict) -> dict:
     return {**load_agent_context(run_dir), "line_numbered_proof": proof}
 
 
+def _trusted_human_allowed_theorem_refs(
+    run_dir: Path,
+    manifest: dict,
+    proof_artifact: str,
+) -> set[tuple[str, str]]:
+    report_rel = (manifest.get("optional_artifacts") or {}).get("proof_gap_resolution")
+    if not report_rel:
+        return set()
+    try:
+        report = ProofGapResolutionReport.model_validate(read_yaml(run_dir / report_rel))
+    except Exception:  # noqa: BLE001 - malformed provenance must fail closed
+        return set()
+    if report.run_id != manifest.get("run_id"):
+        return set()
+    if report.proof_artifact != proof_artifact:
+        return set()
+    if report.line_numbered_proof_sha256 != artifact_revision_hash(run_dir, proof_artifact):
+        return set()
+    return {
+        (candidate.line_id, candidate.proposed_ref)
+        for candidate in report.candidates
+        if candidate.action == "attach_human_allowed_theorem_ref"
+        and candidate.status == "accepted_by_human"
+        and not candidate.source_grounded
+        and not candidate.machine_verified
+        and candidate.proposed_ref
+    }
+
+
+def _is_resolved_dependency(
+    dep: dict,
+    *,
+    line_id: str,
+    trusted_human_allowed_theorem_refs: set[tuple[str, str]],
+) -> bool:
+    dep_type = dep.get("type")
+    status = dep.get("status")
+    if dep_type == "unchecked_gap":
+        return False
+    if dep_type == "theorem_ref":
+        if (line_id, str(dep.get("ref") or "")) in trusted_human_allowed_theorem_refs:
+            return (
+                status == "accepted_by_human"
+                and dep.get("authority") == "human_allowed_theorem_ref"
+                and dep.get("machine_verified") is False
+                and dep.get("source_grounded") is False
+            )
+        return False
+    if dep_type == "human_assumption":
+        return False
+    return status == "resolved"
+
+
+def _unresolved_proof_dependency_lines(
+    proof: dict,
+    *,
+    trusted_human_allowed_theorem_refs: set[tuple[str, str]] | None = None,
+) -> list[str]:
+    trusted_human_allowed_theorem_refs = trusted_human_allowed_theorem_refs or set()
+    unresolved: list[str] = []
+    for index, line in enumerate(proof.get("lines") or [], start=1):
+        if not isinstance(line, dict):
+            continue
+        line_id = str(line.get("line_id") or f"line_{index}")
+        if line.get("gaps"):
+            unresolved.append(line_id)
+            continue
+        for dep in line.get("dependencies") or []:
+            if isinstance(dep, dict) and not _is_resolved_dependency(
+                dep,
+                line_id=line_id,
+                trusted_human_allowed_theorem_refs=trusted_human_allowed_theorem_refs,
+            ):
+                unresolved.append(line_id)
+                break
+    return unresolved
+
+
 def run_proof_reviewers(run_dir: Path, *, client, proof: dict | None = None) -> list[dict]:
     """Call the three proof reviewers adversarially over the LINE-NUMBERED PROOF."""
     run_dir = Path(run_dir)
@@ -255,14 +334,21 @@ def seal_agent_consensus(
     manifest = read_yaml(manifest_path)
     # Goal 69: the mock check may ONLY seal a line-numbered proof (fail closed).
     proof = _require_line_numbered_proof(run_dir, manifest)
-    unresolved_gap_lines = [
-        str(line.get("line_id") or f"line_{index}")
-        for index, line in enumerate(proof.get("lines") or [], start=1)
-        if isinstance(line, dict) and line.get("gaps")
-    ]
+    proof_artifact = (manifest.get("optional_artifacts") or {}).get(
+        "line_numbered_proof", "line_numbered_proof.yaml"
+    )
+    trusted_human_allowed_theorem_refs = _trusted_human_allowed_theorem_refs(
+        run_dir,
+        manifest,
+        proof_artifact,
+    )
+    unresolved_gap_lines = _unresolved_proof_dependency_lines(
+        proof,
+        trusted_human_allowed_theorem_refs=trusted_human_allowed_theorem_refs,
+    )
     if unresolved_gap_lines:
         raise RuntimeError(
-            "agent consensus cannot seal line-numbered proof with unresolved gaps: "
+            "agent consensus cannot seal line-numbered proof with unresolved dependencies: "
             + ", ".join(unresolved_gap_lines)
         )
     # Bind the hashes AS THE REVIEWERS REVIEW THEM (captured before the reviewers run,

@@ -30,6 +30,7 @@ from espresso_proof.orchestration.agent_consensus_seal import (
     seal_agent_consensus,
 )
 from espresso_proof.orchestration.proof_writer import write_line_numbered_proof
+from espresso_proof.orchestration.proof_gap_resolver import resolve_proof_gaps
 from espresso_proof.ui.descriptions import VERIFIED_PROOF_STATUSES, describe_proof_language
 from espresso_proof.ui.evidence_trust import EARNED_LEVELS, is_green, trust_tone
 from tests.test_proof_verification_bridge_v2 import _build
@@ -120,6 +121,35 @@ class _ProofReviewStub(StubLLMClient):
         }
 
 
+class _GapResolverStub(StubLLMClient):
+    def complete_json(self, *, system: str, prompt: str) -> dict:
+        if "proof gap resolver" not in system.lower():
+            return super().complete_json(system=system, prompt=prompt)
+        return {
+            "candidates": [
+                {
+                    "line_id": "L1",
+                    "dependency_ref": "L1.gap.1",
+                    "dependency_type": "unchecked_gap",
+                    "action": "attach_candidate_theorem_ref",
+                    "proposed_ref": "candidate.lagrange",
+                    "needed_statement": "If H is a subgroup of finite G, then |H| divides |G|.",
+                    "proposed_statement": "If H is a subgroup of a finite group G, then the order of H divides the order of G.",
+                    "source_locator": "candidate web locator only",
+                    "source_kind": "web",
+                    "applicability_review": "candidate_match",
+                    "reviewer_notes": ["Candidate source still needs review."],
+                }
+            ]
+        }
+
+
+def _add_single_gap(run_dir: Path) -> None:
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    proof["lines"][0]["gaps"] = ["external theorem locator missing"]
+    write_yaml(run_dir / "line_numbered_proof.yaml", proof)
+
+
 # --------------------------------------------------------------------------- #
 # model
 # --------------------------------------------------------------------------- #
@@ -132,6 +162,36 @@ def test_proof_line_and_proof_models() -> None:
         ],
     )
     assert proof.status == "advisory"  # pinned advisory
+    assert proof.lines[1].dependencies[0].type == "prior_line"
+    assert proof.lines[1].dependencies[0].ref == "L1"
+
+
+def test_proof_line_dependency_graph_migrates_legacy_gaps_and_refs() -> None:
+    proof = LineNumberedProof(
+        claim_id="c1",
+        strategy_id="s1",
+        proof_kind="lagrange",
+        lines=[
+            ProofLine(line_id="L1", statement="G finite", justification="hypothesis"),
+            ProofLine(
+                line_id="L2",
+                statement="|H| divides |G|",
+                justification="Lagrange theorem",
+                depends_on=["L1"],
+                source_refs=["lagrange_candidate"],
+                gaps=["missing exact theorem locator"],
+            ),
+        ],
+    )
+    line = proof.lines[1]
+    assert {(dep.type, dep.ref) for dep in line.dependencies} >= {
+        ("prior_line", "L1"),
+        ("theorem_ref", "lagrange_candidate"),
+        ("unchecked_gap", "L2.gap.1"),
+    }
+    theorem_dep = next(dep for dep in line.dependencies if dep.type == "theorem_ref")
+    assert theorem_dep.status == "candidate"
+    assert theorem_dep.authority == "agent_claimed_theorem_ref"
 
 
 def test_proof_rejects_route_only_and_bad_lines() -> None:
@@ -234,10 +294,196 @@ def test_negative_unresolved_proof_gaps_cannot_seal(tmp_path: Path) -> None:
     proof["lines"][0]["gaps"] = ["external theorem locator missing"]
     write_yaml(run_dir / "line_numbered_proof.yaml", proof)
 
-    with pytest.raises(RuntimeError, match="unresolved gaps"):
+    with pytest.raises(RuntimeError, match="unresolved dependencies"):
         seal_agent_consensus(run_dir, client=_ProofReviewStub())
 
     assert _grade(run_dir)["proof_language_status"] != _AMBER
+
+
+def test_negative_candidate_theorem_dependency_cannot_seal(tmp_path: Path) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    proof["lines"][0]["dependencies"].append(
+        {
+            "type": "theorem_ref",
+            "ref": "agent_claimed_lagrange",
+            "status": "candidate",
+            "authority": "agent_claimed_theorem_ref",
+            "needed_statement": "If H is a subgroup of finite G, then |H| divides |G|.",
+        }
+    )
+    write_yaml(run_dir / "line_numbered_proof.yaml", proof)
+
+    with pytest.raises(RuntimeError, match="unresolved dependencies"):
+        seal_agent_consensus(run_dir, client=_ProofReviewStub())
+
+    assert _grade(run_dir)["proof_language_status"] != _AMBER
+
+
+def test_negative_self_asserted_human_allowed_dependency_cannot_seal(tmp_path: Path) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    proof["lines"][0]["dependencies"].append(
+        {
+            "type": "theorem_ref",
+            "ref": "human_allowed_theorem.lagrange",
+            "status": "accepted_by_human",
+            "authority": "human_allowed_theorem_ref",
+            "needed_statement": "If H is a subgroup of finite G, then |H| divides |G|.",
+            "source_grounded": False,
+            "machine_verified": False,
+        }
+    )
+    write_yaml(run_dir / "line_numbered_proof.yaml", proof)
+
+    with pytest.raises(RuntimeError, match="unresolved dependencies"):
+        seal_agent_consensus(run_dir, client=_ProofReviewStub())
+
+    assert _grade(run_dir)["proof_language_status"] != _AMBER
+
+
+def test_negative_self_asserted_source_resolved_dependency_cannot_seal(tmp_path: Path) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    proof["lines"][0]["dependencies"].append(
+        {
+            "type": "theorem_ref",
+            "ref": "agent_claimed_lagrange",
+            "status": "resolved",
+            "authority": "agent_claimed_theorem_ref",
+            "source_locator": "Theorem 1.2 somewhere",
+            "needed_statement": "If H is a subgroup of finite G, then |H| divides |G|.",
+        }
+    )
+    write_yaml(run_dir / "line_numbered_proof.yaml", proof)
+
+    with pytest.raises(RuntimeError, match="unresolved dependencies"):
+        seal_agent_consensus(run_dir, client=_ProofReviewStub())
+
+    assert _grade(run_dir)["proof_language_status"] != _AMBER
+
+
+def test_proof_gap_resolver_attaches_candidate_but_does_not_clear_gap(tmp_path: Path) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    _add_single_gap(run_dir)
+
+    report = resolve_proof_gaps(run_dir, client=_GapResolverStub())
+    validate_run(run_dir)
+
+    assert report["candidates"][0]["action"] == "attach_candidate_theorem_ref"
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    deps = proof["lines"][0]["dependencies"]
+    assert any(dep["ref"] == "candidate.lagrange" for dep in deps)
+    assert proof["lines"][0]["gaps"] == ["external theorem locator missing"]
+    with pytest.raises(RuntimeError, match="unresolved dependencies"):
+        seal_agent_consensus(run_dir, client=_ProofReviewStub())
+
+
+def test_proof_gap_resolver_human_allow_clears_gap_for_advisory_seal(tmp_path: Path) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    _add_single_gap(run_dir)
+
+    report = resolve_proof_gaps(
+        run_dir,
+        human_allow=[
+            "L1|human_allowed_theorem.lagrange|If H is a subgroup of finite G, then |H| divides |G|."
+        ],
+        client=StubLLMClient(),
+    )
+    validate_run(run_dir)
+
+    assert report["candidates"][0]["status"] == "accepted_by_human"
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    assert proof["lines"][0]["gaps"] == []
+    dep = next(
+        item
+        for item in proof["lines"][0]["dependencies"]
+        if item["ref"] == "human_allowed_theorem.lagrange"
+    )
+    assert dep["authority"] == "human_allowed_theorem_ref"
+    assert dep["source_grounded"] is False
+    assert dep["machine_verified"] is False
+    record = seal_agent_consensus(run_dir, client=_ProofReviewStub())
+    assert record["consensus"] is True
+
+
+def test_proof_gap_resolver_human_allow_requires_dependency_ref_when_ambiguous(tmp_path: Path) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    proof["lines"][0]["gaps"] = [
+        "first external theorem locator missing",
+        "second external theorem locator missing",
+    ]
+    write_yaml(run_dir / "line_numbered_proof.yaml", proof)
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        resolve_proof_gaps(
+            run_dir,
+            human_allow=["L1|human_allowed_theorem.first|First theorem."],
+            client=StubLLMClient(),
+        )
+
+    report = resolve_proof_gaps(
+        run_dir,
+        human_allow=["L1@L1.gap.2|human_allowed_theorem.second|Second theorem."],
+        client=StubLLMClient(),
+    )
+    validate_run(run_dir)
+
+    assert report["candidates"][0]["dependency_ref"] == "L1.gap.2"
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    assert proof["lines"][0]["gaps"] == ["first external theorem locator missing"]
+
+
+def test_proof_gap_resolver_human_allow_does_not_clear_unrelated_gap(tmp_path: Path) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    proof["lines"][0]["gaps"] = ["separate source locator still missing"]
+    proof["lines"][0]["dependencies"].append(
+        {
+            "type": "theorem_ref",
+            "ref": "candidate.lagrange",
+            "status": "candidate",
+            "authority": "agent_claimed_theorem_ref",
+            "needed_statement": "If H is a subgroup of finite G, then |H| divides |G|.",
+        }
+    )
+    write_yaml(run_dir / "line_numbered_proof.yaml", proof)
+
+    resolve_proof_gaps(
+        run_dir,
+        human_allow=[
+            "L1@candidate.lagrange|human_allowed_theorem.lagrange|If H is a subgroup of finite G, then |H| divides |G|."
+        ],
+        client=StubLLMClient(),
+    )
+    validate_run(run_dir)
+
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    assert proof["lines"][0]["gaps"] == ["separate source locator still missing"]
+    deps = proof["lines"][0]["dependencies"]
+    assert not any(dep["ref"] == "candidate.lagrange" for dep in deps)
+    assert any(dep["ref"] == "human_allowed_theorem.lagrange" for dep in deps)
+
+
+def test_proof_gap_resolution_is_bound_to_current_proof_hash(tmp_path: Path) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    _add_single_gap(run_dir)
+    resolve_proof_gaps(
+        run_dir,
+        human_allow=[
+            "L1|human_allowed_theorem.lagrange|If H is a subgroup of finite G, then |H| divides |G|."
+        ],
+        client=StubLLMClient(),
+    )
+    validate_run(run_dir)
+
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    proof["notes"].append("mutated after gap resolution")
+    write_yaml(run_dir / "line_numbered_proof.yaml", proof)
+
+    with pytest.raises(KernelValidationError, match="stale"):
+        validate_run(run_dir)
 
 
 def test_negative_modified_proof_after_review_invalidates_consensus(tmp_path: Path) -> None:

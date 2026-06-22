@@ -116,6 +116,7 @@ from espresso_proof.kernel.models import (
     LiteratureReviewReport,
     MemoryEntry,
     ProverLoopReport,
+    ProofGapResolutionReport,
     TheoremApplicabilityReport,
     TheoremExtractionReport,
     WorkflowSpec,
@@ -2152,11 +2153,66 @@ def seal_consensus(
     if record["consensus"]:
         typer.echo(
             "Sealed: agent_consensus_mock_checked (amber, NOT machine-verified). "
-            "Residual gaps remain open; see agent_consensus_review.yaml."
+            "Reviewer residual risks may remain; see agent_consensus_review.yaml."
         )
     else:
         blocking = [e["reviewer_id"] for e in record["entries"] if e["verdict"] != "no_fatal_flaw_found"]
         typer.echo(f"Not sealed: no unanimous consensus (blocking reviewers: {blocking}).")
+
+
+@app.command("resolve-proof-gaps")
+def resolve_proof_gaps_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    provider: str = typer.Option("stub", "--provider"),
+    model: str = typer.Option("gpt-4.1", "--model"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND", "--external-agent-command-env"
+    ),
+    human_allow: list[str] | None = typer.Option(
+        None,
+        "--human-allow",
+        help="Repeatable explicit advisory theorem allowance: LINE_ID or LINE_ID@DEPENDENCY_REF, then |REF|THEOREM_STATEMENT.",
+    ),
+) -> None:
+    """Resolve line-numbered proof gaps into candidate repairs.
+
+    Default mode calls a resolver agent and attaches candidate theorem refs
+    only; it does not clear gaps or seal anything. ``--human-allow`` records an
+    explicit user-allowed theorem ref for advisory consensus, not source-grounded
+    or machine-verified proof.
+    """
+
+    from espresso_proof.orchestration.proof_gap_resolver import resolve_proof_gaps
+
+    if provider not in {"stub", "openai", "external"}:
+        raise typer.BadParameter("provider must be stub, openai, or external")
+    validate_run(run)
+    _require_claim_clear_for_cli(run)
+    with run_writer_lock(run, action="proof gap resolver"):
+        report = resolve_proof_gaps(
+            run,
+            provider=provider,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+            human_allow=human_allow or [],
+        )
+        ProofGapResolutionReport.model_validate(report)
+    attached = sum(
+        1
+        for item in report["candidates"]
+        if item["action"]
+        in {"attach_candidate_theorem_ref", "attach_human_allowed_theorem_ref"}
+    )
+    typer.echo(
+        f"Wrote proof_gap_resolution.yaml ({len(report['candidates'])} candidate repair(s), "
+        f"{attached} attached to proof graph)."
+    )
+    typer.echo(
+        "Candidate source repairs stay advisory; rerun seal-consensus only after "
+        "source/applicability review or explicit human allowance."
+    )
 
 
 @app.command("run-prover-loop-round")

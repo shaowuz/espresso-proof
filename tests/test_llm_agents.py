@@ -16,8 +16,10 @@ from espresso_proof.agents.llm_agents import (
     OpenAIResponsesClient,
     StubLLMClient,
     collect_unsafe_language,
+    line_numbered_proof_writer_system_prompt,
     make_prover_attempt,
     make_verifier_review,
+    prover_system_prompt,
     safe_text,
 )
 from espresso_proof.orchestration.mock_pipeline import run_mock_critique
@@ -35,6 +37,17 @@ from espresso_proof.kernel.validators import KernelValidationError
 
 FIXTURES = Path("tests/fixtures")
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_prover_and_proof_writer_prompts_forbid_unchecked_examples_as_support() -> None:
+    prover = prover_system_prompt().lower()
+    writer = line_numbered_proof_writer_system_prompt().lower()
+
+    assert "unchecked examples" in prover
+    assert "never be cited as proof support" in prover
+    assert "pressure-lane context only" in writer
+    assert "dependencies" in writer
+    assert "human_allowed_theorem_ref" in writer
 
 
 def _mark_claim_clear(run_dir: Path) -> None:

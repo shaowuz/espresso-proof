@@ -2035,7 +2035,13 @@ def prover_system_prompt() -> str:
     return (
         "You are Espresso's prover agent. Propose candidate proof routes only. "
         "Do not claim the theorem is proved, verified, complete, or true. "
-        "Every route must list source requests and risks. Return JSON only."
+        "Every route must list source requests and risks. "
+        "Unchecked examples and counterexamples are pressure-lane context only: "
+        "they may suggest a route or expose a boundary case, but they may NEVER be "
+        "cited as proof support, theorem support, survived evidence, or proof dependencies. "
+        "Only definitions, prior proof lines, explicit theorem references, verified "
+        "computations, or human-confirmed assumptions can support a proof step. "
+        "Return JSON only."
     )
 
 
@@ -2080,14 +2086,26 @@ def line_numbered_proof_writer_system_prompt() -> str:
         "argument: each line must actually assert a mathematical statement and give a "
         "concrete justification for WHY it follows (a rule of inference, an explicit "
         "algebraic manipulation, a case, or a cited lemma whose hypotheses you state). "
-        "Number the lines and record, for each line, the earlier line_ids it depends "
-        "on. If a line genuinely rests on an uncited external theorem, still give the "
-        "justification and record the gap in that line's 'gaps'. This is a CANDIDATE "
+        "Number the lines and record a structured 'dependencies' graph for each line. "
+        "Dependency types are prior_line, definition, arithmetic, theorem_ref, "
+        "human_assumption, and unchecked_gap. Unchecked examples/counterexamples are "
+        "pressure-lane context only; never cite them as proof dependencies. If a line "
+        "genuinely rests on an uncited external theorem, still give the justification "
+        "and record a theorem_ref with status 'missing' plus an unchecked_gap. "
+        "A theorem allowed by the user must be marked human_assumption or theorem_ref "
+        "with authority 'human_allowed_theorem_ref', source_grounded=false, and "
+        "machine_verified=false. This is a CANDIDATE "
         "proof only: do NOT claim it is proved, verified, machine-checked, or "
         "source-certified -- the kernel decides status. "
         "Return JSON only: {\"proof_kind\": short label (e.g. parity_case_split | "
         "consecutive_integers | induction), \"lines\": [{\"line_id\": e.g. L1, "
         "\"statement\": the asserted math, \"justification\": why it follows, "
+        "\"dependencies\": [{\"type\": prior_line|definition|arithmetic|theorem_ref|"
+        "human_assumption|unchecked_gap, \"ref\": id, \"status\": resolved|missing|"
+        "candidate|rejected|accepted_by_human, \"role\": short role, "
+        "\"needed_statement\": optional theorem statement, \"source_locator\": optional, "
+        "\"authority\": optional source_grounded_theorem_ref|human_allowed_theorem_ref|"
+        "agent_claimed_theorem_ref, \"source_grounded\": bool, \"machine_verified\": bool}], "
         "\"depends_on\": [earlier line_ids], \"source_refs\": [optional candidate refs], "
         "\"gaps\": [optional acknowledged holes]}]}."
     )
@@ -2134,6 +2152,30 @@ def proof_consensus_system_prompt(reviewer_id: str) -> str:
     )
 
 
+def proof_gap_resolver_system_prompt() -> str:
+    return (
+        "PROOF GAP RESOLVER. You inspect unresolved dependencies in a "
+        "line_numbered_proof and propose candidate repairs only. Do not build a "
+        "theorem library. Do not claim a theorem is source-backed, checked, proved, "
+        "or machine-verified. This resolver has no trusted retrieval transcript in "
+        "context, so any locator you name is only a candidate locator claim, not "
+        "evidence that user material, project corpus, or the web was actually "
+        "searched. Prefer precise candidate theorem/source queries; if you cannot "
+        "name a plausible precise locator, keep the gap. A separate retrieval and "
+        "applicability review must validate it before it can clear a dependency. "
+        "Return JSON only: {\"candidates\": [{\"line_id\": proof line id, "
+        "\"dependency_ref\": unresolved dependency ref, \"dependency_type\": "
+        "theorem_ref|human_assumption|unchecked_gap, \"action\": "
+        "attach_candidate_theorem_ref|keep_gap, \"proposed_ref\": stable candidate "
+        "id, \"needed_statement\": statement needed by the proof line, "
+        "\"proposed_statement\": theorem statement from source if found, "
+        "\"source_locator\": exact theorem/section/page locator if found, "
+        "\"source_url\": optional URL, \"source_kind\": user_material|project_corpus|"
+        "web|paper|book|unknown, \"applicability_review\": not_reviewed|candidate_match|"
+        "mismatch|unclear, \"reviewer_notes\": [short notes]}]}."
+    )
+
+
 def agent_prompt(context: dict, *, role: str) -> str:
     return json.dumps(
         {
@@ -2143,6 +2185,7 @@ def agent_prompt(context: dict, *, role: str) -> str:
                 "no proof/source/evidence upgrades",
                 "human gate before deeper work",
                 "source support requires exact locator and matching hypotheses",
+                "unchecked examples/counterexamples are pressure only, never proof support",
                 "time_allocation.yaml is scheduling-only and advisory-only",
                 "record missing source/theorem/example/counterexample context explicitly",
             ],

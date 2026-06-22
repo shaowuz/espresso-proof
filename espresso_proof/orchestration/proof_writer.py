@@ -43,6 +43,7 @@ def _normalize_lines(raw_lines: object) -> list[dict]:
                 "line_id": (str(line.get("line_id") or "").strip() or f"L{index}"),
                 "statement": str(line.get("statement", "") or "").strip(),
                 "justification": str(line.get("justification", "") or "").strip(),
+                "dependencies": list(line.get("dependencies") or []),
                 "depends_on": [str(d).strip() for d in (line.get("depends_on") or []) if str(d).strip()],
                 "source_refs": [str(s).strip() for s in (line.get("source_refs") or []) if str(s).strip()],
                 "gaps": [str(g).strip() for g in (line.get("gaps") or []) if str(g).strip()],
@@ -109,7 +110,10 @@ def write_line_numbered_proof(
         "generated_at": datetime.now(UTC).isoformat(),
         "notes": [],
     }
-    LineNumberedProof.model_validate(record)  # fail-closed BEFORE writing (route -> reject)
+    # Fail closed before writing, and persist the normalized proof graph rather
+    # than the raw model output (legacy depends_on/source_refs/gaps are expanded
+    # into structured dependencies by the model).
+    record = LineNumberedProof.model_validate(record).model_dump(mode="json")
 
     proof_path = run_dir / LINE_NUMBERED_PROOF_FILENAME
     snapshot = {

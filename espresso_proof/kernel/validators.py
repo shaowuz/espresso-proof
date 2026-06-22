@@ -38,6 +38,7 @@ from espresso_proof.kernel.models import (
     ProofVerificationReport,
     ProofVerificationStatus,
     PressureLaneBarrierReport,
+    ProofGapResolutionReport,
     SubgoalState,
     ContinueDecision,
     ExampleSelection,
@@ -213,6 +214,7 @@ def validate_run(run_dir: Path) -> None:
     autonomous_literature_retrieval = _load_optional_autonomous_literature_retrieval(run_dir, manifest)
     _load_optional_literature_candidates(run_dir, manifest)
     _load_optional_retrieval_resolution(run_dir, manifest)
+    proof_gap_resolution = _load_optional_proof_gap_resolution(run_dir, manifest)
     memory_context = _load_optional_memory_context(run_dir, manifest)
     if memory_context is not None:
         _validate_memory_context(memory_context, claim, manifest)
@@ -262,6 +264,7 @@ def validate_run(run_dir: Path) -> None:
     _validate_mathematical_judgment(mathematical_judgment, claim, manifest)
     _validate_failure_pattern_audit(failure_pattern_audit, claim, manifest)
     _validate_literature_retrieval(literature_retrieval, claim, manifest)
+    _validate_proof_gap_resolution(proof_gap_resolution, claim, manifest, run_dir)
     _validate_proof_verification(proof_verification, claim, manifest, idea_grade)
     _validate_grade_proof_language_backed(
         idea_grade,
@@ -1560,6 +1563,70 @@ def _load_optional_retrieval_resolution(
         run_dir / optional["retrieval_resolution"],
         RetrievalResolutionReport,
     )
+
+
+def _load_optional_proof_gap_resolution(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> ProofGapResolutionReport | None:
+    optional = manifest.optional_artifacts
+    if "proof_gap_resolution" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["proof_gap_resolution"],
+        ProofGapResolutionReport,
+    )
+
+
+def _validate_proof_gap_resolution(
+    report: ProofGapResolutionReport | None,
+    claim: Claim,
+    manifest: RunManifest,
+    run_dir: Path,
+) -> None:
+    if report is None:
+        return
+    if report.claim_id != claim.id:
+        raise KernelValidationError("proof_gap_resolution claim_id does not match locked claim")
+    if report.run_id != manifest.run_id:
+        raise KernelValidationError("proof_gap_resolution run_id does not match manifest")
+    proof_artifact = manifest.optional_artifacts.get("line_numbered_proof")
+    if not proof_artifact:
+        raise KernelValidationError("proof_gap_resolution requires a line_numbered_proof artifact")
+    if report.proof_artifact != proof_artifact:
+        raise KernelValidationError("proof_gap_resolution proof_artifact does not match line_numbered_proof")
+    if report.line_numbered_proof_sha256 != artifact_revision_hash(run_dir, proof_artifact):
+        raise KernelValidationError("proof_gap_resolution is stale for the current line_numbered_proof")
+    proof = validate_yaml_model(run_dir / proof_artifact, LineNumberedProof)
+    proof_dependencies = {
+        (line.line_id, dep.ref): dep
+        for line in proof.lines
+        for dep in line.dependencies
+    }
+    seen: set[tuple[str, str]] = set()
+    for candidate in report.candidates:
+        key = (candidate.line_id, candidate.dependency_ref)
+        if key in seen:
+            raise KernelValidationError("duplicate proof gap resolution candidate")
+        seen.add(key)
+        if candidate.action == "attach_human_allowed_theorem_ref":
+            if candidate.status != "accepted_by_human":
+                raise KernelValidationError("human-allowed proof gap candidate must be accepted_by_human")
+            if candidate.source_grounded or candidate.machine_verified:
+                raise KernelValidationError("human-allowed theorem refs are advisory, not source-grounded or machine-verified")
+            dep = proof_dependencies.get((candidate.line_id, candidate.proposed_ref))
+            if dep is None:
+                raise KernelValidationError("human-allowed proof gap candidate is not attached to the proof graph")
+            if dep.authority != "human_allowed_theorem_ref" or dep.status != "accepted_by_human":
+                raise KernelValidationError("human-allowed proof dependency lacks trusted advisory provenance")
+            if dep.source_grounded or dep.machine_verified:
+                raise KernelValidationError("human-allowed proof dependency must remain advisory")
+        if candidate.action == "attach_candidate_theorem_ref":
+            if candidate.status != "candidate":
+                raise KernelValidationError("agent source-locator theorem refs must remain candidate until reviewed")
+            dep = proof_dependencies.get((candidate.line_id, candidate.proposed_ref))
+            if dep is None:
+                raise KernelValidationError("agent proof gap candidate is not attached to the proof graph")
 
 
 def _load_optional_memory_context(

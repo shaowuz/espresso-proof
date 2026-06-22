@@ -4021,20 +4021,136 @@ class AIReviewAssessment(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class ProofLineDependency(StrictBaseModel):
+    """Structured dependency edge for one line of a candidate proof.
+
+    This is not a proof checker. It only makes provenance explicit enough for the
+    kernel to route repairs and block overclaiming: examples are not support,
+    missing theorem refs stay gaps, and human-allowed theorem use remains clearly
+    advisory rather than source-grounded or machine-verified.
+    """
+
+    type: Literal[
+        "prior_line",
+        "definition",
+        "arithmetic",
+        "theorem_ref",
+        "human_assumption",
+        "unchecked_gap",
+    ]
+    ref: str = Field(min_length=1)
+    status: Literal[
+        "resolved",
+        "missing",
+        "candidate",
+        "rejected",
+        "accepted_by_human",
+    ] = "resolved"
+    role: str = ""
+    needed_statement: str = ""
+    source_locator: str = ""
+    reviewer_verdict: Literal["", "pass", "gap", "fatal"] = ""
+    authority: Literal[
+        "",
+        "source_grounded_theorem_ref",
+        "human_allowed_theorem_ref",
+        "agent_claimed_theorem_ref",
+    ] = ""
+    source_grounded: bool = False
+    machine_verified: bool = False
+
+
 class ProofLine(StrictBaseModel):
     """One line of a structured, line-numbered proof (Goal 69). It is a CANDIDATE
     proof line: ``justification`` says WHY the line follows (a rule of inference, an
-    algebraic step, a cited lemma); ``depends_on`` lists earlier ``line_id`` values it
-    rests on; ``source_refs`` are candidate references (NEVER earned source_backed
-    status); ``gaps`` records any acknowledged hole in this line. The model carries no
-    proof/source/checked status field (StrictBaseModel forbids extras)."""
+    algebraic step, a cited lemma); ``dependencies`` is the structured proof graph.
+    Legacy ``depends_on`` / ``source_refs`` / ``gaps`` are preserved for compatibility
+    and normalized into dependency edges. The model carries no proof/source/checked
+    status field (StrictBaseModel forbids extras)."""
 
     line_id: str = Field(min_length=1)
     statement: str = Field(min_length=1)
     justification: str = Field(min_length=1)
+    dependencies: list[ProofLineDependency] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_dependency_graph(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        line_id = str(normalized.get("line_id") or "line").strip() or "line"
+        dependencies = list(normalized.get("dependencies") or [])
+
+        depends_on = [str(dep).strip() for dep in (normalized.get("depends_on") or []) if str(dep).strip()]
+        source_refs = [str(ref).strip() for ref in (normalized.get("source_refs") or []) if str(ref).strip()]
+        gaps = [str(gap).strip() for gap in (normalized.get("gaps") or []) if str(gap).strip()]
+
+        existing_edges = {
+            (str(edge.get("type")), str(edge.get("ref")))
+            for edge in dependencies
+            if isinstance(edge, dict)
+        }
+        for dep in depends_on:
+            key = ("prior_line", dep)
+            if key not in existing_edges:
+                dependencies.append({"type": "prior_line", "ref": dep, "status": "resolved"})
+                existing_edges.add(key)
+        for ref in source_refs:
+            key = ("theorem_ref", ref)
+            if key not in existing_edges:
+                dependencies.append(
+                    {
+                        "type": "theorem_ref",
+                        "ref": ref,
+                        "status": "candidate",
+                        "authority": "agent_claimed_theorem_ref",
+                    }
+                )
+                existing_edges.add(key)
+        for index, gap in enumerate(gaps, start=1):
+            key = ("unchecked_gap", f"{line_id}.gap.{index}")
+            if key not in existing_edges:
+                dependencies.append(
+                    {
+                        "type": "unchecked_gap",
+                        "ref": f"{line_id}.gap.{index}",
+                        "status": "missing",
+                        "role": gap,
+                    }
+                )
+                existing_edges.add(key)
+
+        prior_refs = [
+            str(edge.get("ref")).strip()
+            for edge in dependencies
+            if isinstance(edge, dict)
+            and edge.get("type") == "prior_line"
+            and str(edge.get("ref")).strip()
+        ]
+        theorem_refs = [
+            str(edge.get("ref")).strip()
+            for edge in dependencies
+            if isinstance(edge, dict)
+            and edge.get("type") == "theorem_ref"
+            and str(edge.get("ref")).strip()
+        ]
+        gap_roles = [
+            str(edge.get("role") or edge.get("needed_statement") or edge.get("ref")).strip()
+            for edge in dependencies
+            if isinstance(edge, dict)
+            and edge.get("type") == "unchecked_gap"
+            and str(edge.get("role") or edge.get("needed_statement") or edge.get("ref")).strip()
+        ]
+
+        normalized["dependencies"] = dependencies
+        normalized["depends_on"] = list(dict.fromkeys([*depends_on, *prior_refs]))
+        normalized["source_refs"] = list(dict.fromkeys([*source_refs, *theorem_refs]))
+        normalized["gaps"] = list(dict.fromkeys([*gaps, *gap_roles]))
+        return normalized
 
 
 class LineNumberedProof(StrictBaseModel):
@@ -4081,8 +4197,74 @@ class LineNumberedProof(StrictBaseModel):
                     raise ValueError(
                         f"line {line.line_id} depends_on {dep!r} which is not an earlier line"
                     )
+            for dep in line.dependencies:
+                if dep.type == "prior_line" and dep.ref not in seen:
+                    raise ValueError(
+                        f"line {line.line_id} dependency {dep.ref!r} is not an earlier line"
+                    )
             seen.add(line.line_id)
         return self
+
+
+class ProofGapResolutionCandidate(StrictBaseModel):
+    """One candidate repair for an unresolved proof dependency.
+
+    Candidate source lookup and LLM applicability notes are planning artifacts.
+    They do not earn source-backed, checked, proof, or verified status. Human
+    allowance is explicit provenance for advisory use only.
+    """
+
+    line_id: str = Field(min_length=1)
+    dependency_ref: str = Field(min_length=1)
+    dependency_type: Literal["theorem_ref", "human_assumption", "unchecked_gap"]
+    action: Literal[
+        "attach_candidate_theorem_ref",
+        "attach_human_allowed_theorem_ref",
+        "keep_gap",
+    ] = "keep_gap"
+    proposed_ref: str = ""
+    needed_statement: str = ""
+    proposed_statement: str = ""
+    source_locator: str = ""
+    source_url: str = ""
+    source_kind: Literal[
+        "user_material",
+        "project_corpus",
+        "web",
+        "paper",
+        "book",
+        "unknown",
+    ] = "unknown"
+    applicability_review: Literal[
+        "not_reviewed",
+        "candidate_match",
+        "mismatch",
+        "unclear",
+        "human_allowed",
+    ] = "not_reviewed"
+    reviewer_notes: list[str] = Field(default_factory=list)
+    status: Literal["candidate", "accepted_by_human", "rejected"] = "candidate"
+    source_grounded: bool = False
+    machine_verified: bool = False
+    human_confirmation_required: bool = True
+
+
+class ProofGapResolutionReport(StrictBaseModel):
+    """Repair-loop sidecar for unresolved proof dependencies.
+
+    The resolver may find candidate sources or record explicit human-allowed
+    theorem use, but this report itself is advisory process evidence only.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    source_policy: Literal["dynamic_sources_only"] = "dynamic_sources_only"
+    proof_artifact: str = "line_numbered_proof.yaml"
+    line_numbered_proof_sha256: str = Field(min_length=1)
+    candidates: list[ProofGapResolutionCandidate] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
 class AgentConsensusVerdict(str, Enum):
@@ -4230,6 +4412,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "prover_loop": ProverLoopReport,
     "prover_round": ProverRoundReport,
     "prover_round_index": ProverRoundIndex,
+    "proof_gap_resolution": ProofGapResolutionReport,
     "proof_goal_graph": ProofGoalGraph,
     "theorem_condition_ledger": TheoremConditionLedger,
     "human_time_allocation_context": HumanTimeAllocationContext,
