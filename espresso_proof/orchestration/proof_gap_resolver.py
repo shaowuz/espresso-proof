@@ -116,11 +116,14 @@ def _normalize_agent_candidates(raw: object, unresolved: list[dict]) -> list[dic
         key = (item["line_id"], str(dep.get("ref") or ""))
         if key in covered:
             continue
+        dependency_type = str(dep.get("type") or "unchecked_gap")
+        if dependency_type not in {"theorem_ref", "human_assumption", "unchecked_gap"}:
+            dependency_type = "unchecked_gap"
         candidates.append(
             {
                 "line_id": item["line_id"],
                 "dependency_ref": key[1],
-                "dependency_type": str(dep.get("type") or "unchecked_gap"),
+                "dependency_type": dependency_type,
                 "action": "keep_gap",
                 "needed_statement": str(dep.get("needed_statement") or dep.get("role") or ""),
                 "reviewer_notes": ["No candidate repair was produced for this dependency."],

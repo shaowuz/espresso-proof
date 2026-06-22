@@ -30,7 +30,10 @@ from espresso_proof.orchestration.agent_consensus_seal import (
     seal_agent_consensus,
 )
 from espresso_proof.orchestration.proof_writer import write_line_numbered_proof
-from espresso_proof.orchestration.proof_gap_resolver import resolve_proof_gaps
+from espresso_proof.orchestration.proof_gap_resolver import (
+    _normalize_agent_candidates,
+    resolve_proof_gaps,
+)
 from espresso_proof.ui.descriptions import VERIFIED_PROOF_STATUSES, describe_proof_language
 from espresso_proof.ui.evidence_trust import EARNED_LEVELS, is_green, trust_tone
 from tests.test_proof_verification_bridge_v2 import _build
@@ -177,6 +180,29 @@ def test_proof_line_dependency_graph_migrates_legacy_gaps_and_refs() -> None:
                 line_id="L2",
                 statement="|H| divides |G|",
                 justification="Lagrange theorem",
+                dependencies=[
+                    {
+                        "type": "prior_line",
+                        "ref": "L1",
+                        "status": "candidate",
+                        "role": "uses earlier hypothesis line",
+                        "authority": "agent_claimed_definition",
+                    },
+                    {
+                        "type": "definition",
+                        "ref": "subgroup_definition",
+                        "status": "resolved",
+                        "role": "subgroup definition",
+                        "authority": "agent_locked_definition",
+                    },
+                    {
+                        "type": "theorem_ref",
+                        "ref": "lagrange_candidate",
+                        "status": "candidate",
+                        "role": "subgroup order divisibility",
+                        "authority": "agent_external_theorem",
+                    }
+                ],
                 depends_on=["L1"],
                 source_refs=["lagrange_candidate"],
                 gaps=["missing exact theorem locator"],
@@ -192,6 +218,39 @@ def test_proof_line_dependency_graph_migrates_legacy_gaps_and_refs() -> None:
     theorem_dep = next(dep for dep in line.dependencies if dep.type == "theorem_ref")
     assert theorem_dep.status == "candidate"
     assert theorem_dep.authority == "agent_claimed_theorem_ref"
+    prior_dep = next(dep for dep in line.dependencies if dep.type == "prior_line")
+    assert prior_dep.status == "resolved"
+    assert prior_dep.authority == ""
+    definition_dep = next(dep for dep in line.dependencies if dep.type == "definition")
+    assert definition_dep.authority == ""
+
+
+def test_gap_resolver_keeps_non_sealable_unresolved_edges_as_unchecked_gap() -> None:
+    candidates = _normalize_agent_candidates(
+        raw={"candidates": []},
+        unresolved=[
+            {
+                "line_id": "L2",
+                "dependency": {
+                    "type": "prior_line",
+                    "ref": "L1",
+                    "status": "candidate",
+                    "role": "earlier line was marked unresolved by the agent",
+                },
+            }
+        ],
+    )
+
+    assert candidates == [
+        {
+            "line_id": "L2",
+            "dependency_ref": "L1",
+            "dependency_type": "unchecked_gap",
+            "action": "keep_gap",
+            "needed_statement": "earlier line was marked unresolved by the agent",
+            "reviewer_notes": ["No candidate repair was produced for this dependency."],
+        }
+    ]
 
 
 def test_proof_rejects_route_only_and_bad_lines() -> None:
@@ -484,6 +543,31 @@ def test_proof_gap_resolution_is_bound_to_current_proof_hash(tmp_path: Path) -> 
 
     with pytest.raises(KernelValidationError, match="stale"):
         validate_run(run_dir)
+
+
+def test_writer_revokes_stale_proof_gap_resolution_when_regenerating_proof(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    _add_single_gap(run_dir)
+    resolve_proof_gaps(
+        run_dir,
+        human_allow=[
+            "L1|human_allowed_theorem.lagrange|If H is a subgroup of finite G, then |H| divides |G|."
+        ],
+        client=StubLLMClient(),
+    )
+    validate_run(run_dir)
+    assert "proof_gap_resolution" in read_yaml(run_dir / "run_manifest.yaml")[
+        "optional_artifacts"
+    ]
+
+    write_line_numbered_proof(run_dir, client=StubLLMClient())
+    validate_run(run_dir)
+
+    optional = read_yaml(run_dir / "run_manifest.yaml")["optional_artifacts"]
+    assert optional["line_numbered_proof"] == "line_numbered_proof.yaml"
+    assert "proof_gap_resolution" not in optional
 
 
 def test_negative_modified_proof_after_review_invalidates_consensus(tmp_path: Path) -> None:

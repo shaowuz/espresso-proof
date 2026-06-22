@@ -87,6 +87,10 @@ def _append_prover_step(run_dir: Path, text: str) -> None:
     report = read_yaml(path)
     report["prover_attempt"]["proposed_steps"].append(text)
     write_yaml(path, report)
+    agent_path = run_dir / "llm_agent_run.yaml"
+    agent = read_yaml(agent_path)
+    agent["prover_attempt"]["proposed_steps"].append(text)
+    write_yaml(agent_path, agent)
 
 
 def _append_reviewer_objection(run_dir: Path, text: str) -> None:
@@ -221,6 +225,17 @@ def test_unchecked_context_cannot_support_proof(
 
     with pytest.raises(KernelValidationError, match=match):
         validate_run(run_dir)
+
+
+def test_unchecked_context_boundary_disclaimer_can_mention_support(tmp_path: Path) -> None:
+    run_dir = _run_to_prover_gate(tmp_path)
+    _append_prover_step(
+        run_dir,
+        "Unchecked examples and pressure tests do not contribute line-level support "
+        "for the proof candidate.",
+    )
+
+    validate_run(run_dir)
 
 
 def test_source_misuse_routes_to_source_repair_not_proof(tmp_path: Path) -> None:

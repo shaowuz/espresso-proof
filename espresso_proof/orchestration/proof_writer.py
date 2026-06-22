@@ -25,10 +25,11 @@ from espresso_proof.agents.llm_agents import (
     load_agent_context,
 )
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.kernel.models import LineNumberedProof
+from espresso_proof.kernel.models import LineNumberedProof, ProofLanguageStatus
 from espresso_proof.kernel.validators import validate_run
 
 LINE_NUMBERED_PROOF_FILENAME = "line_numbered_proof.yaml"
+_PROOF_BOUND_SIDECARS = ("proof_gap_resolution", "agent_consensus_review")
 
 __all__ = ["LINE_NUMBERED_PROOF_FILENAME", "write_line_numbered_proof"]
 
@@ -94,6 +95,7 @@ def write_line_numbered_proof(
     manifest_path = run_dir / "run_manifest.yaml"
     manifest = read_yaml(manifest_path)
     claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])
+    grade_path = run_dir / manifest["artifacts"]["idea_grade"]
 
     raw = client.complete_json(
         system=line_numbered_proof_writer_system_prompt(),
@@ -118,12 +120,34 @@ def write_line_numbered_proof(
     proof_path = run_dir / LINE_NUMBERED_PROOF_FILENAME
     snapshot = {
         "manifest": manifest_path.read_bytes(),
+        "grade": grade_path.read_bytes() if grade_path.exists() else None,
         "had_proof": proof_path.exists(),
         "proof": proof_path.read_bytes() if proof_path.exists() else None,
     }
     try:
+        optional = manifest.setdefault("optional_artifacts", {})
+        revoked_sidecars = [key for key in _PROOF_BOUND_SIDECARS if key in optional]
+        for key in revoked_sidecars:
+            optional.pop(key, None)
+        if "agent_consensus_review" in revoked_sidecars:
+            grade = read_yaml(grade_path)
+            if (
+                isinstance(grade, dict)
+                and grade.get("proof_language_status")
+                == ProofLanguageStatus.agent_consensus_mock_checked.value
+            ):
+                grade["proof_language_status"] = ProofLanguageStatus.proof_candidate.value
+                grade["human_review_required"] = True
+                reason = (
+                    "Line-numbered proof was regenerated; stale agent consensus "
+                    "seal was revoked."
+                )
+                reasons = list(grade.get("reasons") or [])
+                if reason not in reasons:
+                    grade["reasons"] = [reason, *reasons]
+                write_yaml(grade_path, grade)
         write_yaml(proof_path, record)
-        manifest.setdefault("optional_artifacts", {})["line_numbered_proof"] = LINE_NUMBERED_PROOF_FILENAME
+        optional["line_numbered_proof"] = LINE_NUMBERED_PROOF_FILENAME
         write_yaml(manifest_path, manifest)
         validate_run(run_dir)
         return record
@@ -131,6 +155,10 @@ def write_line_numbered_proof(
         tmp = manifest_path.with_name(manifest_path.name + ".restore.tmp")
         tmp.write_bytes(snapshot["manifest"])
         os.replace(tmp, manifest_path)
+        if snapshot["grade"] is not None:
+            tmp = grade_path.with_name(grade_path.name + ".restore.tmp")
+            tmp.write_bytes(snapshot["grade"])
+            os.replace(tmp, grade_path)
         if snapshot["had_proof"]:
             proof_path.write_bytes(snapshot["proof"])
         elif proof_path.exists():

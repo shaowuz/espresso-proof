@@ -13,8 +13,13 @@ from espresso_proof.cli import app
 from espresso_proof.kernel.io import read_yaml
 from espresso_proof.kernel.io import write_yaml
 from espresso_proof.agents.llm_agents import (
+    AGENT_OUTPUT_SCHEMA,
+    LINE_NUMBERED_PROOF_OUTPUT_SCHEMA,
     OpenAIResponsesClient,
+    PROOF_CONSENSUS_OUTPUT_SCHEMA,
+    PROOF_GAP_RESOLVER_OUTPUT_SCHEMA,
     StubLLMClient,
+    _required_json_schema_for_system,
     collect_unsafe_language,
     line_numbered_proof_writer_system_prompt,
     make_prover_attempt,
@@ -45,9 +50,32 @@ def test_prover_and_proof_writer_prompts_forbid_unchecked_examples_as_support() 
 
     assert "unchecked examples" in prover
     assert "never be cited as proof support" in prover
+    assert "do not write that unchecked context supports" in prover
     assert "pressure-lane context only" in writer
     assert "dependencies" in writer
     assert "human_allowed_theorem_ref" in writer
+    assert "prior-line dependencies should be status 'resolved'" in writer
+
+
+def test_live_agent_schema_selection_covers_proof_specific_roles() -> None:
+    assert (
+        _required_json_schema_for_system("You are the Espresso line-numbered proof writer.")
+        is LINE_NUMBERED_PROOF_OUTPUT_SCHEMA
+    )
+    assert (
+        _required_json_schema_for_system("You are a proof-consensus review agent.")
+        is PROOF_CONSENSUS_OUTPUT_SCHEMA
+    )
+    assert (
+        _required_json_schema_for_system("You are the proof gap resolver.")
+        is PROOF_GAP_RESOLVER_OUTPUT_SCHEMA
+    )
+    assert _required_json_schema_for_system("Return ordinary agent JSON.") is AGENT_OUTPUT_SCHEMA
+
+    dependency_schema = LINE_NUMBERED_PROOF_OUTPUT_SCHEMA["properties"]["lines"]["items"]["properties"][
+        "dependencies"
+    ]["items"]
+    assert set(dependency_schema["required"]) == set(dependency_schema["properties"])
 
 
 def _mark_claim_clear(run_dir: Path) -> None:

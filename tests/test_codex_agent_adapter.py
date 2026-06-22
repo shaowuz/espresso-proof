@@ -244,6 +244,56 @@ def test_codex_skill_selection_covers_core_subagent_roles() -> None:
         assert selected.skills == expected
 
 
+def test_codex_adapter_schema_gate_covers_proof_specific_roles() -> None:
+    adapter = _load_adapter_module()
+    cases = [
+        ("You are the Espresso line-numbered proof writer.", "{}"),
+        ("You are the proof-consensus review agent.", "{}"),
+        ("You are the proof gap resolver.", "{}"),
+        ("Return JSON only.", '{"role": "line_numbered_proof_writer"}'),
+        ("Return JSON only.", '{"role": "proof_gap_resolver"}'),
+    ]
+    for system, prompt in cases:
+        assert adapter._uses_generic_agent_output(system=system, prompt=prompt) is True
+
+
+def test_codex_run_sends_utf8_stdin_to_cli(tmp_path: Path) -> None:
+    adapter = _load_adapter_module()
+    stdin_bytes = tmp_path / "stdin.bin"
+    fake = tmp_path / "fake_codex.py"
+    fake.write_text(
+        "\n".join(
+            [
+                "import sys",
+                f"stdin_bytes = {str(stdin_bytes)!r}",
+                "last_message = None",
+                "for index, arg in enumerate(sys.argv):",
+                "    if arg == '--output-last-message' and index + 1 < len(sys.argv):",
+                "        last_message = sys.argv[index + 1]",
+                "with open(stdin_bytes, 'wb') as handle:",
+                "    handle.write(sys.stdin.buffer.read())",
+                "if last_message:",
+                "    with open(last_message, 'w', encoding='utf-8') as handle:",
+                "        handle.write('{\"ok\": true}')",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    prompt = "prime order café 数学"
+    last_message = tmp_path / "last_message.txt"
+
+    text, return_code = adapter._run_codex(
+        [sys.executable, str(fake), "--output-last-message", str(last_message)],
+        full_prompt=prompt,
+        last_message=last_message,
+    )
+
+    assert return_code == 0
+    assert json.loads(text)["ok"] is True
+    assert stdin_bytes.read_bytes() == prompt.encode("utf-8")
+
+
 def test_legacy_claude_adapter_remains_available() -> None:
     legacy = ROOT / "scripts" / "espresso_claude_agent.py"
     assert legacy.exists()

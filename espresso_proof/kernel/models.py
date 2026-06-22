@@ -4094,6 +4094,24 @@ class ProofLine(StrictBaseModel):
             for edge in dependencies
             if isinstance(edge, dict)
         }
+        allowed_authorities = {
+            "",
+            "source_grounded_theorem_ref",
+            "human_allowed_theorem_ref",
+            "agent_claimed_theorem_ref",
+        }
+        for edge in dependencies:
+            if not isinstance(edge, dict):
+                continue
+            edge_type = edge.get("type")
+            if edge_type == "prior_line":
+                edge["status"] = "resolved"
+            if edge_type == "theorem_ref":
+                if edge.get("authority") not in allowed_authorities:
+                    edge["authority"] = "agent_claimed_theorem_ref"
+            elif edge_type in {"prior_line", "definition", "arithmetic", "unchecked_gap"}:
+                if edge.get("authority") not in {"", None}:
+                    edge["authority"] = ""
         for dep in depends_on:
             key = ("prior_line", dep)
             if key not in existing_edges:
