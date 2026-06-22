@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -14,6 +15,13 @@ class StrictBaseModel(BaseModel):
 
 class FlexibleBaseModel(BaseModel):
     model_config = ConfigDict(extra="allow")
+
+
+def _parse_stage_status_timestamp(value: str, field_name: str) -> datetime:
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"stage_status {field_name} must be ISO 8601") from exc
 
 
 class SourceStatus(str, Enum):
@@ -1429,6 +1437,21 @@ class SourceGroundingReport(StrictBaseModel):
     source_refs: list[SourceRef] = Field(default_factory=list)
     steps: list[SourceGroundingStep]
 
+    @model_validator(mode="after")
+    def validate_unique_bindings(self) -> SourceGroundingReport:
+        ref_ids = [ref.id for ref in self.source_refs]
+        if len(ref_ids) != len(set(ref_ids)):
+            raise ValueError("source_grounding source_ref ids must be unique")
+        step_ids = [step.proof_step_id for step in self.steps]
+        if len(step_ids) != len(set(step_ids)):
+            raise ValueError("source_grounding proof_step_id values must be unique")
+        for step in self.steps:
+            if len(step.source_refs) != len(set(step.source_refs)):
+                raise ValueError(
+                    f"source_grounding step {step.proof_step_id!r} source_refs must be unique"
+                )
+        return self
+
 
 class TheoremApplicabilityCondition(StrictBaseModel):
     id: str
@@ -2175,6 +2198,26 @@ class LLMAgentProviderDiagnostic(StrictBaseModel):
     error: str | None = None
 
 
+class LLMAgentCallDiagnostic(StrictBaseModel):
+    """Out-of-band provider diagnostic for one actual agent call.
+
+    This is process provenance only. It is deliberately kept outside prover and
+    reviewer content so adapter readiness/fallback status can be audited without
+    becoming mathematical evidence.
+    """
+
+    call_index: int = Field(ge=1)
+    role: str
+    provider: Literal["openai", "stub", "external"]
+    model: str
+    adapter: str
+    parse_status: str
+    fallback_used: bool = False
+    fallback_reason: str = ""
+    request_id: str = ""
+    verified_real_provider: bool = False
+
+
 class LLMAgentRunReport(StrictBaseModel):
     schema_version: Literal[1] = 1
     claim_id: str
@@ -2187,6 +2230,7 @@ class LLMAgentRunReport(StrictBaseModel):
     verifier_reviews: list[LLMAgentVerifierReview]
     human_gate: LLMAgentHumanGate
     provider_diagnostic: LLMAgentProviderDiagnostic | None = None
+    agent_call_diagnostics: list[LLMAgentCallDiagnostic] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -3316,6 +3360,302 @@ class FrontHalfRunReport(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+StageProcessStatus = Literal[
+    "not_started",
+    "queued",
+    "running",
+    "done",
+    "skipped",
+    "blocked",
+    "failed",
+]
+
+StageEvidenceRole = Literal[
+    "none",
+    "candidate_only",
+    "checked_evidence_possible",
+    "proof_candidate_only",
+    "advisory_only",
+    "presentation_only",
+]
+
+
+class StageStatusEntry(StrictBaseModel):
+    """Process-status projection for one conceptual AGENT_FLOW stage.
+
+    This is deliberately not a proof/source/evidence status object. It says
+    whether a process stage has been observed, and may bind process artifacts by
+    hash so stale UI/trace projections fail closed. StrictBaseModel rejects
+    extra status-smuggling fields by construction.
+    """
+
+    stage_id: str
+    display_name: str
+    status: StageProcessStatus = "not_started"
+    status_reason: str = ""
+    started_at: str | None = None
+    finished_at: str | None = None
+    depends_on: list[str] = Field(default_factory=list)
+    reads_from: list[str] = Field(default_factory=list)
+    outputs: list[str] = Field(default_factory=list)
+    parallel_group: str | None = None
+    evidence_role: StageEvidenceRole = "none"
+    advisory_only: Literal[True] = True
+    claim_clear_blocked: bool = False
+    error_summary: str | None = None
+    artifact_hashes: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_process_shape(self) -> StageStatusEntry:
+        if self.status == "running" and self.started_at is None:
+            raise ValueError("running stage_status entry requires started_at")
+        if self.status == "running" and self.finished_at is not None:
+            raise ValueError("running stage_status entry cannot have finished_at")
+        if self.status in {"done", "skipped", "blocked", "failed"} and self.finished_at is None:
+            raise ValueError(f"{self.status} stage_status entry requires finished_at")
+        if self.status in {"not_started", "queued"} and self.started_at is not None:
+            raise ValueError(f"{self.status} stage_status entry cannot have started_at")
+        if self.status in {"not_started", "queued"} and self.finished_at is not None:
+            raise ValueError(f"{self.status} stage_status entry cannot have finished_at")
+        started = (
+            _parse_stage_status_timestamp(self.started_at, "started_at")
+            if self.started_at is not None
+            else None
+        )
+        finished = (
+            _parse_stage_status_timestamp(self.finished_at, "finished_at")
+            if self.finished_at is not None
+            else None
+        )
+        if started is not None and finished is not None:
+            try:
+                finished_before_started = finished < started
+            except TypeError as exc:
+                raise ValueError(
+                    "stage_status timestamps must use comparable timezone offsets"
+                ) from exc
+            if finished_before_started:
+                raise ValueError("stage_status finished_at cannot be before started_at")
+        if self.status == "failed" and not (self.error_summary or self.status_reason):
+            raise ValueError("failed stage_status entry requires error_summary or status_reason")
+        if self.status == "blocked" and not (
+            self.status_reason or self.error_summary or self.claim_clear_blocked
+        ):
+            raise ValueError("blocked stage_status entry requires a reason")
+        if self.claim_clear_blocked and self.status not in {"blocked", "skipped"}:
+            raise ValueError("claim_clear_blocked stage must be blocked or skipped")
+        for path in (*self.outputs, *self.artifact_hashes):
+            raw_path = str(path)
+            path_obj = Path(raw_path)
+            windows_path = PureWindowsPath(raw_path)
+            if (
+                path_obj.is_absolute()
+                or windows_path.is_absolute()
+                or bool(windows_path.drive)
+                or bool(windows_path.root)
+            ):
+                raise ValueError(f"stage_status path must be run-relative: {path!r}")
+            if ".." in path_obj.parts or ".." in windows_path.parts:
+                raise ValueError(f"stage_status path cannot contain '..': {path!r}")
+            if "\\" in raw_path:
+                raise ValueError(
+                    f"stage_status path must use POSIX '/' separators: {path!r}"
+                )
+        for artifact_hash in self.artifact_hashes.values():
+            if artifact_hash != "missing" and not artifact_hash.strip():
+                raise ValueError("stage_status artifact hash must be non-empty")
+        return self
+
+
+class StageStatusReport(StrictBaseModel):
+    """AGENT_FLOW process-status projection for one run.
+
+    Optional/additive. The report is advisory process metadata only; it must
+    never own proof/source/evidence/refutation/grade status. Validators bind it
+    to the current run, AGENT_FLOW spec, and artifact hashes.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    advisory_only: Literal[True] = True
+    effect: Literal["process_status_only"] = "process_status_only"
+    stages: list[StageStatusEntry]
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_stages(self) -> StageStatusReport:
+        _parse_stage_status_timestamp(self.generated_at, "generated_at")
+        ids = [stage.stage_id for stage in self.stages]
+        if len(ids) != len(set(ids)):
+            raise ValueError("stage_status entries must be unique by stage_id")
+        return self
+
+
+PressureLaneBarrierState = Literal[
+    "seeded",
+    "running",
+    "joining",
+    "completed",
+    "failed",
+]
+
+PressureLaneBarrierEntryStatus = Literal[
+    "seeded",
+    "computed",
+    "compute_failed",
+    "committing",
+    "committed",
+    "failed",
+]
+
+PressureLaneBarrierAgent = Literal[
+    "literature",
+    "examples",
+    "counterexamples",
+    "failure_patterns",
+]
+
+PressureLaneBarrierRole = Literal[
+    "pressure_lane",
+    "dependent_audit",
+]
+
+
+class PressureLaneBarrierEntry(StrictBaseModel):
+    """One lane in the explicit pressure-lane execution barrier.
+
+    This is process state for scheduling only. A worker may compute an in-memory
+    candidate, but the candidate is never serialized here; only the coordinator
+    may later commit artifacts through the existing validated single-agent path.
+    """
+
+    agent: PressureLaneBarrierAgent
+    stage_id: str
+    role: PressureLaneBarrierRole
+    status: PressureLaneBarrierEntryStatus = "seeded"
+    started_at: str | None = None
+    finished_at: str | None = None
+    duration_ms: int | None = None
+    error_summary: str | None = None
+    worker_shared_write: Literal[False] = False
+    candidate_persisted: Literal[False] = False
+
+    @model_validator(mode="after")
+    def validate_entry_shape(self) -> PressureLaneBarrierEntry:
+        if self.duration_ms is not None and self.duration_ms < 0:
+            raise ValueError("pressure lane barrier duration_ms must be non-negative")
+        if self.status in {"committed", "failed", "computed", "compute_failed"}:
+            if self.finished_at is None:
+                raise ValueError(
+                    f"{self.status} pressure lane barrier entry requires finished_at"
+                )
+        if self.status in {"seeded", "committing"} and self.finished_at is not None:
+            raise ValueError(
+                f"{self.status} pressure lane barrier entry cannot have finished_at"
+            )
+        if self.status in {"compute_failed", "failed"} and not self.error_summary:
+            raise ValueError(
+                f"{self.status} pressure lane barrier entry requires error_summary"
+            )
+        if self.status in {"computed", "committed"} and self.error_summary:
+            raise ValueError(
+                f"{self.status} pressure lane barrier entry cannot carry error_summary"
+            )
+        return self
+
+
+class PressureLaneBarrierReport(StrictBaseModel):
+    """Durable SEED/RUN/JOIN/RESUME barrier for explicit pressure-lane batches.
+
+    Optional/additive and advisory-only. It records deterministic scheduling
+    state, not mathematical evidence. It cannot carry source/evidence/proof/
+    grade status, and it never stores worker candidates.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    updated_at: str
+    mode: Literal["explicit_batch_parallel_compute_serial_commit"]
+    barrier_state: PressureLaneBarrierState
+    requested_agents: list[PressureLaneBarrierAgent]
+    commit_order: list[PressureLaneBarrierAgent]
+    entries: list[PressureLaneBarrierEntry]
+    advisory_only: Literal[True] = True
+    effect: Literal["scheduling_only"] = "scheduling_only"
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_report_shape(self) -> PressureLaneBarrierReport:
+        if not self.requested_agents:
+            raise ValueError("pressure lane barrier must request at least one agent")
+        if not self.entries:
+            raise ValueError("pressure lane barrier must contain at least one entry")
+        if len(self.requested_agents) != len(set(self.requested_agents)):
+            raise ValueError("pressure lane barrier requested_agents must be unique")
+        if len(self.commit_order) != len(set(self.commit_order)):
+            raise ValueError("pressure lane barrier commit_order must be unique")
+        if set(self.requested_agents) != set(self.commit_order):
+            raise ValueError(
+                "pressure lane barrier commit_order must cover requested_agents"
+            )
+        if tuple(self.requested_agents) != tuple(self.commit_order):
+            raise ValueError(
+                "pressure lane barrier requested_agents must follow commit_order"
+            )
+        entry_agents = [entry.agent for entry in self.entries]
+        if len(entry_agents) != len(set(entry_agents)):
+            raise ValueError("pressure lane barrier entries must be unique by agent")
+        if set(entry_agents) != set(self.requested_agents):
+            raise ValueError(
+                "pressure lane barrier entries must cover requested_agents"
+            )
+        if tuple(entry_agents) != tuple(self.commit_order):
+            raise ValueError("pressure lane barrier entries must follow commit_order")
+        entry_statuses = {entry.status for entry in self.entries}
+        allowed_by_state = {
+            "seeded": {"seeded"},
+            "running": {"seeded", "computed", "compute_failed"},
+            "joining": {
+                "seeded",
+                "computed",
+                "compute_failed",
+                "committing",
+                "committed",
+                "failed",
+            },
+        }
+        invalid_statuses = entry_statuses - allowed_by_state.get(
+            self.barrier_state,
+            entry_statuses,
+        )
+        if invalid_statuses:
+            raise ValueError(
+                f"{self.barrier_state} pressure lane barrier cannot contain "
+                f"entry status(es): {', '.join(sorted(invalid_statuses))}"
+            )
+        commit_phase_statuses = {"committing", "committed", "failed"}
+        if self.barrier_state == "joining" and entry_statuses.isdisjoint(
+            commit_phase_statuses
+        ):
+            raise ValueError(
+                "joining pressure lane barrier requires at least one "
+                "commit-phase entry"
+            )
+        if self.barrier_state == "completed" and entry_statuses != {"committed"}:
+            raise ValueError(
+                "completed pressure lane barrier requires every entry committed"
+            )
+        if self.barrier_state == "failed" and "failed" not in entry_statuses:
+            raise ValueError(
+                "failed pressure lane barrier requires at least one failed entry"
+            )
+        return self
+
+
 class AgentRunStatusEntry(StrictBaseModel):
     """Process status for ONE evidence / understanding agent (Goal 27).
 
@@ -3689,9 +4029,9 @@ class ProofLine(StrictBaseModel):
     status); ``gaps`` records any acknowledged hole in this line. The model carries no
     proof/source/checked status field (StrictBaseModel forbids extras)."""
 
-    line_id: str
-    statement: str
-    justification: str
+    line_id: str = Field(min_length=1)
+    statement: str = Field(min_length=1)
+    justification: str = Field(min_length=1)
     depends_on: list[str] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
@@ -3715,7 +4055,7 @@ class LineNumberedProof(StrictBaseModel):
     strategy_id: str
     proof_kind: str
     status: Literal["advisory"] = "advisory"
-    lines: list[ProofLine] = Field(default_factory=list)
+    lines: list[ProofLine] = Field(min_length=1)
     generated_at: str = ""
     notes: list[str] = Field(default_factory=list)
 
@@ -3775,11 +4115,11 @@ class AgentConsensusEntry(StrictBaseModel):
         "adversarial_gap_reviewer",
     ]
     verdict: AgentConsensusVerdict
-    looked_for: str  # which fatal-flaw classes this reviewer actively hunted
-    finding: str  # the active "no fatal flaw because ..." / "fatal flaw: ..." statement
+    looked_for: str = Field(min_length=1)  # which fatal-flaw classes this reviewer actively hunted
+    finding: str = Field(min_length=1)  # the active "no fatal flaw because ..." / "fatal flaw: ..." statement
     # Goal 69: a reviewer's verdict must cite the proof line_id(s) it rests on; a PASS
     # that references no line is not a real review of the line-numbered proof.
-    cited_line_ids: list[str] = Field(default_factory=list)
+    cited_line_ids: list[str]
     residual_objections: list[str] = Field(default_factory=list)  # non-fatal, surfaced
 
 
@@ -3810,11 +4150,11 @@ class AgentConsensusReview(StrictBaseModel):
     bound_claim_hash: str
     # Goal 69: the consensus binds the LINE-NUMBERED PROOF it reviewed (not route
     # text). Any edit to the proof after review changes this hash -> seal fails closed.
-    bound_line_numbered_proof_hash: str = ""
-    bound_source_grounding_hash: str = ""
-    bound_review_hash: str = ""
-    bound_prover_loop_hash: str = ""
-    entries: list[AgentConsensusEntry] = Field(default_factory=list)
+    bound_line_numbered_proof_hash: str
+    bound_source_grounding_hash: str
+    bound_review_hash: str
+    bound_prover_loop_hash: str
+    entries: list[AgentConsensusEntry] = Field(min_length=3, max_length=3)
     consensus: bool
     disclaimer: str
     notes: list[str] = Field(default_factory=list)
@@ -3894,6 +4234,8 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "theorem_condition_ledger": TheoremConditionLedger,
     "human_time_allocation_context": HumanTimeAllocationContext,
     "front_half_run": FrontHalfRunReport,
+    "stage_status": StageStatusReport,
+    "pressure_lane_barrier": PressureLaneBarrierReport,
     "agent_run_status": AgentRunStatusReport,
     "pressure_status": PressureStatusReport,
     "memory_entry": MemoryEntry,

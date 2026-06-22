@@ -28,7 +28,11 @@ from espresso_proof.ui.descriptions import (
     route_source_phrase,
 )
 from espresso_proof.kernel.io import read_yaml
+from espresso_proof.kernel.validators import validate_run
+from espresso_proof.orchestration.agent_flow_status import load_stage_status_projection
+from espresso_proof.orchestration.pressure_lanes import build_pressure_lane_view
 from espresso_proof.ui.latest_round import load_latest_round
+from espresso_proof.ui.memo import build_concise_memo
 from espresso_proof.kernel.proof_language import scrub_source_support_language
 
 # The ONLY statuses whose evidence the kernel has actually earned. Everything
@@ -404,10 +408,12 @@ def build_snapshot(run_dir: Path, run_id: str, status: dict) -> dict:
             "human_review_required": bool((grade or {}).get("human_review_required", True)),
         },
         "status": status,
+        "compact_memo": _compact_memo(run_dir),
         "strategies": _strategies(brief, selected, _my_feedback_map(run_dir)),
         "strategy_summary": _strategy_summary(synthesis, grade),
         "ledger_context": _ledger_context(run_dir, grade),
         "latest_round": load_latest_round(run_dir),
+        "pressure_lanes": build_pressure_lane_view(run_dir),
         "examples": _examples(examples),
         "counterexamples": _counterexamples(counterexamples),
         "computations": _computations(computations),
@@ -429,6 +435,13 @@ def build_snapshot(run_dir: Path, run_id: str, status: dict) -> dict:
     return snapshot
 
 
+def _compact_memo(run_dir: Path) -> str:
+    try:
+        return build_concise_memo(run_dir)
+    except Exception:  # noqa: BLE001 - display-only fallback
+        return ""
+
+
 # Goal 43B: each cockpit panel reads its own validated slice so panels refresh
 # independently. The panel agent_state is honest process state, never evidence:
 # it is read from the matching agent's process row (done/running/failed/
@@ -436,7 +449,15 @@ def build_snapshot(run_dir: Path, run_id: str, status: dict) -> dict:
 # "ready" once the artifact is present. A cache/poll can never turn a missing
 # panel into earned evidence — the tones inside each slice still come only from
 # the validated artifact status.
-PANELS = ("claim", "strategies", "examples", "counterexamples", "computations", "literature")
+PANELS = (
+    "claim",
+    "strategies",
+    "examples",
+    "counterexamples",
+    "computations",
+    "literature",
+    "trace",
+)
 
 # Which on-demand agent backs each panel (for honest per-panel process state).
 _PANEL_AGENT = {
@@ -461,6 +482,90 @@ def _panel_agent_state(panel: str, present: bool, status: dict) -> str:
                     # was earned is decided by the slice's own status tones.
                     return word
     return "ready" if present else "not_run"
+
+
+_STAGE_STATE_WORDS = {
+    "not_started": "Not started",
+    "queued": "Queued",
+    "running": "Running",
+    "done": "Stage finished",
+    "skipped": "Skipped",
+    "blocked": "Blocked",
+    "failed": "Failed",
+}
+
+_STAGE_EVIDENCE_ROLE_WORDS = {
+    "none": "Process only",
+    "candidate_only": "Candidate context only",
+    "checked_evidence_possible": "Evidence remains in underlying artifacts",
+    "proof_candidate_only": "Proof candidate only",
+    "advisory_only": "Advisory only",
+    "presentation_only": "Presentation only",
+}
+
+
+def _stage_tone(status: str | None) -> str:
+    if status in {"blocked", "failed"}:
+        return "warn"
+    if status == "running":
+        return "neutral"
+    return "muted"
+
+
+def _stage_group(group: str | None) -> str:
+    return _clip(str(group or "main").replace("_", " "), 80)
+
+
+def build_stage_trace_panel(run_dir: Path) -> dict:
+    """Display-safe AGENT_FLOW trace panel.
+
+    The trace is process metadata only. It never exposes raw YAML/logs/hashes,
+    and it never lets a stage process state imply proof/source/evidence status.
+    Missing or unreadable stage status fails closed to an unavailable advisory
+    panel rather than fabricating success.
+    """
+
+    try:
+        validate_run(run_dir)
+        report = load_stage_status_projection(run_dir)
+    except Exception as exc:  # noqa: BLE001 - display fail-closed
+        return {
+            "items": [],
+            "missing": True,
+            "unavailable": True,
+            "advisory_note": "Process trace unavailable; no mathematical status changed.",
+            "error": _clip(type(exc).__name__, 80),
+        }
+
+    items: list[dict] = []
+    for stage in report.stages:
+        status_detail = _clip_status_text(stage.status_reason or stage.error_summary, 220)
+        blocked_reason = ""
+        if stage.status in {"blocked", "failed", "skipped"}:
+            blocked_reason = status_detail
+        items.append(
+            {
+                "stage_id": _clip(stage.stage_id, 80),
+                "display_name": _clip(stage.display_name, 120),
+                "state_word": _STAGE_STATE_WORDS.get(stage.status, "Unknown"),
+                "tone": _stage_tone(stage.status),
+                "group": _stage_group(stage.parallel_group),
+                "evidence_role_word": _STAGE_EVIDENCE_ROLE_WORDS.get(
+                    stage.evidence_role,
+                    "Process only",
+                ),
+                "advisory_note": "Process trace only; not a proof or evidence signal.",
+                "blocked_reason": blocked_reason,
+                "status_detail": status_detail,
+                "updated_at": _clip(stage.finished_at or stage.started_at or report.generated_at, 80),
+            }
+        )
+    return {
+        "items": items,
+        "missing": False,
+        "unavailable": False,
+        "advisory_note": "Stage state means process progress only.",
+    }
 
 
 def build_panel(run_dir: Path, run_id: str, status: dict, panel: str) -> dict:
@@ -496,8 +601,15 @@ def build_panel(run_dir: Path, run_id: str, status: dict, panel: str) -> dict:
         out["strategy_summary"] = _strategy_summary(synthesis, grade)
         out["ledger_context"] = _ledger_context(run_dir, grade)
         out["latest_round"] = load_latest_round(run_dir)
+        out["compact_memo"] = _compact_memo(run_dir)
         out["missing"] = brief is None
         out["agent_state"] = _panel_agent_state(panel, brief is not None, status)
+        return out
+
+    if panel == "trace":
+        trace = build_stage_trace_panel(run_dir)
+        out.update(trace)
+        out["agent_state"] = _panel_agent_state(panel, not trace.get("missing"), status)
         return out
 
     artifact_name = {
@@ -513,6 +625,9 @@ def build_panel(run_dir: Path, run_id: str, status: dict, panel: str) -> dict:
         "literature": _literature,
     }[panel]
     data = _artifact(run_dir, artifact_name)
+    lane_by_agent = {
+        lane["agent"]: lane for lane in build_pressure_lane_view(run_dir)
+    }
     source_grounding = _artifact(run_dir, "source_grounding") if panel == "literature" else None
     if panel == "literature":
         out["items"] = _literature(data, source_grounding)
@@ -522,6 +637,9 @@ def build_panel(run_dir: Path, run_id: str, status: dict, panel: str) -> dict:
         present = data is not None
     out["missing"] = not present
     out["agent_state"] = _panel_agent_state(panel, present, status)
+    agent = _PANEL_AGENT.get(panel)
+    if agent is not None:
+        out["pressure_lane"] = lane_by_agent.get(agent)
     if panel == "literature":
         grade = _artifact(run_dir, "idea_grade")
         out["source_gaps"] = [

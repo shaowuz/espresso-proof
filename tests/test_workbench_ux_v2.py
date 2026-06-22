@@ -227,3 +227,36 @@ def test_product_create_run_defaults_to_codex_mode() -> None:
     """The built cockpit should not silently create template/stub runs."""
     api = Path("web/src/lib/api.ts").read_text(encoding="utf-8")
     assert 'mode = "codex"' in api
+
+
+def test_react_cockpit_wires_collapsed_agent_flow_trace() -> None:
+    """PR70K: the React cockpit consumes the display-safe trace panel, collapsed
+    by default, without treating process state as proof/evidence."""
+
+    types = Path("web/src/lib/types.ts").read_text(encoding="utf-8")
+    hooks = Path("web/src/hooks/useCockpit.ts").read_text(encoding="utf-8")
+    workspace = Path("web/src/components/Workspace.tsx").read_text(encoding="utf-8")
+    component = Path("web/src/components/AgentFlowTrace.tsx").read_text(encoding="utf-8")
+
+    assert '| "trace"' in types
+    assert "TracePanel" in types
+    assert "status_detail: string" in types
+    assert "useTracePanel" in hooks
+    assert 'usePanel<TracePanel>(runId, "trace"' in hooks
+    assert "useTracePanel(runId)" in workspace
+    assert "<AgentFlowTrace" in workspace
+    assert "item.status_detail" in component
+    assert "Collapsed by default" in component
+    assert "Stage state is process progress only" in component
+    assert "Process trace only; not a proof or evidence signal." in component
+    for forbidden in (
+        "artifact_hashes",
+        "events.jsonl",
+        "raw YAML",
+        "traceback",
+        "proof complete",
+        "we proved",
+        "bg-green",
+        "text-green",
+    ):
+        assert forbidden not in component

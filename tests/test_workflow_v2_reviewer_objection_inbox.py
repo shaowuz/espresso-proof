@@ -152,6 +152,11 @@ def _round_keys(run_dir: Path) -> list[tuple[int, str]]:
     return [(entry["round_index"], entry["loop_attempt_id"]) for entry in index["rounds"]]
 
 
+def _latest_round_report(run_dir: Path) -> dict:
+    index = read_yaml(run_dir / "prover_rounds" / "index.yaml")
+    return read_yaml(run_dir / index["rounds"][-1]["artifact_path"])
+
+
 def test_reviewer_objection_routes_through_update_inbox_and_time_allocation(
     tmp_path: Path,
 ) -> None:
@@ -330,15 +335,67 @@ def test_reviewer_verified_text_cannot_upgrade_proof_status(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize(
+    ("text", "unsafe_terms"),
+    [
+        ("source_status: source_backed", ("source_status", "source_backed")),
+        ("Checked evidence supports this route.", ("checked evidence",)),
+    ],
+)
+def test_reviewer_reserved_status_language_is_contained_as_unsafe_ledger(
+    tmp_path: Path, text: str, unsafe_terms: tuple[str, ...]
+) -> None:
+    run_dir, _ = _run_to_resolved_loop(tmp_path)
+
+    result = continue_prover_loop(
+        run_dir=run_dir,
+        client=_ReviewerObjectionClient(objections=[text]),
+    )
+
+    assert result["stop_reason"] != "validation_error"
+    validate_run(run_dir)
+    latest = _latest_round_report(run_dir)
+    reviews = latest["verifier_reviews"]
+    content_text = " ".join(
+        [
+            item
+            for review in reviews
+            for item in (
+                review["objections"]
+                + review["source_requests"]
+                + [obj["text"] for obj in review.get("scoped_objections", [])]
+            )
+        ]
+    ).lower()
+    unsafe_text = " ".join(
+        phrase for review in reviews for phrase in review["unsafe_language"]
+    ).lower()
+
+    assert "[withheld status phrase]" in content_text
+    for term in unsafe_terms:
+        assert term not in content_text
+        assert term in unsafe_text
+
+    inbox = load_update_inbox(run_dir)
+    assert inbox is not None
+    round_002_entries = [
+        entry for entry in inbox.entries if "prover_rounds/round_002" in entry.origin_artifact
+    ]
+    assert round_002_entries
+    assert all(entry.effect == "scheduling_only" for entry in round_002_entries)
+    assert all(entry.advisory_only is True for entry in round_002_entries)
+    raw_inbox = (run_dir / "update_inbox.yaml").read_text(encoding="utf-8").lower()
+    for term in unsafe_terms:
+        assert term not in raw_inbox
+
+
+@pytest.mark.parametrize(
     ("text", "match"),
     [
-        ("source_status: source_backed", "source_status"),
-        ("Checked evidence supports this route.", "checked_evidence"),
         ("The theorem applicability status is applicable.", "theorem_applicability"),
         ("A counterexample refutes the claim.", "counterexample_refutes_claim"),
     ],
 )
-def test_reviewer_text_cannot_set_owned_statuses(
+def test_reviewer_uncontained_status_language_still_fails_closed(
     tmp_path: Path, text: str, match: str
 ) -> None:
     run_dir, _ = _run_to_resolved_loop(tmp_path)

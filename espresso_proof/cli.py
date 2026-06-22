@@ -64,6 +64,10 @@ from espresso_proof.verification.proof_verification import (
 from espresso_proof.verification.symbolic_identity import SUPPORTED_RING_IDENTITIES
 from espresso_proof.evaluation.benchmark import run_benchmark
 from espresso_proof.evaluation.calibration import run_calibration
+from espresso_proof.evaluation.real_math_benchmark import (
+    build_real_math_capability_report,
+    case_from_run as real_math_case_from_run,
+)
 from espresso_proof.claim.claim_clear import (
     CLAIM_CLEAR_BLOCKED_ON_DEMAND_AGENTS,
     ClaimClearBlockedError,
@@ -2339,6 +2343,162 @@ def benchmark_command(
             typer.echo(f"        - {problem}")
     typer.echo(f"benchmark: {passed}/{len(report)} case(s) passed")
     if passed != len(report):
+        raise typer.Exit(code=1)
+
+
+@app.command("real-math-capability")
+def real_math_capability_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    case_id: str | None = typer.Option(None, "--case-id"),
+    provider: str | None = typer.Option(
+        None, "--provider", help="Override provider; otherwise infer from llm_agent_run.yaml."
+    ),
+    model_fingerprint: str | None = typer.Option(
+        None,
+        "--model-fingerprint",
+        help="Override model fingerprint; otherwise infer from llm_agent_run.yaml.",
+    ),
+    prompt_version: str = typer.Option(..., "--prompt-version"),
+    repeat_count: int = typer.Option(1, "--repeat-count", min=1),
+    json_out: Path | None = typer.Option(
+        None, "--json-out", help="Write the capability report as machine-readable JSON."
+    ),
+) -> None:
+    """Evaluate one existing run against the real-math capability ledger.
+
+    Read-only: this command validates/inspects run artifacts and reports whether
+    the run was valid, used a ready real provider without adapter fallback, found
+    useful routes, and earned any scoped/source/formal/human capability labels.
+    It never upgrades proof/source/evidence status.
+    """
+
+    case = real_math_case_from_run(
+        run,
+        case_id=case_id,
+        provider=provider,
+        model_fingerprint=model_fingerprint,
+        prompt_version=prompt_version,
+        repeat_count=repeat_count,
+    )
+    report = build_real_math_capability_report([case])
+    row = report["cases"][0]
+    metrics = report["metrics"]
+    typer.echo(
+        "real-math capability: "
+        f"valid_run={row['valid_run']} "
+        f"real_agent_valid_run={row['real_agent_valid_run']} "
+        f"useful_route={row['useful_route_found']} "
+        f"source_supported={row['source_supported_argument']} "
+        f"checked_scoped={row['checked_scoped_fact']} "
+        f"formal={row['formal_solution']} "
+        f"human_attested={row['human_attested_solution']} "
+        f"overclaim_count={metrics['overclaim_count']}"
+    )
+    typer.echo(
+        "provider: "
+        f"{row['provider']} model={row['model_fingerprint']} "
+        f"ready={row['provider_ready']} adapter_fallback={row['adapter_fallback_used']}"
+    )
+    if json_out is not None:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+        typer.echo(f"Wrote real-math capability report -> {json_out}")
+    if metrics["overclaim_count"]:
+        raise typer.Exit(code=1)
+
+
+@app.command("real-agent-smoke")
+def real_agent_smoke_command(
+    input: Path = typer.Option(
+        Path("tests/fixtures/promising_but_unproved/input.md"),
+        "--input",
+        "-i",
+        exists=True,
+        dir_okay=False,
+    ),
+    project: str = typer.Option("real_codex_smoke", "--project", "-p"),
+    literature_mode: str = typer.Option("local", "--literature-mode"),
+    literature_provider: list[str] | None = typer.Option(None, "--literature-provider"),
+    max_references: int = typer.Option(8, "--max-references", min=1, max=25),
+    provider: str = typer.Option("external", "--provider"),
+    front_half: str = typer.Option("mock", "--front-half"),
+    model: str = typer.Option("codex-cli", "--model"),
+    reviewer_set: str = typer.Option("espresso", "--reviewer-set"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+        "--external-agent-command-env",
+    ),
+    output_root: Path = typer.Option(
+        Path(".real_agent_smoke_runs"), "--output-root", file_okay=False
+    ),
+    prompt_version: str = typer.Option("real-agent-smoke-v1", "--prompt-version"),
+    repeat_count: int = typer.Option(1, "--repeat-count", min=1),
+    json_out: Path | None = typer.Option(
+        None,
+        "--json-out",
+        help="Write the capability report here; default: <run>/real_math_capability.json.",
+    ),
+) -> None:
+    """Run the real-agent smoke gate and write a capability report.
+
+    This is a product-readiness smoke, not a solver claim. It requires a
+    non-stub provider, runs the normal orchestrator path with network preflight,
+    validates the run, and then writes the same read-only capability report as
+    ``real-math-capability``. Passing means "real agent produced a valid run
+    without adapter fallback or proof-language overclaim."
+    """
+
+    if literature_mode not in {"local", "live"}:
+        raise typer.BadParameter("literature-mode must be local or live")
+    if provider not in {"openai", "external"}:
+        raise typer.BadParameter("real-agent-smoke requires provider=openai or provider=external")
+    if front_half not in {"mock", "stub", "external"}:
+        raise typer.BadParameter("front-half must be mock, stub, or external")
+    if reviewer_set not in {"generic", "espresso"}:
+        raise typer.BadParameter("reviewer-set must be generic or espresso")
+
+    result = orchestrate_run(
+        project=project,
+        input_path=input,
+        output_root=output_root,
+        provider=provider,
+        front_half=front_half,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        reviewer_set=reviewer_set,
+        literature_mode=literature_mode,
+        literature_providers=literature_provider,
+        max_references=max_references,
+        agent_network_preflight=True,
+    )
+    run_dir = Path(result["run_dir"])
+    report_path = json_out or (run_dir / "real_math_capability.json")
+    case = real_math_case_from_run(
+        run_dir,
+        case_id=run_dir.name,
+        prompt_version=prompt_version,
+        repeat_count=repeat_count,
+    )
+    report = build_real_math_capability_report([case])
+    row = report["cases"][0]
+    metrics = report["metrics"]
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    typer.echo(f"Wrote run artifacts to {run_dir}")
+    typer.echo(f"Wrote real-math capability report -> {report_path}")
+    typer.echo(
+        "real-agent smoke: "
+        f"valid_run={row['valid_run']} "
+        f"real_agent_valid_run={row['real_agent_valid_run']} "
+        f"provider_ready={row['provider_ready']} "
+        f"adapter_fallback={row['adapter_fallback_used']} "
+        f"agent_solved={row['agent_solved']} "
+        f"overclaim_count={metrics['overclaim_count']}"
+    )
+    if not row["real_agent_valid_run"] or metrics["overclaim_count"]:
         raise typer.Exit(code=1)
 
 

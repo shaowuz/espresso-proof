@@ -205,7 +205,11 @@ def _usage_for_step(step, source_grounding: SourceGroundingReport, literature_re
     statement = (
         _theorem_statement(comparison, literature_report)
         if comparison is not None
-        else step.needed_theorem
+        else (
+            source_ref.statement_or_summary
+            if source_ref is not None
+            else step.needed_theorem
+        )
     )
     if comparison is not None:
         conditions = _conditions_from_comparison(comparison)

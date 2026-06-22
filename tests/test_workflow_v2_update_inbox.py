@@ -15,6 +15,11 @@ from espresso_proof.kernel.update_inbox import (
     canonical_dedupe_key,
     load_update_inbox,
 )
+from espresso_proof.kernel.pressure_status import artifact_revision_hash
+from espresso_proof.orchestration.update_inbox_service import (
+    UpdateInboxServiceError,
+    append_scheduling_update,
+)
 from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.kernel.validators import validate_run
@@ -70,6 +75,24 @@ def _event(run_dir: Path, **overrides) -> dict:
     return data
 
 
+def _service_event(run_dir: Path, **overrides) -> dict:
+    origin_artifact = str(overrides.pop("origin_artifact", "source_grounding.yaml"))
+    artifact_hash = str(
+        overrides.pop(
+            "artifact_revision_or_hash",
+            artifact_revision_hash(run_dir, origin_artifact),
+        )
+    )
+    data = _event(
+        run_dir,
+        origin_artifact=origin_artifact,
+        artifact_revision_or_hash=artifact_hash,
+        dedupe_key="service-will-canonicalize",
+        **overrides,
+    )
+    return data
+
+
 def _write_raw_inbox(run_dir: Path, entries: list[dict]) -> None:
     claim, manifest = _claim_and_manifest(run_dir)
     write_yaml(
@@ -104,6 +127,137 @@ def test_duplicate_update_inbox_event_is_idempotent(tmp_path: Path) -> None:
     assert len(second.entries) == 1
     assert load_update_inbox(run_dir) is not None
     _refresh_and_validate(run_dir)
+
+
+def test_update_inbox_service_accepts_current_origin_event(tmp_path: Path) -> None:
+    run_dir = _fast_run(tmp_path)
+
+    report = append_scheduling_update(run_dir, _service_event(run_dir))
+
+    assert len(report.entries) == 1
+    entry = report.entries[0]
+    assert entry.effect == "scheduling_only"
+    assert entry.advisory_only is True
+    assert entry.artifact_revision_or_hash == artifact_revision_hash(
+        run_dir,
+        entry.origin_artifact,
+    )
+    _refresh_and_validate(run_dir)
+
+
+def test_update_inbox_service_rejects_forged_origin_artifact(tmp_path: Path) -> None:
+    run_dir = _fast_run(tmp_path)
+    event = _service_event(
+        run_dir,
+        origin_artifact="not_a_real_artifact.yaml",
+        artifact_revision_or_hash="missing",
+    )
+
+    with pytest.raises(UpdateInboxServiceError, match="declared run artifact"):
+        append_scheduling_update(run_dir, event)
+
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert "update_inbox" not in manifest.get("optional_artifacts", {})
+
+
+def test_update_inbox_service_rejects_stale_origin_hash(tmp_path: Path) -> None:
+    run_dir = _fast_run(tmp_path)
+    event = _service_event(run_dir, artifact_revision_or_hash="stale_hash")
+
+    with pytest.raises(UpdateInboxServiceError, match="hash is stale"):
+        append_scheduling_update(run_dir, event)
+
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert "update_inbox" not in manifest.get("optional_artifacts", {})
+
+
+def test_update_inbox_service_rejects_undeclared_existing_origin_artifact(
+    tmp_path: Path,
+) -> None:
+    run_dir = _fast_run(tmp_path)
+    forged_origin = run_dir / "scratch_origin.yaml"
+    forged_origin.write_text("forged: true\n", encoding="utf-8")
+    event = _service_event(
+        run_dir,
+        origin_artifact="scratch_origin.yaml",
+        artifact_revision_or_hash=artifact_revision_hash(run_dir, "scratch_origin.yaml"),
+    )
+
+    with pytest.raises(UpdateInboxServiceError, match="declared run artifact"):
+        append_scheduling_update(run_dir, event)
+
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert "update_inbox" not in manifest.get("optional_artifacts", {})
+    assert not (run_dir / UPDATE_INBOX_FILENAME).exists()
+
+
+def test_update_inbox_service_rejects_stage_status_origin_artifact(
+    tmp_path: Path,
+) -> None:
+    run_dir = _fast_run(tmp_path)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert manifest["optional_artifacts"]["stage_status"] == "stage_status.yaml"
+    event = _service_event(
+        run_dir,
+        origin_artifact="stage_status.yaml",
+        artifact_revision_or_hash=artifact_revision_hash(run_dir, "stage_status.yaml"),
+    )
+
+    with pytest.raises(UpdateInboxServiceError, match="process-only artifacts"):
+        append_scheduling_update(run_dir, event)
+
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert "update_inbox" not in manifest.get("optional_artifacts", {})
+    assert not (run_dir / UPDATE_INBOX_FILENAME).exists()
+
+
+def test_update_inbox_service_rejects_self_originating_event(tmp_path: Path) -> None:
+    run_dir = _fast_run(tmp_path)
+    event = _service_event(
+        run_dir,
+        origin_stage="time_allocation",
+        origin_artifact="time_allocation.yaml",
+        artifact_revision_or_hash=artifact_revision_hash(run_dir, "time_allocation.yaml"),
+    )
+
+    with pytest.raises(UpdateInboxServiceError, match="scheduling services"):
+        append_scheduling_update(run_dir, event)
+
+
+def test_update_inbox_service_rejects_validator_failed_event(tmp_path: Path) -> None:
+    run_dir = _fast_run(tmp_path)
+    event = _service_event(run_dir, validator_ok=False)
+
+    with pytest.raises(UpdateInboxServiceError, match="validator_ok"):
+        append_scheduling_update(run_dir, event)
+
+
+@pytest.mark.parametrize(
+    ("forbidden_field", "value"),
+    [
+        ("proof_status", "proved"),
+        ("source_status", "source_backed"),
+        ("evidence_status", "checked"),
+        ("grade_status", "proved"),
+        ("refuted", True),
+        ("checked", True),
+    ],
+)
+def test_update_inbox_service_rejects_direct_status_mutation_before_write(
+    tmp_path: Path,
+    forbidden_field: str,
+    value: object,
+) -> None:
+    run_dir = _fast_run(tmp_path)
+    event = _service_event(run_dir)
+    event[forbidden_field] = value
+
+    with pytest.raises(UpdateInboxServiceError, match="schema validation"):
+        append_scheduling_update(run_dir, event)
+
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert "update_inbox" not in manifest.get("optional_artifacts", {})
+    assert not (run_dir / UPDATE_INBOX_FILENAME).exists()
 
 
 def test_whole_claim_event_allows_null_route_or_step_id(tmp_path: Path) -> None:
@@ -168,7 +322,9 @@ def test_raw_duplicate_semantic_event_with_different_keys_fails_validation(
         validate_run(run_dir)
 
 
-def test_duplicate_applied_entry_keeps_first_applied_at(tmp_path: Path) -> None:
+def test_duplicate_applied_entry_keeps_first_stamp_but_requires_consumption(
+    tmp_path: Path,
+) -> None:
     run_dir = _fast_run(tmp_path)
     event = _event(run_dir)
     first = append_update_inbox_event(run_dir, event)
@@ -184,7 +340,8 @@ def test_duplicate_applied_entry_keeps_first_applied_at(tmp_path: Path) -> None:
 
     assert len(report.entries) == 1
     assert report.entries[0].applied_at == "2026-06-15T02:00:00+00:00"
-    validate_run(run_dir)
+    with pytest.raises(KernelValidationError, match="applied_at requires"):
+        validate_run(run_dir)
 
 
 def test_same_dedupe_key_with_different_payload_conflicts(tmp_path: Path) -> None:

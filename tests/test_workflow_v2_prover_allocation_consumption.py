@@ -6,6 +6,7 @@ import pytest
 
 import espresso_proof.orchestration.prover_loop_driver as drv
 from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
 from espresso_proof.agents.llm_agents import run_llm_agent_pass
 from espresso_proof.orchestration.mock_pipeline import run_mock_critique
 from espresso_proof.orchestration.orchestrator import _resolve_and_build_loop, orchestrate_run
@@ -332,6 +333,13 @@ def test_failed_append_rolls_back_generated_time_allocation_for_old_run(
     allocation_path = run_dir / "time_allocation.yaml"
     if allocation_path.exists():
         allocation_path.unlink()
+    inbox_path = run_dir / "update_inbox.yaml"
+    if inbox_path.exists():
+        inbox = read_yaml(inbox_path)
+        for entry in inbox.get("entries", []):
+            entry["applied_at"] = None
+        write_yaml(inbox_path, inbox)
+        refresh_final_report_disclosures(run_dir)
     agent_path = run_dir / "llm_agent_run.yaml"
     agent = read_yaml(agent_path)
     agent["input_artifacts"] = [

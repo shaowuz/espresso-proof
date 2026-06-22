@@ -11,8 +11,10 @@ from espresso_proof.kernel.time_allocation import (
     build_time_allocation_plan,
     write_time_allocation_plan,
 )
+from espresso_proof.kernel.models import TimeAllocationPlan
 from espresso_proof.kernel.update_inbox import append_update_inbox_event, load_update_inbox
 from espresso_proof.kernel.surface_warnings import pending_update_inbox_ids, refresh_final_report_disclosures
+from espresso_proof.orchestration.update_inbox_service import update_inbox_consumption_rows
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.kernel.validators import validate_run
 
@@ -267,6 +269,17 @@ def test_reviewer_objection_allocation_marks_consumed_inbox_entries(
     assert inbox_after is not None
     assert inbox_after.entries[0].applied_at is not None
     assert pending_update_inbox_ids(inbox_after.model_dump(mode="json")) == []
+    rows = update_inbox_consumption_rows(run_dir)
+    assert rows == [
+        {
+            "id": "upd_reviewer_001",
+            "type": "reviewer_objection",
+            "applied_at": inbox_after.entries[0].applied_at,
+            "scheduling_consumed": True,
+            "resolved": False,
+            "resolution_state": "consumed_by_scheduling",
+        }
+    ]
     validate_run(run_dir)
 
 
@@ -291,6 +304,35 @@ def test_reviewer_objection_allocation_preserves_existing_applied_at(
     assert inbox_after is not None
     assert inbox_after.entries[0].applied_at == "2026-06-15T02:00:00+00:00"
     validate_run(run_dir)
+
+
+def test_reviewer_objection_applied_at_requires_matching_allocation_response(
+    tmp_path: Path,
+    ) -> None:
+    run_dir = _fast_run(tmp_path)
+    route_id = _first_route_id(run_dir)
+    append_update_inbox_event(
+        run_dir,
+        _reviewer_objection_event(run_dir, route_id=route_id),
+    )
+    inbox_path = run_dir / "update_inbox.yaml"
+    raw = read_yaml(inbox_path)
+    raw["entries"][0]["applied_at"] = "2026-06-15T02:00:00+00:00"
+    write_yaml(inbox_path, raw)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    depends_on = manifest.setdefault("dependencies", {}).setdefault(
+        "time_allocation",
+        {"depends_on": []},
+    )["depends_on"]
+    if "update_inbox" not in depends_on:
+        depends_on.append("update_inbox")
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+
+    with pytest.raises(
+        KernelValidationError,
+        match="reviewer-objection time_allocation response",
+    ):
+        validate_run(run_dir)
 
 
 def test_non_reviewer_inbox_entries_remain_pending_after_time_allocation(
@@ -366,6 +408,37 @@ def test_failed_update_inbox_apply_rolls_back_time_allocation_snapshot(
     assert inbox is not None
     assert inbox.entries[0].applied_at is None
     validate_run(run_dir)
+
+
+def test_invalid_allocation_validation_does_not_mark_inbox_applied(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import espresso_proof.kernel.time_allocation as time_allocation_mod
+
+    run_dir = _fast_run(tmp_path)
+    _drop_time_allocation(run_dir)
+    append_update_inbox_event(run_dir, _reviewer_objection_event(run_dir))
+    real_build = time_allocation_mod.build_time_allocation_plan
+
+    def unsafe_plan(run_dir_arg: Path):
+        plan = real_build(run_dir_arg)
+        assert plan is not None
+        raw = plan.model_dump(mode="json")
+        raw["entries"][0]["reason"] = "Unsafe allocation note: proved and verified."
+        return TimeAllocationPlan.model_validate(raw)
+
+    monkeypatch.setattr(time_allocation_mod, "build_time_allocation_plan", unsafe_plan)
+
+    with pytest.raises(KernelValidationError, match="time_allocation cannot write"):
+        time_allocation_mod.write_time_allocation_plan(run_dir)
+
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert "time_allocation" not in manifest.get("optional_artifacts", {})
+    assert not (run_dir / TIME_ALLOCATION_FILENAME).exists()
+    inbox = load_update_inbox(run_dir)
+    assert inbox is not None
+    assert inbox.entries[0].applied_at is None
 
 
 @pytest.mark.parametrize("action,budget", [("source_pinning", "small"), ("cheap_check", "tiny")])

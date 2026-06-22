@@ -11,6 +11,7 @@ import type {
   PanelName,
   StatusView,
   StrategyPanel,
+  TracePanel,
 } from "../lib/types";
 
 const STATUS_POLL = 3000;
@@ -57,3 +58,5 @@ export const useComputationsPanel = (runId: string | null) =>
   usePanel<ComputationsPanel>(runId, "computations", EVIDENCE_POLL);
 export const useLiteraturePanel = (runId: string | null) =>
   usePanel<LiteraturePanel>(runId, "literature", EVIDENCE_POLL);
+export const useTracePanel = (runId: string | null) =>
+  usePanel<TracePanel>(runId, "trace", FAST_POLL);

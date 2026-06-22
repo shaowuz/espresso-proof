@@ -28,11 +28,27 @@ from espresso_proof.kernel.observability import (
     now_iso,
     write_timings,
 )
-from espresso_proof.kernel.run_lock import DEFAULT_TIMEOUT_SECONDS, RunLockedError
+from espresso_proof.kernel.run_lock import (
+    DEFAULT_TIMEOUT_SECONDS,
+    RunLockedError,
+    run_writer_lock,
+)
+from espresso_proof.kernel.stage_runner import StageRunner
+from espresso_proof.kernel.validators import validate_run
 from espresso_proof.orchestration.agent_runner import (
     ON_DEMAND_AGENTS,
     compute_agent,
     run_single_agent,
+)
+from espresso_proof.orchestration.pressure_lane_barrier import (
+    PRESSURE_LANE_BARRIER_COMMIT_ORDER,
+    PRESSURE_LANE_BARRIER_FILENAME,
+    finalize_pressure_lane_barrier,
+    record_pressure_lane_barrier_agent_result,
+    record_pressure_lane_barrier_commit_result,
+    record_pressure_lane_barrier_committing,
+    record_pressure_lane_barrier_compute,
+    seed_pressure_lane_barrier,
 )
 
 # Deterministic commit order. ``examples`` reconciles ``tests.yaml`` from the
@@ -40,7 +56,7 @@ from espresso_proof.orchestration.agent_runner import (
 # commit before examples; literature and failure_patterns own disjoint files and may
 # go in any order. This order is what subgoal 05's parallel-compute / serial-commit
 # coordinator must also honor for byte-identical convergence.
-_COMMIT_ORDER = ["counterexamples", "examples", "literature", "failure_patterns"]
+_COMMIT_ORDER = list(PRESSURE_LANE_BARRIER_COMMIT_ORDER)
 
 
 def order_for_commit(agents: set[str]) -> list[str]:
@@ -48,6 +64,26 @@ def order_for_commit(agents: set[str]) -> list[str]:
     ordered = [a for a in _COMMIT_ORDER if a in agents]
     ordered += [a for a in sorted(agents) if a not in _COMMIT_ORDER]
     return ordered
+
+
+def _record_barrier_checked(run_dir: Path, stage_name: str, writer) -> dict:
+    """Write one barrier transition under lock + StageRunner + validate_run."""
+
+    report: dict = {}
+
+    def _mutate() -> None:
+        nonlocal report
+        report = writer()
+
+    with run_writer_lock(run_dir, action=stage_name):
+        StageRunner(run_dir).run(
+            name=stage_name,
+            mutate=_mutate,
+            validate=lambda: validate_run(run_dir),
+            state_after=None,
+            snapshot_paths=[PRESSURE_LANE_BARRIER_FILENAME],
+        )
+    return report
 
 
 def run_evidence_batch(
@@ -231,6 +267,16 @@ def run_evidence_batch_parallel(
 
     run_id = (read_yaml(run_dir / "run_manifest.yaml") or {}).get("run_id")
 
+    # SEED -- persist the deterministic scheduling plan before any worker
+    # computes. Re-entering after a crash overwrites any partial barrier with the
+    # same deterministic plan, so resume is coherent even though worker
+    # candidates remain in memory only.
+    _record_barrier_checked(
+        run_dir,
+        "pressure_lane_barrier:seed",
+        lambda: seed_pressure_lane_barrier(run_dir, ordered),
+    )
+
     # PHASE 1 -- parallel COMPUTE (off the lock) of the precompute lanes only. A
     # lane whose compute raises is NOT dropped: it is committed via the inline
     # recompute path below (candidate stays None), reproducing the serial
@@ -257,6 +303,15 @@ def run_evidence_batch_parallel(
                 info = future.result()  # _timed_compute never raises
                 timed[info["agent"]] = info
 
+    # RUN -- workers are done and have not written shared status. The coordinator
+    # records only timing/error summaries; candidates stay in memory until the
+    # serial commit below.
+    _record_barrier_checked(
+        run_dir,
+        "pressure_lane_barrier:run",
+        lambda: record_pressure_lane_barrier_compute(run_dir, timed),
+    )
+
     # PHASE 2 -- serial COMMIT on the coordinator thread, in deterministic order.
     # Precompute lanes commit their candidate; any deferred lane (failure_patterns)
     # has candidate=None, so run_single_agent recomputes it inline at THIS point --
@@ -282,19 +337,42 @@ def run_evidence_batch_parallel(
                 error_summary=info["error"],
             )
 
+        _record_barrier_checked(
+            run_dir,
+            f"pressure_lane_barrier:joining:{agent}",
+            lambda agent=agent: record_pressure_lane_barrier_committing(run_dir, agent),
+        )
         commit_started = now_iso()
         c0 = monotonic_ms()
-        result = _commit_lane_with_lock_retry(
-            run_dir,
-            agent,
-            info["candidate"] if info is not None else None,
-            provider=provider,
-            model=model,
-            api_key_env=api_key_env,
-            external_agent_command_env=external_agent_command_env,
-            retries=commit_retries,
-            backoff_seconds=commit_backoff_seconds,
-        )
+        try:
+            result = _commit_lane_with_lock_retry(
+                run_dir,
+                agent,
+                info["candidate"] if info is not None else None,
+                provider=provider,
+                model=model,
+                api_key_env=api_key_env,
+                external_agent_command_env=external_agent_command_env,
+                retries=commit_retries,
+                backoff_seconds=commit_backoff_seconds,
+            )
+        except Exception as exc:
+            _record_barrier_checked(
+                run_dir,
+                f"pressure_lane_barrier:failed:{agent}",
+                lambda agent=agent, exc=exc: record_pressure_lane_barrier_agent_result(
+                    run_dir,
+                    agent,
+                    status="failed",
+                    error_summary=str(exc),
+                ),
+            )
+            _record_barrier_checked(
+                run_dir,
+                "pressure_lane_barrier:finalize",
+                lambda: finalize_pressure_lane_barrier(run_dir),
+            )
+            raise
         append_agent_event(
             run_dir,
             agent_name=agent,
@@ -308,8 +386,22 @@ def run_evidence_batch_parallel(
             run_id=run_id,
             error_summary=result.get("error"),
         )
+        _record_barrier_checked(
+            run_dir,
+            f"pressure_lane_barrier:committed:{agent}",
+            lambda agent=agent, result=result: record_pressure_lane_barrier_commit_result(
+                run_dir,
+                agent,
+                result,
+            ),
+        )
         results[agent] = result
 
+    _record_barrier_checked(
+        run_dir,
+        "pressure_lane_barrier:finalize",
+        lambda: finalize_pressure_lane_barrier(run_dir),
+    )
     # Aggregate the per-lane timings into timings.yaml (diagnostic; fails closed).
     write_timings(run_dir)
     return {"agents": results}

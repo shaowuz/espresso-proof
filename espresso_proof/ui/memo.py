@@ -383,6 +383,12 @@ def build_concise_memo(run_dir: Path) -> str:
             "  (Only a 'Done' agent's results count as evidence; the kernel still "
             "checks them. Missing/running/skipped/failed agents are not evidence.)"
         )
+    from espresso_proof.orchestration.pressure_lanes import pressure_lane_memo_lines
+
+    lane_lines = pressure_lane_memo_lines(run_dir)
+    if lane_lines:
+        lines.append("")
+        lines.extend(lane_lines)
 
     lines.append("")
     if routes_preliminary:

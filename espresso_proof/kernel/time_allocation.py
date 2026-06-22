@@ -14,7 +14,13 @@ import tempfile
 from typing import Any
 
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.kernel.models import TimeAllocationPlan
+from espresso_proof.kernel.models import (
+    Claim,
+    RunManifest,
+    StrategyBrief,
+    StrategySynthesis,
+    TimeAllocationPlan,
+)
 from espresso_proof.kernel.run_lock import run_writer_lock
 from espresso_proof.kernel.update_inbox import mark_update_inbox_entries_applied
 from espresso_proof.validation.errors import KernelValidationError
@@ -74,6 +80,39 @@ def _read_optional(run_dir: Path, manifest: dict[str, Any], key: str) -> dict[st
     if rel and (run_dir / rel).exists():
         return read_yaml(run_dir / rel)
     return None
+
+
+def _validate_written_time_allocation(run_dir: Path) -> None:
+    from espresso_proof.kernel.validators import (
+        _validate_time_allocation,
+        validate_yaml_model,
+    )
+
+    manifest = validate_yaml_model(run_dir / "run_manifest.yaml", RunManifest)
+    claim = validate_yaml_model(
+        run_dir / manifest.artifacts["locked_claim"],
+        Claim,
+    )
+    strategy_synthesis = validate_yaml_model(
+        run_dir / manifest.artifacts["strategy_synthesis"],
+        StrategySynthesis,
+    )
+    strategy_brief = validate_yaml_model(
+        run_dir / manifest.artifacts["strategy_brief"],
+        StrategyBrief,
+    )
+    time_allocation = validate_yaml_model(
+        run_dir / manifest.optional_artifacts["time_allocation"],
+        TimeAllocationPlan,
+    )
+    _validate_time_allocation(
+        time_allocation,
+        claim,
+        manifest,
+        run_dir,
+        strategy_synthesis,
+        strategy_brief,
+    )
 
 
 def _graded_routes(value: Any) -> list[dict[str, Any]]:
@@ -374,8 +413,10 @@ def write_time_allocation_plan(run_dir: Path) -> TimeAllocationPlan | None:
                 "depends_on": depends_on
             }
             write_yaml(run_dir / "run_manifest.yaml", manifest)
+            _validate_written_time_allocation(run_dir)
             if "update_inbox" in manifest.get("optional_artifacts", {}):
                 mark_update_inbox_entries_applied(run_dir, consumed_update_ids)
+                _validate_written_time_allocation(run_dir)
         except Exception:
             _restore_files(snapshot)
             raise

@@ -34,6 +34,7 @@ from espresso_proof.kernel.validators import KernelValidationError
 
 
 FIXTURES = Path("tests/fixtures")
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _mark_claim_clear(run_dir: Path) -> None:
@@ -68,6 +69,65 @@ def external_agent_command(tmp_path: Path) -> str:
         encoding="utf-8",
     )
     return f"{sys.executable} {script}"
+
+
+def codex_adapter_command(tmp_path: Path) -> str:
+    script = tmp_path / "espresso_codex_agent.py"
+    script.write_text(
+        "\n".join(
+            [
+                "import json",
+                "import sys",
+                "json.loads(sys.stdin.read())",
+                "json.dump({",
+                "  'summary': 'Codex adapter returned candidate-only output.',",
+                "  'steps': ['Check exact source hypotheses.'],",
+                "  'source_requests': ['Exact theorem locator.'],",
+                "  'missing_hypotheses': ['Genericity condition.'],",
+                "  'risks': ['Route may be too narrow.'],",
+                "  'verdict': 'needs_sources',",
+                "  'recommended_human_action': 'revise',",
+                "  '_espresso_codex_adapter': {",
+                "    'adapter': 'espresso_codex_agent',",
+                "    'request_id': 'test-request',",
+                "    'parse_status': 'ok',",
+                "    'fallback_used': False,",
+                "    'fallback_reason': '',",
+                "    'model': 'gpt-5.5',",
+                "    'effort': 'medium'",
+                "  }",
+                "}, sys.stdout)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return f"{sys.executable} {script}"
+
+
+def fake_codex_cli(tmp_path: Path, *, message: str) -> Path:
+    script = tmp_path / "codex"
+    script.write_text(
+        "\n".join(
+            [
+                "import json",
+                "import sys",
+                f"message = {message!r}",
+                "last_message = None",
+                "for index, arg in enumerate(sys.argv):",
+                "    if arg == '--output-last-message' and index + 1 < len(sys.argv):",
+                "        last_message = sys.argv[index + 1]",
+                "if last_message:",
+                "    with open(last_message, 'w', encoding='utf-8') as handle:",
+                "        handle.write(message)",
+                "print(json.dumps({'event': 'fake_codex_done'}))",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
 
 
 def test_stub_llm_agents_write_schema_valid_candidate_artifact(tmp_path: Path) -> None:
@@ -442,6 +502,9 @@ def test_run_flow_openai_network_preflight_writes_provider_diagnostic(
     assert report.provider_diagnostic.status == "ready"
     assert report.provider_diagnostic.network_check == "passed"
     assert report.provider_diagnostic.structured_output["store"] is False
+    assert len(report.agent_call_diagnostics) == 4
+    assert {diag.adapter for diag in report.agent_call_diagnostics} == {"openai_responses"}
+    assert all(diag.verified_real_provider for diag in report.agent_call_diagnostics)
     assert len(calls) == 5
     assert calls[0]["input"].startswith("Return a minimal candidate-only Espresso agent response")
     assert all(call["store"] is False for call in calls)
@@ -485,11 +548,139 @@ def test_run_flow_external_provider_uses_json_command(tmp_path: Path, monkeypatc
     assert report.provider_diagnostic.provider == "external"
     assert report.provider_diagnostic.status == "ready"
     assert report.provider_diagnostic.network_check == "passed"
+    assert len(report.agent_call_diagnostics) == 4
+    assert {diag.adapter for diag in report.agent_call_diagnostics} == {"external_json_agent"}
+    assert all(not diag.verified_real_provider for diag in report.agent_call_diagnostics)
     assert {review.verifier_id for review in report.verifier_reviews} == {
         "strategy_reviewer_001",
         "evidence_reviewer_002",
         "line_proof_reviewer_003",
     }
+
+
+def test_run_flow_codex_adapter_records_verified_call_diagnostics(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_COMMAND", codex_adapter_command(tmp_path))
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "run-flow",
+            "--input",
+            str(FIXTURES / "promising_but_unproved" / "input.md"),
+            "--project",
+            "codex_adapter_smoke",
+            "--literature-mode",
+            "local",
+            "--provider",
+            "external",
+            "--model",
+            "codex-cli",
+            "--reviewer-set",
+            "espresso",
+            "--agent-network-preflight",
+            "--output-root",
+            str(tmp_path / "runs"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    match = re.search(r"Wrote run artifacts to\s+(.+)", result.output)
+    assert match, result.output
+    run_dir = Path(match.group(1).strip())
+    validate_run(run_dir)
+    report = LLMAgentRunReport.model_validate(read_yaml(run_dir / "llm_agent_run.yaml"))
+    assert report.provider == "external"
+    assert report.model == "gpt-5.5-medium"
+    assert len(report.agent_call_diagnostics) == 4
+    assert {diag.adapter for diag in report.agent_call_diagnostics} == {
+        "espresso_codex_agent"
+    }
+    assert all(diag.parse_status == "ok" for diag in report.agent_call_diagnostics)
+    assert all(not diag.fallback_used for diag in report.agent_call_diagnostics)
+    assert all(diag.verified_real_provider for diag in report.agent_call_diagnostics)
+
+
+def test_external_provider_reserved_status_language_is_contained(
+    tmp_path: Path, monkeypatch
+) -> None:
+    script = tmp_path / "status_smuggling_agent.py"
+    script.write_text(
+        "\n".join(
+            [
+                "import json",
+                "import sys",
+                "json.loads(sys.stdin.read())",
+                "json.dump({",
+                "  'summary': 'This candidate route counts as source_backed.',",
+                "  'steps': ['Treat the route as source_backed after this pass.'],",
+                "  'source_requests': ['Exact theorem locator.'],",
+                "  'missing_hypotheses': ['Genericity condition.'],",
+                "  'risks': ['source_backed status is not actually earned here.'],",
+                "  'verdict': 'needs_sources',",
+                "  'recommended_human_action': 'revise',",
+                "}, sys.stdout)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_COMMAND", f"{sys.executable} {script}")
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "run-flow",
+            "--input",
+            str(FIXTURES / "promising_but_unproved" / "input.md"),
+            "--project",
+            "hodge_atoms",
+            "--literature-mode",
+            "local",
+            "--provider",
+            "external",
+            "--model",
+            "status-smuggling-agent",
+            "--reviewer-set",
+            "espresso",
+            "--agent-network-preflight",
+            "--output-root",
+            str(tmp_path / "runs"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    match = re.search(r"Wrote run artifacts to\s+(.+)", result.output)
+    assert match, result.output
+    run_dir = Path(match.group(1).strip())
+    validate_run(run_dir)
+    report = LLMAgentRunReport.model_validate(read_yaml(run_dir / "llm_agent_run.yaml"))
+    assert "source_backed" not in report.prover_attempt.output_summary.lower()
+    assert "[withheld status phrase]" in report.prover_attempt.output_summary
+    assert any("source_backed" in review.unsafe_language for review in report.verifier_reviews)
+
+    index = read_yaml(run_dir / "prover_rounds/index.yaml")
+    round_report = read_yaml(run_dir / index["rounds"][0]["artifact_path"])
+    content_text = json.dumps(
+        {
+            "prover_attempt": round_report["prover_attempt"],
+            "reviewer_objections": [
+                review["objections"]
+                + review["missing_hypotheses"]
+                + review["source_requests"]
+                + [
+                    objection["text"]
+                    for objection in review.get("scoped_objections", [])
+                ]
+                for review in round_report["verifier_reviews"]
+            ],
+        }
+    ).lower()
+    assert "source_backed" not in content_text
+    assert "[withheld status phrase]" in content_text
 
 
 def test_bridge_run_flow_creates_selectable_run(tmp_path: Path) -> None:
@@ -738,6 +929,42 @@ def test_agent_doctor_external_network_check_uses_json_command(
     assert payload["status"] == "ready"
     assert payload["network_check"] == "passed"
     assert payload["sample_verdict"] == "needs_sources"
+
+
+def test_agent_doctor_external_codex_adapter_rejects_fallback_as_ready(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+        f'{sys.executable} "{ROOT / "scripts" / "espresso_codex_agent.py"}"',
+    )
+    monkeypatch.setenv("ESPRESSO_CODEX_CLI", str(fake_codex_cli(tmp_path, message="not json")))
+    monkeypatch.setenv("ESPRESSO_AGENT_LOG_DIR", str(tmp_path / "logs"))
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "agent-doctor",
+            "--provider",
+            "external",
+            "--model",
+            "codex-cli",
+            "--network-check",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["provider"] == "external"
+    assert payload["model"] == "gpt-5.5-medium"
+    assert payload["status"] == "error"
+    assert payload["network_check"] == "failed"
+    assert "Codex adapter fallback used during diagnostic" in payload["error"]
+    adapter = payload["structured_output"]["adapter_diagnostic"]
+    assert adapter["parse_status"] == "fallback"
+    assert adapter["fallback_used"] is True
 
 
 def test_bridge_agent_doctor_reports_missing_openai_key(tmp_path: Path) -> None:
@@ -1668,6 +1895,20 @@ def test_safe_language_filter_preserves_unverified() -> None:
     assert "proof-close" in collect_unsafe_language({"summary": "proof-close", "steps": [], "risks": []})
     assert "verified" not in collect_unsafe_language(
         {"summary": "This remains unverified.", "steps": [], "risks": []}
+    )
+
+
+def test_reserved_status_language_is_redacted_before_round_validation() -> None:
+    from espresso_proof.kernel.validators import _prover_status_smuggling_field
+
+    raw = "The candidate route counts as source_backed after this pass."
+    redacted = safe_text(raw)
+
+    assert "source_backed" not in redacted.lower()
+    assert "[withheld status phrase]" in redacted
+    assert _prover_status_smuggling_field(redacted) is None
+    assert "source_backed" in collect_unsafe_language(
+        {"summary": raw, "steps": [], "risks": []}
     )
 
 

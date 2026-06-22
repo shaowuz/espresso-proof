@@ -32,6 +32,22 @@ export interface AgentView {
   duration_seconds: number | null;
 }
 
+export interface PressureLaneView {
+  stage_id: string;
+  agent: string;
+  title: string;
+  display_name: string;
+  status: string;
+  status_word: string;
+  agent_status: string;
+  default_visible: boolean;
+  default_execution: string;
+  counts_as_evidence: boolean;
+  pending_counts_as_evidence: boolean;
+  evidence_note: string;
+  claim_clear_blocked: boolean;
+}
+
 export interface StatusView {
   state: string;
   proof_status: string;
@@ -165,12 +181,14 @@ export interface Snapshot {
   run_id: string;
   claim: ClaimView;
   status: StatusView;
+  compact_memo: string;
   strategies: StrategyView[];
   strategy_summary?: StrategySummary;
   examples: ExampleView[];
   counterexamples: CounterexampleView[];
   computations: ComputationView[];
   literature: LiteratureView[];
+  pressure_lanes: PressureLaneView[];
   source_gaps: string[];
   missing: Record<MissingKey, boolean>;
 }
@@ -206,7 +224,8 @@ export type PanelName =
   | "examples"
   | "counterexamples"
   | "computations"
-  | "literature";
+  | "literature"
+  | "trace";
 
 export type AgentState =
   | "ready"
@@ -222,6 +241,7 @@ export interface PanelBase {
   panel: PanelName;
   missing: boolean;
   agent_state: AgentState;
+  pressure_lane?: PressureLaneView | null;
 }
 
 export interface ClaimPanel extends PanelBase {
@@ -234,6 +254,7 @@ export interface StrategyPanel extends PanelBase {
   strategy_summary?: StrategySummary;
   ledger_context?: LedgerContext;
   latest_round?: LatestRound | null;
+  compact_memo?: string;
 }
 export interface ExamplesPanel extends PanelBase {
   panel: "examples";
@@ -251,4 +272,24 @@ export interface LiteraturePanel extends PanelBase {
   panel: "literature";
   items: LiteratureView[];
   source_gaps: string[];
+}
+
+export interface TraceItem {
+  stage_id: string;
+  display_name: string;
+  state_word: string;
+  tone: Tone;
+  group: string;
+  evidence_role_word: string;
+  advisory_note: string;
+  blocked_reason: string;
+  status_detail: string;
+  updated_at: string;
+}
+
+export interface TracePanel extends PanelBase {
+  panel: "trace";
+  items: TraceItem[];
+  unavailable?: boolean;
+  advisory_note?: string;
 }

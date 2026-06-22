@@ -36,6 +36,7 @@ from espresso_proof.kernel.models import (
     AgentConsensusReview,
     AgentConsensusVerdict,
     IdeaGrade,
+    LineNumberedProof,
     ProofLanguageStatus,
 )
 from espresso_proof.kernel.pressure_status import artifact_revision_hash
@@ -138,7 +139,12 @@ def _require_line_numbered_proof(run_dir: Path, manifest: dict) -> dict:
     proof = read_yaml(run_dir / proof_rel)
     if not isinstance(proof, dict) or not proof.get("lines"):
         raise NoLineNumberedProofError("cannot seal: line_numbered_proof is empty/route-only")
-    return proof
+    try:
+        return LineNumberedProof.model_validate(proof).model_dump(mode="json")
+    except Exception as exc:
+        raise NoLineNumberedProofError(
+            f"cannot seal: line_numbered_proof.yaml is malformed ({exc})"
+        ) from exc
 
 
 def _proof_review_context(run_dir: Path, proof: dict) -> dict:
@@ -249,6 +255,16 @@ def seal_agent_consensus(
     manifest = read_yaml(manifest_path)
     # Goal 69: the mock check may ONLY seal a line-numbered proof (fail closed).
     proof = _require_line_numbered_proof(run_dir, manifest)
+    unresolved_gap_lines = [
+        str(line.get("line_id") or f"line_{index}")
+        for index, line in enumerate(proof.get("lines") or [], start=1)
+        if isinstance(line, dict) and line.get("gaps")
+    ]
+    if unresolved_gap_lines:
+        raise RuntimeError(
+            "agent consensus cannot seal line-numbered proof with unresolved gaps: "
+            + ", ".join(unresolved_gap_lines)
+        )
     # Bind the hashes AS THE REVIEWERS REVIEW THEM (captured before the reviewers run,
     # off the on-disk proof they are about to see). The gate re-reads the current
     # files, so a mid-seal proof swap (current != reviewed) is caught -> rollback.

@@ -90,6 +90,7 @@ export function LiteratureRail({
         count={present ? items.length : null}
         agentState={lit.data?.agent_state}
         agent={literatureAgent}
+        pressureLane={lit.data?.pressure_lane}
         isPending={lit.isPending}
         isRefetching={lit.isFetching}
         isError={lit.isError}

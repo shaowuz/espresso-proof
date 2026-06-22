@@ -57,6 +57,7 @@ from espresso_proof.kernel.models import LiteratureReviewReport
 from espresso_proof.literature.literature_discovery import discover_literature as run_literature_discovery
 from espresso_proof.agents.llm_agents import build_client, load_agent_context
 from espresso_proof.kernel.pressure_status import PRESSURE_STATUS_FILENAME, build_pressure_status
+from espresso_proof.orchestration.agent_flow_driver import record_agent_flow_stage_status
 from espresso_proof.orchestration.run_dashboard import write_run_dashboard
 from espresso_proof.kernel.run_lock import run_writer_lock
 from espresso_proof.kernel.stage_runner import StageError, StageRunner
@@ -231,7 +232,7 @@ def skip_agent(run_dir: Path, agent: str, *, reason: str | None = None) -> dict:
         set_agent_status(run_dir, agent, "skipped", error_summary=reason)
         if agent in ("examples", "counterexamples"):
             build_pressure_status(run_dir)
-        validate_run(run_dir)
+        record_agent_flow_stage_status(run_dir)
         _refresh_dashboard(run_dir)
     return {"agent": agent, "status": "skipped"}
 
@@ -326,7 +327,7 @@ def _run_single_agent_locked(
     set_agent_status(run_dir, agent, "running", started_at=started_at, increment_attempt=True)
     if agent in ("examples", "counterexamples"):
         build_pressure_status(run_dir)
-    validate_run(run_dir)
+    record_agent_flow_stage_status(run_dir)
 
     snapshot_paths = AGENT_SNAPSHOT_PATHS[agent] + ["agent_run_status.yaml", PRESSURE_STATUS_FILENAME]
     runner = StageRunner(run_dir)
@@ -361,10 +362,11 @@ def _run_single_agent_locked(
         )
         if agent in ("examples", "counterexamples"):
             build_pressure_status(run_dir)
-        validate_run(run_dir)
+        record_agent_flow_stage_status(run_dir)
         _refresh_dashboard(run_dir)
         return {"agent": agent, "status": "failed", "error": str(exc)}
 
+    record_agent_flow_stage_status(run_dir)
     _refresh_dashboard(run_dir)
     return {"agent": agent, "status": "done"}
 

@@ -6,6 +6,7 @@ import re
 import shlex
 import signal
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -20,7 +21,7 @@ from espresso_proof.strategy.human_time_allocation import (
     write_time_allocation_context,
 )
 from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
-from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.io import path_exists, read_yaml, write_yaml
 from espresso_proof.kernel.models import LLMAgentRunReport, ProverLoopReport, ProverRoundIndex, ProverRoundReport
 from espresso_proof.kernel.pressure_status import artifact_revision_hash
 from espresso_proof.kernel.proof_language import PROOF_COMPLETE_PHRASES
@@ -29,9 +30,11 @@ from espresso_proof.kernel.time_allocation import (
     TIME_ALLOCATION_FILENAME,
     ensure_prover_time_allocation_plan,
     time_allocation_prompt_payload,
-    write_time_allocation_plan,
 )
-from espresso_proof.kernel.update_inbox import append_update_inbox_event
+from espresso_proof.orchestration.update_inbox_service import (
+    append_scheduling_update,
+    write_time_allocation_from_update_inbox,
+)
 
 
 AGENT_OUTPUT_SCHEMA = {
@@ -99,6 +102,33 @@ FORBIDDEN_LANGUAGE = [
 ]
 FORBIDDEN_LANGUAGE = list(dict.fromkeys([*FORBIDDEN_LANGUAGE, *PROOF_COMPLETE_PHRASES]))
 
+RESERVED_STATUS_LANGUAGE = [
+    "proof_status",
+    "proof-language status",
+    "proof language status",
+    "source_status",
+    "source status",
+    "source_backed_status",
+    "source-backed status",
+    "source backed status",
+    "source_backed",
+    "source-backed",
+    "source backed",
+    "checked_evidence",
+    "checked evidence",
+    "evidence_status",
+    "evidence status",
+    "refutation_status",
+    "refutation status",
+    "grade_status",
+    "grade status",
+    "agent_consensus_mock_checked",
+    "agent consensus mock checked",
+    "mock_checked",
+    "mock checked",
+]
+RESERVED_STATUS_LANGUAGE = list(dict.fromkeys(RESERVED_STATUS_LANGUAGE))
+
 INPUT_ARTIFACTS = [
     "locked_claim.yaml",
     "hypothesis_ledger.yaml",
@@ -160,6 +190,7 @@ CODEX_EXTERNAL_MODEL = "gpt-5.5-medium"
 DEFAULT_EXTERNAL_TIMEOUT_SECONDS = 120
 DEFAULT_CODEX_EXTERNAL_TIMEOUT_SECONDS = 360
 EXTERNAL_AGENT_TIMEOUT_ENV = "ESPRESSO_EXTERNAL_AGENT_TIMEOUT_SECONDS"
+CODEX_ADAPTER_DIAGNOSTIC_KEY = "_espresso_codex_adapter"
 
 
 class LLMClient(Protocol):
@@ -378,7 +409,7 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
     thread. Best-effort; never raises. Falls back to killing the direct child."""
     try:
         os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, OSError):
+    except (AttributeError, ProcessLookupError, PermissionError, OSError):
         try:
             proc.kill()
         except Exception:  # noqa: BLE001 - best-effort
@@ -400,7 +431,7 @@ class ExternalCommandClient:
         raw_command = os.environ.get(command_env, "")
         if not raw_command:
             raise RuntimeError(f"{command_env} is not set")
-        self.command = shlex.split(raw_command)
+        self.command = _normalize_external_command(_split_external_command(raw_command))
         if not self.command:
             raise RuntimeError(f"{command_env} is empty")
         if _is_codex_external_command(self.command):
@@ -460,7 +491,26 @@ class ExternalCommandClient:
 
 
 def _is_codex_external_command(command: list[str]) -> bool:
-    return any(Path(part).name == "espresso_codex_agent.py" for part in command)
+    return any(Path(part.strip("\"'")).name == "espresso_codex_agent.py" for part in command)
+
+
+def _split_external_command(raw_command: str) -> list[str]:
+    """Split an env-provided command without corrupting Windows backslashes."""
+
+    parts = shlex.split(raw_command, posix=os.name != "nt")
+    if os.name == "nt":
+        return [part.strip("\"'") for part in parts]
+    return parts
+
+
+def _normalize_external_command(command: list[str]) -> list[str]:
+    """Make a bare Python script external-agent command executable on Windows."""
+
+    if len(command) == 1:
+        script = Path(command[0])
+        if script.suffix.lower() == ".py" and script.exists():
+            return [sys.executable, str(script)]
+    return command
 
 
 def _resolve_external_timeout(command: list[str], *, requested_timeout: int | None) -> int:
@@ -562,7 +612,11 @@ def external_agent_diagnostic(
     """Report whether a local JSON agent command is configured and callable."""
     raw_command = os.environ.get(command_env, "")
     command_present = bool(raw_command)
-    command = shlex.split(raw_command) if raw_command else []
+    command = (
+        _normalize_external_command(_split_external_command(raw_command))
+        if raw_command
+        else []
+    )
     effective_model = CODEX_EXTERNAL_MODEL if _is_codex_external_command(command) else (
         model or "external-json-agent"
     )
@@ -609,6 +663,8 @@ def external_agent_diagnostic(
         missing = [key for key in AGENT_OUTPUT_SCHEMA["required"] if key not in sample]
         if missing:
             raise RuntimeError(f"diagnostic response missing keys: {', '.join(missing)}")
+        if _is_codex_external_command(client.command):
+            _validate_codex_adapter_diagnostic(sample, report)
         report.update(
             {
                 "status": "ready",
@@ -627,6 +683,113 @@ def external_agent_diagnostic(
             }
         )
     return report
+
+
+def _validate_codex_adapter_diagnostic(sample: dict, report: dict) -> None:
+    meta = sample.get(CODEX_ADAPTER_DIAGNOSTIC_KEY)
+    structured = report.setdefault("structured_output", {})
+    structured["adapter_diagnostic_key"] = CODEX_ADAPTER_DIAGNOSTIC_KEY
+    if not isinstance(meta, dict):
+        raise RuntimeError(
+            "Codex adapter diagnostic did not return adapter status; cannot verify live Codex output."
+        )
+    adapter_diagnostic = {
+        "adapter": str(meta.get("adapter") or ""),
+        "parse_status": str(meta.get("parse_status") or ""),
+        "fallback_used": meta.get("fallback_used") is True,
+        "fallback_reason": str(meta.get("fallback_reason") or ""),
+        "model": str(meta.get("model") or ""),
+        "effort": str(meta.get("effort") or ""),
+    }
+    structured["adapter_diagnostic"] = adapter_diagnostic
+    if adapter_diagnostic["parse_status"] != "ok" or adapter_diagnostic["fallback_used"]:
+        reason = adapter_diagnostic["fallback_reason"] or "adapter returned fallback output"
+        raise RuntimeError(f"Codex adapter fallback used during diagnostic: {reason}")
+
+
+def _complete_agent_json(
+    *,
+    client: LLMClient,
+    role: str,
+    call_diagnostics: list[dict],
+    system: str,
+    prompt: str,
+) -> dict:
+    raw = client.complete_json(system=system, prompt=prompt)
+    diagnostic = _agent_call_diagnostic(
+        raw,
+        client=client,
+        role=role,
+        call_index=len(call_diagnostics) + 1,
+    )
+    if diagnostic is not None:
+        call_diagnostics.append(diagnostic)
+    return raw
+
+
+def _agent_call_diagnostic(
+    raw: dict,
+    *,
+    client: LLMClient,
+    role: str,
+    call_index: int,
+) -> dict | None:
+    provider = getattr(client, "provider", "")
+    model = getattr(client, "model", "")
+    if provider == "stub":
+        return None
+    if provider == "openai":
+        return {
+            "call_index": call_index,
+            "role": role,
+            "provider": "openai",
+            "model": model,
+            "adapter": "openai_responses",
+            "parse_status": "ok",
+            "fallback_used": False,
+            "fallback_reason": "",
+            "request_id": "",
+            "verified_real_provider": True,
+        }
+    if provider != "external":
+        return None
+
+    meta = raw.get(CODEX_ADAPTER_DIAGNOSTIC_KEY) if isinstance(raw, dict) else None
+    if isinstance(meta, dict):
+        adapter = str(meta.get("adapter") or "")
+        parse_status = str(meta.get("parse_status") or "")
+        fallback_used = meta.get("fallback_used") is True
+        fallback_reason = str(meta.get("fallback_reason") or "")
+        request_id = str(meta.get("request_id") or "")
+        verified = (
+            adapter == "espresso_codex_agent"
+            and parse_status == "ok"
+            and not fallback_used
+        )
+        return {
+            "call_index": call_index,
+            "role": role,
+            "provider": "external",
+            "model": model,
+            "adapter": adapter,
+            "parse_status": parse_status,
+            "fallback_used": fallback_used,
+            "fallback_reason": fallback_reason,
+            "request_id": request_id,
+            "verified_real_provider": verified,
+        }
+    return {
+        "call_index": call_index,
+        "role": role,
+        "provider": "external",
+        "model": model,
+        "adapter": "external_json_agent",
+        "parse_status": "unverified",
+        "fallback_used": False,
+        "fallback_reason": "",
+        "request_id": "",
+        "verified_real_provider": False,
+    }
 
 
 def _agent_input_artifacts(manifest: dict) -> list[str]:
@@ -718,8 +881,12 @@ def run_llm_agent_pass(
     context["time_allocation_plan"] = time_context
     context["prover_missing_context_to_record"] = time_context["missing_context"]
     input_artifacts = _agent_input_artifacts(context["manifest"])
+    agent_call_diagnostics: list[dict] = []
     now = datetime.now(UTC).isoformat()
-    prover_raw = client.complete_json(
+    prover_raw = _complete_agent_json(
+        client=client,
+        role="prover",
+        call_diagnostics=agent_call_diagnostics,
         system=prover_system_prompt(),
         prompt=agent_prompt(context, role="prover"),
     )
@@ -733,7 +900,10 @@ def run_llm_agent_pass(
     verifier_reviews = []
     reviewer_roles = _reviewer_roles(reviewer_set, verifier_count)
     for index, reviewer_role in enumerate(reviewer_roles, start=1):
-        verifier_raw = client.complete_json(
+        verifier_raw = _complete_agent_json(
+            client=client,
+            role=reviewer_role,
+            call_diagnostics=agent_call_diagnostics,
             system=verifier_system_prompt(index, reviewer_role=reviewer_role),
             prompt=agent_prompt(
                 {**context, "prover_attempt": prover},
@@ -762,10 +932,11 @@ def run_llm_agent_pass(
         "verifier_reviews": verifier_reviews,
         "human_gate": gate,
         "provider_diagnostic": provider_diagnostic,
+        "agent_call_diagnostics": agent_call_diagnostics,
         "notes": [
             "Initial LLM agent runtime; outputs are candidate planning artifacts only.",
             f"Reviewer set: {reviewer_set}; roles: {', '.join(reviewer_roles)}.",
-            "This artifact must not upgrade Idea grade, source_backed, checked evidence, or proof status.",
+            "This artifact must not upgrade Idea grade, source support, checked evidence, or proof status.",
             "Human gate must be resolved through a validated CLI/API path before deeper automated work.",
         ],
     }
@@ -1002,7 +1173,7 @@ def refresh_prover_round_index(*, run_dir: Path, loop_report: dict) -> dict:
     for attempt in loop_report.get("attempts", []):
         artifact_path = _round_artifact_rel_path(attempt)
         path = run_dir / artifact_path
-        if not path.exists():
+        if not path_exists(path):
             continue
         round_report = ProverRoundReport.model_validate(read_yaml(path))
         entries.append(
@@ -1062,7 +1233,7 @@ def _write_prover_round_artifact(
         "status": attempt["status"],
         "next_action": attempt["next_action"],
         "safety_note": (
-            "This round artifact does not upgrade proof status, source_backed status, "
+            "This round artifact does not upgrade proof status, source support status, "
             "checked evidence, or human preference into verification."
         ),
     }
@@ -1074,9 +1245,8 @@ def _write_prover_round_artifact(
 
 
 def _round_artifact_rel_path(attempt: dict) -> str:
-    strategy = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(attempt.get("strategy_id", "strategy")))
     attempt_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(attempt.get("attempt_id", "attempt")))
-    return f"prover_rounds/round_{int(attempt['round_index']):03d}_{attempt_id}_{strategy}.yaml"
+    return f"prover_rounds/round_{int(attempt['round_index']):03d}_{attempt_id}.yaml"
 
 
 def _reviewer_blocker_slots(
@@ -1123,7 +1293,7 @@ def _append_reviewer_objection_events(
         safe_verifier = re.sub(r"[^a-zA-Z0-9_.-]+", "_", verifier_id)
         for field, blocker_index in slots:
             event_index += 1
-            append_update_inbox_event(
+            append_scheduling_update(
                 run_dir,
                 {
                     "id": f"{event_id_prefix}_{event_index:03d}",
@@ -1189,7 +1359,7 @@ def route_initial_reviewer_blockers_to_update_inbox(
         open_blocker_texts=set(blockers[:12]),
     )
     if created:
-        write_time_allocation_plan(run_dir)
+        write_time_allocation_from_update_inbox(run_dir)
     return created
 
 
@@ -1620,7 +1790,7 @@ def append_prover_loop_round(
         verifier_reviews=verifier_reviews,
         open_blocker_texts=set(blockers),
     ):
-        write_time_allocation_plan(run_dir)
+        write_time_allocation_from_update_inbox(run_dir)
     return loop_report
 
 
@@ -1877,7 +2047,7 @@ def verifier_system_prompt(index: int, *, reviewer_role: str = "verifier") -> st
         ),
         "evidence_reviewer": (
             "You are Espresso evidence reviewer agent. Assess example coverage, counterexample pressure, "
-            "and whether checked/source_checked evidence is being used honestly."
+            "and whether computation/source evidence is being used honestly."
         ),
         "line_proof_reviewer": (
             "You are Espresso line proof reviewer agent. Parse proof-sketch steps, locate source gaps, "
@@ -1913,8 +2083,8 @@ def line_numbered_proof_writer_system_prompt() -> str:
         "Number the lines and record, for each line, the earlier line_ids it depends "
         "on. If a line genuinely rests on an uncited external theorem, still give the "
         "justification and record the gap in that line's 'gaps'. This is a CANDIDATE "
-        "proof only: do NOT claim it is proved, verified, machine-checked, or source-"
-        "backed -- the kernel decides status. "
+        "proof only: do NOT claim it is proved, verified, machine-checked, or "
+        "source-certified -- the kernel decides status. "
         "Return JSON only: {\"proof_kind\": short label (e.g. parity_case_split | "
         "consecutive_integers | induction), \"lines\": [{\"line_id\": e.g. L1, "
         "\"statement\": the asserted math, \"justification\": why it follows, "
@@ -1972,7 +2142,7 @@ def agent_prompt(context: dict, *, role: str) -> str:
                 "candidate routes only",
                 "no proof/source/evidence upgrades",
                 "human gate before deeper work",
-                "source_backed requires exact locator and matching hypotheses",
+                "source support requires exact locator and matching hypotheses",
                 "time_allocation.yaml is scheduling-only and advisory-only",
                 "record missing source/theorem/example/counterexample context explicitly",
             ],
@@ -1997,6 +2167,13 @@ def safe_list(value: object) -> list[str]:
 
 def safe_text(value: object) -> str:
     text = re.sub(r"\s+", " ", str(value)).strip()
+    for phrase in sorted(RESERVED_STATUS_LANGUAGE, key=len, reverse=True):
+        text = re.sub(
+            forbidden_pattern(phrase),
+            "[withheld status phrase]",
+            text,
+            flags=re.IGNORECASE,
+        )
     for phrase in sorted(FORBIDDEN_LANGUAGE, key=len, reverse=True):
         text = re.sub(
             forbidden_pattern(phrase),
@@ -2017,7 +2194,7 @@ def collect_unsafe_language(raw: dict) -> list[str]:
     ).lower()
     return [
         phrase
-        for phrase in FORBIDDEN_LANGUAGE
+        for phrase in [*FORBIDDEN_LANGUAGE, *RESERVED_STATUS_LANGUAGE]
         if re.search(forbidden_pattern(phrase), text, flags=re.IGNORECASE)
     ]
 

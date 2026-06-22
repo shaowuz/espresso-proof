@@ -7,11 +7,14 @@ import type {
   LatestRound,
   PanelBase,
   PanelName,
+  PressureLaneView,
   RunListItem,
   Snapshot,
   StatusView,
   StrategySummary,
   StrategyView,
+  Tone,
+  TraceItem,
 } from "./types";
 
 /**
@@ -113,12 +116,14 @@ export async function fetchSnapshot(runId: string): Promise<Snapshot> {
       budget: status?.budget ?? {},
       agents: Array.isArray(status?.agents) ? status.agents : [],
     },
+    compact_memo: typeof raw.compact_memo === "string" ? raw.compact_memo : "",
     strategies: Array.isArray(raw.strategies) ? raw.strategies : [],
     strategy_summary: raw.strategy_summary as StrategySummary | undefined,
     examples: Array.isArray(raw.examples) ? raw.examples : [],
     counterexamples: Array.isArray(raw.counterexamples) ? raw.counterexamples : [],
     computations: Array.isArray(raw.computations) ? raw.computations : [],
     literature: Array.isArray(raw.literature) ? raw.literature : [],
+    pressure_lanes: normalizePressureLanes(raw.pressure_lanes),
     source_gaps: Array.isArray(raw.source_gaps) ? raw.source_gaps : [],
     missing: raw.missing ?? EMPTY_MISSING,
   };
@@ -206,6 +211,7 @@ export async function fetchPanel<T extends PanelBase>(
     panel,
     missing: raw.missing !== false,
     agent_state: isAgentState(raw.agent_state) ? raw.agent_state : "not_run",
+    pressure_lane: normalizePressureLane(raw.pressure_lane),
   };
   if (panel === "claim") {
     const claim = raw.claim as ClaimView | undefined;
@@ -221,6 +227,7 @@ export async function fetchPanel<T extends PanelBase>(
       strategy_summary: raw.strategy_summary as StrategySummary | undefined,
       ledger_context: raw.ledger_context as LedgerContext | undefined,
       latest_round: raw.latest_round as LatestRound | null | undefined,
+      compact_memo: typeof raw.compact_memo === "string" ? raw.compact_memo : "",
     } as unknown as T;
   }
   const items = Array.isArray(raw.items) ? raw.items : [];
@@ -231,7 +238,46 @@ export async function fetchPanel<T extends PanelBase>(
       source_gaps: Array.isArray(raw.source_gaps) ? (raw.source_gaps as string[]) : [],
     } as unknown as T;
   }
+  if (panel === "trace") {
+    return {
+      ...base,
+      items: normalizeTraceItems(items),
+      unavailable: raw.unavailable === true,
+      advisory_note: typeof raw.advisory_note === "string" ? raw.advisory_note : "",
+    } as unknown as T;
+  }
   return { ...base, items } as unknown as T;
+}
+
+function normalizePressureLanes(value: unknown): PressureLaneView[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => normalizePressureLane(item))
+    .filter((item): item is PressureLaneView => item !== null);
+}
+
+function normalizePressureLane(value: unknown): PressureLaneView | null {
+  if (value === null || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  return {
+    stage_id: typeof raw.stage_id === "string" ? raw.stage_id : "",
+    agent: typeof raw.agent === "string" ? raw.agent : "",
+    title: typeof raw.title === "string" ? raw.title : "",
+    display_name: typeof raw.display_name === "string" ? raw.display_name : "",
+    status: typeof raw.status === "string" ? raw.status : "not_started",
+    status_word: typeof raw.status_word === "string" ? raw.status_word : "Not started",
+    agent_status: typeof raw.agent_status === "string" ? raw.agent_status : "not_run",
+    default_visible: raw.default_visible === true,
+    default_execution:
+      typeof raw.default_execution === "string" ? raw.default_execution : "on_demand",
+    counts_as_evidence: raw.counts_as_evidence === true,
+    pending_counts_as_evidence: raw.pending_counts_as_evidence === true,
+    evidence_note:
+      typeof raw.evidence_note === "string"
+        ? raw.evidence_note
+        : "pending; not counted as evidence",
+    claim_clear_blocked: raw.claim_clear_blocked === true,
+  };
 }
 
 function isAgentState(value: unknown): value is AgentState {
@@ -244,6 +290,37 @@ function isAgentState(value: unknown): value is AgentState {
     value === "skipped" ||
     value === "done"
   );
+}
+
+function isTone(value: unknown): value is Tone {
+  return (
+    value === "warn" ||
+    value === "human" ||
+    value === "muted" ||
+    value === "neutral" ||
+    value === "earned"
+  );
+}
+
+function normalizeTraceItems(items: unknown[]): TraceItem[] {
+  return items
+    .filter((item): item is Record<string, unknown> => item !== null && typeof item === "object")
+    .map((item) => ({
+      stage_id: typeof item.stage_id === "string" ? item.stage_id : "",
+      display_name: typeof item.display_name === "string" ? item.display_name : "",
+      state_word: typeof item.state_word === "string" ? item.state_word : "Unknown",
+      tone: isTone(item.tone) && item.tone !== "earned" ? item.tone : "muted",
+      group: typeof item.group === "string" ? item.group : "main",
+      evidence_role_word:
+        typeof item.evidence_role_word === "string" ? item.evidence_role_word : "Process only",
+      advisory_note:
+        typeof item.advisory_note === "string"
+          ? item.advisory_note
+          : "Process trace only; not a proof or evidence signal.",
+      blocked_reason: typeof item.blocked_reason === "string" ? item.blocked_reason : "",
+      status_detail: typeof item.status_detail === "string" ? item.status_detail : "",
+      updated_at: typeof item.updated_at === "string" ? item.updated_at : "",
+    }));
 }
 
 /** Friendly message for a query error (server copy when present). */

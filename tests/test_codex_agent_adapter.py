@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -16,9 +17,18 @@ ROOT = Path(__file__).resolve().parents[1]
 ADAPTER = ROOT / "scripts" / "espresso_codex_agent.py"
 
 
+def _load_adapter_module():
+    spec = importlib.util.spec_from_file_location("espresso_codex_agent_under_test", ADAPTER)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _write_fake_codex(tmp_path: Path, *, message: str | None = None, return_code: int = 0) -> Path:
     fake = tmp_path / "codex"
     argv_log = tmp_path / "codex_argv.json"
+    stdin_log = tmp_path / "codex_stdin.txt"
     message_text = message or json.dumps(
         {
             "summary": "Codex returned candidate-only output.",
@@ -37,10 +47,14 @@ def _write_fake_codex(tmp_path: Path, *, message: str | None = None, return_code
                 "import json",
                 "import sys",
                 f"argv_log = {str(argv_log)!r}",
+                f"stdin_log = {str(stdin_log)!r}",
                 f"message_text = {message_text!r}",
                 f"return_code = {return_code!r}",
                 "with open(argv_log, 'w', encoding='utf-8') as handle:",
                 "    json.dump(sys.argv, handle)",
+                "stdin_text = sys.stdin.read()",
+                "with open(stdin_log, 'w', encoding='utf-8') as handle:",
+                "    handle.write(stdin_text)",
                 "last_message = None",
                 "for index, arg in enumerate(sys.argv):",
                 "    if arg == '--output-last-message' and index + 1 < len(sys.argv):",
@@ -107,6 +121,11 @@ def test_codex_adapter_pins_model_effort_injects_goal_and_logs_full_prompt(tmp_p
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
     assert payload["verdict"] == "needs_sources"
+    meta = payload["_espresso_codex_adapter"]
+    assert meta["adapter"] == "espresso_codex_agent"
+    assert meta["parse_status"] == "ok"
+    assert meta["fallback_used"] is False
+    assert meta["request_id"]
     argv = json.loads((tmp_path / "codex_argv.json").read_text(encoding="utf-8"))
     assert argv[1] == "exec"
     assert "-m" in argv
@@ -114,7 +133,8 @@ def test_codex_adapter_pins_model_effort_injects_goal_and_logs_full_prompt(tmp_p
     assert "-c" in argv
     assert 'model_reasoning_effort="medium"' in argv
     assert "--ask-for-approval" not in argv
-    full_prompt = argv[-1]
+    assert argv[-1] == "-"
+    full_prompt = (tmp_path / "codex_stdin.txt").read_text(encoding="utf-8")
     assert "Active goal: test Codex external mode." in full_prompt
     assert "literature-review" in full_prompt
     assert "Skill: mathematical-safety" in full_prompt
@@ -149,11 +169,61 @@ def test_codex_adapter_returns_safe_fallback_and_logs_reason_for_bad_json(tmp_pa
     payload = json.loads(completed.stdout)
     assert payload["verdict"] == "needs_revision"
     assert "codex adapter could not produce usable JSON" in payload["summary"]
+    assert payload["_espresso_codex_adapter"]["fallback_used"] is True
     events_path = tmp_path / "logs" / "codex_agent_events.jsonl"
     events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
     assert events[-1]["ok"] is False
     assert events[-1]["parse_status"] == "fallback"
     assert events[-1]["fallback_reason"]
+
+
+def test_codex_adapter_marks_diagnostic_fallback_out_of_band(tmp_path: Path) -> None:
+    fake_codex = _write_fake_codex(tmp_path, message="not json")
+
+    completed = _run_adapter(
+        tmp_path=tmp_path,
+        system="You are Espresso's external agent diagnostic. Return JSON only.",
+        prompt="Return a minimal candidate-only Espresso agent response for this diagnostic.",
+        fake_codex=fake_codex,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    # Normal agent fields still fail closed to a candidate-only fallback.
+    assert payload["verdict"] == "needs_revision"
+    # Diagnostic readiness must be able to tell this was NOT live Codex JSON.
+    meta = payload["_espresso_codex_adapter"]
+    assert meta["adapter"] == "espresso_codex_agent"
+    assert meta["parse_status"] == "fallback"
+    assert meta["fallback_used"] is True
+    assert meta["fallback_reason"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="WindowsApps launcher caching is Windows-only")
+def test_codex_command_prefix_caches_windowsapps_cli(tmp_path: Path, monkeypatch) -> None:
+    adapter = _load_adapter_module()
+    source = (
+        tmp_path
+        / "Program Files"
+        / "WindowsApps"
+        / "OpenAI.Codex_1.0.0.0_x64__test"
+        / "app"
+        / "resources"
+        / "codex.exe"
+    )
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"fake windowsapps codex executable")
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setenv("ESPRESSO_CODEX_CLI_CACHE_DIR", str(cache_dir))
+
+    prefix = adapter._codex_command_prefix(str(source))
+
+    assert len(prefix) == 1
+    cached = Path(prefix[0])
+    assert cached.parent == cache_dir
+    assert "WindowsApps" not in str(cached)
+    assert cached.read_bytes() == source.read_bytes()
+    assert cached.suffix == ".exe"
 
 
 def test_codex_skill_selection_covers_core_subagent_roles() -> None:
@@ -243,6 +313,21 @@ def test_external_client_valid_json_object_still_works(tmp_path: Path, monkeypat
     )
     monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_COMMAND", f"{sys.executable} {adapter}")
     client = ExternalCommandClient(model="gpt-4.1")
+    assert client.complete_json(system="x", prompt="{}")["verdict"] == "needs_sources"
+
+
+def test_external_client_runs_bare_python_script_command(tmp_path: Path, monkeypatch) -> None:
+    adapter = tmp_path / "agent.py"
+    adapter.write_text(
+        "import sys\n" 'sys.stdout.write(\'{"verdict": "needs_sources"}\')\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_COMMAND", str(adapter))
+
+    client = ExternalCommandClient(model="gpt-4.1")
+
+    assert Path(client.command[0]) == Path(sys.executable)
+    assert client.command[1] == str(adapter)
     assert client.complete_json(system="x", prompt="{}")["verdict"] == "needs_sources"
 
 

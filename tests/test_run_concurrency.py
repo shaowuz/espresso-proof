@@ -124,6 +124,23 @@ def _gate_run(tmp_path: Path) -> Path:
     return Path(result["run_dir"])
 
 
+def _fast_pressure_run(tmp_path: Path) -> Path:
+    claim_path = tmp_path / "pressure.md"
+    claim_path.write_text(
+        "Every group of order p^2, where p is prime, is abelian.",
+        encoding="utf-8",
+    )
+    result = orchestrate_run(
+        project="pressure_conc",
+        input_path=claim_path,
+        output_root=tmp_path,
+        provider="stub",
+        front_half="stub",
+        fast=True,
+    )
+    return Path(result["run_dir"])
+
+
 def test_concurrent_resume_cannot_duplicate_rounds(tmp_path: Path) -> None:
     run_dir = _gate_run(tmp_path)
     brief = read_yaml(
@@ -168,6 +185,40 @@ def test_concurrent_resume_cannot_duplicate_rounds(tmp_path: Path) -> None:
     assert loop["budget"]["rounds_used"] <= loop["budget"]["max_rounds"]
     # the index matches the attempts actually recorded in the loop (no orphans).
     assert len(index["rounds"]) == len(loop["attempts"])
+
+
+def test_pressure_lane_workers_do_not_write_barrier_status(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from espresso_proof.orchestration import evidence_coordinator as ec
+
+    run_dir = _fast_pressure_run(tmp_path)
+    real_compute = ec.compute_agent
+    observed: list[tuple[str, str, tuple[str, ...]]] = []
+
+    def spy_compute(run_dir_arg, agent, **kwargs):
+        barrier = read_yaml(Path(run_dir_arg) / "pressure_lane_barrier.yaml")
+        observed.append(
+            (
+                agent,
+                barrier["barrier_state"],
+                tuple(entry["status"] for entry in barrier["entries"]),
+            )
+        )
+        return real_compute(run_dir_arg, agent, **kwargs)
+
+    monkeypatch.setattr(ec, "compute_agent", spy_compute)
+    ec.run_evidence_batch_parallel(
+        run_dir,
+        ["literature", "examples", "counterexamples"],
+        max_workers=2,
+    )
+
+    assert observed
+    assert {state for _, state, _ in observed} == {"seeded"}
+    assert all(set(statuses) == {"seeded"} for _, _, statuses in observed)
+    validate_run(run_dir)
 
 
 # -- events.jsonl timeline ----------------------------------------------------

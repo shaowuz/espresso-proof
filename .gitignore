@@ -2,6 +2,7 @@
 .eval_runs/
 eval_runs/
 .benchmark_runs/
+.goal70_acceptance/
 .espresso_agent_logs/
 .ai/
 __pycache__/

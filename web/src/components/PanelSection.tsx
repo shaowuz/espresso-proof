@@ -82,7 +82,7 @@ function DownloadArtifact({
     </a>
   );
 }
-import type { AgentState, AgentView } from "../lib/types";
+import type { AgentState, AgentView, PressureLaneView } from "../lib/types";
 import { cn } from "../lib/cn";
 import { PanelPlaceholder } from "./ExpandableCard";
 import { FadeIn } from "./motion";
@@ -162,6 +162,7 @@ export function PanelSection({
   onRetry,
   download,
   run,
+  pressureLane,
   children,
 }: {
   icon?: LucideIcon;
@@ -181,6 +182,7 @@ export function PanelSection({
   download?: { runId: string; panel: string; label: string };
   /** When set, a small run/stop toggle drives this panel's agent. */
   run?: { runId: string; agent: string; onRan: () => void };
+  pressureLane?: PressureLaneView | null;
   children?: ReactNode;
 }) {
   const processPending =
@@ -200,6 +202,13 @@ export function PanelSection({
           <Loader2 className="h-3 w-3 animate-spin text-stone-300" aria-hidden />
         )}
       </div>
+      {pressureLane && (
+        <p className="mb-1.5 rounded-md border border-stone-200 bg-stone-50 px-2 py-1.5 text-[13px] leading-relaxed text-stone-600">
+          <span className="font-medium text-stone-700">{pressureLane.status_word}</span>
+          {" - "}
+          {pressureLane.evidence_note}
+        </p>
+      )}
 
       {isError ? (
         <div className="flex flex-col gap-1.5 rounded-lg border border-rose-200 bg-rose-50/70 px-2.5 py-2 text-[14px] text-rose-700">

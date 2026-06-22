@@ -3,7 +3,10 @@ from __future__ import annotations
 from espresso_proof.orchestration.agent_flow_spec import (
     AGENT_FLOW_STAGES,
     CLAIM_CLEAR_BLOCKED_STAGE_IDS,
+    EVIDENCE_ROLES,
+    STAGE_STATUS_KINDS,
     get_stage,
+    is_normalized_stage_id,
     ordered_stage_ids,
     stage_index,
     stages_blocked_by_unclear_claim,
@@ -18,10 +21,36 @@ def test_agent_flow_spec_is_structurally_valid() -> None:
     ids = ordered_stage_ids()
     assert len(ids) == len(set(ids))
     assert ids[:3] == ("scaffold", "understanding_claim", "claim_clear_gate")
+    assert all(is_normalized_stage_id(stage_id) for stage_id in ids)
+
+
+def test_stage_status_and_evidence_vocabularies_are_explicit() -> None:
+    assert set(STAGE_STATUS_KINDS) == {
+        "entry",
+        "gate",
+        "required",
+        "pressure_lane",
+        "candidate_pass",
+        "advisory",
+        "human_gate",
+        "report",
+    }
+    assert set(EVIDENCE_ROLES) == {
+        "none",
+        "candidate_only",
+        "checked_evidence_possible",
+        "proof_candidate_only",
+        "advisory_only",
+        "presentation_only",
+    }
+    assert {stage.status_kind for stage in AGENT_FLOW_STAGES} <= set(STAGE_STATUS_KINDS)
+    assert {stage.evidence_role for stage in AGENT_FLOW_STAGES} <= set(EVIDENCE_ROLES)
 
 
 def test_unclear_claim_blocks_downstream_swarm() -> None:
     blocked = set(stages_blocked_by_unclear_claim())
+    assert CLAIM_CLEAR_BLOCKED_STAGE_IDS == stages_blocked_by_unclear_claim()
+    assert CLAIM_CLEAR_BLOCKED_STAGE_IDS == ordered_stage_ids()[3:]
     assert set(CLAIM_CLEAR_BLOCKED_STAGE_IDS) <= blocked
     assert "understanding_claim" not in blocked
     assert "claim_clear_gate" not in blocked

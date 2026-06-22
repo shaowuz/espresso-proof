@@ -287,6 +287,8 @@ def set_agent_status(
             entry["attempts"] = int(entry.get("attempts") or 0) + 1
         if started_at is not None:
             entry["started_at"] = started_at
+        elif status == "running" and not entry.get("started_at"):
+            entry["started_at"] = now
         if finished_at is not None:
             entry["finished_at"] = finished_at
         entry["status"] = status

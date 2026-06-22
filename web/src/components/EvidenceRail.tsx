@@ -123,6 +123,7 @@ export function EvidenceRail({
         count={examples.data && !examples.data.missing ? exItems.length : null}
         agentState={examples.data?.agent_state}
         agent={agentByName.get("examples")}
+        pressureLane={examples.data?.pressure_lane}
         isPending={examples.isPending}
         isRefetching={examples.isFetching}
         isError={examples.isError}
@@ -172,6 +173,7 @@ export function EvidenceRail({
         count={counter.data && !counter.data.missing ? ceItems.length : null}
         agentState={counter.data?.agent_state}
         agent={agentByName.get("counterexamples")}
+        pressureLane={counter.data?.pressure_lane}
         isPending={counter.isPending}
         isRefetching={counter.isFetching}
         isError={counter.isError}

@@ -31,6 +31,26 @@ EvidenceRole = Literal[
     "presentation_only",
 ]
 
+STAGE_STATUS_KINDS: tuple[str, ...] = (
+    "entry",
+    "gate",
+    "required",
+    "pressure_lane",
+    "candidate_pass",
+    "advisory",
+    "human_gate",
+    "report",
+)
+
+EVIDENCE_ROLES: tuple[str, ...] = (
+    "none",
+    "candidate_only",
+    "checked_evidence_possible",
+    "proof_candidate_only",
+    "advisory_only",
+    "presentation_only",
+)
+
 
 @dataclass(frozen=True)
 class AgentFlowStage:
@@ -399,6 +419,16 @@ AGENT_FLOW_STAGES: tuple[AgentFlowStage, ...] = (
 _AGENT_FLOW_BY_ID: dict[str, AgentFlowStage] = {stage.id: stage for stage in AGENT_FLOW_STAGES}
 
 
+def is_normalized_stage_id(stage_id: str) -> bool:
+    """Return whether a stage id uses the canonical AGENT_FLOW id shape."""
+
+    if not stage_id or stage_id != stage_id.lower():
+        return False
+    if stage_id.startswith("_") or stage_id.endswith("_") or "__" in stage_id:
+        return False
+    return all(part.isalnum() for part in stage_id.split("_"))
+
+
 def ordered_stage_ids() -> tuple[str, ...]:
     """Return AGENT_FLOW stage ids in canonical display/execution order."""
 
@@ -441,8 +471,21 @@ def validate_agent_flow_spec() -> None:
     ids = ordered_stage_ids()
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate AGENT_FLOW stage ids")
+    bad_ids = [stage_id for stage_id in ids if not is_normalized_stage_id(stage_id)]
+    if bad_ids:
+        raise ValueError(f"non-normalized AGENT_FLOW stage id(s): {bad_ids}")
+    if CLAIM_CLEAR_BLOCKED_STAGE_IDS != stages_blocked_by_unclear_claim():
+        raise ValueError(
+            "CLAIM_CLEAR_BLOCKED_STAGE_IDS must match per-stage claim-clear flags"
+        )
     known = set(ids)
     for stage in AGENT_FLOW_STAGES:
+        if stage.status_kind not in STAGE_STATUS_KINDS:
+            raise ValueError(f"stage {stage.id!r} has unknown status_kind {stage.status_kind!r}")
+        if stage.evidence_role not in EVIDENCE_ROLES:
+            raise ValueError(
+                f"stage {stage.id!r} has unknown evidence_role {stage.evidence_role!r}"
+            )
         missing = (set(stage.depends_on) | set(stage.reads_from)) - known
         if missing:
             raise ValueError(f"stage {stage.id!r} references unknown stage(s): {sorted(missing)}")
@@ -469,10 +512,13 @@ validate_agent_flow_spec()
 __all__ = [
     "AGENT_FLOW_STAGES",
     "CLAIM_CLEAR_BLOCKED_STAGE_IDS",
+    "EVIDENCE_ROLES",
     "AgentFlowStage",
     "EvidenceRole",
+    "STAGE_STATUS_KINDS",
     "StageStatusKind",
     "get_stage",
+    "is_normalized_stage_id",
     "ordered_stage_ids",
     "stage_index",
     "stages_blocked_by_unclear_claim",

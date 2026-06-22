@@ -52,6 +52,11 @@ from espresso_proof.kernel.pressure_status import build_pressure_status
 from espresso_proof.kernel.run_events import append_event
 from espresso_proof.orchestration.prover_loop_driver import continue_prover_loop
 from espresso_proof.orchestration.run_dashboard import write_run_dashboard
+from espresso_proof.orchestration.agent_flow_driver import (
+    front_half_stages_for_runner,
+    record_agent_flow_stage_status,
+)
+from espresso_proof.orchestration.agent_flow_legacy_map import LEGACY_FRONT_HALF_FAST_ORDER
 from espresso_proof.kernel.run_lock import run_writer_lock
 from espresso_proof.kernel.stage_runner import StageRunner
 from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
@@ -90,13 +95,7 @@ ORCHESTRATION_STATES: list[str] = [
 # claim judgment + preliminary routes + a conservative grade, WITHOUT waiting for
 # the optional evidence agents (literature / examples / counterexamples / failure-
 # pattern audit). Those run later, on demand or in parallel, via ``run-agent``.
-FAST_CORE_STAGES: list[str] = [
-    "understanding_claim",  # S1: locked_claim + hypothesis_ledger (+ claim_precision)
-    "source_theorem",       # S7: candidate source matching (candidate-only)
-    "regrade",              # evidence-aware grade recompute (before strategy)
-    "strategy",             # S5: strategy generator + grader + brief
-    "grade_memory_memo",    # S8: grade refresh + memory + concise answer
-]
+FAST_CORE_STAGES: list[str] = list(LEGACY_FRONT_HALF_FAST_ORDER)
 
 
 def _state_index(state: str) -> int:
@@ -116,6 +115,30 @@ def _set_state(run_dir: Path, state: str) -> None:
 def _reached(run_dir: Path, state: str) -> bool:
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     return _state_index(manifest.get("current_state", "")) >= _state_index(state)
+
+
+def _record_claim_clear_gate_transaction(
+    run_dir: Path,
+    *,
+    runner: StageRunner,
+    gate_result,
+) -> dict:
+    """Persist claim-clear scheduling state inside a StageRunner transaction."""
+
+    gate_report: dict = {}
+
+    def _mutate_claim_gate() -> None:
+        nonlocal gate_report
+        gate_report = write_claim_clear_gate(run_dir, gate_result)
+        _set_state(run_dir, gate_result.state)
+
+    runner.run(
+        name="claim_clear_gate",
+        mutate=_mutate_claim_gate,
+        validate=lambda: validate_run(run_dir),
+        snapshot_paths=["claim_clear_gate.yaml"],
+    )
+    return gate_report
 
 
 # Goal 65 control-flow: next_action values for which the front half issued a HARD
@@ -167,7 +190,7 @@ def _finish_without_llm_gate(
         ],
     )
     build_pressure_status(run_dir, late_after_strategy=False)
-    validate_run(run_dir)
+    record_agent_flow_stage_status(run_dir)
     write_timings(run_dir)
     register_observability_artifacts(run_dir)
     dashboard = write_run_dashboard(run_dir)
@@ -276,18 +299,10 @@ def orchestrate_run(
     if _reached(run_dir, CLAIM_CLEAR):
         resume_gate = evaluate_claim_clear(run_dir, require_recorded_clear_gate=True)
         if not resume_gate.clear:
-            gate_report: dict = {}
-
-            def _stale_claim_gate() -> None:
-                nonlocal gate_report
-                gate_report = write_claim_clear_gate(run_dir, resume_gate)
-
-            runner.run(
-                name="claim_clear_gate",
-                mutate=_stale_claim_gate,
-                validate=lambda: validate_run(run_dir),
-                state_after=WAITING_CLAIM_CLARIFICATION,
-                snapshot_paths=["claim_clear_gate.yaml"],
+            gate_report = _record_claim_clear_gate_transaction(
+                run_dir,
+                runner=runner,
+                gate_result=resume_gate,
             )
             return _finish_without_llm_gate(run_dir, claim_gate=gate_report)
 
@@ -295,7 +310,7 @@ def orchestrate_run(
     # DEFER literature discovery + the evidence stages (examples / counterexamples),
     # so the user sees an initial judgment + preliminary routes quickly. The
     # deferred agents run later via ``run-agent``.
-    front_half_stages = FAST_CORE_STAGES if fast else None
+    front_half_stages = front_half_stages_for_runner(fast=fast)
     ran_front_half_agents = front_half != "mock" or front_half_client is not None
 
     # Stage 1 — front-half agents (S1–S8). Skipped when front_half == "mock".
@@ -331,14 +346,13 @@ def orchestrate_run(
         )
 
     gate_result = evaluate_claim_clear(run_dir)
-    gate_report = write_claim_clear_gate(run_dir, gate_result)
+    gate_report = _record_claim_clear_gate_transaction(
+        run_dir,
+        runner=runner,
+        gate_result=gate_result,
+    )
     if not gate_result.clear:
-        _set_state(run_dir, WAITING_CLAIM_CLARIFICATION)
-        validate_run(run_dir)
         return _finish_without_llm_gate(run_dir, claim_gate=gate_report)
-    if not _reached(run_dir, CLAIM_CLEAR):
-        _set_state(run_dir, CLAIM_CLEAR)
-        validate_run(run_dir)
 
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     artifacts = manifest["artifacts"]
@@ -506,7 +520,7 @@ def orchestrate_run(
                 done.add("counterexamples")
         init_agent_run_status(run_dir, done=done)
         build_pressure_status(run_dir, late_after_strategy=False)
-        validate_run(run_dir)
+    record_agent_flow_stage_status(run_dir, runner=runner)
 
     # Goal 54A: aggregate run timings + register the per-run observability logs as
     # optional artifacts (diagnostic only; both helpers fail closed and never gate).
@@ -738,6 +752,7 @@ def _resume_run_locked(
         validate_run(run_dir)
 
     _set_state(run_dir, "COMPLETED_MEMO")
+    record_agent_flow_stage_status(run_dir)
     write_timings(run_dir)
     register_observability_artifacts(run_dir)
     memo = build_concise_memo(run_dir)

@@ -103,6 +103,7 @@ def test_snapshot_is_typed_and_display_safe(client) -> None:
         "counterexamples", "computations", "literature",
     }
     assert not snap["missing"]["claim"]
+    assert "trace" not in snap
 
 
 def test_snapshot_green_tone_only_for_earned_evidence(client) -> None:

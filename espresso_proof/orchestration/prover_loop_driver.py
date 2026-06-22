@@ -18,7 +18,15 @@ from espresso_proof.orchestration.advisory_proof_sketch import capture_advisory_
 from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.claim.persisted_claim_normalization import normalize_persisted_claim_ledger
 from espresso_proof.loop.blocker_provenance import blocker_provenance, classify_blocker
-from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.kernel.io import (
+    list_files_with_suffix,
+    path_exists,
+    read_bytes,
+    read_yaml,
+    unlink_path,
+    write_bytes,
+    write_yaml,
+)
 from espresso_proof.agents.llm_agents import LLMClient, append_prover_loop_round
 from espresso_proof.kernel.observability import append_agent_event, monotonic_ms, now_iso
 from espresso_proof.kernel.run_events import append_event
@@ -76,11 +84,11 @@ def _snapshot_run(run_dir: Path) -> dict:
         "final_report.md",
     ):
         p = run_dir / rel
-        snap[rel] = p.read_bytes() if p.exists() else None
+        snap[rel] = read_bytes(p) if path_exists(p) else None
     rounds_dir = run_dir / "prover_rounds"
     snap["__rounds__"] = (
-        {f.name: f.read_bytes() for f in rounds_dir.glob("*.yaml")}
-        if rounds_dir.exists()
+        {f.name: read_bytes(f) for f in list_files_with_suffix(rounds_dir, ".yaml")}
+        if path_exists(rounds_dir)
         else {}
     )
     return snap
@@ -95,20 +103,20 @@ def _restore_run(run_dir: Path, snap: dict) -> None:
             continue
         p = run_dir / rel
         if data is None:
-            if p.exists():
-                p.unlink()
+            if path_exists(p):
+                unlink_path(p)
         else:
-            p.write_bytes(data)
+            write_bytes(p, data)
     rounds_dir = run_dir / "prover_rounds"
     saved = snap.get("__rounds__", {})
-    if rounds_dir.exists():
-        for f in rounds_dir.glob("*.yaml"):
+    if path_exists(rounds_dir):
+        for f in list_files_with_suffix(rounds_dir, ".yaml"):
             if f.name not in saved:
-                f.unlink()  # remove a round artifact written by the failed append
+                unlink_path(f)  # remove a round artifact written by the failed append
     if saved:
         rounds_dir.mkdir(exist_ok=True)
         for name, data in saved.items():
-            (rounds_dir / name).write_bytes(data)
+            write_bytes(rounds_dir / name, data)
 
 
 def _round_blockers(attempts: list[dict]) -> dict[int, list[str]]:

@@ -92,4 +92,35 @@ describe("PanelSection", () => {
     expect(html).toContain("3s");
     expect(html).not.toContain("bg-green");
   });
+
+  it("renders pressure lane evidence notes as process-only context", () => {
+    const html = renderToStaticMarkup(
+      <PanelSection
+        title="Examples"
+        agentState="not_run"
+        pressureLane={{
+          stage_id: "examples",
+          agent: "examples",
+          title: "Examples",
+          display_name: "Examples",
+          status: "not_started",
+          status_word: "Not started",
+          agent_status: "not_run",
+          default_visible: true,
+          default_execution: "on_demand",
+          counts_as_evidence: false,
+          pending_counts_as_evidence: false,
+          evidence_note: "pending; not counted as evidence",
+          claim_clear_blocked: false,
+        }}
+        isPending={false}
+        isError={false}
+        hasData={false}
+        emptyText="No examples yet"
+      />,
+    );
+    expect(html).toContain("Not started");
+    expect(html).toContain("pending; not counted as evidence");
+    expect(html).not.toContain("bg-green");
+  });
 });

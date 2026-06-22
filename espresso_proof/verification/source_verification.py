@@ -23,6 +23,7 @@ def verify_source_grounding_from_theorems(
     existing_refs = {ref["id"]: ref for ref in source_grounding.get("source_refs", [])}
 
     for step in source_grounding.get("steps", []):
+        required_statement = str(step.get("needed_theorem") or "")
         theorem = best_theorem_for_step(step, extraction.theorems)
         if theorem is None:
             continue
@@ -40,9 +41,13 @@ def verify_source_grounding_from_theorems(
         attributed = bool([a for a in source.authors if str(a).strip()]) and bool(
             str(source.title).strip()
         )
+        conclusion_match = conclusion_compatible(required_statement, theorem.statement)
         status = (
             "source_backed"
-            if exact_locator and hypothesis_match["matches"] is True and attributed
+            if exact_locator
+            and hypothesis_match["matches"] is True
+            and attributed
+            and conclusion_match
             else "candidate"
         )
         ref_id = f"verified_{theorem.id}"
@@ -61,7 +66,6 @@ def verify_source_grounding_from_theorems(
             # theorem_extraction artifact).
             "statement_sha256": hashlib.sha256(theorem.statement.encode("utf-8")).hexdigest(),
         }
-        step["needed_theorem"] = theorem.statement[:240]
         step["status"] = status
         step["source_refs"] = [ref_id]
         step["hypothesis_match"] = hypothesis_match
@@ -76,6 +80,8 @@ def verify_source_grounding_from_theorems(
         else:
             if not attributed:
                 reason = "missing attribution (author/title) for the cited source"
+            elif not conclusion_match:
+                reason = "source conclusion does not cover the proof step's requested theorem"
             elif not exact_locator:
                 reason = "no exact locator"
             else:
@@ -115,6 +121,15 @@ def ground_run(*, run_dir: Path, theorem_extraction_path: Path) -> dict:
     refresh_final_report_disclosures(run_dir)
     validate_run(run_dir)
     return read_yaml(run_dir / "source_grounding.yaml")
+
+
+def conclusion_compatible(required_statement: str, theorem_statement: str) -> bool:
+    """Fail closed unless the source statement covers the requested step terms."""
+
+    required_terms = significant_terms(required_statement)
+    if not required_terms:
+        return False
+    return all(term_present(term, theorem_statement) for term in required_terms)
 
 
 def best_theorem_for_step(step: dict, theorems) -> object | None:

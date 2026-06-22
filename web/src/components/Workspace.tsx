@@ -27,7 +27,7 @@ import type {
   StrategySummary,
 } from "../lib/types";
 import { continueRoute, errorText, postStrategyFeedback } from "../lib/api";
-import { useClaimPanel, useStrategiesPanel } from "../hooks/useCockpit";
+import { useClaimPanel, useStrategiesPanel, useTracePanel } from "../hooks/useCockpit";
 import { useJob } from "../hooks/useJob";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -41,6 +41,7 @@ import { MathText } from "./MathText";
 import { AnimatedList, Collapse, FadeIn } from "./motion";
 import { ChatPanel, type ChatMessage } from "./ChatPanel";
 import { analyzeClaimText, type ClaimTextWarning } from "../lib/claimText";
+import { AgentFlowTrace } from "./AgentFlowTrace";
 
 const CLAIM_WARNING_LABELS: Record<ClaimTextWarning, string> = {
   unsafe_markup: "Unsafe markup hidden",
@@ -547,6 +548,21 @@ function StrategySynthesisCard({ summary }: { summary: StrategySummary | undefin
 
 // ─── StrategyCard ─────────────────────────────────────────────────────────────
 
+function CompactResearchMemo({ memo }: { memo: string | undefined }) {
+  const text = memo?.trim();
+  if (!text) return null;
+  return (
+    <section className="rounded-md border border-stone-200 bg-white px-3 py-2 text-[14px] leading-relaxed">
+      <div className="mb-1 text-[13px] font-semibold uppercase tracking-wide text-stone-500">
+        Research memo
+      </div>
+      <div className="whitespace-pre-wrap text-stone-700">
+        <MathText>{text}</MathText>
+      </div>
+    </section>
+  );
+}
+
 function StrategyCard({
   strategy,
   runId,
@@ -693,11 +709,20 @@ export function Workspace({
 }) {
   const claim = useClaimPanel(runId);
   const strat = useStrategiesPanel(runId);
+  const trace = useTracePanel(runId);
   const strategies = strat.data && !strat.data.missing ? strat.data.strategies : [];
 
   return (
     <div className="flex flex-col gap-4 p-4">
       <ClaimCard claim={claim.data?.claim} missing={claim.data?.missing ?? true} />
+      <CompactResearchMemo memo={strat.data?.compact_memo} />
+      <AgentFlowTrace
+        trace={trace.data}
+        isPending={trace.isPending}
+        isError={trace.isError}
+        errorText={errorText(trace.error)}
+        onRetry={() => void trace.refetch()}
+      />
       <ActiveObjectBanner
         activeObject={activeObject}
         onClear={() => onActiveObjectChange(null)}

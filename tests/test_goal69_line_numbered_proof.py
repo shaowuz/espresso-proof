@@ -84,15 +84,23 @@ class _ProofReviewStub(StubLLMClient):
     """Proof-consensus reviewer stub with per-role verdicts; cites the proof's line_ids
     (parsed from the prompt) unless ``cite=False``."""
 
-    def __init__(self, verdicts: dict | None = None, cite: bool = True) -> None:
+    def __init__(
+        self,
+        verdicts: dict | None = None,
+        cite: bool = True,
+        extra_cited_line_ids: list[str] | None = None,
+    ) -> None:
         super().__init__()
         self._verdicts = verdicts or {}
         self._cite = cite
+        self._extra_cited_line_ids = extra_cited_line_ids or []
+        self.proof_review_calls = 0
 
     def complete_json(self, *, system: str, prompt: str) -> dict:
         lo = system.lower()
         if "proof-consensus review" not in lo:
             return super().complete_json(system=system, prompt=prompt)
+        self.proof_review_calls += 1
         if "line-proof reviewer" in lo:
             role = "line_proof_reviewer"
         elif "applicability reviewer" in lo:
@@ -102,11 +110,12 @@ class _ProofReviewStub(StubLLMClient):
         import re
 
         ids = re.findall(r"['\"]?line_id['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]", prompt)
+        cited_ids = sorted(set(ids + self._extra_cited_line_ids))
         return {
             "verdict": self._verdicts.get(role, "no_fatal_flaw_found"),
             "looked_for": "non-sequiturs, misapplied lemmas, missing cases",
             "finding": "stub proof review",
-            "cited_line_ids": (sorted(set(ids)) if self._cite else []),
+            "cited_line_ids": (cited_ids if self._cite else []),
             "residual_objections": [],
         }
 
@@ -196,12 +205,38 @@ def test_negative_line_without_justification_cannot_seal(tmp_path: Path) -> None
     write_yaml(run_dir / "run_manifest.yaml", man)
     with pytest.raises(KernelValidationError):  # malformed proof -> run invalid -> not sealable
         validate_run(run_dir)
+    reviewer = _ProofReviewStub()
+    with pytest.raises(NoLineNumberedProofError):
+        seal_agent_consensus(run_dir, client=reviewer)
+    assert reviewer.proof_review_calls == 0
 
 
 def test_negative_reviewer_pass_without_line_id_cannot_seal(tmp_path: Path) -> None:
     run_dir = _run_with_proof(tmp_path)
     with pytest.raises(KernelValidationError):  # PASS citing no line -> gate fails -> rollback + raise
         seal_agent_consensus(run_dir, client=_ProofReviewStub(cite=False))
+    assert _grade(run_dir)["proof_language_status"] != _AMBER
+
+
+def test_negative_reviewer_pass_with_unknown_line_id_cannot_seal(tmp_path: Path) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    with pytest.raises(KernelValidationError, match="unknown line_id"):
+        seal_agent_consensus(
+            run_dir,
+            client=_ProofReviewStub(extra_cited_line_ids=["BOGUS_LINE"]),
+        )
+    assert _grade(run_dir)["proof_language_status"] != _AMBER
+
+
+def test_negative_unresolved_proof_gaps_cannot_seal(tmp_path: Path) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    proof["lines"][0]["gaps"] = ["external theorem locator missing"]
+    write_yaml(run_dir / "line_numbered_proof.yaml", proof)
+
+    with pytest.raises(RuntimeError, match="unresolved gaps"):
+        seal_agent_consensus(run_dir, client=_ProofReviewStub())
+
     assert _grade(run_dir)["proof_language_status"] != _AMBER
 
 

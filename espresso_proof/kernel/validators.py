@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from espresso_proof.kernel.io import read_text, read_yaml
+from espresso_proof.kernel.io import path_exists, path_is_file, read_text, read_yaml
 from espresso_proof.kernel.research_bank import (
     load_counterexamples_artifact,
     load_examples_artifact,
@@ -37,6 +37,7 @@ from espresso_proof.kernel.models import (
     _has_run_artifact_provenance,
     ProofVerificationReport,
     ProofVerificationStatus,
+    PressureLaneBarrierReport,
     SubgoalState,
     ContinueDecision,
     ExampleSelection,
@@ -64,6 +65,7 @@ from espresso_proof.kernel.models import (
     RunManifest,
     SourceGroundingReport,
     SourceStatus,
+    StageStatusReport,
     StrategyBrief,
     StrategySynthesis,
     TestReport,
@@ -86,6 +88,19 @@ from espresso_proof.kernel.strategy_rules import validate_strategy_rules
 from espresso_proof.kernel.surface_warnings import (
     collect_surface_warnings,
     final_report_missing_disclosures,
+)
+from espresso_proof.orchestration.agent_flow_spec import (
+    get_stage,
+    ordered_stage_ids,
+    stages_blocked_by_unclear_claim,
+)
+from espresso_proof.orchestration.agent_flow_legacy_map import get_legacy_mapping
+from espresso_proof.orchestration.pressure_lane_barrier import (
+    PRESSURE_LANE_BARRIER_AGENT_ROLES,
+    PRESSURE_LANE_BARRIER_AGENT_STAGE_IDS,
+    PRESSURE_LANE_BARRIER_FILENAME,
+    PRESSURE_LANE_BARRIER_MODE,
+    order_for_pressure_lane_barrier,
 )
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.validation.front_half import validate_front_half_run
@@ -213,6 +228,8 @@ def validate_run(run_dir: Path) -> None:
     theorem_condition_ledger = _load_optional_theorem_condition_ledger(run_dir, manifest)
     agent_run_status = _load_optional_agent_run_status(run_dir, manifest)
     pressure_status = _load_optional_pressure_status(run_dir, manifest)
+    stage_status = _load_optional_stage_status(run_dir, manifest)
+    pressure_lane_barrier = _load_optional_pressure_lane_barrier(run_dir, manifest)
     time_allocation = _load_optional_time_allocation(run_dir, manifest)
     update_inbox = _load_optional_update_inbox(run_dir, manifest)
     _load_optional_ai_review(run_dir, manifest, claim)
@@ -334,6 +351,14 @@ def validate_run(run_dir: Path) -> None:
         examples,
         counterexamples,
     )
+    _validate_stage_status(stage_status, claim, manifest, run_dir)
+    _validate_pressure_lane_barrier(
+        pressure_lane_barrier,
+        claim,
+        manifest,
+        run_dir,
+        agent_run_status,
+    )
     _validate_time_allocation(
         time_allocation,
         claim,
@@ -342,7 +367,7 @@ def validate_run(run_dir: Path) -> None:
         strategy_synthesis,
         strategy_brief,
     )
-    _validate_update_inbox(update_inbox, claim, manifest, run_dir)
+    _validate_update_inbox(update_inbox, claim, manifest, run_dir, time_allocation)
     _validate_final_report_language(
         run_dir / artifacts["final_report"],
         manifest,
@@ -380,6 +405,34 @@ def _load_optional_pressure_status(
     return validate_yaml_model(
         run_dir / optional["pressure_status"],
         PressureStatusReport,
+    )
+
+
+def _load_optional_stage_status(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> StageStatusReport | None:
+    optional = manifest.optional_artifacts
+    if "stage_status" not in optional:
+        return None
+    if not path_exists(run_dir / optional["stage_status"]):
+        raise KernelValidationError("stage_status optional artifact is missing")
+    return validate_yaml_model(
+        run_dir / optional["stage_status"],
+        StageStatusReport,
+    )
+
+
+def _load_optional_pressure_lane_barrier(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> PressureLaneBarrierReport | None:
+    optional = manifest.optional_artifacts
+    if "pressure_lane_barrier" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["pressure_lane_barrier"],
+        PressureLaneBarrierReport,
     )
 
 
@@ -609,6 +662,265 @@ def _validate_pressure_counts(
         raise KernelValidationError(f"pressure_status {entry.kind} admissible_refutation_count is stale")
 
 
+def _validate_stage_status(
+    stage_status: StageStatusReport | None,
+    claim: Claim,
+    manifest: RunManifest,
+    run_dir: Path,
+) -> None:
+    """Bind AGENT_FLOW process status to the current run and spec.
+
+    The report is optional and advisory. It may make stage progress visible, but
+    cannot own or smuggle mathematical trust. This validator therefore checks
+    schema shape, spec parity, selected process invariants, and artifact hashes;
+    it never promotes or demotes proof/source/evidence/refutation/grade status.
+    """
+
+    if "stage_status" in manifest.artifacts:
+        raise KernelValidationError("stage_status must be an optional process artifact")
+    if stage_status is None:
+        return
+    if manifest.optional_artifacts.get("stage_status") != "stage_status.yaml":
+        raise KernelValidationError("stage_status optional artifact must be stage_status.yaml")
+    if stage_status.claim_id != claim.id:
+        raise KernelValidationError("stage_status claim_id does not match locked claim")
+    if stage_status.run_id != manifest.run_id:
+        raise KernelValidationError("stage_status run_id does not match run manifest")
+    if not stage_status.advisory_only or stage_status.effect != "process_status_only":
+        raise KernelValidationError("stage_status must be process-status-only/advisory")
+
+    artifact_path = run_dir / manifest.optional_artifacts["stage_status"]
+    raw = read_yaml(artifact_path)
+    if _contains_forbidden_stage_status_token(raw):
+        raise KernelValidationError("stage_status cannot write mathematical status fields")
+
+    expected_ids = ordered_stage_ids()
+    actual_ids = tuple(entry.stage_id for entry in stage_status.stages)
+    if actual_ids != expected_ids:
+        raise KernelValidationError("stage_status must cover AGENT_FLOW stages in canonical order")
+
+    expected_id_set = set(expected_ids)
+    status_by_id = {entry.stage_id: entry.status for entry in stage_status.stages}
+    claim_clear_blocked = any(entry.claim_clear_blocked for entry in stage_status.stages)
+    blocked_ids = set(stages_blocked_by_unclear_claim())
+    dependency_ready_statuses = {"queued", "running", "done", "failed"}
+
+    for entry in stage_status.stages:
+        spec = get_stage(entry.stage_id)
+        legacy_mapping = get_legacy_mapping(entry.stage_id)
+        mapped_artifacts = set(legacy_mapping.artifacts).union(
+            legacy_mapping.optional_artifacts
+        )
+        for field_name, stage_refs in (
+            ("depends_on", entry.depends_on),
+            ("reads_from", entry.reads_from),
+        ):
+            for stage_ref in stage_refs:
+                if stage_ref not in expected_id_set:
+                    raise KernelValidationError(
+                        f"stage_status {entry.stage_id} {field_name} "
+                        f"references unknown AGENT_FLOW stage: {stage_ref!r}"
+                    )
+        if entry.display_name != spec.display_name:
+            raise KernelValidationError(f"stage_status {entry.stage_id} display_name is stale")
+        if tuple(entry.depends_on) != spec.depends_on:
+            raise KernelValidationError(f"stage_status {entry.stage_id} depends_on is stale")
+        if tuple(entry.reads_from) != spec.reads_from:
+            raise KernelValidationError(f"stage_status {entry.stage_id} reads_from is stale")
+        if tuple(entry.outputs) != spec.outputs:
+            raise KernelValidationError(f"stage_status {entry.stage_id} outputs are stale")
+        if entry.parallel_group != spec.parallel_group:
+            raise KernelValidationError(f"stage_status {entry.stage_id} parallel_group is stale")
+        if entry.evidence_role != spec.evidence_role:
+            raise KernelValidationError(f"stage_status {entry.stage_id} evidence_role is stale")
+        if entry.status in dependency_ready_statuses:
+            for dependency in entry.depends_on:
+                if status_by_id.get(dependency) != "done":
+                    raise KernelValidationError(
+                        f"stage_status {entry.stage_id} cannot be {entry.status} "
+                        f"before dependency {dependency} is done"
+                    )
+        if entry.claim_clear_blocked and entry.stage_id not in blocked_ids:
+            raise KernelValidationError(
+                f"stage_status {entry.stage_id} cannot be claim-clear-blocked"
+            )
+        for rel, recorded_hash in entry.artifact_hashes.items():
+            validate_relative_artifact_path(
+                f"stage_status.{entry.stage_id}.artifact_hashes",
+                rel,
+                path_name="stage_status artifact hash path",
+            )
+            if rel not in mapped_artifacts:
+                raise KernelValidationError(
+                    f"stage_status {entry.stage_id} artifact hash path is not "
+                    f"mapped to the stage: {rel!r}"
+                )
+            current_hash = artifact_revision_hash(run_dir, rel)
+            if recorded_hash == "missing":
+                if entry.status == "done":
+                    raise KernelValidationError(
+                        f"stage_status {entry.stage_id} is done but artifact {rel!r} is missing"
+                    )
+                if current_hash != "missing":
+                    raise KernelValidationError(
+                        f"stage_status {entry.stage_id} artifact hash is stale"
+                    )
+            elif current_hash != recorded_hash:
+                raise KernelValidationError(
+                    f"stage_status {entry.stage_id} artifact hash is stale"
+                )
+
+    if claim_clear_blocked:
+        for stage_id in blocked_ids:
+            if status_by_id.get(stage_id) in {"queued", "running", "done"}:
+                raise KernelValidationError(
+                    f"stage_status {stage_id} cannot run while claim-clear is blocked"
+                )
+
+    if status_by_id.get("time_allocation") in {"queued", "running", "done"}:
+        if status_by_id.get("strategy_grader") != "done":
+            raise KernelValidationError(
+                "stage_status time_allocation cannot start before strategy_grader is done"
+            )
+
+
+def _validate_pressure_lane_barrier(
+    pressure_lane_barrier: PressureLaneBarrierReport | None,
+    claim: Claim,
+    manifest: RunManifest,
+    run_dir: Path,
+    agent_run_status: AgentRunStatusReport | None,
+) -> None:
+    """Bind the explicit pressure-lane barrier to this run.
+
+    The barrier is allowed to be mid-SEED/RUN/JOIN so a crashed batch can be
+    resumed. Only terminal claims are cross-checked against the agent board:
+    ``committed`` must mean the validated single-agent path already marked the
+    lane done, and ``failed`` must not coexist with a done board entry.
+    """
+
+    if "pressure_lane_barrier" in manifest.artifacts:
+        raise KernelValidationError(
+            "pressure_lane_barrier must be an optional process artifact"
+        )
+    if pressure_lane_barrier is None:
+        return
+    if (
+        manifest.optional_artifacts.get("pressure_lane_barrier")
+        != PRESSURE_LANE_BARRIER_FILENAME
+    ):
+        raise KernelValidationError(
+            "pressure_lane_barrier optional artifact must be pressure_lane_barrier.yaml"
+        )
+    if pressure_lane_barrier.claim_id != claim.id:
+        raise KernelValidationError(
+            "pressure_lane_barrier claim_id does not match locked claim"
+        )
+    if pressure_lane_barrier.run_id != manifest.run_id:
+        raise KernelValidationError(
+            "pressure_lane_barrier run_id does not match run manifest"
+        )
+    if (
+        not pressure_lane_barrier.advisory_only
+        or pressure_lane_barrier.effect != "scheduling_only"
+        or pressure_lane_barrier.mode != PRESSURE_LANE_BARRIER_MODE
+    ):
+        raise KernelValidationError(
+            "pressure_lane_barrier must be scheduling-only/advisory"
+        )
+
+    artifact_path = run_dir / manifest.optional_artifacts["pressure_lane_barrier"]
+    raw = read_yaml(artifact_path)
+    if _contains_forbidden_stage_status_token(raw):
+        raise KernelValidationError(
+            "pressure_lane_barrier cannot write mathematical status fields"
+        )
+
+    requested = list(pressure_lane_barrier.requested_agents)
+    expected_order = order_for_pressure_lane_barrier(set(requested))
+    if list(pressure_lane_barrier.commit_order) != expected_order:
+        raise KernelValidationError(
+            "pressure_lane_barrier commit_order is not deterministic"
+        )
+
+    board_statuses = (
+        {entry.agent: entry.status for entry in agent_run_status.agents}
+        if agent_run_status is not None
+        else {}
+    )
+    entries_by_agent = {entry.agent: entry for entry in pressure_lane_barrier.entries}
+    for agent in requested:
+        entry = entries_by_agent[agent]
+        if entry.stage_id != PRESSURE_LANE_BARRIER_AGENT_STAGE_IDS[agent]:
+            raise KernelValidationError(
+                f"pressure_lane_barrier {agent} stage_id is stale"
+            )
+        if entry.role != PRESSURE_LANE_BARRIER_AGENT_ROLES[agent]:
+            raise KernelValidationError(
+                f"pressure_lane_barrier {agent} role is stale"
+            )
+        if entry.worker_shared_write or entry.candidate_persisted:
+            raise KernelValidationError(
+                "pressure_lane_barrier workers cannot claim shared writes or persisted candidates"
+            )
+        board_status = board_statuses.get(agent)
+        if entry.status == "committed" and board_status not in {None, "done"}:
+            raise KernelValidationError(
+                f"pressure_lane_barrier {agent} committed but agent board is {board_status}"
+            )
+        if entry.status == "failed" and board_status == "done":
+            raise KernelValidationError(
+                f"pressure_lane_barrier {agent} failed but agent board is done"
+            )
+
+
+def _contains_forbidden_stage_status_token(value) -> bool:
+    forbidden_keys = {
+        "proof_status",
+        "source_backed",
+        "source_status",
+        "checked_evidence",
+        "example_checked",
+        "example_survived",
+        "example_failed",
+        "counterexample_refutes_claim",
+        "refutation_status",
+        "theorem_applicability_status",
+        "grade_status",
+        "human_confirmed",
+        "lean_checked",
+        "machine_checked",
+        "verified",
+        "proved",
+        "complete_proof",
+        "final_status",
+        "memory_evidence",
+    }
+    if isinstance(value, str):
+        lowered = value.lower()
+        forbidden_phrases = [
+            r"\bproved\b",
+            r"\bverified\b",
+            r"\bproof-close\b",
+            r"\bproof\s+complete\b",
+            r"\bsource[-_ ]backed\b",
+            r"\bchecked\s+evidence\b",
+            r"\brefutes\s+claim\b",
+            r"\blean[-_ ]checked\b",
+            r"\bmachine[-_ ]checked\b",
+        ]
+        return any(re.search(pattern, lowered) for pattern in forbidden_phrases)
+    if isinstance(value, dict):
+        return any(
+            str(key).lower() in forbidden_keys
+            or _contains_forbidden_stage_status_token(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_forbidden_stage_status_token(item) for item in value)
+    return False
+
+
 def _validate_time_allocation(
     time_allocation: TimeAllocationPlan | None,
     claim: Claim,
@@ -633,7 +945,7 @@ def _validate_time_allocation(
         raise KernelValidationError("time_allocation must record TIME_ALLOCATION_STARTED")
 
     artifact_path = run_dir / manifest.optional_artifacts["time_allocation"]
-    if not artifact_path.exists():
+    if not path_exists(artifact_path):
         raise KernelValidationError("time_allocation optional artifact is missing")
 
     if time_allocation.strategy_artifact == "strategy_brief":
@@ -712,6 +1024,7 @@ def _validate_update_inbox(
     claim: Claim,
     manifest: RunManifest,
     run_dir: Path,
+    time_allocation: TimeAllocationPlan | None,
 ) -> None:
     if "update_inbox" in manifest.artifacts:
         raise KernelValidationError("update_inbox must be an optional scheduling artifact")
@@ -758,6 +1071,55 @@ def _validate_update_inbox(
             entry.origin_artifact,
             path_name="origin artifact",
         )
+    _validate_update_inbox_applied_at_consumption(
+        update_inbox,
+        time_allocation,
+        manifest,
+    )
+
+
+def _validate_update_inbox_applied_at_consumption(
+    update_inbox: UpdateInboxReport,
+    time_allocation: TimeAllocationPlan | None,
+    manifest: RunManifest,
+) -> None:
+    applied_entries = [entry for entry in update_inbox.entries if entry.applied_at]
+    if not applied_entries:
+        return
+    if time_allocation is None:
+        raise KernelValidationError(
+            "update_inbox applied_at requires time_allocation scheduling consumption"
+        )
+    time_allocation_dependencies = manifest.dependencies.get("time_allocation", {})
+    if "update_inbox" not in time_allocation_dependencies.get("depends_on", []):
+        raise KernelValidationError(
+            "update_inbox applied_at requires time_allocation dependency on update_inbox"
+        )
+
+    allocation_by_route = {
+        entry.route_id: entry
+        for entry in time_allocation.entries
+        if entry.route_id is not None
+    }
+    for entry in applied_entries:
+        if entry.type != "reviewer_objection":
+            raise KernelValidationError(
+                "update_inbox applied_at is currently valid only for reviewer_objection "
+                "scheduling consumption"
+            )
+        if entry.route_id_or_step_id is None:
+            raise KernelValidationError(
+                "update_inbox applied_at reviewer_objection requires a route binding"
+            )
+        allocation = allocation_by_route.get(entry.route_id_or_step_id)
+        if allocation is None:
+            raise KernelValidationError(
+                "update_inbox applied_at requires matching time_allocation route"
+            )
+        if allocation.action not in {"repair_attempt", "ask_human"}:
+            raise KernelValidationError(
+                "update_inbox applied_at requires a reviewer-objection time_allocation response"
+            )
 
 
 def _canonical_update_inbox_dedupe_key(entry) -> str:
@@ -1849,11 +2211,17 @@ def _validate_agent_consensus_review(
     proof_line_ids = {line.line_id for line in line_numbered_proof.lines}
     for entry in consensus.entries:
         if entry.verdict == AgentConsensusVerdict.no_fatal_flaw_found:
-            cited = [lid for lid in entry.cited_line_ids if lid in proof_line_ids]
+            cited = [lid for lid in entry.cited_line_ids if lid]
+            unknown = [lid for lid in cited if lid not in proof_line_ids]
             if not cited:
                 raise KernelValidationError(
                     f"reviewer {entry.reviewer_id} returned no_fatal_flaw_found but did "
                     "not cite any line_id of the line-numbered proof"
+                )
+            if unknown:
+                raise KernelValidationError(
+                    f"reviewer {entry.reviewer_id} cited unknown line_id(s) in the "
+                    f"line-numbered proof: {', '.join(sorted(set(unknown)))}"
                 )
 
     # 3. A line_proof reviewer that FAILED the standard kernel review cannot claim
@@ -2849,7 +3217,7 @@ def _validate_prover_round_index(
             raise KernelValidationError(
                 f"{entry.loop_attempt_id}: prover round artifact path escapes run dir"
             ) from exc
-        if not path.exists() or not path.is_file():
+        if not path_exists(path) or not path_is_file(path):
             raise KernelValidationError(
                 f"{entry.loop_attempt_id}: prover round artifact is missing"
             )

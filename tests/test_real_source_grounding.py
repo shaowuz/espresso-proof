@@ -98,6 +98,31 @@ def test_missing_attribution_stays_candidate(tmp_path: Path) -> None:
     assert all(s["status"] != "source_backed" for s in sg["steps"])
 
 
+def test_source_conclusion_mismatch_stays_candidate_and_preserves_requested_step(
+    tmp_path: Path,
+) -> None:
+    run_dir = _hodge_run(tmp_path)
+    source_grounding_path = run_dir / "source_grounding.yaml"
+    sg_before = read_yaml(source_grounding_path)
+    requested = (
+        "cubic fourfolds over base field C imply the intermediate Jacobian is trivial"
+    )
+    sg_before["steps"][0]["needed_theorem"] = requested
+    write_yaml(source_grounding_path, sg_before)
+    text = (
+        "Theorem 1.2. Exact literature statement about Hodge structures over "
+        "base field C for cubic fourfolds."
+    )
+    ext = _ingest(run_dir, text, authors=["J.-P. Serre"], title="Topics in Galois Theory")
+    ground_run(run_dir=run_dir, theorem_extraction_path=ext)
+    validate_run(run_dir)
+
+    sg_after = read_yaml(source_grounding_path)
+    assert sg_after["steps"][0]["needed_theorem"] == requested
+    assert sg_after["steps"][0]["status"] == "candidate"
+    assert "source conclusion does not cover" in sg_after["steps"][0]["note"]
+
+
 def test_model_rejects_source_backed_without_attribution() -> None:
     base = {
         "claim_id": "claim_001",
@@ -122,6 +147,48 @@ def test_model_rejects_source_backed_without_attribution() -> None:
     base["source_refs"][0]["title"] = ""  # missing title
     with pytest.raises(ValueError, match="source title"):
         SourceGroundingReport.model_validate(base)
+
+
+def test_source_grounding_rejects_ambiguous_duplicate_bindings() -> None:
+    ref = {
+        "id": "src_x",
+        "type": "paper",
+        "title": "Some source",
+        "authors": ["A. Author"],
+        "locator": {"kind": "theorem", "value": "Theorem 1.1"},
+        "statement_or_summary": "Exact statement.",
+        "hypothesis_match": {"matches": True, "mismatches": []},
+        "confidence": "high",
+        "status": "source_backed",
+    }
+    step = {
+        "proof_step_id": "step_001",
+        "needed_theorem": "Exact statement.",
+        "status": "source_backed",
+        "source_refs": ["src_x"],
+        "hypothesis_match": {"matches": True, "mismatches": []},
+        "note": "Supported by the exact locator.",
+    }
+    with pytest.raises(ValueError, match="source_ref ids must be unique"):
+        SourceGroundingReport.model_validate(
+            {"claim_id": "claim_001", "source_refs": [ref, dict(ref)], "steps": [step]}
+        )
+    with pytest.raises(ValueError, match="proof_step_id values must be unique"):
+        SourceGroundingReport.model_validate(
+            {
+                "claim_id": "claim_001",
+                "source_refs": [ref],
+                "steps": [step, {**step, "source_refs": ["src_x"]}],
+            }
+        )
+    with pytest.raises(ValueError, match="source_refs must be unique"):
+        SourceGroundingReport.model_validate(
+            {
+                "claim_id": "claim_001",
+                "source_refs": [ref],
+                "steps": [{**step, "source_refs": ["src_x", "src_x"]}],
+            }
+        )
 
 
 def test_no_exact_locator_stays_candidate(tmp_path: Path) -> None:
