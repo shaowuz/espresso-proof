@@ -143,6 +143,7 @@ def build_stage_status_projection(
         "notes": [
             "AGENT_FLOW process-status projection only.",
             "Stage completion does not imply mathematical validation.",
+            "parallel_group records conceptual AGENT_FLOW lanes; legacy full runs may still execute them sequentially.",
         ],
     }
 

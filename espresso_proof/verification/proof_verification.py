@@ -199,6 +199,66 @@ def build_matrix_rank_entry(
     }
 
 
+def build_tensor_left_exact_counterexample_entry(
+    claim_id: str,
+    *,
+    entry_id: str = "tensor_left_exact_z_mod_2",
+) -> dict:
+    """Check the standard Z --2--> Z tensor Z/2Z non-injectivity witness.
+
+    This earns only a scoped computation check: in ``Z/2Z`` the nonzero class of
+    1 maps to 0 under multiplication by 2. It does not prove any general theorem
+    about tensor products or arbitrary exact sequences.
+    """
+
+    modulus = 2
+    witness = 1
+    image = (2 * witness) % modulus
+    confirmed = witness % modulus != 0 and image == 0
+    detail = (
+        "In M=Z/2Z, the tensor-induced map is multiplication by 2; "
+        "the class 1 mod 2 is nonzero and maps to 0 mod 2."
+        if confirmed
+        else "The fixed mod-2 witness did not confirm non-injectivity."
+    )
+    return {
+        "id": entry_id,
+        "verifier_type": "exact_computation",
+        "claim_id": claim_id,
+        "target": (
+            "tensoring 0 -> Z --x2--> Z -> Z/2Z -> 0 with M=Z/2Z: "
+            "left map non-injectivity witness"
+        ),
+        "input_summary": "modulus=2, map=multiplication_by_2, witness=1 mod 2",
+        "result": detail,
+        "trusted": True,
+        "confirmed": confirmed,
+        "earned_status": "computation_checked" if confirmed else "unverified",
+        "scope_note": (
+            "Scoped exact computation for the concrete witness only: it confirms "
+            "that 1 in Z/2Z lies in the kernel of the tensor-induced multiplication "
+            "by 2 map and is nonzero. It is not a universal proof about tensor "
+            "products or arbitrary modules."
+        ),
+    }
+
+
+def verify_tensor_left_exact_counterexample_in_run(
+    run_dir: Path,
+    *,
+    entry_id: str = "tensor_left_exact_z_mod_2",
+) -> dict:
+    """Append the standard tensor-left-exactness counterexample witness check."""
+
+    run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
+    entry = build_tensor_left_exact_counterexample_entry(claim_id, entry_id=entry_id)
+    append_verification_entries(run_dir, [entry])
+    return entry
+
+
 def verify_matrix_rank_in_run(
     run_dir: Path,
     *,

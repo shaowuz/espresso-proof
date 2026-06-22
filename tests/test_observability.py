@@ -148,11 +148,18 @@ def test_run_produces_observability_and_still_validates(tmp_path: Path):
     terminal = [a for a in agent_events if a.get("agent_status") != "started"]
     assert terminal and all(a.get("agent_status") == "finished" for a in terminal)
     assert all(isinstance(a.get("duration_ms"), int) for a in terminal)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    prover_terminal = [
+        a for a in terminal if a.get("stage") == "llm_prover_reviewers"
+    ]
+    assert prover_terminal
+    assert all(a.get("run_id") == manifest["run_id"] for a in prover_terminal)
+    assert all(a.get("validation_status") == "passed" for a in prover_terminal)
     assert any(a.get("agent_status") == "started" for a in agent_events)
     assert obs.latest_unfinished_agent_call(run_dir) is None
     assert timings["stage_durations_ms"] and isinstance(timings["total_duration_ms"], int)
     # all three registered as OPTIONAL artifacts
-    optional = read_yaml(run_dir / "run_manifest.yaml")["optional_artifacts"]
+    optional = manifest["optional_artifacts"]
     assert optional.get("events") == "events.jsonl"
     assert optional.get("agent_events") == "agent_events.jsonl"
     assert optional.get("timings") == "timings.yaml"
@@ -193,6 +200,49 @@ def test_orchestrate_prover_pass_emits_agent_event(tmp_path: Path):
     stages = {a.get("stage") for a in obs.read_agent_events(run_dir)}
     # not only front-half stages — the deep Prover+Reviewers pass is recorded too.
     assert "llm_prover_reviewers" in stages
+
+
+def test_post_call_validation_failure_emits_terminal_agent_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from espresso_proof.orchestration import orchestrator as orch
+
+    claim = tmp_path / "c.md"
+    claim.write_text(
+        "Every group of order p^2, where p is a prime, is abelian.\n",
+        encoding="utf-8",
+    )
+    original_validate = orch.validate_run
+
+    def fail_after_llm_artifact(run_dir: Path) -> None:
+        original_validate(run_dir)
+        if Path(run_dir, "llm_agent_run.yaml").exists():
+            raise RuntimeError("injected post-call validation failure")
+
+    monkeypatch.setattr(orch, "validate_run", fail_after_llm_artifact)
+
+    with pytest.raises(StageError, match="post-call validation failure"):
+        orchestrate_run(
+            project="obs_failed_validation",
+            input_path=claim,
+            output_root=tmp_path,
+            provider="stub",
+            front_half="stub",
+            front_half_client=FakeClaude(precision="precise"),
+        )
+
+    run_dir = next(tmp_path.rglob("run_manifest.yaml")).parent
+    llm_events = [
+        event
+        for event in obs.read_agent_events(run_dir)
+        if event.get("stage") == "llm_prover_reviewers"
+    ]
+    assert any(event.get("agent_status") == "started" for event in llm_events)
+    failed = [event for event in llm_events if event.get("agent_status") == "failed"]
+    assert failed
+    assert failed[-1]["validation_status"] == "failed"
+    assert obs.latest_unfinished_agent_call(run_dir) is None
 
 
 def test_resume_prover_rounds_emit_agent_events(tmp_path: Path):

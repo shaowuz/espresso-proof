@@ -221,6 +221,44 @@ def test_real_math_benchmark_separates_valid_run_from_solution_claims(
     assert row["repeat_count"] == 1
 
 
+def test_real_math_benchmark_counts_useful_witness_route_below_proof_threshold(
+    tmp_path: Path,
+) -> None:
+    claim_path = tmp_path / "tensor_counterexample.md"
+    claim_path.write_text(
+        "Find a counterexample that tensor product is left exact.\n",
+        encoding="utf-8",
+    )
+    run_dir = run_mock_critique("tensor_benchmark", claim_path, tmp_path)
+    _make_claim_clear(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    route_patch = {
+        "title": "Tensor Z/2Z counterexample witness",
+        "score": 40,
+        "status": "fragile",
+        "why_this_route": "Use the short exact sequence Z --multiplication by 2--> Z -> Z/2Z.",
+        "main_risk": "The witness still needs scoped checking.",
+        "source_status": "candidate",
+        "next_loop_plan": "Check the mod 2 tensor-induced map is non-injective.",
+    }
+    synthesis_path = run_dir / manifest["artifacts"]["strategy_synthesis"]
+    synthesis = read_yaml(synthesis_path)
+    synthesis["routes"][0].update(route_patch)
+    write_yaml(synthesis_path, synthesis)
+    brief_path = run_dir / manifest["artifacts"]["strategy_brief"]
+    brief = read_yaml(brief_path)
+    brief["top_strategies"][0].update(route_patch)
+    write_yaml(brief_path, brief)
+    validate_run(run_dir)
+
+    report = build_real_math_capability_report([_case(run_dir, "tensor_witness")])
+    row = _row(report)
+
+    assert row["useful_route_found"] is True
+    assert row["checked_scoped_fact"] is False
+    assert row["formal_solution"] is False
+
+
 def test_real_math_benchmark_counts_source_supported_argument_only_after_grounding(
     tmp_path: Path,
 ) -> None:

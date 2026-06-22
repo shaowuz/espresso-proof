@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from espresso_proof.claim.hypothesis_normalization import normalize_ambient_object_hypotheses
+from espresso_proof.claim.task_intent import infer_task_intent, is_witness_intent
 from espresso_proof.kernel.io import read_yaml, write_text, write_yaml
 from espresso_proof.agents.llm_agents import LLMClient, load_agent_context, safe_list, safe_text
 from espresso_proof.ui.memo import build_concise_memo
@@ -183,6 +184,8 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     review = context.get("review") or {}
 
     precision = ledger.get("claim_precision", "unclear")
+    task_intent = infer_task_intent(claim)
+    witness_intent = is_witness_intent(task_intent)
 
     # Signals (read-only; never upgrade any status).
     source_backed_steps = any(
@@ -209,7 +212,10 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
         # support. A confirmed machine check vetoes likely_false, but never
         # upgrades this front-half grade beyond fragile.
         has_confirmed_machine_check = _has_confirmed_machine_check(run_dir, context)
-        negative_evidence = counterexample_pressure or theorem_applicability_failure
+        negative_evidence = (
+            (counterexample_pressure and not witness_intent)
+            or theorem_applicability_failure
+        )
         status = (
             "likely_false"
             if negative_evidence and not has_confirmed_machine_check
@@ -226,7 +232,13 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     score = _REGRADE_SCORES.get(status, 10)
     reason = {
         "unclear": "Recomputed from live artifacts: the claim is not precise enough to study safely.",
-        "fragile": "Recomputed from live artifacts: the claim is precise, but the route has source gaps / missing hypotheses / counterexample pressure and no checked proof.",
+        "fragile": (
+            "Recomputed from live artifacts: candidate witness/counterexample "
+            "constructions are present for this task, but they remain unchecked "
+            "and cannot count as proof dependencies."
+            if witness_intent and counterexample_pressure
+            else "Recomputed from live artifacts: the claim is precise, but the route has source gaps / missing hypotheses / counterexample pressure and no checked proof."
+        ),
         "likely_false": "Recomputed from live artifacts: the claim is precise but faces unchecked counterexample pressure or theorem misuse; no confirming machine check or checked counterexample has been verified.",
         "refuted": "Recomputed from live artifacts: an admissible, checked counterexample violates the conclusion.",
     }[status]
@@ -261,7 +273,10 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
             run_dir, artifacts
         )
 
-    notes = [f"regrade: precision={precision} -> status={status} (score {score})"]
+    notes = [
+        f"regrade: precision={precision}, task_intent={task_intent} -> "
+        f"status={status} (score {score})"
+    ]
     if reconciled:
         notes.append(f"reconciled {reconciled} scaffold strategy artifact(s)")
     if scaffold_reconciled:

@@ -22,7 +22,10 @@ from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.ui.memo import build_concise_memo
 from espresso_proof.orchestration.mock_pipeline import run_mock_critique
 from espresso_proof.kernel.models import ProofVerificationStatus
-from espresso_proof.verification.proof_verification import verify_finite_groups
+from espresso_proof.verification.proof_verification import (
+    verify_finite_groups,
+    verify_tensor_left_exact_counterexample_in_run,
+)
 from espresso_proof.orchestration.run_dashboard import render_topbar_status_html, status_summary
 from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
@@ -112,6 +115,20 @@ def test_finite_group_bridge_earns_instance_checked_not_proved(tmp_path: Path) -
     assert "machine-verified instances (scoped" in memo
     for phrase in ("proof-close", "proof complete", "we proved the", "this establishes the theorem"):
         assert phrase not in memo
+
+
+def test_tensor_left_exact_counterexample_bridge_is_scoped_computation(
+    tmp_path: Path,
+) -> None:
+    run_dir = _build(tmp_path)
+    entry = verify_tensor_left_exact_counterexample_in_run(run_dir)
+    validate_run(run_dir)
+
+    assert entry["verifier_type"] == "exact_computation"
+    assert entry["earned_status"] == "computation_checked"
+    assert entry["confirmed"] is True
+    assert "1 in Z/2Z" in entry["scope_note"]
+    assert _grade(run_dir)["proof_language_status"] != "computation_checked"
 
 
 # --- the 5 goal-required negative tests --------------------------------------

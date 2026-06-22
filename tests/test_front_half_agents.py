@@ -931,6 +931,7 @@ def _confirmed_verification_result(check_id: str = "c1") -> dict:
 def _regrade_status(
     tmp_path: Path,
     *,
+    claim_text: str = "For every integer n>=1, 1+2+...+n = n(n+1)/2.\n",
     counterexamples: list[dict] | None = None,
     check: dict | None = None,
     verification: dict | None = None,
@@ -939,10 +940,7 @@ def _regrade_status(
     from espresso_proof.agents.llm_agents import load_agent_context
 
     claim_path = tmp_path / "regrade_claim.md"
-    claim_path.write_text(
-        "For every integer n>=1, 1+2+...+n = n(n+1)/2.\n",
-        encoding="utf-8",
-    )
+    claim_path.write_text(claim_text, encoding="utf-8")
     run_dir = run_mock_critique("regrade_test", claim_path, tmp_path)
     ctx = load_agent_context(run_dir)
     ctx["hypothesis_ledger"]["claim_precision"] = "precise"
@@ -989,6 +987,21 @@ def test_regrade_unchecked_negative_pressure_still_flags_likely_false(tmp_path: 
     ]
     grade = _regrade_status(tmp_path, counterexamples=counterexamples)
     assert grade["status"] == "likely_false"
+
+
+def test_regrade_witness_task_does_not_treat_candidate_as_failed_claim(
+    tmp_path: Path,
+) -> None:
+    counterexamples = [
+        {"id": "cx1", "satisfies_all_claim_hypotheses": False, "refutes_claim": False}
+    ]
+    grade = _regrade_status(
+        tmp_path,
+        claim_text="Find a counterexample that tensor product is left exact.\n",
+        counterexamples=counterexamples,
+    )
+    assert grade["status"] == "fragile"
+    assert "candidate witness/counterexample" in grade["reasons"][0]
 
 
 def test_regrade_checked_machine_check_without_verification_does_not_veto(

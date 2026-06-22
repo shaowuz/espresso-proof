@@ -58,7 +58,7 @@ from espresso_proof.orchestration.agent_flow_driver import (
 )
 from espresso_proof.orchestration.agent_flow_legacy_map import LEGACY_FRONT_HALF_FAST_ORDER
 from espresso_proof.kernel.run_lock import run_writer_lock
-from espresso_proof.kernel.stage_runner import StageRunner
+from espresso_proof.kernel.stage_runner import StageError, StageRunner
 from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.kernel.models import (
@@ -420,9 +420,13 @@ def orchestrate_run(
             ),
         )
     if not _sbp["stop"] and not _reached(run_dir, "WAITING_LLM_AGENT_HUMAN_GATE"):
+        llm_agent_event_summary: dict[str, object] = {}
+
         def _llm_prover_reviewers() -> None:
             # Goal 54A: bracket the deep Prover+Reviewers model pass with provenance
             # so a stall in the model call (vs validation/rendering) is visible.
+            stage_manifest = read_yaml(run_dir / "run_manifest.yaml")
+            run_id = str(stage_manifest["run_id"])
             _started = now_iso()
             _t0 = monotonic_ms()
             append_event(run_dir, "agent_call_started", stage="llm_prover_reviewers")
@@ -433,7 +437,7 @@ def orchestrate_run(
             append_agent_event(
                 run_dir, agent_name="llm_prover_reviewers", provider=provider,
                 adapter=provider, model=model, stage="llm_prover_reviewers",
-                agent_status="started", started_at=_started,
+                agent_status="started", run_id=run_id, started_at=_started,
             )
             try:
                 agent_report = run_llm_agent_pass(
@@ -455,19 +459,13 @@ def orchestrate_run(
                     run_dir, agent_name="llm_prover_reviewers", provider=provider,
                     adapter=provider, model=model, stage="llm_prover_reviewers",
                     agent_status="timed_out" if _timed_out else "failed",
-                    started_at=_started, finished_at=now_iso(),
+                    run_id=run_id, started_at=_started, finished_at=now_iso(),
                     duration_ms=monotonic_ms() - _t0, error_summary=str(exc),
                     timed_out=_timed_out, timeout_ms=_timeout_ms,
                 )
                 append_event(run_dir, "agent_call_failed", stage="llm_prover_reviewers", detail=str(exc))
                 raise
-            append_agent_event(
-                run_dir, agent_name="llm_prover_reviewers", provider=provider, adapter=provider,
-                model=model, stage="llm_prover_reviewers", agent_status="finished",
-                started_at=_started, finished_at=now_iso(), duration_ms=monotonic_ms() - _t0,
-                output_artifact_path="llm_agent_run.yaml",
-            )
-            append_event(run_dir, "agent_call_finished", stage="llm_prover_reviewers")
+            llm_agent_event_summary.update(run_id=run_id, started_at=_started, t0=_t0)
             LLMAgentRunReport.model_validate(agent_report)
             loop_report = build_prover_loop_report(
                 agent_report=agent_report,
@@ -498,12 +496,55 @@ def orchestrate_run(
 
         # Whole-run snapshot: this stage creates the llm/prover artifacts and the
         # prover_rounds/ directory, all of which must be dropped on rollback.
-        runner.run(
-            name="llm_prover_reviewers",
-            mutate=_llm_prover_reviewers,
-            validate=lambda: validate_run(run_dir),
-            state_after="WAITING_LLM_AGENT_HUMAN_GATE",
-        )
+        try:
+            runner.run(
+                name="llm_prover_reviewers",
+                mutate=_llm_prover_reviewers,
+                validate=lambda: validate_run(run_dir),
+                state_after="WAITING_LLM_AGENT_HUMAN_GATE",
+            )
+        except StageError as exc:
+            if llm_agent_event_summary:
+                append_agent_event(
+                    run_dir,
+                    agent_name="llm_prover_reviewers",
+                    provider=provider,
+                    adapter=provider,
+                    model=model,
+                    stage="llm_prover_reviewers",
+                    agent_status="failed",
+                    run_id=str(llm_agent_event_summary["run_id"]),
+                    started_at=str(llm_agent_event_summary["started_at"]),
+                    finished_at=now_iso(),
+                    duration_ms=monotonic_ms() - int(llm_agent_event_summary["t0"]),
+                    output_artifact_path="llm_agent_run.yaml",
+                    validation_status="failed",
+                    error_summary=str(exc),
+                )
+                append_event(
+                    run_dir,
+                    "agent_call_failed",
+                    stage="llm_prover_reviewers",
+                    detail=str(exc),
+                )
+            raise
+        if llm_agent_event_summary:
+            append_agent_event(
+                run_dir,
+                agent_name="llm_prover_reviewers",
+                provider=provider,
+                adapter=provider,
+                model=model,
+                stage="llm_prover_reviewers",
+                agent_status="finished",
+                run_id=str(llm_agent_event_summary["run_id"]),
+                started_at=str(llm_agent_event_summary["started_at"]),
+                finished_at=now_iso(),
+                duration_ms=monotonic_ms() - int(llm_agent_event_summary["t0"]),
+                output_artifact_path="llm_agent_run.yaml",
+                validation_status="passed",
+            )
+            append_event(run_dir, "agent_call_finished", stage="llm_prover_reviewers")
 
     # Goal 27 — initialize the per-agent run-status board. In the fast core pass
     # only claim_understanding has run; the evidence agents are not_run (to be run

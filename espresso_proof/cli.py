@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -56,6 +57,7 @@ from espresso_proof.kernel.subgoal_graph import build_subgoal_graph
 from espresso_proof.verification.finite_group_verifier import verify_identity_on_table
 from espresso_proof.verification.proof_verification import (
     auto_wire_scoped_verifications,
+    verify_tensor_left_exact_counterexample_in_run,
     verify_finite_groups,
     verify_identity_table_in_run,
     verify_matrix_rank_in_run,
@@ -126,6 +128,41 @@ from espresso_proof.orchestration.workflow_generator import generate_workflow_sp
 
 app = typer.Typer(help="Espresso Proof local kernel.")
 
+_WINDOWS_RUN_PATH_LIMIT = 240
+
+
+def _guard_windows_run_path_length(output_root: Path, project: str) -> None:
+    """Fail early when a fresh run path is likely to exceed legacy MAX_PATH."""
+
+    if os.name != "nt":
+        return
+    sample_run_id = f"{project}-YYYYMMDD-HHMMSS-xxxxxxxx"
+    sample = (
+        output_root.resolve(strict=False)
+        / "projects"
+        / project
+        / "runs"
+        / sample_run_id
+        / "prover_rounds"
+        / "round_001_initial_llm_prover_review_attempt.yaml"
+    )
+    if len(str(sample)) >= _WINDOWS_RUN_PATH_LIMIT:
+        raise typer.BadParameter(
+            "Windows run path would likely exceed MAX_PATH. Use a shorter "
+            "--output-root such as C:\\tmp\\espresso_runs or a shorter --project."
+        )
+
+
+def _refresh_process_status(run: Path) -> None:
+    """Refresh AGENT_FLOW process projection after manual CLI artifact writes."""
+
+    from espresso_proof.orchestration.agent_flow_status import (
+        write_stage_status_projection,
+    )
+
+    write_stage_status_projection(run, include_artifact_hashes=False)
+    validate_run(run)
+
 
 def _require_claim_clear_for_cli(run: Path) -> None:
     try:
@@ -157,6 +194,7 @@ def critique_sketch(
     """Run a schema-checked mock critique pass."""
     if mode != "mock":
         raise typer.BadParameter("P0 only supports --mode mock")
+    _guard_windows_run_path_length(Path("."), project)
     run_dir = run_mock_critique(project, input, Path("."))
     typer.echo(f"Wrote run artifacts to {run_dir}")
 
@@ -173,6 +211,7 @@ def new_run(
     unclear, no source_backed, needs_human). This unblocks arbitrary new claims
     so front-half agents can enrich a real run.
     """
+    _guard_windows_run_path_length(output_root, project)
     run_dir = run_mock_critique(project, input, output_root)
     validate_run(run_dir)
     typer.echo(f"Wrote run artifacts to {run_dir}")
@@ -300,6 +339,7 @@ def orchestrate(
     if reviewer_set not in {"generic", "espresso"}:
         raise typer.BadParameter("reviewer-set must be generic or espresso")
 
+    _guard_windows_run_path_length(output_root, project)
     result = orchestrate_run(
         project=project,
         input_path=input,
@@ -527,6 +567,7 @@ def run_flow(
     if reviewer_set not in {"generic", "espresso"}:
         raise typer.BadParameter("reviewer-set must be generic or espresso")
 
+    _guard_windows_run_path_length(output_root, project)
     result = orchestrate_run(
         project=project,
         input_path=input,
@@ -938,6 +979,7 @@ def _refresh_derived_views(run: Path) -> None:
             validate_run(run)
     if (run / "research_dashboard.html").exists():
         write_run_dashboard(run)
+    _refresh_process_status(run)
 
 
 @app.command("run-external-tool")
@@ -1143,6 +1185,31 @@ def verify_matrix_rank_in_run_command(
     typer.echo(
         f"Entry {entry['id']}: {entry['earned_status']} -- {entry['result']} "
         "(checked for this specific matrix only; NOT a universal proof)."
+    )
+    typer.echo(f"Scope: {entry['scope_note']}")
+
+
+@app.command("verify-tensor-left-exact-counterexample-in-run")
+def verify_tensor_left_exact_counterexample_in_run_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    entry_id: str = typer.Option(
+        "tensor_left_exact_z_mod_2",
+        "--id",
+        help="Unique id for this verification entry.",
+    ),
+) -> None:
+    """Machine-check the standard Z/2Z witness that tensoring need not preserve
+    left exactness. Earns only a scoped computation_checked entry for this
+    concrete witness; never proves a universal theorem.
+    """
+
+    _require_claim_clear_for_cli(run)
+    entry = verify_tensor_left_exact_counterexample_in_run(run, entry_id=entry_id)
+    validate_run(run)
+    _refresh_derived_views(run)
+    typer.echo(
+        f"Entry {entry['id']}: {entry['earned_status']} -- {entry['result']} "
+        "(checked for this concrete tensor witness only; NOT a universal proof)."
     )
     typer.echo(f"Scope: {entry['scope_note']}")
 
@@ -2111,6 +2178,7 @@ def write_proof(
             api_key_env=api_key_env,
             external_agent_command_env=external_agent_command_env,
         )
+    _refresh_process_status(run)
     typer.echo(
         f"Wrote line_numbered_proof.yaml ({len(record['lines'])} lines, "
         f"kind={record['proof_kind']}, advisory only)."
@@ -2149,7 +2217,13 @@ def seal_consensus(
             )
         except NoLineNumberedProofError as exc:
             typer.echo(f"Not sealed: {exc}")
+            _refresh_process_status(run)
             raise typer.Exit(code=1) from exc
+        except RuntimeError as exc:
+            typer.echo(f"Not sealed: {exc}")
+            _refresh_process_status(run)
+            raise typer.Exit(code=1) from exc
+    _refresh_process_status(run)
     if record["consensus"]:
         typer.echo(
             "Sealed: agent_consensus_mock_checked (amber, NOT machine-verified). "
@@ -2199,6 +2273,7 @@ def resolve_proof_gaps_command(
             human_allow=human_allow or [],
         )
         ProofGapResolutionReport.model_validate(report)
+    _refresh_process_status(run)
     attached = sum(
         1
         for item in report["candidates"]

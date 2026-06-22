@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from espresso_proof.claim.task_intent import infer_task_intent, is_witness_intent
 from espresso_proof.kernel.io import read_text, read_yaml
 from espresso_proof.kernel.proof_language import contains_proof_language
 from espresso_proof.kernel.validators import validate_run
@@ -114,6 +115,7 @@ def _case_row(case: dict[str, Any]) -> dict[str, Any]:
     final_report = _read_artifact_text(run_dir, artifacts, "final_report")
     proof_phrase = contains_proof_language(final_report)
 
+    claim = _read_artifact_yaml(run_dir, artifacts, "locked_claim") or {}
     grade = _read_artifact_yaml(run_dir, artifacts, "idea_grade") or {}
     source_grounding = _read_artifact_yaml(run_dir, artifacts, "source_grounding") or {}
     strategy_brief = _read_artifact_yaml(run_dir, artifacts, "strategy_brief") or {}
@@ -141,7 +143,7 @@ def _case_row(case: dict[str, Any]) -> dict[str, Any]:
     source_supported = capability_valid and _has_source_supported_argument(
         source_grounding, theorem_applicability
     )
-    useful_route = capability_valid and _has_useful_route(strategy_brief)
+    useful_route = capability_valid and _has_useful_route(strategy_brief, claim)
     real_agent_valid_run = (
         valid_run
         and str(case["provider"]) != "stub"
@@ -281,7 +283,11 @@ def _verified_agent_calls(llm_agent_run: dict[str, Any], provider: str) -> bool:
     )
 
 
-def _has_useful_route(strategy_brief: dict[str, Any]) -> bool:
+def _has_useful_route(
+    strategy_brief: dict[str, Any], claim: dict[str, Any] | None = None
+) -> bool:
+    task_intent = infer_task_intent(claim)
+    witness_task = is_witness_intent(task_intent)
     for route in strategy_brief.get("top_strategies") or []:
         if not isinstance(route, dict):
             continue
@@ -290,7 +296,41 @@ def _has_useful_route(strategy_brief: dict[str, Any]) -> bool:
         score = route.get("score")
         if isinstance(score, int) and score >= USEFUL_ROUTE_MIN_SCORE:
             return True
+        if (
+            witness_task
+            and isinstance(score, int)
+            and score >= 40
+            and _route_has_witness_markers(route)
+        ):
+            return True
     return False
+
+
+def _route_has_witness_markers(route: dict[str, Any]) -> bool:
+    text = " ".join(
+        str(route.get(key) or "")
+        for key in (
+            "title",
+            "why_this_route",
+            "main_risk",
+            "next_loop_plan",
+            "notes",
+        )
+    ).lower()
+    return any(
+        marker in text
+        for marker in (
+            "counterexample",
+            "witness",
+            "tensor",
+            "short exact",
+            "multiplication by 2",
+            "z/2",
+            "mod 2",
+            "non-injective",
+            "noninjective",
+        )
+    )
 
 
 def _has_checked_scoped_fact(

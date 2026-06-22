@@ -12,7 +12,9 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from typer.testing import CliRunner
 
+from espresso_proof.cli import app
 from espresso_proof.agents.llm_agents import StubLLMClient
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.kernel.models import (
@@ -34,6 +36,8 @@ from espresso_proof.orchestration.proof_gap_resolver import (
     _normalize_agent_candidates,
     resolve_proof_gaps,
 )
+from espresso_proof.orchestration.agent_flow_status import STAGE_STATUS_FILENAME
+from espresso_proof.orchestration.orchestrator import orchestrate_run
 from espresso_proof.ui.descriptions import VERIFIED_PROOF_STATUSES, describe_proof_language
 from espresso_proof.ui.evidence_trust import EARNED_LEVELS, is_green, trust_tone
 from tests.test_proof_verification_bridge_v2 import _build
@@ -50,6 +54,10 @@ def _artifacts(run_dir: Path) -> dict:
 
 def _grade(run_dir: Path) -> dict:
     return read_yaml(run_dir / _artifacts(run_dir)["idea_grade"])
+
+
+def _stage(report: dict, stage_id: str) -> dict:
+    return next(stage for stage in report["stages"] if stage["stage_id"] == stage_id)
 
 
 def _admissible_run(tmp_path: Path) -> Path:
@@ -223,6 +231,30 @@ def test_proof_line_dependency_graph_migrates_legacy_gaps_and_refs() -> None:
     assert prior_dep.authority == ""
     definition_dep = next(dep for dep in line.dependencies if dep.type == "definition")
     assert definition_dep.authority == ""
+
+
+def test_write_proof_cli_refreshes_stage_status_projection(tmp_path: Path) -> None:
+    claim = tmp_path / "claim.md"
+    claim.write_text(
+        "Every group of order p^2, where p is a prime, is abelian.\n",
+        encoding="utf-8",
+    )
+    result_run = orchestrate_run(
+        project="goal69_status",
+        input_path=claim,
+        output_root=tmp_path,
+        provider="stub",
+        front_half="stub",
+        fast=True,
+    )
+    run_dir = Path(result_run["run_dir"])
+
+    result = CliRunner().invoke(app, ["write-proof", "--run", str(run_dir)])
+
+    assert result.exit_code == 0, result.output
+    validate_run(run_dir)
+    report = read_yaml(run_dir / STAGE_STATUS_FILENAME)
+    assert _stage(report, "line_numbered_proof_writer")["status"] == "done"
 
 
 def test_gap_resolver_keeps_non_sealable_unresolved_edges_as_unchecked_gap() -> None:
