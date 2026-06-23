@@ -870,6 +870,45 @@ class ProofVerificationReport(StrictBaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class FiniteObjectWitnessReport(StrictBaseModel):
+    """Scoped finite-object witness sidecar.
+
+    The sidecar is reviewer-facing evidence packaging only. It must stay scoped
+    and advisory; the checked status, if any, is owned by proof_verification.yaml.
+    """
+
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    witness_id: str
+    kind: Literal["gl2_f3_solvability"]
+    advisory_only: Literal[True]
+    witness: dict[str, Any]
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_gl2_witness_shape(self) -> FiniteObjectWitnessReport:
+        required = {
+            "order",
+            "derived_series_orders",
+            "is_solvable",
+            "confirmed",
+            "transcript_sha256",
+        }
+        missing = sorted(required - set(self.witness))
+        if missing:
+            raise ValueError(f"finite object witness missing required keys: {missing}")
+        if self.witness["order"] != 48:
+            raise ValueError("GL_2(F_3) witness must record order 48")
+        if self.witness["derived_series_orders"] != [48, 24, 8, 2, 1]:
+            raise ValueError("GL_2(F_3) witness must record the expected derived series")
+        if self.witness["is_solvable"] is not True or self.witness["confirmed"] is not True:
+            raise ValueError("GL_2(F_3) witness must be confirmed solvable")
+        if not str(self.witness["transcript_sha256"]).strip():
+            raise ValueError("finite object witness requires transcript_sha256")
+        return self
+
+
 class ExternalToolCandidate(StrictBaseModel):
     """A discovered external tool proposed for a scoped check (Goal 25, slice 1).
 
@@ -1137,6 +1176,11 @@ class ExtractedTheorem(StrictBaseModel):
     context: str = ""
     hypothesis_terms: list[str] = Field(default_factory=list)
     confidence: Literal["high", "medium", "low"]
+    source_locator: dict[str, Any] = Field(default_factory=dict)
+    # Additive provenance: hash of the extracted statement string. Source
+    # grounding still owns statement_sha256 on SourceRef; this field just makes
+    # extraction artifacts easier to audit and never grants trust by itself.
+    statement_sha256: str = ""
 
 
 class TheoremExtractionReport(StrictBaseModel):
@@ -1483,7 +1527,14 @@ class TheoremApplicabilityUsage(StrictBaseModel):
     source_status: SourceStatus
     conclusion_status: Literal["compatible", "weaker", "stronger", "orthogonal", "contradicts", "unclear"]
     conditions: list[TheoremApplicabilityCondition]
-    applicability_status: Literal["applicable", "blocked", "misapplied", "unclear"]
+    applicability_status: Literal[
+        "applicable",
+        "blocked",
+        "misapplied",
+        "unclear",
+        "needs_human_assumption",
+        "wrong_source",
+    ]
     blocks_source_backed: bool
     claim_scope: Literal["universal", "restricted", "unclear"] = "unclear"
     theorem_scope: Literal["universal", "very_general", "generic", "restricted", "unclear"] = "unclear"
@@ -1495,6 +1546,8 @@ class TheoremApplicabilityUsage(StrictBaseModel):
         bad_conditions = {"missing", "mismatched", "unclear", "not_checked"}
         has_bad_condition = any(condition.status in bad_conditions for condition in self.conditions)
         if self.applicability_status == "applicable":
+            if self.source_status != SourceStatus.source_backed:
+                raise ValueError("applicable theorem usage requires source_backed source status")
             if not self.conditions:
                 raise ValueError("applicable theorem usage requires non-empty condition coverage")
             if has_bad_condition:
@@ -1505,6 +1558,8 @@ class TheoremApplicabilityUsage(StrictBaseModel):
                 raise ValueError("applicable theorem usage cannot block source_backed")
         if has_bad_condition and not self.blocks_source_backed:
             raise ValueError("unsatisfied theorem conditions must block source_backed")
+        if self.source_status != SourceStatus.source_backed and not self.blocks_source_backed:
+            raise ValueError("non-source-backed theorem usage must block source_backed")
         return self
 
 
@@ -1524,7 +1579,14 @@ class TheoremApplicabilityReport(StrictBaseModel):
     # ``all_applicable`` while any ledger obligation is unresolved. Additive and
     # optional — absent/empty means behaviour is unchanged.
     ledger_usages: list[TheoremApplicabilityUsage] = Field(default_factory=list)
-    overall_status: Literal["all_applicable", "blocked", "misapplied", "unclear"]
+    overall_status: Literal[
+        "all_applicable",
+        "blocked",
+        "misapplied",
+        "unclear",
+        "needs_human_assumption",
+        "wrong_source",
+    ]
     notes: list[str] = Field(default_factory=list)
     # Goal 41: sha256 of source_grounding.yaml's bytes AT AUDIT TIME. Optional/
     # additive: when set, the run validator requires the current file to match —
@@ -1550,9 +1612,46 @@ class TheoremApplicabilityReport(StrictBaseModel):
         if any(usage.applicability_status == "misapplied" for usage in self.usages):
             if self.overall_status != "misapplied":
                 raise ValueError("misapplied theorem usage requires overall_status=misapplied")
+        if any(usage.applicability_status == "wrong_source" for usage in self.usages):
+            if self.overall_status not in {"wrong_source", "misapplied"}:
+                raise ValueError("wrong_source theorem usage requires overall_status=wrong_source or misapplied")
+        if any(usage.applicability_status == "needs_human_assumption" for usage in self.usages):
+            if self.overall_status not in {"needs_human_assumption", "blocked", "misapplied", "wrong_source"}:
+                raise ValueError("needs_human_assumption usage requires a blocking overall status")
         if any(usage.applicability_status == "blocked" for usage in self.usages):
-            if self.overall_status not in {"blocked", "misapplied"}:
+            if self.overall_status not in {"blocked", "misapplied", "wrong_source", "needs_human_assumption"}:
                 raise ValueError("blocked theorem usage requires blocked or misapplied overall status")
+        return self
+
+
+class TheoremApplicabilityReviewRecord(StrictBaseModel):
+    reviewer_id: Literal["source_match_reviewer", "hypothesis_reviewer"]
+    proof_step_id: str | None
+    verdict: Literal[
+        "applicable",
+        "blocked",
+        "needs_human_assumption",
+        "wrong_source",
+        "unclear",
+    ]
+    conclusion_status: Literal["compatible", "weaker", "stronger", "orthogonal", "contradicts", "unclear"]
+    conditions: list[TheoremApplicabilityCondition] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class TheoremApplicabilityReviewArtifact(StrictBaseModel):
+    schema_version: Literal[1] = 1
+    claim_id: str
+    run_id: str
+    generated_at: str
+    reviewers: list[Literal["source_match_reviewer", "hypothesis_reviewer"]]
+    reviews: list[TheoremApplicabilityReviewRecord]
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_reviewers(self) -> TheoremApplicabilityReviewArtifact:
+        if self.reviewers != ["source_match_reviewer", "hypothesis_reviewer"]:
+            raise ValueError("theorem_applicability_review must record both reviewers in order")
         return self
 
 
@@ -4282,6 +4381,7 @@ class ProofGapResolutionReport(StrictBaseModel):
     proof_artifact: str = "line_numbered_proof.yaml"
     line_numbered_proof_sha256: str = Field(min_length=1)
     candidates: list[ProofGapResolutionCandidate] = Field(default_factory=list)
+    repair_plan: list[dict[str, Any]] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
 
@@ -4404,6 +4504,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "literature_search_plan": LiteratureSearchPlan,
     "autonomous_literature_retrieval": AutonomousLiteratureRetrievalReport,
     "proof_verification": ProofVerificationReport,
+    "finite_object_witness": FiniteObjectWitnessReport,
     "external_tool_candidates": ExternalToolCandidatesReport,
     "external_tool_runs": ExternalToolRunsReport,
     "scoped_verification_request": ScopedVerificationRequest,
@@ -4416,6 +4517,7 @@ MODEL_REGISTRY: dict[str, type[BaseModel]] = {
     "source_grounding": SourceGroundingReport,
     "theorem_extraction": TheoremExtractionReport,
     "theorem_applicability": TheoremApplicabilityReport,
+    "theorem_applicability_review": TheoremApplicabilityReviewArtifact,
     "review": Review,
     "idea_grade": IdeaGrade,
     "loop_control": LoopControl,

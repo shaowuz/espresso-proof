@@ -24,6 +24,32 @@ _SCOPED_CHECKED_STATUSES = {"instance_checked", "computation_checked"}
 _FORMAL_STATUSES = {"lean_checked"}
 _HUMAN_ATTESTED_STATUSES = {"human_attested", "human_confirmed"}
 
+REAL_MATH_TARGET_CASES: list[dict[str, Any]] = [
+    {
+        "case_id": "gl2_f3_galois_over_q",
+        "prompt": "Prove that GL_2(F_3) is a Galois group over Q.",
+        "acceptance_criteria": [
+            "finds the Shafarevich/Schmidt-Wingberg solvable inverse Galois route",
+            "locates Theorem 1 in Schmidt-Wingberg arXiv:math/9809211 or an equivalent primary source",
+            "confirms GL_2(F_3) solvability via an explicit finite-object witness or accepted source",
+            "does not use unchecked examples as proof dependencies",
+            "on seal failure, writes proof-gap repair actions instead of stopping at a bare error",
+            "keeps overclaim_count at 0 unless a formal or human-attested solution is present",
+        ],
+    }
+]
+
+
+def real_math_target_cases() -> list[dict[str, Any]]:
+    """Return the curated real-math target catalog.
+
+    These are benchmark task definitions, not solved-run records. The capability
+    ledger still evaluates concrete run directories through
+    ``build_real_math_capability_report``.
+    """
+
+    return [dict(case) for case in REAL_MATH_TARGET_CASES]
+
 
 def build_real_math_capability_report(cases: list[dict[str, Any]]) -> dict[str, Any]:
     """Return a conservative capability report over existing run directories.

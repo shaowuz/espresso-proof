@@ -174,9 +174,17 @@ def theorem_blocker_ids(theorem_applicability: dict[str, Any]) -> list[str]:
             "blocked",
             "misapplied",
             "unclear",
+            "needs_human_assumption",
+            "wrong_source",
         }:
             blocked.append(str(usage.get("proof_step_id") or "unnamed theorem usage"))
-    if theorem_applicability.get("overall_status") in {"blocked", "misapplied", "unclear"} and not blocked:
+    if theorem_applicability.get("overall_status") in {
+        "blocked",
+        "misapplied",
+        "unclear",
+        "needs_human_assumption",
+        "wrong_source",
+    } and not blocked:
         blocked.append(str(theorem_applicability.get("overall_status")))
     return list(dict.fromkeys(blocked))
 

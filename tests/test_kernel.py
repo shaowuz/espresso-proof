@@ -41,6 +41,13 @@ from espresso_proof.orchestration.workflow_generator import classify_domain, gen
 FIXTURES = Path("tests/fixtures")
 
 
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation is unavailable in this test environment: {exc}")
+
+
 @pytest.mark.parametrize("fixture_dir", sorted(p for p in FIXTURES.iterdir() if p.is_dir()))
 def test_fixture_shape_is_complete(fixture_dir: Path) -> None:
     assert (fixture_dir / "input.md").exists()
@@ -107,7 +114,7 @@ def test_kernel_safe_run_path_rejects_symlink(tmp_path: Path) -> None:
     run_dir.mkdir(parents=True)
     outside = tmp_path / "outside.yaml"
     outside.write_text("not: trusted\n", encoding="utf-8")
-    (run_dir / "linked.yaml").symlink_to(outside)
+    _symlink_or_skip(run_dir / "linked.yaml", outside)
 
     with pytest.raises(KernelError, match="symlink"):
         safe_run_path(run_dir, "linked.yaml")
@@ -152,7 +159,7 @@ def test_kernel_snapshot_rejects_symlink_artifact(tmp_path: Path) -> None:
     outside.write_text("not: trusted\n", encoding="utf-8")
     examples_path = run_dir / "examples.yaml"
     examples_path.unlink()
-    examples_path.symlink_to(outside)
+    _symlink_or_skip(examples_path, outside)
 
     with pytest.raises(KernelError, match="symlink"):
         snapshot(tmp_path, run_dir)

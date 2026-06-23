@@ -19,17 +19,23 @@ trusted backend with a confirming result may earn a checked status.
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
 from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.verification.finite_group_verifier import (
     all_groups_of_order_p_squared,
+    gl2_f3_solvability_witness,
     verify_group_abelian,
     verify_identity_on_table,
 )
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.kernel.models import ProofVerificationReport, ScopedVerificationRequests
+from espresso_proof.kernel.models import (
+    FiniteObjectWitnessReport,
+    ProofVerificationReport,
+    ScopedVerificationRequests,
+)
 from espresso_proof.kernel.run_lock import run_writer_lock
 from espresso_proof.verification.symbolic_identity import verify_ring_identity_mod
 
@@ -76,6 +82,49 @@ def build_finite_group_entries(claim_id: str, primes: list[int]) -> list[dict]:
     return entries
 
 
+def build_gl2_f3_solvability_entry(claim_id: str, *, entry_id: str = "gl2_f3_solvable") -> tuple[dict, dict]:
+    """Build a scoped finite-object witness entry for ``GL_2(F_3)``.
+
+    The witness is explicit finite data: 48 matrices over F_3 and derived-series
+    subgroup hashes/orders. It earns only ``instance_checked`` for this finite
+    object when the deterministic transcript confirms the expected derived
+    series. It does not prove an inverse Galois theorem or any general group
+    classification fact.
+    """
+
+    witness = gl2_f3_solvability_witness()
+    confirmed = bool(witness["confirmed"])
+    entry = {
+        "id": entry_id,
+        "verifier_type": "finite_group_cayley",
+        "claim_id": claim_id,
+        "target": "solvability of the explicit finite group GL_2(F_3)",
+        "input_summary": (
+            "Enumerated invertible 2x2 matrices over F_3; multiplication is matrix "
+            "multiplication mod 3; derived series orders "
+            + " -> ".join(str(x) for x in witness["derived_series_orders"])
+        ),
+        "result": (
+            "confirmed GL_2(F_3) solvable: derived series reaches the trivial subgroup"
+            if confirmed
+            else "GL_2(F_3) solvability witness did not confirm the expected derived series"
+        ),
+        "trusted": True,
+        "confirmed": confirmed,
+        "earned_status": "instance_checked" if confirmed else "unverified",
+        "scope_note": (
+            "Scoped finite-object witness only: enumerates GL_2(F_3) and computes "
+            "its derived series orders 48 -> 24 -> 8 -> 2 -> 1. This supports only "
+            "the solvability of this explicit finite group; it is not a general "
+            "theorem and does not establish the inverse Galois conclusion."
+        ),
+        "input_hash": witness["transcript_sha256"],
+        "output_hash": witness["transcript_sha256"],
+        "adapter_id": "gl2_f3_solvability_witness",
+    }
+    return entry, witness
+
+
 def build_proof_verification(run_dir: Path, *, primes: list[int]) -> dict:
     run_dir = Path(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
@@ -112,6 +161,70 @@ def verify_finite_groups(run_dir: Path, *, primes: list[int]) -> dict:
     )
     write_yaml(manifest_path, manifest)
     return report
+
+
+def verify_gl2_f3_solvable_in_run(
+    run_dir: Path,
+    *,
+    entry_id: str = "gl2_f3_solvable",
+) -> dict:
+    """Append the explicit ``GL_2(F_3)`` solvability witness to a run."""
+
+    run_dir = Path(run_dir)
+    ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
+    manifest_path = run_dir / "run_manifest.yaml"
+    witness_path = run_dir / "finite_object_witness.yaml"
+    proof_verification_path = run_dir / "proof_verification.yaml"
+    with run_writer_lock(run_dir, action="gl2 f3 finite-object witness"):
+        manifest = read_yaml(manifest_path)
+        claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
+        entry, witness = build_gl2_f3_solvability_entry(claim_id, entry_id=entry_id)
+        witness_report = {
+            "schema_version": 1,
+            "claim_id": claim_id,
+            "run_id": manifest["run_id"],
+            "witness_id": entry_id,
+            "kind": "gl2_f3_solvability",
+            "advisory_only": True,
+            "witness": witness,
+            "notes": [
+                "Finite-object witness package for reviewer inspection.",
+                "This artifact is scoped to GL_2(F_3) and does not prove the full Galois-realization claim.",
+            ],
+        }
+        FiniteObjectWitnessReport.model_validate(witness_report)
+        snapshot = {
+            "manifest": manifest_path.read_bytes(),
+            "had_witness": witness_path.exists(),
+            "witness": witness_path.read_bytes() if witness_path.exists() else None,
+            "had_proof_verification": proof_verification_path.exists(),
+            "proof_verification": (
+                proof_verification_path.read_bytes()
+                if proof_verification_path.exists()
+                else None
+            ),
+        }
+        try:
+            write_yaml(witness_path, witness_report)
+            manifest.setdefault("optional_artifacts", {})["finite_object_witness"] = (
+                "finite_object_witness.yaml"
+            )
+            write_yaml(manifest_path, manifest)
+            _append_verification_entries_locked(run_dir, [entry])
+            return entry
+        except Exception:
+            tmp = manifest_path.with_name(manifest_path.name + ".restore.tmp")
+            tmp.write_bytes(snapshot["manifest"])
+            os.replace(tmp, manifest_path)
+            if snapshot["had_witness"]:
+                witness_path.write_bytes(snapshot["witness"])
+            elif witness_path.exists():
+                witness_path.unlink()
+            if snapshot["had_proof_verification"]:
+                proof_verification_path.write_bytes(snapshot["proof_verification"])
+            elif proof_verification_path.exists():
+                proof_verification_path.unlink()
+            raise
 
 
 def build_identity_table_entry(claim_id: str, *, entry_id: str, table: object, identity: str, target: str = "") -> dict:

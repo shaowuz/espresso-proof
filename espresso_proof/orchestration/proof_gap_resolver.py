@@ -24,6 +24,7 @@ from espresso_proof.kernel.pressure_status import artifact_revision_hash
 from espresso_proof.kernel.validators import validate_run
 
 PROOF_GAP_RESOLUTION_FILENAME = "proof_gap_resolution.yaml"
+GAP_REPAIR_ROUNDS_INDEX = "gap_repair_rounds/index.yaml"
 
 __all__ = ["PROOF_GAP_RESOLUTION_FILENAME", "resolve_proof_gaps"]
 
@@ -296,6 +297,215 @@ def _resolver_context(run_dir: Path, proof: dict, unresolved: list[dict]) -> dic
     }
 
 
+def _repair_plan(candidates: list[dict]) -> list[dict]:
+    plan: list[dict] = []
+    for candidate in candidates:
+        line_id = str(candidate.get("line_id") or "")
+        dep_ref = str(candidate.get("dependency_ref") or "")
+        needed = " ".join(
+            str(candidate.get(key) or "")
+            for key in ("needed_statement", "proposed_statement", "source_locator")
+        ).lower()
+        base = {
+            "line_id": line_id,
+            "dependency_ref": dep_ref,
+            "dependency_type": candidate.get("dependency_type", "unchecked_gap"),
+            "candidate_ref": candidate.get("proposed_ref", ""),
+            "status": "planned",
+            "advisory_only": True,
+        }
+        if "gl_2(f_3)" in needed or "gl2(f3)" in needed or "gl_2" in needed and "solv" in needed:
+            plan.append(
+                {
+                    **base,
+                    "action": "finite_object_witness",
+                    "channel": "scoped_witness_then_review",
+                    "description": (
+                        "Generate explicit GL_2(F_3) derived-series witness; "
+                        "reviewer must decide whether it supports only this finite object."
+                    ),
+                    "target_artifact": "finite_object_witness.yaml",
+                }
+            )
+        if candidate.get("dependency_type") == "theorem_ref" or "theorem" in needed or "source" in needed:
+            plan.append(
+                {
+                    **base,
+                    "action": "source_retrieval",
+                    "channel": "source_locator_grounding",
+                    "description": (
+                        "Retrieve the proposed dynamic source, extract theorem locator, "
+                        "then run theorem applicability review."
+                    ),
+                    "target_artifact": "theorem_extraction.yaml",
+                }
+            )
+            plan.append(
+                {
+                    **base,
+                    "action": "theorem_applicability_review",
+                    "channel": "source_match_and_hypothesis_review",
+                    "description": (
+                        "Run source-match and hypothesis reviewers; keep blocked unless "
+                        "the theorem statement and conditions match."
+                    ),
+                    "target_artifact": "theorem_applicability.yaml",
+                }
+            )
+        if candidate.get("dependency_type") == "unchecked_gap":
+            plan.append(
+                {
+                    **base,
+                    "action": "proof_dependency_rewrite",
+                    "channel": "proof_graph_repair",
+                    "description": (
+                        "Rewrite the proof dependency edge only after a source-backed, "
+                        "human-allowed, or scoped witness review is available."
+                    ),
+                    "target_artifact": "line_numbered_proof.yaml",
+                }
+            )
+    if candidates:
+        plan.append(
+            {
+                "line_id": "*",
+                "dependency_ref": "*",
+                "dependency_type": "seal_retry",
+                "candidate_ref": "",
+                "status": "planned",
+                "advisory_only": True,
+                "action": "rerun_seal_consensus",
+                "channel": "seal_after_repairs_only",
+                "description": "Rerun seal-consensus after accepted repairs; unresolved candidate repairs must still fail closed.",
+                "target_artifact": "agent_consensus_review.yaml",
+            }
+        )
+    return plan
+
+
+def _write_repair_loop_artifacts(
+    run_dir: Path,
+    *,
+    manifest: dict,
+    claim: dict,
+    report: dict,
+    repair_plan: list[dict],
+) -> None:
+    blockers = [
+        {
+            "line_id": item.get("line_id"),
+            "dependency_ref": item.get("dependency_ref"),
+            "dependency_type": item.get("dependency_type"),
+            "needed_statement": item.get("needed_statement", ""),
+        }
+        for item in report.get("candidates", [])
+    ]
+    repair_target = {
+        "schema_version": 1,
+        "claim_id": claim["id"],
+        "run_id": manifest["run_id"],
+        "kind": "repair_target",
+        "source": "proof_gap_resolver",
+        "advisory_only": True,
+        "selected_target": {
+            "line_ids": sorted({str(item.get("line_id")) for item in blockers if item.get("line_id")}),
+            "reason": "seal-consensus found unresolved proof dependencies",
+        },
+        "blockers": blockers,
+        "repair_plan": repair_plan,
+        "notes": [
+            "Repair target is scheduling metadata only.",
+            "It cannot upgrade proof/source/evidence status.",
+        ],
+    }
+    write_yaml(run_dir / "repair_target.yaml", repair_target)
+
+    rounds_dir = run_dir / "gap_repair_rounds"
+    rounds_dir.mkdir(exist_ok=True)
+    index_path = run_dir / GAP_REPAIR_ROUNDS_INDEX
+    index = read_yaml(index_path) if index_path.exists() else {
+        "schema_version": 1,
+        "claim_id": claim["id"],
+        "run_id": manifest["run_id"],
+        "rounds": [],
+        "notes": [
+            "Gap repair rounds are advisory process records.",
+            "They never clear a proof dependency without source/applicability review or human allowance.",
+        ],
+    }
+    round_id = f"gap_repair_{len(index.get('rounds', [])) + 1:03d}"
+    round_record = {
+        "round_id": round_id,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "trigger": "seal_consensus_unresolved_dependencies",
+        "proof_gap_resolution": PROOF_GAP_RESOLUTION_FILENAME,
+        "repair_target": "repair_target.yaml",
+        "status": "planned",
+        "repair_plan_count": len(repair_plan),
+        "actions": repair_plan,
+    }
+    write_yaml(rounds_dir / f"{round_id}.yaml", round_record)
+    index.setdefault("rounds", []).append(
+        {
+            "round_id": round_id,
+            "artifact": f"gap_repair_rounds/{round_id}.yaml",
+            "status": "planned",
+            "repair_plan_count": len(repair_plan),
+        }
+    )
+    write_yaml(index_path, index)
+
+
+def _snapshot_optional_file(path: Path) -> dict:
+    return {
+        "exists": path.exists(),
+        "bytes": path.read_bytes() if path.exists() else None,
+    }
+
+
+def _restore_optional_file(path: Path, snapshot: dict) -> None:
+    if snapshot["exists"]:
+        path.write_bytes(snapshot["bytes"])
+    elif path.exists():
+        path.unlink()
+
+
+def _snapshot_directory(path: Path) -> dict:
+    files: dict[str, bytes] = {}
+    existed = path.exists()
+    if existed:
+        for item in path.rglob("*"):
+            if item.is_file():
+                files[item.relative_to(path).as_posix()] = item.read_bytes()
+    return {"exists": existed, "files": files}
+
+
+def _restore_directory(path: Path, snapshot: dict) -> None:
+    if path.exists():
+        for item in sorted(path.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            if item.is_file():
+                rel = item.relative_to(path).as_posix()
+                if rel not in snapshot["files"]:
+                    item.unlink()
+        for item in sorted(path.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            if item.is_dir():
+                try:
+                    item.rmdir()
+                except OSError:
+                    pass
+    if snapshot["exists"]:
+        path.mkdir(exist_ok=True)
+        for rel, data in snapshot["files"].items():
+            target = path / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+    elif path.exists():
+        try:
+            path.rmdir()
+        except OSError:
+            pass
+
+
 def resolve_proof_gaps(
     run_dir: Path,
     *,
@@ -327,6 +537,7 @@ def resolve_proof_gaps(
         )
     agent_candidates = [] if human_candidates else _normalize_agent_candidates(raw, unresolved)
     candidates = [*agent_candidates, *human_candidates]
+    repair_plan = _repair_plan(candidates)
     patched_proof = _apply_candidates_to_proof(proof, candidates)
     proof_artifact = manifest.get("optional_artifacts", {}).get(
         "line_numbered_proof", "line_numbered_proof.yaml"
@@ -334,11 +545,15 @@ def resolve_proof_gaps(
 
     proof_path = run_dir / proof_artifact
     report_path = run_dir / PROOF_GAP_RESOLUTION_FILENAME
+    repair_target_path = run_dir / "repair_target.yaml"
+    rounds_dir = run_dir / "gap_repair_rounds"
     snapshot = {
         "manifest": manifest_path.read_bytes(),
         "proof": proof_path.read_bytes(),
         "had_report": report_path.exists(),
         "report": report_path.read_bytes() if report_path.exists() else None,
+        "repair_target": _snapshot_optional_file(repair_target_path),
+        "rounds_dir": _snapshot_directory(rounds_dir),
     }
     try:
         write_yaml(proof_path, patched_proof)
@@ -352,6 +567,7 @@ def resolve_proof_gaps(
             "proof_artifact": proof_artifact,
             "line_numbered_proof_sha256": proof_hash,
             "candidates": candidates,
+            "repair_plan": repair_plan,
             "notes": [
                 "Candidate repairs only; source/applicability review or explicit human allowance is required before a gap can clear.",
                 "No theorem library or mathematical rule checker is used by this resolver.",
@@ -360,9 +576,20 @@ def resolve_proof_gaps(
         }
         report = ProofGapResolutionReport.model_validate(report).model_dump(mode="json")
         write_yaml(report_path, report)
+        _write_repair_loop_artifacts(
+            run_dir,
+            manifest=manifest,
+            claim=claim,
+            report=report,
+            repair_plan=repair_plan,
+        )
         manifest.setdefault("optional_artifacts", {})[
             "proof_gap_resolution"
         ] = PROOF_GAP_RESOLUTION_FILENAME
+        manifest.setdefault("optional_artifacts", {})["repair_target"] = "repair_target.yaml"
+        manifest.setdefault("optional_artifacts", {})[
+            "gap_repair_rounds_index"
+        ] = GAP_REPAIR_ROUNDS_INDEX
         write_yaml(manifest_path, manifest)
         validate_run(run_dir)
         return report
@@ -375,4 +602,6 @@ def resolve_proof_gaps(
             report_path.write_bytes(snapshot["report"])
         elif report_path.exists():
             report_path.unlink()
+        _restore_optional_file(repair_target_path, snapshot["repair_target"])
+        _restore_directory(rounds_dir, snapshot["rounds_dir"])
         raise

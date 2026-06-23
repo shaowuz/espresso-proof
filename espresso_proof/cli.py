@@ -59,6 +59,7 @@ from espresso_proof.verification.proof_verification import (
     auto_wire_scoped_verifications,
     verify_tensor_left_exact_counterexample_in_run,
     verify_finite_groups,
+    verify_gl2_f3_solvable_in_run,
     verify_identity_table_in_run,
     verify_matrix_rank_in_run,
     verify_ring_identity_in_run,
@@ -1083,6 +1084,34 @@ def verify_finite_groups_command(
     typer.echo(f"-> {run / 'proof_verification.yaml'}")
 
 
+@app.command("verify-gl2-f3-solvable-in-run")
+def verify_gl2_f3_solvable_in_run_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    entry_id: str = typer.Option(
+        "gl2_f3_solvable",
+        "--id",
+        help="Unique id for this verification entry.",
+    ),
+) -> None:
+    """Build the explicit GL_2(F_3) finite-object witness and record it.
+
+    Earns instance_checked only for the scoped statement that this explicitly
+    enumerated finite group is solvable. It does not prove the inverse Galois
+    conclusion and does not act as a general group-theory verifier.
+    """
+    _require_claim_clear_for_cli(run)
+    entry = verify_gl2_f3_solvable_in_run(run, entry_id=entry_id)
+    validate_run(run)
+    _refresh_derived_views(run)
+    typer.echo(
+        f"Entry {entry['id']}: {entry['earned_status']} -- {entry['result']} "
+        "(finite-object witness only; NOT a proof of the full claim)."
+    )
+    typer.echo(f"Scope: {entry['scope_note']}")
+    typer.echo(f"-> {run / 'finite_object_witness.yaml'}")
+    typer.echo(f"-> {run / 'proof_verification.yaml'}")
+
+
 @app.command("verify-identity")
 def verify_identity_command(
     table: Path = typer.Option(..., "--table", exists=True, dir_okay=False, help="YAML file: a finite operation table (list of lists of ints)."),
@@ -1883,6 +1912,44 @@ def audit_theorem_applicability_command(
     typer.echo(f"Wrote theorem applicability audit to {run / 'theorem_applicability.yaml'}")
 
 
+@app.command("review-theorem-applicability")
+def review_theorem_applicability_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    provider: str = typer.Option("stub", "--provider"),
+    model: str = typer.Option("gpt-4.1", "--model"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND", "--external-agent-command-env"
+    ),
+) -> None:
+    """Run source-match and hypothesis LLM reviewers over theorem applicability.
+
+    Writes theorem_applicability_review.yaml and folds the structured reviewer
+    verdict into theorem_applicability.yaml. This does not upgrade source status.
+    """
+    from espresso_proof.verification.theorem_applicability import (
+        review_theorem_applicability_with_llm,
+    )
+
+    if provider not in {"stub", "openai", "external"}:
+        raise typer.BadParameter("provider must be stub, openai, or external")
+    validate_run(run)
+    _require_claim_clear_for_cli(run)
+    report = review_theorem_applicability_with_llm(
+        run,
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+    )
+    _refresh_process_status(run)
+    typer.echo(
+        f"Reviewed theorem applicability with {len(report['reviews'])} reviewer result(s); "
+        "source status unchanged."
+    )
+    typer.echo(f"-> {run / 'theorem_applicability_review.yaml'}")
+
+
 @app.command("verify-computations")
 def verify_computations_command(
     run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
@@ -2221,6 +2288,23 @@ def seal_consensus(
             raise typer.Exit(code=1) from exc
         except RuntimeError as exc:
             typer.echo(f"Not sealed: {exc}")
+            try:
+                from espresso_proof.orchestration.proof_gap_resolver import resolve_proof_gaps
+
+                report = resolve_proof_gaps(
+                    run,
+                    provider=provider,
+                    model=model,
+                    api_key_env=api_key_env,
+                    external_agent_command_env=external_agent_command_env,
+                )
+                typer.echo(
+                    "Generated proof-gap repair plan: "
+                    f"{len(report.get('candidates', []))} candidate(s), "
+                    f"{len(report.get('repair_plan', []))} planned action(s)."
+                )
+            except Exception as repair_exc:  # noqa: BLE001 - seal still fails closed.
+                typer.echo(f"Repair plan generation also failed: {repair_exc}")
             _refresh_process_status(run)
             raise typer.Exit(code=1) from exc
     _refresh_process_status(run)

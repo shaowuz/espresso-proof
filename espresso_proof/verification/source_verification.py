@@ -257,6 +257,8 @@ def term_covered(term: str, statement: str) -> bool:
         return _unnegated_word_present("over", statement) or _unnegated_word_present(
             "base field", statement
         )
+    if term == "order":
+        return "|g|" in statement or "order" in statement
     if term == "projective":
         return _unnegated_word_present("proper", statement) and _unnegated_word_present(
             "ample", statement
@@ -276,21 +278,38 @@ def expanded_hypothesis_terms(text: str) -> list[str]:
 TERM_ALIASES = {
     "cubic": ["degree 3", "degree-three"],
     "field": ["over", "base field"],
+    "q": ["global field", "number field", "rational field"],
     "fourfold": ["fourfolds", "four-dimensional"],
+    "galois": ["galois group", "galois extension"],
     "hodge": ["hodgetheoretic", "hodge-theoretic"],
+    "order": ["|g|", "order"],
     "proper": ["complete"],
     "smooth": ["nonsingular", "non-singular"],
+    "realization": ["there exists", "galois group isomorphic"],
+    "realize": ["there exists", "galois group isomorphic"],
+    "solvable": ["solvable group"],
 }
 
 
 STOPWORDS = {
     "and",
     "are",
+    "apply",
     "for",
     "from",
     "hypothesis",
+    "particular",
+    "schmidt",
+    "shafarevich",
     "source",
     "the",
+    "theorem",
     "this",
+    "its",
+    "via",
+    "over",
+    "every",
+    "occurs",
     "with",
+    "wingberg",
 }

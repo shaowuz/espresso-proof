@@ -640,7 +640,13 @@ def test_theorem_applicability_rejects_source_grounding_artifact_mismatch(tmp_pa
 def test_theorem_applicability_rejects_unknown_proof_step(tmp_path: Path) -> None:
     run_dir, manifest, source_grounding, ref_id, _step = _setup_source_backed_run(tmp_path)
     usage = _theorem_usage(proof_step_id="ghost_step", source_ref_id=ref_id)
-    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[usage])
+    _write_applicability(
+        run_dir,
+        manifest,
+        source_grounding["claim_id"],
+        usages=[usage],
+        overall_status="blocked",
+    )
     with pytest.raises(KernelValidationError, match="references unknown proof step"):
         validate_run(run_dir)
 
@@ -648,7 +654,13 @@ def test_theorem_applicability_rejects_unknown_proof_step(tmp_path: Path) -> Non
 def test_theorem_applicability_rejects_unknown_source_ref(tmp_path: Path) -> None:
     run_dir, manifest, source_grounding, _ref, step_id = _setup_source_backed_run(tmp_path)
     usage = _theorem_usage(proof_step_id=step_id, source_ref_id="ghost_ref")
-    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[usage])
+    _write_applicability(
+        run_dir,
+        manifest,
+        source_grounding["claim_id"],
+        usages=[usage],
+        overall_status="blocked",
+    )
     with pytest.raises(KernelValidationError, match="references unknown source ref"):
         validate_run(run_dir)
 
@@ -700,8 +712,20 @@ def test_theorem_applicability_source_status_must_match_step(tmp_path: Path) -> 
     # A usage whose source_status disagrees with its source_grounding step is
     # rejected (the audit cannot quietly downgrade/relabel the step's status).
     run_dir, manifest, source_grounding, ref_id, step_id = _setup_source_backed_run(tmp_path)
-    usage = _theorem_usage(proof_step_id=step_id, source_ref_id=ref_id, source_status="candidate")
-    _write_applicability(run_dir, manifest, source_grounding["claim_id"], usages=[usage])
+    usage = _theorem_usage(
+        proof_step_id=step_id,
+        source_ref_id=ref_id,
+        source_status="candidate",
+        applicability_status="blocked",
+        blocks_source_backed=True,
+    )
+    _write_applicability(
+        run_dir,
+        manifest,
+        source_grounding["claim_id"],
+        usages=[usage],
+        overall_status="blocked",
+    )
     with pytest.raises(KernelValidationError, match="source_status does not match source_grounding step"):
         validate_run(run_dir)
 

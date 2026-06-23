@@ -15,6 +15,10 @@ reach this backend.
 
 from __future__ import annotations
 
+import hashlib
+import json
+from itertools import product
+
 
 def verify_group_abelian(cayley: list[list[int]]) -> dict:
     """Deterministically check whether ``cayley`` is the table of an abelian group.
@@ -189,3 +193,109 @@ def all_groups_of_order_p_squared(p: int) -> list[tuple[str, list[list[int]]]]:
         (f"C_{p*p}", cyclic_group_table(p * p)),
         (f"C_{p} x C_{p}", elementary_abelian_table(p, 2)),
     ]
+
+
+Matrix2 = tuple[int, int, int, int]
+
+
+def gl2_f3_solvability_witness() -> dict:
+    """Explicit finite-object witness for ``GL_2(F_3)`` solvability.
+
+    This is deliberately scoped to one finite group. It enumerates the invertible
+    2x2 matrices over F_3, computes the commutator-derived series, and records a
+    transcript/hash that an LLM or human reviewer can inspect. It is not a
+    general group-theory rule checker.
+    """
+
+    elements = sorted(m for m in product(range(3), repeat=4) if _det_f3(m) != 0)
+    element_set = set(elements)
+    identity: Matrix2 = (1, 0, 0, 1)
+    closure_ok = all(_matmul_f3(a, b) in element_set for a in elements for b in elements)
+    inverse_ok = all(_matmul_f3(a, _inv_f3(a)) == identity for a in elements)
+
+    series: list[list[Matrix2]] = [elements]
+    current = set(elements)
+    while len(current) > 1:
+        commutators = {_commutator_f3(a, b) for a in current for b in current}
+        current = _subgroup_generated(commutators)
+        series.append(sorted(current))
+        if len(series) > 10:  # defensive fail-closed guard; should never happen.
+            break
+    orders = [len(level) for level in series]
+    transcript = {
+        "field": "F_3",
+        "element_encoding": "matrix (a,b,c,d) represents [[a,b],[c,d]] with entries mod 3",
+        "multiplication": "[[a,b],[c,d]] * [[e,f],[g,h]] over F_3",
+        "determinant_rule": "ad-bc mod 3; invertible iff determinant is nonzero",
+        "order": len(elements),
+        "closure_ok": closure_ok,
+        "inverse_ok": inverse_ok,
+        "derived_series_orders": orders,
+        "derived_series_subgroup_hashes": [
+            hashlib.sha256(json.dumps(level, sort_keys=True).encode("utf-8")).hexdigest()
+            for level in series
+        ],
+    }
+    transcript_hash = hashlib.sha256(
+        json.dumps(transcript, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    solvable = bool(closure_ok and inverse_ok and orders == [48, 24, 8, 2, 1])
+    return {
+        **transcript,
+        "is_solvable": solvable,
+        "confirmed": solvable,
+        "transcript_sha256": transcript_hash,
+        "review_required": (
+            "LLM/human reviewer should inspect that the explicit derived-series "
+            "computation supports only GL_2(F_3), not a general theorem."
+        ),
+    }
+
+
+def _det_f3(m: Matrix2) -> int:
+    a, b, c, d = m
+    return (a * d - b * c) % 3
+
+
+def _matmul_f3(x: Matrix2, y: Matrix2) -> Matrix2:
+    a, b, c, d = x
+    e, f, g, h = y
+    return (
+        (a * e + b * g) % 3,
+        (a * f + b * h) % 3,
+        (c * e + d * g) % 3,
+        (c * f + d * h) % 3,
+    )
+
+
+def _inv_f3(m: Matrix2) -> Matrix2:
+    a, b, c, d = m
+    det = _det_f3(m)
+    inv_det = 1 if det == 1 else 2
+    return (
+        (d * inv_det) % 3,
+        (-b * inv_det) % 3,
+        (-c * inv_det) % 3,
+        (a * inv_det) % 3,
+    )
+
+
+def _commutator_f3(x: Matrix2, y: Matrix2) -> Matrix2:
+    return _matmul_f3(_matmul_f3(_matmul_f3(_inv_f3(x), _inv_f3(y)), x), y)
+
+
+def _subgroup_generated(generators: set[Matrix2]) -> set[Matrix2]:
+    identity: Matrix2 = (1, 0, 0, 1)
+    subgroup = set(generators)
+    subgroup.add(identity)
+    changed = True
+    while changed:
+        changed = False
+        items = list(subgroup)
+        for a in items:
+            for b in items:
+                product_ab = _matmul_f3(a, b)
+                if product_ab not in subgroup:
+                    subgroup.add(product_ab)
+                    changed = True
+    return subgroup

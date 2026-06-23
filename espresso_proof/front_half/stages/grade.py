@@ -383,14 +383,15 @@ def _has_theorem_applicability_failure(run_dir: Path, context: dict) -> bool:
             theorem_applicability = read_yaml(run_dir / rel_path)
     if not isinstance(theorem_applicability, dict):
         return False
-    if theorem_applicability.get("overall_status") in {"blocked", "misapplied"}:
+    blocking_statuses = {"blocked", "misapplied", "needs_human_assumption", "wrong_source"}
+    if theorem_applicability.get("overall_status") in blocking_statuses:
         return True
     usages = list(theorem_applicability.get("usages") or []) + list(
         theorem_applicability.get("ledger_usages") or []
     )
     return any(
         isinstance(usage, dict)
-        and usage.get("applicability_status") in {"blocked", "misapplied"}
+        and usage.get("applicability_status") in blocking_statuses
         for usage in usages
     )
 

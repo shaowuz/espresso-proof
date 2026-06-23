@@ -27,6 +27,7 @@ from espresso_proof.kernel.models import (
     ExternalToolRunsReport,
     FailureClassificationReport,
     FailurePatternAudit,
+    FiniteObjectWitnessReport,
     LiteratureCandidates,
     MemoryContext,
     RetrievalResolutionReport,
@@ -71,6 +72,7 @@ from espresso_proof.kernel.models import (
     StrategySynthesis,
     TestReport,
     TheoremApplicabilityReport,
+    TheoremApplicabilityReviewArtifact,
     TheoremConditionLedger,
     TheoremExtractionReport,
     TimeAllocationPlan,
@@ -195,6 +197,7 @@ def validate_run(run_dir: Path) -> None:
     failure_pattern_audit = _load_optional_failure_pattern_audit(run_dir, manifest)
     literature_retrieval = _load_optional_literature_retrieval(run_dir, manifest)
     proof_verification = _load_optional_proof_verification(run_dir, manifest)
+    _load_optional_finite_object_witness(run_dir, manifest, claim)
     external_tool_candidates = _load_optional_external_tool_candidates(run_dir, manifest)
     external_tool_runs = _load_optional_external_tool_runs(run_dir, manifest)
     counterexamples = load_counterexamples_artifact(run_dir / artifacts["counterexamples"])
@@ -223,6 +226,7 @@ def validate_run(run_dir: Path) -> None:
     # run without it still validates (old-run compatible).
     validate_front_half_run(run_dir)
     theorem_applicability = _load_optional_theorem_applicability(run_dir, manifest)
+    _load_optional_theorem_applicability_review(run_dir, manifest, claim)
     llm_agent_run = _load_optional_llm_agent_run(run_dir, manifest)
     prover_loop = _load_optional_prover_loop(run_dir, manifest)
     prover_round_index = _load_optional_prover_round_index(run_dir, manifest)
@@ -1724,6 +1728,25 @@ def _load_optional_proof_verification(
     )
 
 
+def _load_optional_finite_object_witness(
+    run_dir: Path,
+    manifest: RunManifest,
+    claim: Claim,
+) -> FiniteObjectWitnessReport | None:
+    optional = manifest.optional_artifacts
+    if "finite_object_witness" not in optional:
+        return None
+    witness = validate_yaml_model(
+        run_dir / optional["finite_object_witness"],
+        FiniteObjectWitnessReport,
+    )
+    if witness.claim_id != claim.id:
+        raise KernelValidationError("finite_object_witness claim_id does not match locked claim")
+    if witness.run_id != manifest.run_id:
+        raise KernelValidationError("finite_object_witness run_id does not match manifest")
+    return witness
+
+
 def _load_optional_external_tool_candidates(
     run_dir: Path,
     manifest: RunManifest,
@@ -2030,6 +2053,25 @@ def _load_optional_theorem_applicability(
         run_dir / optional["theorem_applicability"],
         TheoremApplicabilityReport,
     )
+
+
+def _load_optional_theorem_applicability_review(
+    run_dir: Path,
+    manifest: RunManifest,
+    claim: Claim,
+) -> TheoremApplicabilityReviewArtifact | None:
+    optional = manifest.optional_artifacts
+    if "theorem_applicability_review" not in optional:
+        return None
+    review = validate_yaml_model(
+        run_dir / optional["theorem_applicability_review"],
+        TheoremApplicabilityReviewArtifact,
+    )
+    if review.claim_id != claim.id:
+        raise KernelValidationError("theorem_applicability_review claim_id does not match locked claim")
+    if review.run_id != manifest.run_id:
+        raise KernelValidationError("theorem_applicability_review run_id does not match manifest")
+    return review
 
 
 def _load_optional_theorem_condition_ledger(
