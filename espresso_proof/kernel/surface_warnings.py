@@ -163,13 +163,21 @@ def _counterexample_pressure_gap_ids(
     return list(dict.fromkeys(gaps))
 
 
-def theorem_blocker_ids(theorem_applicability: dict[str, Any]) -> list[str]:
+def theorem_blocker_ids(
+    theorem_applicability: dict[str, Any],
+    *,
+    used_source_ref_ids: set[str] | None = None,
+) -> list[str]:
     blocked: list[str] = []
     if not theorem_applicability:
         return blocked
     usages = list(theorem_applicability.get("usages") or [])
     usages.extend(theorem_applicability.get("ledger_usages") or [])
     for usage in _items(usages):
+        if used_source_ref_ids:
+            source_ref_id = str(usage.get("source_ref_id") or "")
+            if source_ref_id not in used_source_ref_ids:
+                continue
         if usage.get("blocks_source_backed") or usage.get("applicability_status") in {
             "blocked",
             "misapplied",
@@ -184,7 +192,7 @@ def theorem_blocker_ids(theorem_applicability: dict[str, Any]) -> list[str]:
         "unclear",
         "needs_human_assumption",
         "wrong_source",
-    } and not blocked:
+    } and not blocked and not used_source_ref_ids:
         blocked.append(str(theorem_applicability.get("overall_status")))
     return list(dict.fromkeys(blocked))
 
@@ -222,7 +230,15 @@ def _source_gap_items(
     grade: dict[str, Any],
     source_grounding: dict[str, Any],
 ) -> list[str]:
-    gaps = _text_items(grade.get("source_gaps"))
+    has_source_backed_ref = any(
+        source_ref.get("status") == "source_backed"
+        for source_ref in _items(source_grounding.get("source_refs"))
+    )
+    gaps = [
+        gap
+        for gap in _text_items(grade.get("source_gaps"))
+        if not (has_source_backed_ref and _is_stale_no_source_gap(gap))
+    ]
     for source_ref in _items(source_grounding.get("source_refs")):
         status = source_ref.get("status")
         if status and status != "source_backed":
@@ -236,6 +252,20 @@ def _source_gap_items(
     return list(dict.fromkeys(gaps))
 
 
+def _is_stale_no_source_gap(text: str) -> bool:
+    lowered = text.lower()
+    stale_markers = (
+        "no source is cited",
+        "no source cited",
+        "no exact locator",
+        "no hypothesis match",
+        "no source support",
+        "no source-backed",
+        "no source backed",
+    )
+    return any(marker in lowered for marker in stale_markers)
+
+
 def collect_surface_warnings(
     *,
     grade: dict[str, Any],
@@ -246,6 +276,8 @@ def collect_surface_warnings(
     source_grounding: dict[str, Any] | None = None,
     theorem_applicability: dict[str, Any] | None = None,
     update_inbox: dict[str, Any] | None = None,
+    line_numbered_proof: dict[str, Any] | None = None,
+    agent_consensus_review: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     warnings: list[dict[str, Any]] = []
     source_gaps = _source_gap_items(grade, source_grounding or {})
@@ -286,7 +318,10 @@ def collect_surface_warnings(
                 "ids": pending_counterexamples,
             }
         )
-    theorem_blockers = theorem_blocker_ids(theorem_applicability or {})
+    theorem_blockers = theorem_blocker_ids(
+        theorem_applicability or {},
+        used_source_ref_ids=_proof_theorem_ref_ids(line_numbered_proof or {}),
+    )
     if theorem_blockers:
         warnings.append(
             {
@@ -300,7 +335,9 @@ def collect_surface_warnings(
                 "ids": theorem_blockers,
             }
         )
-    reviewer_summary = reviewer_blocker_summary(review)
+    reviewer_summary = (
+        "" if (agent_consensus_review or {}).get("consensus") is True else reviewer_blocker_summary(review)
+    )
     if reviewer_summary:
         warnings.append(
             {
@@ -325,6 +362,16 @@ def collect_surface_warnings(
             }
         )
     return warnings
+
+
+def _proof_theorem_ref_ids(line_numbered_proof: dict[str, Any]) -> set[str]:
+    refs: set[str] = set()
+    for line in _items(line_numbered_proof.get("lines")):
+        refs.update(str(ref) for ref in (line.get("source_refs") or []) if str(ref).strip())
+        for dep in _items(line.get("dependencies")):
+            if dep.get("type") == "theorem_ref" and str(dep.get("ref") or "").strip():
+                refs.add(str(dep["ref"]))
+    return refs
 
 
 def render_warning_lines(warnings: list[dict[str, Any]]) -> list[str]:
@@ -392,6 +439,8 @@ def collect_surface_warnings_from_run(run_dir: Path) -> list[dict[str, Any]]:
         source_grounding=artifact("source_grounding"),
         theorem_applicability=optional_artifact("theorem_applicability"),
         update_inbox=optional_artifact("update_inbox"),
+        line_numbered_proof=optional_artifact("line_numbered_proof"),
+        agent_consensus_review=optional_artifact("agent_consensus_review"),
     )
 
 
@@ -500,7 +549,17 @@ def refresh_final_report_disclosures(run_dir: Path) -> None:
     if not path.exists():
         return
     text = path.read_text(encoding="utf-8")
+    consensus_block = ""
+    consensus_match = re.search(r"\n\nAgent-consensus mock check:.*\Z", text, re.DOTALL)
+    if consensus_match:
+        consensus_block = consensus_match.group(0).rstrip() + "\n"
+        text = text[: consensus_match.start()]
     base = _sanitize_legacy_final_body(
         text.split("\n\nOpen blockers / pending checks:", 1)[0].rstrip()
     )
-    write_text(path, base + final_report_disclosure_block(collect_surface_warnings_from_run(run_dir)))
+    write_text(
+        path,
+        base
+        + final_report_disclosure_block(collect_surface_warnings_from_run(run_dir))
+        + consensus_block,
+    )

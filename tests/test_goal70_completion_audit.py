@@ -138,7 +138,7 @@ STEP_COMMANDS = {
         "--provider",
         "external",
         "--front-half",
-        "mock",
+        "external",
         "--model",
         "codex-cli",
         "--api-key-env",
@@ -453,7 +453,7 @@ def _write_complete_evidence(tmp_path: Path) -> tuple[Path, Path, Path]:
         "--provider",
         "external",
         "--front-half",
-        "mock",
+        "external",
         "--model",
         "codex-cli",
         "--api-key-env",
@@ -1263,16 +1263,16 @@ def test_goal70_completion_audit_rejects_live_command_mode_mismatch(
     payload = json.loads(live.read_text(encoding="utf-8"))
     command = payload["steps"][0]["command"]
     command[command.index("--literature-mode") + 1] = "live"
-    command[command.index("--front-half") + 1] = "external"
+    command[command.index("--front-half") + 1] = "mock"
     _write_json(live, payload)
 
     completed = _run_audit(non_live, web, live)
 
     assert completed.returncode != 0
     assert "live smoke command literature mode is local" in completed.stdout
-    assert "live smoke command front half is mock" in completed.stdout
+    assert "live smoke command front half is external" in completed.stdout
     assert "command_literature_mode=live" in completed.stdout
-    assert "command_front_half=external" in completed.stdout
+    assert "command_front_half=mock" in completed.stdout
 
 
 def test_goal70_completion_audit_rejects_live_command_max_references_mismatch(

@@ -154,6 +154,32 @@ def _guard_windows_run_path_length(output_root: Path, project: str) -> None:
         )
 
 
+def _resolve_front_half_mode(*, provider: str, front_half: str, command_name: str) -> str:
+    """Resolve the user-facing front-half setting.
+
+    ``auto`` keeps deterministic stub runs on the developer path, while real
+    providers use a real claim-understanding agent by default. ``run-flow`` keeps
+    its legacy stub fixture default (mock) so old diagnostic tests stay stable.
+    Explicitly pairing a real provider with mock/stub front-half remains
+    available for fixture/debug parity and is surfaced to the user.
+    """
+
+    if front_half == "auto":
+        if provider == "external":
+            return "external"
+        if provider == "openai":
+            return "openai"
+        return "mock" if command_name == "run-flow" else "stub"
+    if provider in {"openai", "external"} and front_half in {"mock", "stub"}:
+        typer.echo(
+            f"{command_name}: using --front-half {front_half} with provider={provider}. "
+            f"This run used {front_half} front-half; arbitrary math claims may stop at "
+            "clarification. Omit --front-half to use the real claim-understanding "
+            "agent, or pass --front-half external for the external adapter."
+        )
+    return front_half
+
+
 def _refresh_process_status(run: Path) -> None:
     """Refresh AGENT_FLOW process projection after manual CLI artifact writes."""
 
@@ -163,6 +189,24 @@ def _refresh_process_status(run: Path) -> None:
 
     write_stage_status_projection(run, include_artifact_hashes=False)
     validate_run(run)
+
+
+def _mark_failure_patterns_done_if_board_exists(run: Path) -> None:
+    """Keep manual failure-audit commands aligned with the visible process board."""
+
+    from espresso_proof.kernel.agent_run_status import has_status, set_agent_status
+
+    if not has_status(run):
+        return
+    now = datetime.now(UTC).isoformat()
+    set_agent_status(
+        run,
+        "failure_patterns",
+        "done",
+        started_at=now,
+        finished_at=now,
+        increment_attempt=True,
+    )
 
 
 def _require_claim_clear_for_cli(run: Path) -> None:
@@ -223,7 +267,7 @@ def orchestrate(
     input: Path | None = typer.Option(None, "--input", "-i", dir_okay=False),
     project: str = typer.Option("hodge_atoms", "--project", "-p"),
     provider: str = typer.Option("stub", "--provider"),
-    front_half: str = typer.Option("stub", "--front-half"),
+    front_half: str = typer.Option("auto", "--front-half"),
     model: str = typer.Option("gpt-4.1", "--model"),
     reviewer_set: str = typer.Option("espresso", "--reviewer-set"),
     api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
@@ -335,10 +379,13 @@ def orchestrate(
         raise typer.BadParameter("provide --input for a fresh run, or --resume <run_dir>")
     if provider not in {"stub", "openai", "external"}:
         raise typer.BadParameter("provider must be stub, openai, or external")
-    if front_half not in {"mock", "stub", "external"}:
-        raise typer.BadParameter("front-half must be mock, stub, or external")
+    if front_half not in {"auto", "mock", "stub", "openai", "external"}:
+        raise typer.BadParameter("front-half must be auto, mock, stub, openai, or external")
     if reviewer_set not in {"generic", "espresso"}:
         raise typer.BadParameter("reviewer-set must be generic or espresso")
+    front_half = _resolve_front_half_mode(
+        provider=provider, front_half=front_half, command_name="orchestrate"
+    )
 
     _guard_windows_run_path_length(output_root, project)
     result = orchestrate_run(
@@ -538,7 +585,7 @@ def run_flow(
     literature_provider: list[str] | None = typer.Option(None, "--literature-provider"),
     max_references: int = typer.Option(8, "--max-references", min=1, max=25),
     provider: str = typer.Option("stub", "--provider"),
-    front_half: str = typer.Option("mock", "--front-half"),
+    front_half: str = typer.Option("auto", "--front-half"),
     model: str = typer.Option("gpt-4.1", "--model"),
     reviewer_set: str = typer.Option("espresso", "--reviewer-set"),
     api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
@@ -563,10 +610,13 @@ def run_flow(
         raise typer.BadParameter("literature-mode must be local or live")
     if provider not in {"stub", "openai", "external"}:
         raise typer.BadParameter("provider must be stub, openai, or external")
-    if front_half not in {"mock", "stub", "external"}:
-        raise typer.BadParameter("front-half must be mock, stub, or external")
+    if front_half not in {"auto", "mock", "stub", "openai", "external"}:
+        raise typer.BadParameter("front-half must be auto, mock, stub, openai, or external")
     if reviewer_set not in {"generic", "espresso"}:
         raise typer.BadParameter("reviewer-set must be generic or espresso")
+    front_half = _resolve_front_half_mode(
+        provider=provider, front_half=front_half, command_name="run-flow"
+    )
 
     _guard_windows_run_path_length(output_root, project)
     result = orchestrate_run(
@@ -665,10 +715,16 @@ def classify_failures_command(
     all-hypotheses counterexample.
     """
     report = classify_failures(run)
-    validate_run(run)
+    pattern_audit = audit_failure_patterns(run)
+    _mark_failure_patterns_done_if_board_exists(run)
+    _refresh_process_status(run)
     categories = ", ".join(item["category"] for item in report["classifications"]) or "none"
     typer.echo(f"Classified {len(report['classifications'])} failure(s): {categories}")
     typer.echo(f"-> {run / 'failure_classification.yaml'}")
+    typer.echo(
+        f"Pattern audit: {len(pattern_audit['matches'])} match(es) -> "
+        f"{run / 'failure_pattern_audit.yaml'}"
+    )
 
 
 @app.command("judge")
@@ -751,7 +807,8 @@ def audit_patterns_command(
     hard=points at an existing kernel validator (no new blocking added).
     """
     report = audit_failure_patterns(run)
-    validate_run(run)
+    _mark_failure_patterns_done_if_board_exists(run)
+    _refresh_process_status(run)
     objections = "; ".join(sorted({objection_phrase(m["tier"]) for m in report["matches"]})) or "none"
     typer.echo(f"Matched {len(report['matches'])} failure pattern(s) [{objections}]")
     typer.echo(f"-> {run / 'failure_pattern_audit.yaml'}")
@@ -1367,6 +1424,18 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     update_inbox_path = _optional_artifact_path(run, optional_artifacts, "update_inbox")
     if update_inbox_path is not None:
         update_inbox = read_yaml(update_inbox_path)
+    line_numbered_proof = {}
+    line_numbered_proof_path = _optional_artifact_path(
+        run, optional_artifacts, "line_numbered_proof"
+    )
+    if line_numbered_proof_path is not None:
+        line_numbered_proof = read_yaml(line_numbered_proof_path)
+    agent_consensus_review = {}
+    agent_consensus_review_path = _optional_artifact_path(
+        run, optional_artifacts, "agent_consensus_review"
+    )
+    if agent_consensus_review_path is not None:
+        agent_consensus_review = read_yaml(agent_consensus_review_path)
 
     failed_reviewers = [
         reviewer["reviewer_id"]
@@ -1428,6 +1497,8 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
         source_grounding=source_grounding,
         theorem_applicability=theorem_applicability,
         update_inbox=update_inbox,
+        line_numbered_proof=line_numbered_proof,
+        agent_consensus_review=agent_consensus_review,
     ))
     if warning_lines:
         _echo("")
@@ -2636,7 +2707,7 @@ def real_agent_smoke_command(
     literature_provider: list[str] | None = typer.Option(None, "--literature-provider"),
     max_references: int = typer.Option(8, "--max-references", min=1, max=25),
     provider: str = typer.Option("external", "--provider"),
-    front_half: str = typer.Option("mock", "--front-half"),
+    front_half: str = typer.Option("auto", "--front-half"),
     model: str = typer.Option("codex-cli", "--model"),
     reviewer_set: str = typer.Option("espresso", "--reviewer-set"),
     api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
@@ -2668,10 +2739,13 @@ def real_agent_smoke_command(
         raise typer.BadParameter("literature-mode must be local or live")
     if provider not in {"openai", "external"}:
         raise typer.BadParameter("real-agent-smoke requires provider=openai or provider=external")
-    if front_half not in {"mock", "stub", "external"}:
-        raise typer.BadParameter("front-half must be mock, stub, or external")
+    if front_half not in {"auto", "mock", "stub", "openai", "external"}:
+        raise typer.BadParameter("front-half must be auto, mock, stub, openai, or external")
     if reviewer_set not in {"generic", "espresso"}:
         raise typer.BadParameter("reviewer-set must be generic or espresso")
+    front_half = _resolve_front_half_mode(
+        provider=provider, front_half=front_half, command_name="real-agent-smoke"
+    )
 
     result = orchestrate_run(
         project=project,

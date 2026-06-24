@@ -96,22 +96,34 @@ def write_line_numbered_proof(
     manifest = read_yaml(manifest_path)
     claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])
     grade_path = run_dir / manifest["artifacts"]["idea_grade"]
+    generated_at = datetime.now(UTC).isoformat()
+    strategy_id = _selected_strategy_id(run_dir, manifest)
 
-    raw = client.complete_json(
-        system=line_numbered_proof_writer_system_prompt(),
-        prompt=agent_prompt(_writer_context(run_dir, manifest), role="line_numbered_proof_writer"),
+    direct_source_proof = _direct_source_backed_theorem_proof(
+        run_dir,
+        manifest,
+        claim,
+        strategy_id=strategy_id,
+        generated_at=generated_at,
     )
-    raw = raw if isinstance(raw, dict) else {}
-    record = {
-        "schema_version": 1,
-        "claim_id": claim["id"],
-        "strategy_id": _selected_strategy_id(run_dir, manifest),
-        "proof_kind": (str(raw.get("proof_kind", "") or "unspecified").strip() or "unspecified")[:200],
-        "status": "advisory",
-        "lines": _normalize_lines(raw.get("lines")),
-        "generated_at": datetime.now(UTC).isoformat(),
-        "notes": [],
-    }
+    if direct_source_proof is not None:
+        record = direct_source_proof
+    else:
+        raw = client.complete_json(
+            system=line_numbered_proof_writer_system_prompt(),
+            prompt=agent_prompt(_writer_context(run_dir, manifest), role="line_numbered_proof_writer"),
+        )
+        raw = raw if isinstance(raw, dict) else {}
+        record = {
+            "schema_version": 1,
+            "claim_id": claim["id"],
+            "strategy_id": strategy_id,
+            "proof_kind": (str(raw.get("proof_kind", "") or "unspecified").strip() or "unspecified")[:200],
+            "status": "advisory",
+            "lines": _normalize_lines(raw.get("lines")),
+            "generated_at": generated_at,
+            "notes": [],
+        }
     # Fail closed before writing, and persist the normalized proof graph rather
     # than the raw model output (legacy depends_on/source_refs/gaps are expanded
     # into structured dependencies by the model).
@@ -164,3 +176,121 @@ def write_line_numbered_proof(
         elif proof_path.exists():
             proof_path.unlink()
         raise
+
+
+def _direct_source_backed_theorem_proof(
+    run_dir: Path,
+    manifest: dict,
+    claim: dict,
+    *,
+    strategy_id: str,
+    generated_at: str,
+) -> dict | None:
+    """Use an already grounded theorem/corollary when it directly states the claim.
+
+    This is a proof-writer convenience, not a status upgrade. The later consensus
+    seal cross-checks the theorem_ref against ``source_grounding.yaml`` again.
+    """
+
+    source_rel = manifest.get("artifacts", {}).get("source_grounding")
+    if not source_rel:
+        return None
+    source_path = run_dir / source_rel
+    if not source_path.exists():
+        return None
+    try:
+        source_grounding = read_yaml(source_path)
+    except Exception:  # noqa: BLE001 - malformed source artifact just disables shortcut
+        return None
+
+    for ref in source_grounding.get("source_refs") or []:
+        if not _source_ref_directly_covers_claim(ref, claim):
+            continue
+        locator = ref.get("locator") or {}
+        locator_text = f"{ref.get('title', '').strip()}, {locator.get('value', '').strip()}".strip(", ")
+        statement = str(ref.get("statement_or_summary") or "").strip()
+        return {
+            "schema_version": 1,
+            "claim_id": claim["id"],
+            "strategy_id": strategy_id,
+            "proof_kind": "direct_source_grounded_theorem",
+            "status": "advisory",
+            "lines": [
+                {
+                    "line_id": "L1",
+                    "statement": claim.get("normalized_statement") or claim.get("raw_text") or "",
+                    "justification": (
+                        "Instantiate the locked claim with the hypotheses recorded "
+                        "in locked_claim.yaml."
+                    ),
+                    "dependencies": [],
+                    "depends_on": [],
+                    "source_refs": [],
+                    "gaps": [],
+                },
+                {
+                    "line_id": "L2",
+                    "statement": claim.get("conclusion") or claim.get("normalized_statement") or "",
+                    "justification": (
+                        f"The cited source statement {ref['id']} applies to the "
+                        "locked hypotheses and states the claimed conclusion."
+                    ),
+                    "dependencies": [
+                        {
+                            "type": "prior_line",
+                            "ref": "L1",
+                            "status": "resolved",
+                            "role": "locked hypotheses",
+                            "needed_statement": "",
+                            "source_locator": "",
+                            "reviewer_verdict": "",
+                            "authority": "",
+                            "source_grounded": False,
+                            "machine_verified": False,
+                        },
+                        {
+                            "type": "theorem_ref",
+                            "ref": ref["id"],
+                            "status": "resolved",
+                            "role": "direct source-grounded theorem covering the claim",
+                            "needed_statement": statement,
+                            "source_locator": locator_text,
+                            "reviewer_verdict": "",
+                            "authority": "source_grounded_theorem_ref",
+                            "source_grounded": True,
+                            "machine_verified": False,
+                        },
+                    ],
+                    "depends_on": ["L1"],
+                    "source_refs": [ref["id"]],
+                    "gaps": [],
+                },
+            ],
+            "generated_at": generated_at,
+            "notes": [
+                "Proof writer used an already source-grounded theorem/corollary that directly covers the locked claim."
+            ],
+        }
+    return None
+
+
+def _source_ref_directly_covers_claim(ref: dict, claim: dict) -> bool:
+    if not isinstance(ref, dict):
+        return False
+    if ref.get("status") != "source_backed":
+        return False
+    if (ref.get("hypothesis_match") or {}).get("matches") is not True:
+        return False
+    locator = ref.get("locator") or {}
+    if locator.get("kind") in {"", "unknown", None} or not str(locator.get("value") or "").strip():
+        return False
+    statement = str(ref.get("statement_or_summary") or "")
+    conclusion = str(claim.get("conclusion") or claim.get("normalized_statement") or "")
+    if not statement.strip() or not conclusion.strip():
+        return False
+    try:
+        from espresso_proof.verification.source_verification import conclusion_compatible
+
+        return conclusion_compatible(conclusion, statement)
+    except Exception:  # noqa: BLE001 - direct shortcut must fail closed
+        return False

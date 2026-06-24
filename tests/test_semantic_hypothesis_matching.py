@@ -19,6 +19,7 @@ from espresso_proof.kernel.models import SourceGroundingReport, SourceGroundingS
 from espresso_proof.literature.pdf_ingestion import ingest_source_for_theorems
 from espresso_proof.verification.source_verification import (
     check_hypothesis_applicability,
+    conclusion_compatible,
     term_present,
     verify_source_grounding_from_theorems,
 )
@@ -49,6 +50,18 @@ def test_required_positive_matches(claim: str, source: str) -> None:
 def test_prime_matches_in_both_directions() -> None:
     assert match_hypothesis_semantically("p is prime", "prime p divides the order")
     assert match_hypothesis_semantically("prime p", "p is prime")
+    assert match_hypothesis_semantically("p is prime", "p a prime number")
+
+
+def test_prime_order_notation_matches_corollary_statement() -> None:
+    assert match_hypothesis_semantically(
+        "|G| = p for some prime number p",
+        r"Let \(|G| = p\) with \(p\) a prime number. Then \(G\) is cyclic.",
+    )
+    assert match_hypothesis_semantically(
+        "G is a group",
+        r"Let \(|G| = p\) with \(p\) a prime number. Then \(G\) is cyclic.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +141,81 @@ def test_applicability_finite_does_not_match_infinite() -> None:
         [],
     )
     assert result["matches"] == "unclear"
+
+
+def test_lagrange_step_does_not_require_irrelevant_prime_hypothesis() -> None:
+    statement = (
+        r"Lagrange Let \(G\) be a finite group and let \(H\) be a subgroup of "
+        r"\(G\text{.}\) In particular, the number of elements in \(H\) must "
+        r"divide the number of elements in \(G\text{.}\)"
+    )
+    result = check_hypothesis_applicability(
+        statement,
+        [
+            _hyp("G is a group"),
+            _hyp("|G| = p for some prime number p"),
+            _hyp("G is finite", "inferred"),
+        ],
+        [],
+        required_statement=(
+            "Lagrange's theorem: for a finite group G and subgroup H, "
+            "|H| divides |G|."
+        ),
+    )
+    assert result["matches"] is True
+    assert not any("prime" in item for item in result["mismatches"])
+
+
+def test_prime_order_corollary_covers_prime_order_cyclic_step() -> None:
+    statement = (
+        r"Let \(|G| = p\) with \(p\) a prime number. Then \(G\) is cyclic "
+        r"and any \(g \in G\) such that \(g \neq e\) is a generator."
+    )
+    result = check_hypothesis_applicability(
+        statement,
+        [
+            _hyp("G is a group"),
+            _hyp("|G| = p for some prime number p"),
+            _hyp("G is finite", "inferred"),
+        ],
+        [],
+        required_statement=(
+            "If g is nonidentity and |G| = p is prime, then |<g>| = p."
+        ),
+    )
+    assert result["matches"] is True
+
+
+def test_group_theory_conclusion_matching_stays_specific() -> None:
+    lagrange = (
+        r"Lagrange Let \(G\) be a finite group and let \(H\) be a subgroup of "
+        r"\(G\text{.}\) Then \(|G|/|H| = [G : H]\). In particular, the "
+        r"number of elements in \(H\) must divide the number of elements in \(G\text{.}\)"
+    )
+    prime_order_cyclic = (
+        r"Let \(|G| = p\) with \(p\) a prime number. Then \(G\) is cyclic "
+        r"and any \(g \in G\) such that \(g \neq e\) is a generator."
+    )
+    assert conclusion_compatible(
+        "Lagrange's theorem: for a finite group G and subgroup H, |H| divides |G|.",
+        lagrange,
+    )
+    assert conclusion_compatible(
+        "If g is nonidentity and |G| = p is prime, then |<g>| = p.",
+        prime_order_cyclic,
+    )
+    assert conclusion_compatible(
+        "Definition of cyclic group: G is cyclic if there exists g in G such that G = <g>.",
+        prime_order_cyclic,
+    )
+    assert not conclusion_compatible(
+        "A group with prime order p has a nonidentity element when p is prime, since p >= 2.",
+        prime_order_cyclic,
+    )
+    assert not conclusion_compatible(
+        "If H is a subgroup of finite G and |H| = |G|, then H = G.",
+        lagrange,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -271,7 +271,12 @@ def persist_examples(
         candidate_artifacts["computation_checks"],
     )
     example_ids = {ex["id"] for ex in candidate_artifacts["examples"]["examples"]}
-    return _reconcile_tests_with_examples(run_dir, artifacts, claim_id, example_ids)
+    dropped_tests = _reconcile_tests_with_examples(run_dir, artifacts, claim_id, example_ids)
+    dropped_counterexamples = _reconcile_counterexamples_with_examples(
+        run_dir, artifacts, claim_id, example_ids
+    )
+    dropped_grade_refs = _reconcile_grade_with_counterexamples(run_dir, artifacts)
+    return dropped_tests + dropped_counterexamples + dropped_grade_refs
 
 
 @register_stage("examples")
@@ -332,6 +337,66 @@ def _reconcile_tests_with_examples(
     TestReport.model_validate(test_report)
     write_yaml(tests_path, test_report)
     return len(original) - len(kept)
+
+
+def _reconcile_counterexamples_with_examples(
+    run_dir: Path,
+    artifacts: dict,
+    claim_id: str,
+    example_ids: set[str],
+) -> int:
+    """Drop counterexample tests whose example reference no longer exists."""
+
+    counterexamples_path = run_dir / artifacts["counterexamples"]
+    if not counterexamples_path.exists():
+        return 0
+
+    counterexamples = read_yaml(counterexamples_path) or {}
+    original = counterexamples.get("tests", [])
+    kept = []
+    for test in original:
+        if not isinstance(test, dict):
+            continue
+        example_id = test.get("example_id")
+        if example_id and example_id not in example_ids:
+            continue
+        kept.append(test)
+    if len(kept) == len(original):
+        return 0
+    counterexamples["claim_id"] = counterexamples.get("claim_id") or claim_id
+    counterexamples["tests"] = kept
+    CounterexampleReport.model_validate(counterexamples)
+    write_yaml(counterexamples_path, counterexamples)
+    return len(original) - len(kept)
+
+
+def _reconcile_grade_with_counterexamples(run_dir: Path, artifacts: dict) -> int:
+    """Drop grade evidence references to counterexample tests that no longer exist."""
+
+    grade_path = run_dir / artifacts["idea_grade"]
+    counterexamples_path = run_dir / artifacts["counterexamples"]
+    if not grade_path.exists() or not counterexamples_path.exists():
+        return 0
+
+    grade = read_yaml(grade_path) or {}
+    counterexamples = read_yaml(counterexamples_path) or {}
+    known_tests = {
+        test.get("id")
+        for test in counterexamples.get("tests", [])
+        if isinstance(test, dict) and test.get("id")
+    }
+    changed = 0
+    for field in ("survived_tests", "failed_tests"):
+        original = list(grade.get(field) or [])
+        kept = [test_id for test_id in original if test_id in known_tests]
+        if kept != original:
+            grade[field] = kept
+            changed += len(original) - len(kept)
+    if not changed:
+        return 0
+    IdeaGrade.model_validate(grade)
+    write_yaml(grade_path, grade)
+    return changed
 
 
 # ---------------------------------------------------------------------------

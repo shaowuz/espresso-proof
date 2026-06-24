@@ -130,7 +130,7 @@ def build_stage_status_projection(
             entry["error_summary"] = None
         stages.append(entry)
 
-    _withhold_status_until_dependencies_are_done(stages)
+    _withhold_status_until_dependencies_are_done(stages, generated_at=generated_at)
 
     return {
         "schema_version": 1,
@@ -208,8 +208,16 @@ def _apply_legacy_status(
 
     agent_name = _AGENT_STATUS_STAGE_MAP.get(mapping.stage_id)
     if agent_name and agent_name in agent_statuses:
-        _apply_agent_status(entry, agent_statuses[agent_name], generated_at)
-        return
+        agent_entry = agent_statuses[agent_name]
+        agent_status = str(agent_entry.get("status") or "not_run")
+        allow_not_run_artifact_fallback = (
+            mapping.stage_id == "failure_classifier"
+            and agent_status == "not_run"
+            and _any_mapping_artifact_exists(run_dir, mapping)
+        )
+        if not allow_not_run_artifact_fallback:
+            _apply_agent_status(entry, agent_entry, generated_at)
+            return
 
     if mapping.stage_id == "scaffold":
         entry["status"] = "done"
@@ -224,6 +232,35 @@ def _apply_legacy_status(
             entry["status"] = "done"
             entry["status_reason"] = "legacy run has no claim_clear_gate artifact"
             entry["finished_at"] = generated_at
+        return
+
+    if mapping.stage_id == "human_strategy_preference":
+        choice_path = run_dir / "human_choice.yaml"
+        choice = read_yaml(choice_path) if choice_path.exists() else {}
+        choice_status = str(choice.get("status") or "")
+        if choice_status == "selected":
+            entry["status"] = "done"
+            entry["finished_at"] = generated_at
+        elif choice_status == "declined":
+            entry["status"] = "skipped"
+            entry["status_reason"] = "human strategy preference declined"
+            entry["finished_at"] = generated_at
+        elif choice_status == "pending":
+            entry["status"] = "queued"
+            entry["status_reason"] = "waiting for human strategy preference"
+        return
+
+    if mapping.stage_id == "agent_consensus_seal":
+        if (run_dir / "agent_consensus_review.yaml").exists():
+            entry["status"] = "done"
+            entry["finished_at"] = generated_at
+        elif (run_dir / "proof_gap_resolution.yaml").exists():
+            entry["status"] = "failed"
+            entry["status_reason"] = "seal failed closed; repair plan written"
+            entry["error_summary"] = "unresolved line-numbered proof dependencies"
+            entry["finished_at"] = generated_at
+        else:
+            entry["status_reason"] = "waiting for line_numbered_proof_writer"
         return
 
     if mapping.runtime_kind in {"optional_runtime", "pending_future_work", "dev_test_only"}:
@@ -261,7 +298,11 @@ def _apply_agent_status(entry: dict, agent_entry: dict, generated_at: str) -> No
     entry["finished_at"] = agent_entry.get("finished_at") or generated_at
 
 
-def _withhold_status_until_dependencies_are_done(stages: list[dict]) -> None:
+def _withhold_status_until_dependencies_are_done(
+    stages: list[dict],
+    *,
+    generated_at: str,
+) -> None:
     """Keep legacy projections from claiming stages that AGENT_FLOW cannot start yet."""
 
     status_by_id: dict[str, str] = {}
@@ -272,14 +313,28 @@ def _withhold_status_until_dependencies_are_done(stages: list[dict]) -> None:
             if status_by_id.get(dependency) != "done"
         ]
         if entry["status"] in _DEPENDENCY_READY_STATUSES and missing_done_dependencies:
-            entry["status"] = "not_started"
-            entry["status_reason"] = (
-                "legacy projection withheld until hard dependencies are done: "
-                + ", ".join(missing_done_dependencies)
-            )
-            entry["started_at"] = None
-            entry["finished_at"] = None
-            entry["error_summary"] = None
+            if entry["status"] == "done" and entry["stage_id"] in {
+                "grade",
+                "concise_answer",
+            }:
+                entry["status"] = "blocked"
+                entry["status_reason"] = (
+                    "legacy artifact exists, but target AGENT_FLOW hard "
+                    "dependencies are pending: "
+                    + ", ".join(missing_done_dependencies)
+                )
+                entry["started_at"] = None
+                entry["finished_at"] = entry.get("finished_at") or generated_at
+                entry["error_summary"] = "target AGENT_FLOW stage dependency not satisfied"
+            else:
+                entry["status"] = "not_started"
+                entry["status_reason"] = (
+                    "legacy projection withheld until hard dependencies are done: "
+                    + ", ".join(missing_done_dependencies)
+                )
+                entry["started_at"] = None
+                entry["finished_at"] = None
+                entry["error_summary"] = None
         status_by_id[entry["stage_id"]] = entry["status"]
 
 

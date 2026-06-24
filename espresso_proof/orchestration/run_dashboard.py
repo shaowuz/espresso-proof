@@ -246,6 +246,8 @@ def _load_run_state(run_dir: Path) -> dict[str, Any]:
     graph = optional_artifact("proof_goal_graph")
     theorem_applicability = optional_artifact("theorem_applicability")
     update_inbox = optional_artifact("update_inbox")
+    line_numbered_proof = optional_artifact("line_numbered_proof")
+    agent_consensus_review = optional_artifact("agent_consensus_review")
     judgment = optional_artifact("mathematical_judgment")
     proof_verification = optional_artifact("proof_verification")
     failure_audit = optional_artifact("failure_pattern_audit")
@@ -303,6 +305,8 @@ def _load_run_state(run_dir: Path) -> dict[str, Any]:
             source_grounding=source_grounding,
             theorem_applicability=theorem_applicability,
             update_inbox=update_inbox,
+            line_numbered_proof=line_numbered_proof,
+            agent_consensus_review=agent_consensus_review,
         ),
         "current_state": current_state,
         "completed": completed,

@@ -74,7 +74,7 @@ def test_goal70_acceptance_gate_live_smoke_is_explicit_opt_in() -> None:
     assert "--literature-mode local" in completed.stdout
     assert "--max-references 8" in completed.stdout
     assert "--provider external" in completed.stdout
-    assert "--front-half mock" in completed.stdout
+    assert "--front-half external" in completed.stdout
     assert "--api-key-env OPENAI_API_KEY" in completed.stdout
     assert "--external-agent-command-env ESPRESSO_EXTERNAL_AGENT_COMMAND" in completed.stdout
     assert "--reviewer-set espresso" in completed.stdout
@@ -229,7 +229,7 @@ def test_goal70_acceptance_gate_live_report_lists_capability_evidence(
     assert step["command"][step["command"].index("--literature-mode") + 1] == "local"
     assert "--literature-provider" not in step["command"]
     assert step["command"][step["command"].index("--max-references") + 1] == "8"
-    assert step["command"][step["command"].index("--front-half") + 1] == "mock"
+    assert step["command"][step["command"].index("--front-half") + 1] == "external"
     assert step["command"][step["command"].index("--api-key-env") + 1] == "OPENAI_API_KEY"
     assert (
         step["command"][step["command"].index("--external-agent-command-env") + 1]

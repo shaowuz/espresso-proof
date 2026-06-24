@@ -183,17 +183,47 @@ def _trusted_human_allowed_theorem_refs(
     }
 
 
+def _trusted_source_grounded_theorem_refs(run_dir: Path, manifest: dict) -> set[str]:
+    artifacts = manifest.get("artifacts") or {}
+    source_rel = artifacts.get("source_grounding")
+    if not source_rel:
+        return set()
+    try:
+        source_grounding = read_yaml(run_dir / source_rel)
+    except Exception:  # noqa: BLE001 - malformed/unreadable support fails closed
+        return set()
+    refs = source_grounding.get("source_refs") or []
+    return {
+        str(ref.get("id") or "")
+        for ref in refs
+        if isinstance(ref, dict)
+        and ref.get("status") == "source_backed"
+        and ref.get("locator", {}).get("kind") not in {"", "unknown", None}
+        and str(ref.get("title") or "").strip()
+        and any(str(author).strip() for author in (ref.get("authors") or []))
+    }
+
+
 def _is_resolved_dependency(
     dep: dict,
     *,
     line_id: str,
     trusted_human_allowed_theorem_refs: set[tuple[str, str]],
+    trusted_source_grounded_theorem_refs: set[str],
 ) -> bool:
     dep_type = dep.get("type")
     status = dep.get("status")
     if dep_type == "unchecked_gap":
         return False
     if dep_type == "theorem_ref":
+        ref = str(dep.get("ref") or "")
+        if ref in trusted_source_grounded_theorem_refs:
+            return (
+                dep.get("source_grounded") is True
+                and dep.get("authority") == "source_grounded_theorem_ref"
+                and dep.get("machine_verified") is False
+                and bool(str(dep.get("source_locator") or "").strip())
+            )
         if (line_id, str(dep.get("ref") or "")) in trusted_human_allowed_theorem_refs:
             return (
                 status == "accepted_by_human"
@@ -211,8 +241,10 @@ def _unresolved_proof_dependency_lines(
     proof: dict,
     *,
     trusted_human_allowed_theorem_refs: set[tuple[str, str]] | None = None,
+    trusted_source_grounded_theorem_refs: set[str] | None = None,
 ) -> list[str]:
     trusted_human_allowed_theorem_refs = trusted_human_allowed_theorem_refs or set()
+    trusted_source_grounded_theorem_refs = trusted_source_grounded_theorem_refs or set()
     unresolved: list[str] = []
     for index, line in enumerate(proof.get("lines") or [], start=1):
         if not isinstance(line, dict):
@@ -226,6 +258,7 @@ def _unresolved_proof_dependency_lines(
                 dep,
                 line_id=line_id,
                 trusted_human_allowed_theorem_refs=trusted_human_allowed_theorem_refs,
+                trusted_source_grounded_theorem_refs=trusted_source_grounded_theorem_refs,
             ):
                 unresolved.append(line_id)
                 break
@@ -342,9 +375,14 @@ def seal_agent_consensus(
         manifest,
         proof_artifact,
     )
+    trusted_source_grounded_theorem_refs = _trusted_source_grounded_theorem_refs(
+        run_dir,
+        manifest,
+    )
     unresolved_gap_lines = _unresolved_proof_dependency_lines(
         proof,
         trusted_human_allowed_theorem_refs=trusted_human_allowed_theorem_refs,
+        trusted_source_grounded_theorem_refs=trusted_source_grounded_theorem_refs,
     )
     if unresolved_gap_lines:
         raise RuntimeError(

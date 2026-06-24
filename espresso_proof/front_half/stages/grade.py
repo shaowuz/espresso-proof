@@ -193,11 +193,10 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     )
     source_gap = (not source_backed_steps) or bool(current.get("source_gaps"))
     counterexample_pressure = len(counterexamples) > 0
-    # A refutation requires an admissible all-hypotheses counterexample that is
-    # actually checked/refuting — the front half never produces one.
+    # Unchecked pressure is a route-repair signal only. A truth-value downgrade
+    # requires a checked all-hypotheses counterexample.
     admissible_refutation = any(
-        c.get("satisfies_all_claim_hypotheses") is True and c.get("refutes_claim") is True
-        for c in counterexamples
+        _is_checked_admissible_refutation(c) for c in counterexamples
     )
     theorem_applicability_failure = _has_theorem_applicability_failure(run_dir, context)
 
@@ -208,19 +207,9 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     elif admissible_refutation:
         status = "refuted"
     else:
-        # likely_false requires real negative pressure, not merely missing
-        # support. A confirmed machine check vetoes likely_false, but never
-        # upgrades this front-half grade beyond fragile.
-        has_confirmed_machine_check = _has_confirmed_machine_check(run_dir, context)
-        negative_evidence = (
-            (counterexample_pressure and not witness_intent)
-            or theorem_applicability_failure
-        )
-        status = (
-            "likely_false"
-            if negative_evidence and not has_confirmed_machine_check
-            else "fragile"
-        )
+        # Unchecked counterexamples and theorem-applicability blockers say the
+        # route is fragile; they do not say the locked claim is likely false.
+        status = "fragile"
         # Precise claim: relax the placeholder failed review so meaningful routes
         # can activate (real reviewers still run later), and scrub stale
         # "too vague to test" placeholder text that no longer applies.
@@ -239,16 +228,22 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
             if witness_intent and counterexample_pressure
             else "Recomputed from live artifacts: the claim is precise, but the route has source gaps / missing hypotheses / counterexample pressure and no checked proof."
         ),
-        "likely_false": "Recomputed from live artifacts: the claim is precise but faces unchecked counterexample pressure or theorem misuse; no confirming machine check or checked counterexample has been verified.",
+        "likely_false": "Recomputed from live artifacts: an admissible checked counterexample strongly pressures the claim.",
         "refuted": "Recomputed from live artifacts: an admissible, checked counterexample violates the conclusion.",
     }[status]
+
+    prior_reasons = list(current.get("reasons") or [])
+    if precision == "precise":
+        prior_reasons = [
+            item for item in prior_reasons if not _is_stale_claim_vagueness_text(item)
+        ]
 
     grade = {
         "claim_id": claim_id,
         "status": status,
         "score": score,
         "confidence": current.get("confidence", "low"),
-        "reasons": [reason] + list(current.get("reasons") or []),
+        "reasons": [reason] + prior_reasons,
         "survived_tests": [],  # SAFETY: no checked evidence in the front half
         "failed_tests": [],
         "counterexample_candidates": [c["id"] for c in counterexamples],
@@ -283,6 +278,8 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
         notes.append(f"reconciled {scaffold_reconciled} stale scaffold artifact(s)")
     if review_note:
         notes.append(review_note)
+    if theorem_applicability_failure:
+        notes.append("theorem applicability blockers kept the route fragile")
     return {"unsafe_language": [], "notes": notes}
 
 
@@ -393,6 +390,17 @@ def _has_theorem_applicability_failure(run_dir: Path, context: dict) -> bool:
         isinstance(usage, dict)
         and usage.get("applicability_status") in blocking_statuses
         for usage in usages
+    )
+
+
+def _is_checked_admissible_refutation(candidate: dict) -> bool:
+    """Return whether a counterexample record can honestly refute the claim."""
+
+    return (
+        candidate.get("satisfies_all_claim_hypotheses") is True
+        and candidate.get("refutes_claim") is True
+        and str(candidate.get("result") or "") == "failed"
+        and str(candidate.get("target") or "theorem") == "theorem"
     )
 
 

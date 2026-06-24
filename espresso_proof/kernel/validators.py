@@ -3678,6 +3678,12 @@ def _validate_final_report_language(
         update_inbox=(
             update_inbox.model_dump(mode="json") if update_inbox is not None else {}
         ),
+        line_numbered_proof=_optional_final_report_context_artifact(
+            final_report.parent, manifest, "line_numbered_proof"
+        ),
+        agent_consensus_review=_optional_final_report_context_artifact(
+            final_report.parent, manifest, "agent_consensus_review"
+        ),
     )
     weak_statuses = {
         ProofLanguageStatus.idea_sketch,
@@ -3723,6 +3729,18 @@ def _validate_final_report_language(
             "final_report.md must disclose active blocker/pending/stale categories: "
             + ", ".join(missing)
         )
+
+
+def _optional_final_report_context_artifact(
+    run_dir: Path,
+    manifest: RunManifest,
+    key: str,
+) -> dict:
+    rel = manifest.optional_artifacts.get(key)
+    if not rel:
+        return {}
+    path = run_dir / rel
+    return read_yaml(path) if path_exists(path) else {}
 
 
 def _validate_final_report_does_not_hide_pending_checks(

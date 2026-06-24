@@ -166,6 +166,31 @@ def test_create_run_returns_immediately_with_slow_provider(client, monkeypatch) 
     assert st["state"]
 
 
+@pytest.mark.parametrize("provider", ["external", "openai"])
+def test_cockpit_real_provider_uses_real_front_half_by_default(
+    tmp_path: Path,
+    monkeypatch,
+    provider: str,
+) -> None:
+    import espresso_proof.server as server_mod
+
+    calls: list[dict] = []
+
+    def fake_orchestrate_run(**kwargs):
+        calls.append(kwargs)
+        run_dir = tmp_path / "root" / "projects" / kwargs["project"] / "runs" / "run_001"
+        return {"run_dir": run_dir, "state": "CLAIM_CLEAR"}
+
+    monkeypatch.setattr(server_mod, "orchestrate_run", fake_orchestrate_run)
+
+    wb = Workbench(tmp_path / "root", provider=provider)
+    result = wb._do_create_run(CLAIM, project="ui_real")
+
+    assert result["project"] == "ui_real"
+    assert calls[0]["provider"] == provider
+    assert calls[0]["front_half"] == provider
+
+
 def test_create_run_rejects_empty(client) -> None:
     _, call, _ = client
     status, d = call("POST", "/api/runs", {"text": "   "})

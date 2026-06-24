@@ -9,6 +9,7 @@ theorem refs back to the proof graph.
 from __future__ import annotations
 
 import os
+import urllib.parse
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -81,7 +82,13 @@ def _normalize_agent_candidates(raw: object, unresolved: list[dict]) -> list[dic
         dependency_type = str(item.get("dependency_type") or "unchecked_gap")
         if dependency_type not in {"theorem_ref", "human_assumption", "unchecked_gap"}:
             dependency_type = "unchecked_gap"
-        source_kind = "unknown"
+        source_kind = str(item.get("source_kind") or "unknown")
+        if source_kind not in {"user_material", "project_corpus", "web", "paper", "book", "unknown"}:
+            source_kind = "unknown"
+        source_locator = str(item.get("source_locator") or "")[:1000]
+        source_url = str(item.get("source_url") or item.get("url") or "")
+        if not source_url and source_locator.startswith(("http://", "https://")):
+            source_url = source_locator
         applicability_review = str(item.get("applicability_review") or "not_reviewed")
         if applicability_review not in {
             "not_reviewed",
@@ -100,8 +107,8 @@ def _normalize_agent_candidates(raw: object, unresolved: list[dict]) -> list[dic
                 "proposed_ref": str(item.get("proposed_ref") or "")[:200],
                 "needed_statement": str(item.get("needed_statement") or "")[:2000],
                 "proposed_statement": str(item.get("proposed_statement") or "")[:4000],
-                "source_locator": str(item.get("source_locator") or "")[:1000],
-                "source_url": "",
+                "source_locator": source_locator,
+                "source_url": source_url[:2000],
                 "source_kind": source_kind,
                 "applicability_review": applicability_review,
                 "reviewer_notes": [str(x)[:1000] for x in (item.get("reviewer_notes") or [])],
@@ -311,6 +318,7 @@ def _repair_plan(candidates: list[dict]) -> list[dict]:
             "dependency_ref": dep_ref,
             "dependency_type": candidate.get("dependency_type", "unchecked_gap"),
             "candidate_ref": candidate.get("proposed_ref", ""),
+            "candidate_source_url": candidate.get("source_url", ""),
             "status": "planned",
             "advisory_only": True,
         }
@@ -327,7 +335,13 @@ def _repair_plan(candidates: list[dict]) -> list[dict]:
                     "target_artifact": "finite_object_witness.yaml",
                 }
             )
-        if candidate.get("dependency_type") == "theorem_ref" or "theorem" in needed or "source" in needed:
+        if (
+            candidate.get("dependency_type") == "theorem_ref"
+            or candidate.get("action") == "attach_candidate_theorem_ref"
+            or bool(candidate.get("source_url"))
+            or "theorem" in needed
+            or "source" in needed
+        ):
             plan.append(
                 {
                     **base,
@@ -383,6 +397,160 @@ def _repair_plan(candidates: list[dict]) -> list[dict]:
     return plan
 
 
+def _source_retrieval_kwargs(candidate: dict) -> tuple[dict | None, str]:
+    source = str(candidate.get("source_url") or "").strip()
+    if not source:
+        locator = str(candidate.get("source_locator") or "").strip()
+        if locator.startswith(("http://", "https://")):
+            source = locator
+    if not source:
+        return None, "candidate has no concrete URL or local source path"
+
+    parsed = urllib.parse.urlparse(source)
+    if parsed.scheme in {"http", "https"}:
+        return {"url": source, "network_enabled": True}, ""
+    if parsed.scheme == "file":
+        local_path = Path(urllib.parse.unquote(parsed.path))
+        if os.name == "nt" and local_path.drive == "" and parsed.netloc:
+            local_path = Path(f"{parsed.netloc}{local_path}")
+    else:
+        local_path = Path(source)
+    if local_path.is_file():
+        return {"local_source": local_path, "network_enabled": False}, ""
+    return None, f"candidate source is not a readable local file: {source}"
+
+
+def _execute_repair_plan(
+    run_dir: Path,
+    *,
+    candidates: list[dict],
+    repair_plan: list[dict],
+    provider: str,
+    model: str,
+    api_key_env: str,
+    external_agent_command_env: str,
+    client,
+) -> list[dict]:
+    """Execute safe, concrete repair actions without clearing proof gaps."""
+
+    from espresso_proof.kernel.stage_runner import StageError, StageRunner
+    from espresso_proof.literature.retrieval_grounding import retrieve_and_ground
+    from espresso_proof.verification.theorem_applicability import (
+        review_theorem_applicability_with_llm,
+    )
+
+    candidates_by_key = {
+        (str(candidate.get("line_id") or ""), str(candidate.get("dependency_ref") or "")): candidate
+        for candidate in candidates
+    }
+    attempts: list[dict] = []
+    retrieval_succeeded = False
+    for action in repair_plan:
+        action_name = str(action.get("action") or "")
+        if action_name not in {"source_retrieval", "theorem_applicability_review"}:
+            continue
+        candidate = candidates_by_key.get(
+            (str(action.get("line_id") or ""), str(action.get("dependency_ref") or ""))
+        )
+        attempt = {
+            "action": action_name,
+            "line_id": action.get("line_id", ""),
+            "dependency_ref": action.get("dependency_ref", ""),
+            "candidate_ref": action.get("candidate_ref", ""),
+            "status": "blocked",
+            "advisory_only": True,
+            "notes": [],
+        }
+        try:
+            if action_name == "source_retrieval":
+                if not candidate:
+                    attempt["notes"].append("no candidate found for retrieval action")
+                    action["status"] = "blocked_no_candidate"
+                    attempts.append(attempt)
+                    continue
+                kwargs, reason = _source_retrieval_kwargs(candidate)
+                if kwargs is None:
+                    attempt["status"] = "blocked_no_source"
+                    attempt["notes"].append(reason)
+                    action["status"] = "blocked_no_source"
+                    attempts.append(attempt)
+                    continue
+
+                result_holder: dict[str, dict] = {}
+
+                def mutate() -> None:
+                    result_holder["report"] = retrieve_and_ground(
+                        run_dir=run_dir,
+                        source_id=f"repair_{candidate.get('line_id', 'line')}_{candidate.get('dependency_ref', 'dep')}"
+                        .replace(".", "_")
+                        .replace(" ", "_")[:80],
+                        title=str(candidate.get("proposed_ref") or "Proof-gap repair source"),
+                        authors=[],
+                        source_type="paper",
+                        **kwargs,
+                    )
+
+                StageRunner(run_dir).run(
+                    name="proof_gap_source_retrieval",
+                    mutate=mutate,
+                    validate=lambda: validate_run(run_dir),
+                )
+                report = result_holder.get("report") or {}
+                resolution = str(report.get("resolution_status") or "unknown")
+                attempt["status"] = (
+                    "executed_resolved" if resolution == "resolved" else f"executed_{resolution}"
+                )
+                attempt["retrieval_resolution"] = resolution
+                attempt["grounding_attempted"] = bool(report.get("grounding_attempted"))
+                attempt["notes"].extend(report.get("notes") or [])
+                action["status"] = attempt["status"]
+                retrieval_succeeded = retrieval_succeeded or resolution == "resolved"
+            elif action_name == "theorem_applicability_review":
+                manifest = read_yaml(run_dir / "run_manifest.yaml")
+                optional = manifest.get("optional_artifacts") or {}
+                if not retrieval_succeeded and "theorem_applicability" not in optional:
+                    attempt["status"] = "blocked_no_grounded_theorem"
+                    attempt["notes"].append(
+                        "no theorem_applicability artifact exists after retrieval attempts"
+                    )
+                    action["status"] = "blocked_no_grounded_theorem"
+                    attempts.append(attempt)
+                    continue
+
+                review_holder: dict[str, dict] = {}
+
+                def mutate_review() -> None:
+                    review_holder["review"] = review_theorem_applicability_with_llm(
+                        run_dir,
+                        provider=provider,
+                        model=model,
+                        api_key_env=api_key_env,
+                        external_agent_command_env=external_agent_command_env,
+                        client=client,
+                    )
+
+                StageRunner(run_dir).run(
+                    name="proof_gap_theorem_applicability_review",
+                    mutate=mutate_review,
+                    validate=lambda: validate_run(run_dir),
+                )
+                review = review_holder.get("review") or {}
+                attempt["status"] = "executed_reviewed"
+                attempt["review_count"] = len(review.get("reviews") or [])
+                attempt["notes"].extend(review.get("notes") or [])
+                action["status"] = "executed_reviewed"
+        except StageError as exc:
+            attempt["status"] = "rolled_back"
+            attempt["notes"].append(str(exc))
+            action["status"] = "rolled_back"
+        except Exception as exc:  # noqa: BLE001 - repair execution fails closed.
+            attempt["status"] = "failed"
+            attempt["notes"].append(str(exc))
+            action["status"] = "failed"
+        attempts.append(attempt)
+    return attempts
+
+
 def _write_repair_loop_artifacts(
     run_dir: Path,
     *,
@@ -390,6 +558,7 @@ def _write_repair_loop_artifacts(
     claim: dict,
     report: dict,
     repair_plan: list[dict],
+    execution_attempts: list[dict],
 ) -> None:
     blockers = [
         {
@@ -440,17 +609,19 @@ def _write_repair_loop_artifacts(
         "trigger": "seal_consensus_unresolved_dependencies",
         "proof_gap_resolution": PROOF_GAP_RESOLUTION_FILENAME,
         "repair_target": "repair_target.yaml",
-        "status": "planned",
+        "status": "attempted" if execution_attempts else "planned",
         "repair_plan_count": len(repair_plan),
         "actions": repair_plan,
+        "execution_attempts": execution_attempts,
     }
     write_yaml(rounds_dir / f"{round_id}.yaml", round_record)
     index.setdefault("rounds", []).append(
         {
             "round_id": round_id,
             "artifact": f"gap_repair_rounds/{round_id}.yaml",
-            "status": "planned",
+            "status": round_record["status"],
             "repair_plan_count": len(repair_plan),
+            "execution_attempt_count": len(execution_attempts),
         }
     )
     write_yaml(index_path, index)
@@ -547,6 +718,7 @@ def resolve_proof_gaps(
     report_path = run_dir / PROOF_GAP_RESOLUTION_FILENAME
     repair_target_path = run_dir / "repair_target.yaml"
     rounds_dir = run_dir / "gap_repair_rounds"
+    artifacts = manifest.get("artifacts") or {}
     snapshot = {
         "manifest": manifest_path.read_bytes(),
         "proof": proof_path.read_bytes(),
@@ -554,10 +726,27 @@ def resolve_proof_gaps(
         "report": report_path.read_bytes() if report_path.exists() else None,
         "repair_target": _snapshot_optional_file(repair_target_path),
         "rounds_dir": _snapshot_directory(rounds_dir),
+        "retrieval_resolution": _snapshot_optional_file(run_dir / "retrieval_resolution.yaml"),
+        "theorem_extraction": _snapshot_optional_file(run_dir / "theorem_extraction.yaml"),
+        "theorem_applicability": _snapshot_optional_file(run_dir / "theorem_applicability.yaml"),
+        "theorem_applicability_review": _snapshot_optional_file(run_dir / "theorem_applicability_review.yaml"),
+        "source_grounding": _snapshot_optional_file(run_dir / artifacts.get("source_grounding", "source_grounding.yaml")),
+        "final_report": _snapshot_optional_file(run_dir / artifacts.get("final_report", "final_report.md")),
     }
     try:
         write_yaml(proof_path, patched_proof)
         proof_hash = artifact_revision_hash(run_dir, proof_artifact)
+        execution_attempts = _execute_repair_plan(
+            run_dir,
+            candidates=candidates,
+            repair_plan=repair_plan,
+            provider=provider,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+            client=client,
+        )
+        manifest = read_yaml(manifest_path)
         report = {
             "schema_version": 1,
             "claim_id": claim["id"],
@@ -572,6 +761,7 @@ def resolve_proof_gaps(
                 "Candidate repairs only; source/applicability review or explicit human allowance is required before a gap can clear.",
                 "No theorem library or mathematical rule checker is used by this resolver.",
                 "LLM-suggested locators are locator claims only until backed by retrieval/reviewer evidence.",
+                "Concrete retrieval/applicability repair actions are attempted when a candidate has a URL or local source; missing sources stay blocked.",
             ],
         }
         report = ProofGapResolutionReport.model_validate(report).model_dump(mode="json")
@@ -582,6 +772,7 @@ def resolve_proof_gaps(
             claim=claim,
             report=report,
             repair_plan=repair_plan,
+            execution_attempts=execution_attempts,
         )
         manifest.setdefault("optional_artifacts", {})[
             "proof_gap_resolution"
@@ -604,4 +795,10 @@ def resolve_proof_gaps(
             report_path.unlink()
         _restore_optional_file(repair_target_path, snapshot["repair_target"])
         _restore_directory(rounds_dir, snapshot["rounds_dir"])
+        _restore_optional_file(run_dir / "retrieval_resolution.yaml", snapshot["retrieval_resolution"])
+        _restore_optional_file(run_dir / "theorem_extraction.yaml", snapshot["theorem_extraction"])
+        _restore_optional_file(run_dir / "theorem_applicability.yaml", snapshot["theorem_applicability"])
+        _restore_optional_file(run_dir / "theorem_applicability_review.yaml", snapshot["theorem_applicability_review"])
+        _restore_optional_file(run_dir / artifacts.get("source_grounding", "source_grounding.yaml"), snapshot["source_grounding"])
+        _restore_optional_file(run_dir / artifacts.get("final_report", "final_report.md"), snapshot["final_report"])
         raise

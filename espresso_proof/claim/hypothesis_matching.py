@@ -66,10 +66,26 @@ SEMANTIC_EQUIVALENCE_RULES: tuple[EquivalenceRule, ...] = (
         claim_patterns=(
             r"\bp\s+is\s+(?:a\s+)?prime\b",
             r"\bprime\s+p\b",
+            r"\bp\s+(?:a\s+)?prime\s+number\b",
         ),
         source_patterns=(
             r"\bprime\s+p\b",
             r"\bp\s+is\s+(?:a\s+)?prime\b",
+            r"\bp\s+(?:a\s+)?prime\s+number\b",
+            r"\bp\s*\\?\)?\s+(?:a\s+)?prime\s+number\b",
+        ),
+    ),
+    EquivalenceRule(
+        concept="prime order",
+        claim_patterns=(
+            r"\|\s*g\s*\|\s*=\s*p\b.*\bprime\b",
+            r"\bprime\s+order\b",
+            r"\border\s+p\b.*\bprime\b",
+        ),
+        source_patterns=(
+            r"\|\s*g\s*\|\s*=\s*p\b.*\bprime\b",
+            r"\bprime\s+order\b",
+            r"\border\s+p\b.*\bprime\b",
         ),
     ),
     EquivalenceRule(
@@ -109,6 +125,8 @@ SEMANTIC_EQUIVALENCE_RULES: tuple[EquivalenceRule, ...] = (
             r"\bg\s+is\s+(?:a\s+)?group\b",
             r"\bgroup\s+g\b",
             r"\bgroup\s+of\s+order\s+p\s*\^?\s*2\b",
+            r"\bg\s+is\s+cyclic\b",
+            r"\bg\s*\\?\)?\s+is\s+cyclic\b",
         ),
     ),
     EquivalenceRule(

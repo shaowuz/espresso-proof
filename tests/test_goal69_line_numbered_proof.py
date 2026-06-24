@@ -155,6 +155,18 @@ class _GapResolverStub(StubLLMClient):
         }
 
 
+class _GapResolverWithSourceStub(_GapResolverStub):
+    def __init__(self, source: Path) -> None:
+        super().__init__()
+        self.source = source
+
+    def complete_json(self, *, system: str, prompt: str) -> dict:
+        raw = super().complete_json(system=system, prompt=prompt)
+        if "proof gap resolver" in system.lower():
+            raw["candidates"][0]["source_url"] = str(self.source)
+        return raw
+
+
 def _add_single_gap(run_dir: Path) -> None:
     proof = read_yaml(run_dir / "line_numbered_proof.yaml")
     proof["lines"][0]["gaps"] = ["external theorem locator missing"]
@@ -257,6 +269,35 @@ def test_write_proof_cli_refreshes_stage_status_projection(tmp_path: Path) -> No
     assert _stage(report, "line_numbered_proof_writer")["status"] == "done"
 
 
+def test_failed_seal_projects_failed_stage_status_after_real_prover_path(tmp_path: Path) -> None:
+    claim = tmp_path / "claim.md"
+    claim.write_text(
+        "Every group of order p^2, where p is a prime, is abelian.\n",
+        encoding="utf-8",
+    )
+    result_run = orchestrate_run(
+        project="goal69_failed_seal_status",
+        input_path=claim,
+        output_root=tmp_path,
+        provider="stub",
+        front_half="stub",
+        fast=True,
+    )
+    run_dir = Path(result_run["run_dir"])
+    write_result = CliRunner().invoke(app, ["write-proof", "--run", str(run_dir)])
+    assert write_result.exit_code == 0, write_result.output
+    _add_single_gap(run_dir)
+
+    seal_result = CliRunner().invoke(app, ["seal-consensus", "--run", str(run_dir)])
+
+    assert seal_result.exit_code == 1
+    report = read_yaml(run_dir / STAGE_STATUS_FILENAME)
+    seal_stage = _stage(report, "agent_consensus_seal")
+    assert seal_stage["status"] == "failed"
+    assert "seal failed closed" in seal_stage["status_reason"]
+    validate_run(run_dir)
+
+
 def test_gap_resolver_keeps_non_sealable_unresolved_edges_as_unchecked_gap() -> None:
     candidates = _normalize_agent_candidates(
         raw={"candidates": []},
@@ -317,6 +358,39 @@ def test_writer_produces_structured_proof(tmp_path: Path) -> None:
     for line in record["lines"]:  # every line is a real proof line, not a route step
         assert line["statement"].strip() and line["justification"].strip()
     assert "line_numbered_proof" in read_yaml(run_dir / "run_manifest.yaml")["optional_artifacts"]
+
+
+def test_writer_prefers_direct_source_backed_theorem(tmp_path: Path) -> None:
+    run_dir = _admissible_run(tmp_path)
+    claim = read_yaml(run_dir / "locked_claim.yaml")
+    source_grounding = read_yaml(run_dir / "source_grounding.yaml")
+    source_grounding["source_refs"].append(
+        {
+            "id": "verified_direct_claim",
+            "type": "web_page",
+            "title": "A checked theorem source",
+            "authors": ["A. Author"],
+            "locator": {"kind": "theorem", "value": "Theorem 2.1"},
+            "statement_or_summary": f"If the locked hypotheses hold, then {claim['conclusion']}",
+            "hypothesis_match": {"matches": True, "mismatches": [], "matched": []},
+            "confidence": "high",
+            "status": "source_backed",
+        }
+    )
+    write_yaml(run_dir / "source_grounding.yaml", source_grounding)
+
+    record = write_line_numbered_proof(run_dir, client=StubLLMClient())
+
+    assert record["proof_kind"] == "direct_source_grounded_theorem"
+    assert [line["line_id"] for line in record["lines"]] == ["L1", "L2"]
+    assert record["lines"][1]["gaps"] == []
+    theorem_dep = next(
+        dep for dep in record["lines"][1]["dependencies"] if dep["type"] == "theorem_ref"
+    )
+    assert theorem_dep["ref"] == "verified_direct_claim"
+    assert theorem_dep["authority"] == "source_grounded_theorem_ref"
+    assert theorem_dep["source_grounded"] is True
+    validate_run(run_dir)
 
 
 # --------------------------------------------------------------------------- #
@@ -454,6 +528,71 @@ def test_negative_self_asserted_source_resolved_dependency_cannot_seal(tmp_path:
     assert _grade(run_dir)["proof_language_status"] != _AMBER
 
 
+def test_source_grounded_theorem_dependency_can_seal_when_cross_checked(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    source_grounding = read_yaml(run_dir / "source_grounding.yaml")
+    source_grounding["source_refs"].append(
+        {
+            "id": "verified_lagrange",
+            "type": "web_page",
+            "title": "A checked algebra source",
+            "authors": ["A. Algebraist"],
+            "locator": {"kind": "theorem", "value": "Theorem 1.2"},
+            "statement_or_summary": "If H is a subgroup of finite G, then |H| divides |G|.",
+            "hypothesis_match": {"matches": True, "mismatches": [], "matched": []},
+            "confidence": "high",
+            "status": "source_backed",
+        }
+    )
+    write_yaml(run_dir / "source_grounding.yaml", source_grounding)
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    proof["lines"][0]["dependencies"].append(
+        {
+            "type": "theorem_ref",
+            "ref": "verified_lagrange",
+            "status": "candidate",
+            "authority": "source_grounded_theorem_ref",
+            "source_grounded": True,
+            "machine_verified": False,
+            "source_locator": "A checked algebra source, Theorem 1.2",
+            "needed_statement": "If H is a subgroup of finite G, then |H| divides |G|.",
+        }
+    )
+    write_yaml(run_dir / "line_numbered_proof.yaml", proof)
+
+    record = seal_agent_consensus(run_dir, client=_ProofReviewStub())
+
+    assert record["consensus"] is True
+    assert _grade(run_dir)["proof_language_status"] == _AMBER
+
+
+def test_self_asserted_source_grounded_dependency_without_source_ref_cannot_seal(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    proof["lines"][0]["dependencies"].append(
+        {
+            "type": "theorem_ref",
+            "ref": "verified_missing",
+            "status": "candidate",
+            "authority": "source_grounded_theorem_ref",
+            "source_grounded": True,
+            "machine_verified": False,
+            "source_locator": "A checked algebra source, Theorem 1.2",
+            "needed_statement": "If H is a subgroup of finite G, then |H| divides |G|.",
+        }
+    )
+    write_yaml(run_dir / "line_numbered_proof.yaml", proof)
+
+    with pytest.raises(RuntimeError, match="unresolved dependencies"):
+        seal_agent_consensus(run_dir, client=_ProofReviewStub())
+
+    assert _grade(run_dir)["proof_language_status"] != _AMBER
+
+
 def test_proof_gap_resolver_attaches_candidate_but_does_not_clear_gap(tmp_path: Path) -> None:
     run_dir = _run_with_proof(tmp_path)
     _add_single_gap(run_dir)
@@ -468,6 +607,33 @@ def test_proof_gap_resolver_attaches_candidate_but_does_not_clear_gap(tmp_path: 
     assert proof["lines"][0]["gaps"] == ["external theorem locator missing"]
     with pytest.raises(RuntimeError, match="unresolved dependencies"):
         seal_agent_consensus(run_dir, client=_ProofReviewStub())
+
+
+def test_proof_gap_resolver_executes_concrete_source_retrieval_attempt(tmp_path: Path) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    _add_single_gap(run_dir)
+    source = tmp_path / "lagrange.txt"
+    source.write_text(
+        "Theorem 6.10. If G is a finite group and H is a subgroup of G, then |H| divides |G|.",
+        encoding="utf-8",
+    )
+
+    report = resolve_proof_gaps(run_dir, client=_GapResolverWithSourceStub(source))
+    validate_run(run_dir)
+
+    assert any(action["status"].startswith("executed_") for action in report["repair_plan"])
+    assert (run_dir / "theorem_extraction.yaml").exists()
+    assert (run_dir / "retrieval_resolution.yaml").exists()
+    round_index = read_yaml(run_dir / "gap_repair_rounds" / "index.yaml")
+    round_record = read_yaml(run_dir / round_index["rounds"][0]["artifact"])
+    assert round_record["status"] == "attempted"
+    assert any(
+        attempt["action"] == "source_retrieval"
+        and attempt["status"].startswith("executed_")
+        for attempt in round_record["execution_attempts"]
+    )
+    proof = read_yaml(run_dir / "line_numbered_proof.yaml")
+    assert proof["lines"][0]["gaps"] == ["external theorem locator missing"]
 
 
 def test_proof_gap_resolver_human_allow_clears_gap_for_advisory_seal(tmp_path: Path) -> None:

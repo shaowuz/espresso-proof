@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,48 @@ def test_vscode_surface_is_marked_dev_only() -> None:
     assert "canonical product UI" in readme_text
     assert "Espresso Proof Dev Prototype" in package_text
     assert "dev-only local prototype" in main_js
+
+
+def test_bridge_run_flow_uses_repo_cwd_and_workspace_output_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "projects" / "prime_order" / "runs" / "r1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run_manifest.yaml").write_text("run_id: r1\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_run_cli(command: list[str], cwd: Path) -> str:
+        captured["command"] = command
+        captured["cwd"] = cwd
+        return f"Wrote run artifacts to {run_dir}\n"
+
+    monkeypatch.setattr(bridge, "run_cli", fake_run_cli)
+    monkeypatch.setattr(bridge, "refresh_final_report_disclosures", lambda _run: None)
+
+    payload = bridge.run_flow(
+        Namespace(
+            workspace=str(tmp_path),
+            project="prime_order",
+            hypothesis="Prove every group of prime order is cyclic.",
+            literature_mode="local",
+            literature_provider=[],
+            max_references=8,
+            provider="external",
+            front_half="auto",
+            model="codex-cli",
+            reviewer_set="espresso",
+            api_key_env="OPENAI_API_KEY",
+            external_agent_command_env="ESPRESSO_EXTERNAL_AGENT_COMMAND",
+            agent_network_preflight=True,
+        )
+    )
+
+    command = captured["command"]
+    assert payload["run"] == str(run_dir.resolve())
+    assert captured["cwd"] == bridge.WORKSPACE_SOURCE_ROOT
+    assert "--output-root" in command
+    assert command[command.index("--output-root") + 1] == str(tmp_path.resolve())
 
 
 def _single_run(tmp_path: Path, name: str = "single") -> tuple[Path, Path]:

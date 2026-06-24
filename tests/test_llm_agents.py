@@ -524,6 +524,8 @@ def test_run_flow_openai_network_preflight_writes_provider_diagnostic(
             "local",
             "--provider",
             "openai",
+            "--front-half",
+            "mock",
             "--reviewer-set",
             "espresso",
             "--agent-network-preflight",
@@ -567,6 +569,8 @@ def test_run_flow_external_provider_uses_json_command(tmp_path: Path, monkeypatc
             "local",
             "--provider",
             "external",
+            "--front-half",
+            "mock",
             "--model",
             "chatgpt-account-adapter",
             "--reviewer-set",
@@ -612,11 +616,13 @@ def test_run_flow_codex_adapter_records_verified_call_diagnostics(
             "--input",
             str(FIXTURES / "promising_but_unproved" / "input.md"),
             "--project",
-            "codex_adapter_smoke",
+            "c",
             "--literature-mode",
             "local",
             "--provider",
             "external",
+            "--front-half",
+            "mock",
             "--model",
             "codex-cli",
             "--reviewer-set",
@@ -683,6 +689,8 @@ def test_external_provider_reserved_status_language_is_contained(
             "local",
             "--provider",
             "external",
+            "--front-half",
+            "mock",
             "--model",
             "status-smuggling-agent",
             "--reviewer-set",
@@ -802,7 +810,7 @@ def test_bridge_snapshot_exposes_prover_loop_and_theorem_applicability(tmp_path:
     current = payload["payload"]["current"]
     assert current["artifacts"]["prover_loop"]["loop_decision"] == "ask_human"
     assert len(current["artifacts"]["prover_round_index"]["rounds"]) >= 1
-    assert current["artifacts"]["theorem_applicability"]["overall_status"] == "unclear"
+    assert current["artifacts"]["theorem_applicability"]["overall_status"] == "blocked"
     assert current["artifact_paths"]["prover_loop"].endswith("prover_loop.yaml")
     assert current["artifact_paths"]["prover_round_index"].endswith("prover_rounds/index.yaml")
     assert current["artifact_paths"]["theorem_applicability"].endswith("theorem_applicability.yaml")
@@ -868,6 +876,8 @@ def test_bridge_run_flow_external_provider_creates_selectable_run(tmp_path: Path
             "local",
             "--provider",
             "external",
+            "--front-half",
+            "mock",
             "--model",
             "chatgpt-account-adapter",
             "--reviewer-set",
@@ -1966,6 +1976,36 @@ def test_mock_agent_adapter_contains_unsafe_prover_prose() -> None:
     assert attempt["output_summary"].count("[withheld proof-like phrase]") >= 3
     assert attempt["proposed_steps"] == []  # prose carried no structured steps
     LLMAgentAttempt.model_validate(attempt)  # the candidate artifact is schema-valid
+
+
+def test_prover_adapter_neutralizes_unchecked_pressure_support_language() -> None:
+    from espresso_proof.kernel.validators import _prover_unchecked_support_misuse
+
+    client = StubLLMClient(model="stub-espresso-agent")
+    raw = {
+        "summary": "An unchecked example supports the proof candidate.",
+        "steps": [
+            "Unchecked citations support the reduction.",
+            "Pending theorem applicability supports the final step.",
+        ],
+        "risks": ["Line-level gap supports the route."],
+    }
+    attempt = make_prover_attempt(
+        raw, client=client, created_at="2026-06-03T00:00:00+00:00"
+    )
+    text_fields = [
+        attempt["output_summary"],
+        *attempt["proposed_steps"],
+        *attempt["risks"],
+    ]
+
+    assert any("neutralized unchecked pressure phrasing" in item for item in attempt["risks"])
+    assert "suggests pressure for" in attempt["output_summary"]
+    assert "suggests a source request for" in attempt["proposed_steps"][0]
+    assert "remains an unresolved condition for" in attempt["proposed_steps"][1]
+    assert "remains an unresolved condition for" in attempt["risks"][0]
+    assert all(_prover_unchecked_support_misuse(item) is None for item in text_fields)
+    LLMAgentAttempt.model_validate(attempt)
 
 
 def test_mock_agent_adapter_records_unsafe_verifier_language() -> None:

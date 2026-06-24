@@ -14,7 +14,11 @@ from pathlib import Path
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.orchestration.mock_pipeline import run_mock_critique
 from espresso_proof.kernel.models import Locator
-from espresso_proof.literature.pdf_ingestion import extract_theorems, ingest_source_for_theorems
+from espresso_proof.literature.pdf_ingestion import (
+    extract_source_text,
+    extract_theorems,
+    ingest_source_for_theorems,
+)
 from espresso_proof.verification.source_verification import ground_run
 from espresso_proof.kernel.validators import validate_run
 
@@ -64,6 +68,35 @@ def test_locator_shape_number_and_name() -> None:
     assert _exact(t)
 
 
+def test_locator_shape_tex_wrapped_number() -> None:
+    t = _one(r"Theorem \(6.10\). Lagrange The order of H must divide the order of G.")
+    assert t["locator"] == {"kind": "theorem", "value": "Theorem 6.10"}
+    assert "order of H" in t["statement"]
+    assert _exact(t)
+
+
+def test_tex_boundary_before_header_splits_blocks() -> None:
+    text = (
+        r"Proposition \(6.9\) Let H be a subgroup of G. "
+        r"Theorem \(6.10\). Lagrange Let G be finite and H a subgroup of G. "
+        r"Then |G|/|H| is the number of left cosets."
+    )
+    ts = extract_theorems(text, source_ref_id="s")
+    assert [t["locator"]["value"] for t in ts] == ["Proposition 6.9", "Theorem 6.10"]
+
+
+def test_malformed_tex_boundary_before_header_splits_blocks() -> None:
+    text = (
+        r"Then the order of \(g\) must divide the number of elements in \(G\text{.}\ "
+        r"Corollary \(6.12\) Let \(|G| = p\) with \(p\) a prime number. "
+        r"Then \(G\) is cyclic."
+    )
+    ts = extract_theorems(text, source_ref_id="s")
+    assert ts[0]["locator"] == {"kind": "corollary", "value": "Corollary 6.12"}
+    assert "prime number" in ts[0]["statement"]
+    assert "cyclic" in ts[0]["statement"]
+
+
 def test_multi_block_splitting_keeps_three_exact_blocks() -> None:
     note = (
         "Theorem 1 (Nontrivial center). Let p be a prime and let G be a finite "
@@ -103,6 +136,30 @@ def test_mid_sentence_reference_does_not_split_statement() -> None:
         source_ref_id="s",
     )
     assert len(ts) == 1
+
+
+def test_html_source_text_extracts_lagrange_theorem_locator() -> None:
+    raw = b"""
+    <!doctype html><html><head><title>Ignore</title><script>var x='Theorem 0';</script></head>
+    <body>
+      <h3>Theorem 6.10 (Lagrange's Theorem)</h3>
+      <p>If G is a finite group and H is a subgroup of G, then |H| divides |G|.</p>
+      <p>Proof. The left cosets of H partition G.</p>
+    </body></html>
+    """
+
+    text, notes = extract_source_text(
+        raw,
+        "https://math.libretexts.org/Bookshelves/Abstract_Algebra/6.02_Lagrange",
+    )
+    ts = extract_theorems(text, source_ref_id="judson")
+
+    assert any("Extracted HTML text" in note for note in notes)
+    assert len(ts) == 1
+    assert ts[0]["locator"] == {"kind": "theorem", "value": "Theorem 6.10"}
+    assert "finite group" in ts[0]["statement"]
+    assert "subgroup of G" in ts[0]["statement"]
+    assert "|H| divides |G|" in ts[0]["statement"]
 
 
 # --- statement fidelity + length cap --------------------------------------

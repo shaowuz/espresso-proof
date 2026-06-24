@@ -828,6 +828,10 @@ def test_precise_claim_scrubs_stale_vague_objection(tmp_path: Path) -> None:
     # display hygiene only: the grade is not upgraded to a proof
     grade = read_yaml(run_dir / artifacts["idea_grade"])
     assert grade["proof_language_status"] == "idea_sketch"
+    assert not any(
+        "vague" in reason.lower() or "not precise enough" in reason.lower()
+        for reason in grade["reasons"]
+    )
 
 
 def test_precise_claim_reconciles_stale_scaffold_control_artifacts(tmp_path: Path) -> None:
@@ -981,12 +985,12 @@ def test_regrade_confirmed_machine_check_vetoes_likely_false(tmp_path: Path) -> 
     assert grade["proof_language_status"] == "idea_sketch"
 
 
-def test_regrade_unchecked_negative_pressure_still_flags_likely_false(tmp_path: Path) -> None:
+def test_regrade_unchecked_negative_pressure_stays_fragile(tmp_path: Path) -> None:
     counterexamples = [
         {"id": "cx1", "satisfies_all_claim_hypotheses": False, "refutes_claim": False}
     ]
     grade = _regrade_status(tmp_path, counterexamples=counterexamples)
-    assert grade["status"] == "likely_false"
+    assert grade["status"] == "fragile"
 
 
 def test_regrade_witness_task_does_not_treat_candidate_as_failed_claim(
@@ -1017,7 +1021,7 @@ def test_regrade_checked_machine_check_without_verification_does_not_veto(
         "machine_check": _finite_confirmed_machine_check(),
     }
     grade = _regrade_status(tmp_path, counterexamples=counterexamples, check=check)
-    assert grade["status"] == "likely_false"
+    assert grade["status"] == "fragile"
 
 
 def test_regrade_stale_verification_for_other_claim_does_not_veto(
@@ -1038,7 +1042,7 @@ def test_regrade_stale_verification_for_other_claim_does_not_veto(
     grade = _regrade_status(
         tmp_path, counterexamples=counterexamples, check=check, verification=verification
     )
-    assert grade["status"] == "likely_false"
+    assert grade["status"] == "fragile"
 
 
 def test_regrade_stale_verification_for_other_expression_does_not_veto(
@@ -1058,18 +1062,24 @@ def test_regrade_stale_verification_for_other_expression_does_not_veto(
     grade = _regrade_status(
         tmp_path, counterexamples=counterexamples, check=check, verification=verification
     )
-    assert grade["status"] == "likely_false"
+    assert grade["status"] == "fragile"
 
 
 def test_regrade_admissible_refutation_still_refuted(tmp_path: Path) -> None:
     counterexamples = [
-        {"id": "cx1", "satisfies_all_claim_hypotheses": True, "refutes_claim": True}
+        {
+            "id": "cx1",
+            "satisfies_all_claim_hypotheses": True,
+            "refutes_claim": True,
+            "result": "failed",
+            "target": "theorem",
+        }
     ]
     grade = _regrade_status(tmp_path, counterexamples=counterexamples)
     assert grade["status"] == "refuted"
 
 
-def test_regrade_unchecked_computation_check_does_not_veto_likely_false(
+def test_regrade_unchecked_computation_check_stays_fragile(
     tmp_path: Path,
 ) -> None:
     counterexamples = [
@@ -1082,7 +1092,7 @@ def test_regrade_unchecked_computation_check_does_not_veto_likely_false(
         "machine_check": _finite_confirmed_machine_check(),
     }
     grade = _regrade_status(tmp_path, counterexamples=counterexamples, check=check)
-    assert grade["status"] == "likely_false"
+    assert grade["status"] == "fragile"
 
 
 def test_reconcile_tests_drops_dangling_example_reference(tmp_path: Path) -> None:
@@ -1101,6 +1111,60 @@ def test_reconcile_tests_drops_dangling_example_reference(tmp_path: Path) -> Non
     assert dropped >= 1
     after = read_yaml(run_dir / artifacts["tests"])
     assert all("ex_special_cubic" not in test.get("uses_examples", []) for test in after["tests"])
+
+
+def test_reconcile_counterexamples_drops_dangling_example_reference(tmp_path: Path) -> None:
+    from espresso_proof.front_half.stages.examples import (
+        _reconcile_counterexamples_with_examples,
+    )
+
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("recon_counterexamples", claim_path, tmp_path)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    counterexamples = read_yaml(run_dir / artifacts["counterexamples"])
+    referenced = {test.get("example_id") for test in counterexamples["tests"]}
+    assert "ex_special_cubic" in referenced
+
+    dropped = _reconcile_counterexamples_with_examples(
+        run_dir, artifacts, counterexamples["claim_id"], set()
+    )
+
+    assert dropped >= 1
+    after = read_yaml(run_dir / artifacts["counterexamples"])
+    assert all(
+        test.get("example_id") != "ex_special_cubic"
+        for test in after["tests"]
+    )
+
+
+def test_reconcile_grade_drops_unknown_counterexample_test_reference(tmp_path: Path) -> None:
+    from espresso_proof.front_half.stages.examples import (
+        _reconcile_grade_with_counterexamples,
+    )
+
+    run_dir = run_mock_critique(
+        "recon_grade_refs",
+        Path("tests/fixtures/promising_but_unproved/input.md"),
+        tmp_path,
+    )
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    grade = read_yaml(run_dir / artifacts["idea_grade"])
+    assert "test_very_general_package_support" in grade["survived_tests"]
+
+    counterexamples = read_yaml(run_dir / artifacts["counterexamples"])
+    counterexamples["tests"] = [
+        test
+        for test in counterexamples["tests"]
+        if test["id"] != "test_very_general_package_support"
+    ]
+    write_yaml(run_dir / artifacts["counterexamples"], counterexamples)
+
+    dropped = _reconcile_grade_with_counterexamples(run_dir, artifacts)
+
+    assert dropped == 1
+    after = read_yaml(run_dir / artifacts["idea_grade"])
+    assert "test_very_general_package_support" not in after["survived_tests"]
 
 
 def test_reconcile_tests_keeps_valid_bank_counterexample_reference(tmp_path: Path) -> None:

@@ -54,13 +54,22 @@ from ..safety import (
 _UNDERSTANDING_SYSTEM = (
     "You are the Espresso Proof Understanding-Claim agent. Turn the user's "
     "mathematical claim into a precise locked claim plus a hypothesis ledger. "
-    "Preserve quantifiers EXACTLY (all / exists / generic / very general / "
-    "special); never silently narrow 'all' to 'very general'. List every "
-    "ambiguous term and every missing or unclear hypothesis instead of guessing. "
+    "Do not solve the problem. Build an auditable claim card: identify the task "
+    "type, separate objects from hypotheses, separate the conclusion from any "
+    "possible route, and preserve quantifiers EXACTLY (all / exists / generic / "
+    "very general / special). Never silently narrow 'all' to 'very general', "
+    "change the base field/category, add an explicit-construction requirement, "
+    "or replace an abstract isomorphism claim by a representation claim unless "
+    "the user said so. Expand compressed standard mathematical English only "
+    "when the expansion is forced by the words used, and record that choice in "
+    "notes. If two readings are materially possible, list the ambiguity and keep "
+    "the claim conservative. Use missing_or_unclear only for real blockers to "
+    "starting literature/examples/strategy work, not for routine source needs. "
     "You may PROPOSE a precise statement, but you must NOT mark it "
-    "human-confirmed and must NOT infer any proof, source, or evidence status. "
-    "Also judge claim_precision: 'precise' if the objects, hypotheses, and "
-    "conclusion are well-defined enough to start studying, else 'imprecise'. "
+    "human-confirmed and must NOT infer any proof, source, evidence, theorem, "
+    "grade, or refutation status. Also judge claim_precision: 'precise' if the "
+    "objects, hypotheses, and conclusion are well-defined enough to start "
+    "studying, else 'imprecise'. "
     "Respond with ONLY a JSON object."
 )
 
@@ -156,8 +165,12 @@ def _understanding_claim(*, run_dir: Path, client: LLMClient, context: dict) -> 
         "required_json_schema": _UNDERSTANDING_OUTPUT_SCHEMA,
         "rules": [
             "preserve quantifiers; never silently narrow 'all' to 'very general'",
-            "list ambiguous terms and missing hypotheses instead of guessing",
-            "do not mark human_confirmed; do not infer proof/source/evidence status",
+            "identify task type before rewriting: theorem, existence, construction, counterexample, computation, classification, equivalence, implication, or exploration",
+            "separate objects, hypotheses, and conclusion; do not put a proof route or source theorem into the conclusion",
+            "expand compressed standard mathematical English only when forced by the wording, and explain the expansion in notes",
+            "list ambiguous terms and real missing hypotheses instead of guessing",
+            "do not block on routine future source needs; source grounding happens later",
+            "do not mark human_confirmed; do not infer proof/source/evidence/theorem/grade/refutation status",
         ],
     }
     raw = client.complete_json(

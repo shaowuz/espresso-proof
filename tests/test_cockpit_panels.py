@@ -245,6 +245,16 @@ def test_trace_panel_surfaces_dependency_withheld_status_detail(tmp_path: Path) 
     seal = next(row for row in panel["items"] if row["stage_id"] == "agent_consensus_seal")
     assert seal["state_word"] == "Not started"
     assert "line_numbered_proof_writer" in seal["status_detail"]
+    grade = next(row for row in panel["items"] if row["stage_id"] == "grade")
+    assert grade["state_word"] == "Blocked"
+    assert grade["tone"] == "warn"
+    assert "failure_classifier" in grade["status_detail"]
+    assert grade["blocked_reason"] == grade["status_detail"]
+    concise = next(row for row in panel["items"] if row["stage_id"] == "concise_answer")
+    assert concise["state_word"] == "Blocked"
+    assert concise["tone"] == "warn"
+    assert "grade" in concise["status_detail"]
+    assert concise["blocked_reason"] == concise["status_detail"]
 
 
 def test_trace_panel_fails_closed_on_invalid_stage_status_direct(tmp_path: Path) -> None:

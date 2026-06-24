@@ -323,7 +323,12 @@ def _conditions_from_step(step, source_ref, claim_hypotheses) -> tuple[list[dict
         from espresso_proof.verification.source_verification import check_hypothesis_applicability
 
         statement = source_ref.statement_or_summary if source_ref is not None else ""
-        recheck = check_hypothesis_applicability(statement, claim_hypotheses, [])
+        recheck = check_hypothesis_applicability(
+            statement,
+            claim_hypotheses,
+            [],
+            required_statement=step.needed_theorem,
+        )
         conditions: list[dict] = []
         index = 1
         for reason in recheck["matched"]:

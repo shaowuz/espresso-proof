@@ -1991,6 +1991,19 @@ def make_prover_attempt(
     created_at: str,
     input_artifacts: list[str] | None = None,
 ) -> dict:
+    output_summary, summary_neutralized = safe_prover_text(raw.get("summary", ""))
+    proposed_steps, steps_neutralized = safe_prover_list(raw.get("steps", []))
+    risks, risks_neutralized = safe_prover_list(raw.get("risks", []))
+    if summary_neutralized or steps_neutralized or risks_neutralized:
+        risks = _append_unique(
+            risks,
+            [
+                (
+                    "Adapter neutralized unchecked pressure phrasing before artifact "
+                    "commit; treat the affected text as pressure-lane context only."
+                )
+            ],
+        )
     return {
         "agent_id": "llm_prover_001",
         "role": "prover",
@@ -1998,10 +2011,10 @@ def make_prover_attempt(
         "model": client.model,
         "created_at": created_at,
         "input_artifacts": list(input_artifacts or INPUT_ARTIFACTS),
-        "output_summary": safe_text(raw.get("summary", "")),
-        "proposed_steps": safe_list(raw.get("steps", [])),
+        "output_summary": output_summary,
+        "proposed_steps": proposed_steps,
         "source_requests": safe_list(raw.get("source_requests", [])),
-        "risks": safe_list(raw.get("risks", [])),
+        "risks": risks,
         "status": "needs_human",
     }
 
@@ -2235,6 +2248,15 @@ def line_numbered_proof_writer_system_prompt() -> str:
         "Dependency types are prior_line, definition, arithmetic, theorem_ref, "
         "human_assumption, and unchecked_gap. Unchecked examples/counterexamples are "
         "pressure-lane context only; never cite them as proof dependencies. If a line "
+        "can cite an existing source_grounding source_ref whose status is "
+        "source_backed and whose statement directly covers the needed theorem or "
+        "claim conclusion, prefer that citation over rebuilding the same theorem "
+        "from unsupported internal lemmas. Such a dependency must use the exact "
+        "source_ref id, authority 'source_grounded_theorem_ref', source_grounded=true, "
+        "machine_verified=false, and the exact locator text in source_locator. "
+        "Do not mark an unchecked or candidate-only source this way. If no "
+        "source_backed ref covers the line, keep it missing/candidate as appropriate. "
+        "If a line "
         "genuinely rests on an uncited external theorem, still give the justification "
         "and record a theorem_ref with status 'missing' plus an unchecked_gap. "
         "A theorem allowed by the user must be marked human_assumption or theorem_ref "
@@ -2358,6 +2380,64 @@ def safe_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [safe_text(item) for item in value if str(item).strip()][:12]
+
+
+def safe_prover_list(value: object) -> tuple[list[str], bool]:
+    if not isinstance(value, list):
+        return [], False
+    out: list[str] = []
+    changed = False
+    for item in value:
+        if not str(item).strip():
+            continue
+        text, item_changed = safe_prover_text(item)
+        out.append(text)
+        changed = changed or item_changed
+        if len(out) >= 12:
+            break
+    return out, changed
+
+
+def safe_prover_text(value: object) -> tuple[str, bool]:
+    text = safe_text(value)
+    neutralized = _neutralize_unchecked_pressure_support(text)
+    return neutralized, neutralized != text
+
+
+def _neutralize_unchecked_pressure_support(text: str) -> str:
+    """Keep live prover prose from treating pressure-lane context as evidence.
+
+    The kernel validator remains authoritative and still rejects hand-edited or
+    missed misuse. This adapter layer only rewrites common live-agent phrasing
+    before the advisory artifact is committed.
+    """
+
+    replacements = [
+        (
+            r"\b(unchecked\s+(?:examples?|counterexamples?))\s+"
+            r"(?:support|supports|establish|establishes|prove|proves)\b",
+            r"\1 suggests pressure for",
+        ),
+        (
+            r"\b(unchecked\s+(?:citations?|sources?|references?))\s+"
+            r"(?:support|supports|establish|establishes|prove|proves)\b",
+            r"\1 suggests a source request for",
+        ),
+        (
+            r"\b(pending\s+theorem\s+applicability)\s+"
+            r"(?:support|supports|establish|establishes|prove|proves)\b",
+            r"\1 remains an unresolved condition for",
+        ),
+        (
+            r"\b(line-level\s+gap)\s+"
+            r"(?:support|supports|establish|establishes|prove|proves)\b",
+            r"\1 remains an unresolved condition for",
+        ),
+    ]
+    out = text
+    for pattern, replacement in replacements:
+        out = re.sub(pattern, replacement, out, flags=re.IGNORECASE)
+    return out
 
 
 def safe_text(value: object) -> str:

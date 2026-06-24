@@ -26,12 +26,25 @@ def verify_source_grounding_from_theorems(
         required_statement = str(step.get("needed_theorem") or "")
         theorem = best_theorem_for_step(step, extraction.theorems)
         if theorem is None:
+            step["status"] = "candidate"
+            step["source_refs"] = []
+            step["hypothesis_match"] = {
+                "matches": "unclear",
+                "mismatches": ["no exact theorem statement matched this proof step"],
+                "matched": [],
+            }
+            step["note"] = (
+                "No extracted exact theorem/corollary statement covered this proof "
+                "step; source conclusion does not cover the requested theorem, so "
+                "leaving it candidate-only."
+            )
             continue
         source = source_by_id[theorem.source_ref_id]
         hypothesis_match = check_hypothesis_applicability(
             theorem.statement,
             claim.get("hypotheses", []),
             ledger.get("missing_or_unclear", []),
+            required_statement=required_statement,
         )
         exact_locator = theorem.locator.is_exact
         # Anti-plagiarism: source_backed requires attribution (author + title), in
@@ -126,6 +139,12 @@ def ground_run(*, run_dir: Path, theorem_extraction_path: Path) -> dict:
 def conclusion_compatible(required_statement: str, theorem_statement: str) -> bool:
     """Fail closed unless the source statement covers the requested step terms."""
 
+    if _is_subgroup_equality_request(required_statement) and not _states_subgroup_equality(
+        theorem_statement
+    ):
+        return False
+    if _group_theorem_conclusion_compatible(required_statement, theorem_statement):
+        return True
     required_terms = significant_terms(required_statement)
     if not required_terms:
         return False
@@ -134,13 +153,23 @@ def conclusion_compatible(required_statement: str, theorem_statement: str) -> bo
 
 def best_theorem_for_step(step: dict, theorems) -> object | None:
     query_terms = significant_terms(step.get("needed_theorem", ""))
+    if not query_terms:
+        return None
     best = None
     best_score = 0
     for theorem in theorems:
         if not theorem.locator.is_exact:
             continue
-        haystack = " ".join([theorem.label, theorem.statement, " ".join(theorem.hypothesis_terms)]).lower()
-        score = sum(1 for term in query_terms if term in haystack)
+        if getattr(theorem, "kind", "") == "remark":
+            continue
+        if not conclusion_compatible(step.get("needed_theorem", ""), theorem.statement):
+            continue
+        haystack = normalize_math_text(
+            " ".join([theorem.label, theorem.statement, " ".join(theorem.hypothesis_terms)])
+        )
+        score = sum(1 for term in query_terms if term_present(term, haystack))
+        if getattr(theorem, "kind", "") in {"theorem", "corollary"}:
+            score += 2
         if score > best_score:
             best = theorem
             best_score = score
@@ -151,6 +180,8 @@ def check_hypothesis_applicability(
     statement: str,
     claim_hypotheses: list[dict],
     missing_or_unclear: list[str],
+    *,
+    required_statement: str | None = None,
 ) -> dict:
     """Decide whether a cited source statement covers the required claim
     hypotheses.
@@ -182,10 +213,20 @@ def check_hypothesis_applicability(
         name = (hypothesis.get("name") or "").strip()
         if not name:
             continue
+        if required_statement and not _hypothesis_relevant_to_step(
+            name, required_statement, statement
+        ):
+            continue
         # 1) Conservative semantic equivalence (explicit, test-backed rules).
         reason = match_hypothesis_semantically(name, statement)
         if reason is not None:
             matched_reasons.append(reason)
+            continue
+        if _unsupported_symbolic_order_hypothesis(name):
+            unclear = True
+            mismatches.append(
+                f"required hypothesis has no checkable terms or semantic match: {name}"
+            )
             continue
         # 2) Fall back to conservative whole-word token coverage.
         terms = list(dict.fromkeys(significant_terms(name) + expanded_hypothesis_terms(name)))
@@ -220,7 +261,7 @@ def term_present(term: str, statement: str) -> bool:
     downgrades to a candidate — the safe direction.
     """
 
-    lowered = statement.lower()
+    lowered = normalize_math_text(statement)
     if _unnegated_word_present(term, lowered):
         return True
     return term_covered(term, lowered)
@@ -239,6 +280,7 @@ def _unnegated_word_present(term: str, lowered_statement: str) -> bool:
 
 
 def significant_terms(text: str) -> list[str]:
+    text = normalize_math_text(text)
     return [
         token
         for token in re.findall(r"[a-zA-Z][a-zA-Z0-9_+-]{2,}", text.lower())
@@ -258,7 +300,13 @@ def term_covered(term: str, statement: str) -> bool:
             "base field", statement
         )
     if term == "order":
-        return "|g|" in statement or "order" in statement
+        return "|g|" in statement or "order" in statement or "number of elements" in statement
+    if term == "finite":
+        return (
+            _unnegated_word_present("finite", statement)
+            or bool(re.search(r"\border\s+of\s+[a-z]\s+(?:is|=)\s+p\b", statement))
+            or bool(re.search(r"\|\s*[a-z]\s*\|\s*=\s*p\b", statement))
+        )
     if term == "projective":
         return _unnegated_word_present("proper", statement) and _unnegated_word_present(
             "ample", statement
@@ -267,10 +315,11 @@ def term_covered(term: str, statement: str) -> bool:
 
 
 def expanded_hypothesis_terms(text: str) -> list[str]:
-    lowered = text.lower()
+    lowered = normalize_math_text(text)
     expanded = []
     for term, aliases in TERM_ALIASES.items():
-        if term in lowered or any(alias in lowered for alias in aliases):
+        term_present_in_text = len(term) >= 3 and _unnegated_word_present(term, lowered)
+        if term_present_in_text or any(alias in lowered for alias in aliases):
             expanded.append(term)
     return expanded
 
@@ -282,7 +331,7 @@ TERM_ALIASES = {
     "fourfold": ["fourfolds", "four-dimensional"],
     "galois": ["galois group", "galois extension"],
     "hodge": ["hodgetheoretic", "hodge-theoretic"],
-    "order": ["|g|", "order"],
+    "order": ["|g|", "order", "cardinality", "number of elements"],
     "proper": ["complete"],
     "smooth": ["nonsingular", "non-singular"],
     "realization": ["there exists", "galois group isomorphic"],
@@ -306,6 +355,7 @@ STOPWORDS = {
     "theorem",
     "this",
     "its",
+    "some",
     "via",
     "over",
     "every",
@@ -313,3 +363,145 @@ STOPWORDS = {
     "with",
     "wingberg",
 }
+
+
+def normalize_math_text(text: str) -> str:
+    """Normalize common TeX/prose variants used by theorem webpages."""
+
+    lowered = str(text).lower()
+    lowered = re.sub(r"\\text\{([^}]*)\}", r"\1", lowered)
+    lowered = lowered.replace("\\langle", "<").replace("\\rangle", ">")
+    lowered = lowered.replace("\\neq", "!=").replace("\\ne", "!=")
+    lowered = lowered.replace("\\in", " in ")
+    lowered = lowered.replace("\\gt", ">").replace("\\lt", "<")
+    lowered = re.sub(r"\\[a-zA-Z]+", " ", lowered)
+    lowered = re.sub(r"\|\s*([a-z])\s*\|\s*=\s*p\b", r" order of \1 is p ", lowered)
+    lowered = re.sub(r"\|\s*([a-z])\s*\|", r" order of \1 ", lowered)
+    lowered = re.sub(
+        r"number of elements in\s+(?:\\?\(?\s*)?([a-z])",
+        r"order of \1",
+        lowered,
+    )
+    lowered = re.sub(r"prime\s+number", "prime", lowered)
+    lowered = re.sub(r"\s+", " ", lowered)
+    return lowered.strip()
+
+
+def _hypothesis_relevant_to_step(
+    hypothesis_name: str,
+    required_statement: str,
+    theorem_statement: str,
+) -> bool:
+    """Only require claim hypotheses that the proof step/theorem actually uses."""
+
+    combined = normalize_math_text(f"{required_statement} {theorem_statement}")
+    hyp_terms = list(
+        dict.fromkeys(
+            significant_terms(hypothesis_name) + expanded_hypothesis_terms(hypothesis_name)
+        )
+    )
+    if "group" in hyp_terms:
+        return any(
+            marker in combined
+            for marker in (" group", "subgroup", "cyclic", "generator", "order of g")
+        )
+    if "finite" in hyp_terms:
+        return any(marker in combined for marker in ("finite", "order of g is p", "prime order"))
+    if "prime" in hyp_terms or "order" in hyp_terms:
+        return any(
+            marker in combined
+            for marker in ("prime", "order of g is p", "order p", "group of prime order")
+        )
+    return any(term_present(term, combined) for term in hyp_terms)
+
+
+def _group_theorem_conclusion_compatible(
+    required_statement: str,
+    theorem_statement: str,
+) -> bool:
+    required = normalize_math_text(required_statement)
+    theorem = normalize_math_text(theorem_statement)
+
+    if _is_nonidentity_existence_request(required):
+        return False
+
+    if (
+        ("lagrange" in required or "subgroup" in required)
+        and "divide" in required
+        and "finite group" in theorem
+        and "subgroup" in theorem
+        and "divide" in theorem
+        and "order of h" in theorem
+        and "order of g" in theorem
+    ):
+        return True
+
+    if (
+        "order of g" in required
+        and "divide" in required
+        and "order of g" in theorem
+        and "divide" in theorem
+        and "finite group" in theorem
+    ):
+        return True
+
+    if (
+        "prime" in required
+        and ("nonidentity" in required or "not equal" in required or "!=" in required)
+        and ("order of <g>" in required or "order of g" in required or "generator" in required)
+        and "order of g is p" in theorem
+        and "prime" in theorem
+        and ("generator" in theorem or "cyclic" in theorem)
+    ):
+        return True
+
+    if (
+        "cyclic" in required
+        and ("definition" in required or "generator" in required or "<g>" in required)
+        and "cyclic" in theorem
+        and ("generator" in theorem or "order of g is p" in theorem)
+    ):
+        return True
+
+    return False
+
+
+def _is_nonidentity_existence_request(required: str) -> bool:
+    return (
+        ("nonidentity element" in required or "non-identity element" in required)
+        and ("p >= 2" in required or "p is prime" in required or "prime" in required)
+        and "cyclic" not in required
+        and "generator" not in required
+        and "divide" not in required
+    )
+
+
+def _is_subgroup_equality_request(required_statement: str) -> bool:
+    required = normalize_math_text(required_statement)
+    return (
+        "subgroup" in required
+        and (
+            "h = g" in required
+            or "same order" in required
+            or ("order of h" in required and "order of g" in required and "then h" in required)
+        )
+    )
+
+
+def _states_subgroup_equality(theorem_statement: str) -> bool:
+    theorem = normalize_math_text(theorem_statement)
+    return (
+        "subgroup" in theorem
+        and (
+            "h = g" in theorem
+            or "same order" in theorem
+            or "same cardinality" in theorem
+        )
+    )
+
+
+def _unsupported_symbolic_order_hypothesis(hypothesis_name: str) -> bool:
+    """Pure symbolic cardinality hypotheses need an explicit semantic rule."""
+
+    lowered = hypothesis_name.lower()
+    return bool(re.search(r"\|\s*[a-z]\s*\|\s*=\s*[a-oq-z]\b", lowered))

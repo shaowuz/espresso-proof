@@ -13,7 +13,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from espresso_proof.cli import app
+from espresso_proof.cli import app, _resolve_front_half_mode
 from espresso_proof.kernel.io import read_yaml
 from espresso_proof.kernel.validators import validate_run
 
@@ -25,6 +25,43 @@ CLAIM_TEXT = "The Mathieu group M23 is realizable as a Galois group over Q.\n"
 
 # A precise seeded scenario used when a test needs to reach downstream stages.
 CLEAR_CLAIM_TEXT = "Every group of order p^2, where p is prime, is abelian.\n"
+
+
+def test_auto_front_half_uses_real_claim_agent_for_real_providers() -> None:
+    assert (
+        _resolve_front_half_mode(
+            provider="external", front_half="auto", command_name="test"
+        )
+        == "external"
+    )
+    assert (
+        _resolve_front_half_mode(provider="openai", front_half="auto", command_name="test")
+        == "openai"
+    )
+    assert (
+        _resolve_front_half_mode(provider="stub", front_half="auto", command_name="orchestrate")
+        == "stub"
+    )
+    assert (
+        _resolve_front_half_mode(provider="stub", front_half="auto", command_name="run-flow")
+        == "mock"
+    )
+
+
+def test_claim_understanding_skill_pins_generation_contract() -> None:
+    text = Path("espresso_proof/agent_skills/claim_understanding.md").read_text(
+        encoding="utf-8"
+    )
+
+    for phrase in (
+        "Required Output Shape",
+        "normalized_statement",
+        "Separate objects from hypotheses",
+        "Separate the conclusion from the route",
+        "Use `missing_or_unclear` for blockers",
+        "Never mark the claim human-confirmed",
+    ):
+        assert phrase in text
 
 
 def _claim(tmp_path: Path) -> str:

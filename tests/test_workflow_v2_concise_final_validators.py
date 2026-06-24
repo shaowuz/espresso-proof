@@ -116,6 +116,114 @@ def test_warning_disclosures_scrub_raw_source_backed_vocabulary() -> None:
     assert final_report_missing_disclosures(block, warnings) == []
 
 
+def test_source_warning_filters_stale_no_source_gaps_after_backed_ref() -> None:
+    warnings = collect_surface_warnings(
+        grade={
+            "source_gaps": [
+                "No source is cited for the cyclicity theorem.",
+                "No exact locator is given for any theorem reference.",
+                "Need a source for the remaining finite-set lemma.",
+            ]
+        },
+        review={},
+        examples={"examples": []},
+        counterexamples={"tests": []},
+        tests={"tests": []},
+        source_grounding={
+            "source_refs": [
+                {
+                    "id": "verified_direct",
+                    "status": "source_backed",
+                    "locator": {"kind": "corollary", "value": "Corollary 6.12"},
+                    "title": "A source",
+                    "authors": ["A. Author"],
+                },
+                {"id": "src_candidate", "status": "candidate"},
+            ],
+            "steps": [
+                {"proof_step_id": "finite_set_lemma", "status": "candidate"},
+            ],
+        },
+    )
+    source_warning = next(w for w in warnings if w["category"] == SOURCE_GAPS)
+    text = source_warning["text"]
+    assert "No source is cited" not in text
+    assert "No exact locator" not in text
+    assert "remaining finite-set lemma" in text
+    assert "src_candidate" in text
+    assert "finite_set_lemma" in text
+
+
+def test_refresh_final_report_preserves_agent_consensus_disclosure(tmp_path: Path) -> None:
+    run_dir = _run(tmp_path)
+    report_path = run_dir / _artifacts(run_dir)["final_report"]
+    report_path.write_text(
+        "Legacy memo.\n\nOpen blockers / pending checks:\n- stale old blocker.\n\n"
+        "Agent-consensus mock check: three agents ran an adversarial pass and surfaced no argument-breaking flaw.\n"
+        "  Agent consensus only, not a machine check -- advisory.\n",
+        encoding="utf-8",
+    )
+
+    refresh_final_report_disclosures(run_dir)
+
+    text = report_path.read_text(encoding="utf-8")
+    assert "Agent-consensus mock check" in text
+    assert "not a machine check" in text
+
+
+def test_warnings_scope_theorem_blockers_to_current_line_proof_refs() -> None:
+    warnings = collect_surface_warnings(
+        grade={},
+        review={},
+        examples={"examples": []},
+        counterexamples={"tests": []},
+        tests={"tests": []},
+        source_grounding={},
+        theorem_applicability={
+            "overall_status": "blocked",
+            "usages": [
+                {
+                    "proof_step_id": "old_candidate_step",
+                    "source_ref_id": "old_ref",
+                    "blocks_source_backed": True,
+                    "applicability_status": "blocked",
+                },
+                {
+                    "proof_step_id": "current_line_ref",
+                    "source_ref_id": "verified_direct",
+                    "blocks_source_backed": False,
+                    "applicability_status": "applicable",
+                },
+            ],
+        },
+        line_numbered_proof={
+            "lines": [
+                {
+                    "line_id": "L2",
+                    "source_refs": ["verified_direct"],
+                    "dependencies": [
+                        {"type": "theorem_ref", "ref": "verified_direct"},
+                    ],
+                }
+            ]
+        },
+    )
+    assert all(w["category"] != THEOREM_BLOCKERS for w in warnings)
+
+
+def test_warnings_suppress_legacy_reviewer_blockers_after_consensus() -> None:
+    warnings = collect_surface_warnings(
+        grade={},
+        review={"reviewers": [{"reviewer_id": "legacy", "verdict": "unclear"}]},
+        examples={"examples": []},
+        counterexamples={"tests": []},
+        tests={"tests": []},
+        source_grounding={},
+        agent_consensus_review={"consensus": True},
+    )
+    assert all(w["category"] != REVIEWER_BLOCKERS for w in warnings)
+
+
 def test_dashboard_memo_and_cockpit_scrub_strategy_source_vocabulary(tmp_path: Path) -> None:
     run_dir = _run(tmp_path)
     manifest = read_yaml(run_dir / "run_manifest.yaml")

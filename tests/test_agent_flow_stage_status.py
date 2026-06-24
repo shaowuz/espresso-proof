@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from espresso_proof.kernel.io import read_yaml
+from espresso_proof.kernel.agent_run_status import agent_status, init_agent_run_status
+from espresso_proof.kernel.failure_pattern_bank import audit_failure_patterns
+from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.kernel.models import StageStatusReport
 from espresso_proof.kernel.validators import validate_run
 from espresso_proof.orchestration.agent_flow_status import (
@@ -50,6 +52,17 @@ def test_write_stage_status_projection_registers_optional_artifact(tmp_path: Pat
     validate_run(run_dir)
 
 
+def test_pending_human_choice_is_not_projected_done(tmp_path: Path) -> None:
+    run_dir = _run(tmp_path)
+
+    report = write_stage_status_projection(run_dir)
+    stages = {entry["stage_id"]: entry for entry in report["stages"]}
+
+    assert stages["human_strategy_preference"]["status"] == "queued"
+    assert "waiting for human strategy preference" in stages["human_strategy_preference"]["status_reason"]
+    validate_run(run_dir)
+
+
 def test_rewriting_stage_status_does_not_hash_the_projection_itself(
     tmp_path: Path,
 ) -> None:
@@ -89,3 +102,41 @@ def test_legacy_projection_withholds_stages_until_dependencies_are_done(
     assert stages["line_numbered_proof_writer"]["status"] == "not_started"
     assert stages["agent_consensus_seal"]["status"] == "not_started"
     assert "line_numbered_proof_writer" in stages["agent_consensus_seal"]["status_reason"]
+
+
+def test_legacy_grade_artifacts_are_blocked_not_invisible_when_dependencies_pending(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run(tmp_path)
+
+    report = write_stage_status_projection(run_dir)
+    stages = {entry["stage_id"]: entry for entry in report["stages"]}
+
+    assert stages["grade"]["status"] == "blocked"
+    assert "legacy artifact exists" in stages["grade"]["status_reason"]
+    assert "failure_classifier" in stages["grade"]["status_reason"]
+    assert stages["concise_answer"]["status"] == "blocked"
+    assert "legacy artifact exists" in stages["concise_answer"]["status_reason"]
+    assert "grade" in stages["concise_answer"]["status_reason"]
+    validate_run(run_dir)
+
+
+def test_failure_classifier_artifact_is_not_shadowed_by_not_run_board(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run(tmp_path)
+    write_yaml(run_dir / "llm_agent_run.yaml", {"projection_fixture": True})
+    init_agent_run_status(run_dir, done={"claim_understanding"})
+    assert agent_status(run_dir, "failure_patterns") == "not_run"
+
+    audit_failure_patterns(run_dir)
+    report = write_stage_status_projection(run_dir)
+    stages = {entry["stage_id"]: entry for entry in report["stages"]}
+
+    assert stages["prover"]["status"] == "done"
+    assert stages["reviewers"]["status"] == "done"
+    assert stages["failure_classifier"]["status"] == "done"
+    assert stages["grade"]["status"] == "done"
+    assert stages["concise_answer"]["status"] == "done"
+    assert agent_status(run_dir, "failure_patterns") == "not_run"
+    validate_run(run_dir)

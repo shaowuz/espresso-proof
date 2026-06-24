@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as html_lib
 import re
 import gzip
 import hashlib
@@ -9,6 +10,7 @@ import urllib.parse
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
+from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
 
@@ -179,6 +181,12 @@ def extract_source_text(raw: bytes, source: str) -> tuple[str, list[str]]:
     if looks_like_pdf(raw, source):
         text, method = extract_text_from_pdf_bytes_with_method(raw)
         return clean_extracted_source_text(text), [prep_note, method]
+    if looks_like_html(raw, source):
+        text = extract_text_from_html_bytes(raw)
+        return clean_extracted_source_text(text), [
+            prep_note,
+            "Extracted HTML text from document body.",
+        ]
     if looks_like_tar(raw):
         text, files = extract_text_from_tar_bytes(raw)
         return clean_extracted_source_text(text), [
@@ -195,6 +203,86 @@ def extract_source_text(raw: bytes, source: str) -> tuple[str, list[str]]:
         prep_note,
         "Read source as UTF-8 text.",
     ]
+
+
+def looks_like_html(raw: bytes, source: str) -> bool:
+    lowered_source = source.lower()
+    if lowered_source.endswith((".html", ".htm")):
+        return True
+    prefix = raw[:4096].decode("utf-8", errors="ignore").lower()
+    return any(marker in prefix for marker in ("<!doctype html", "<html", "<body", "<div", "<p"))
+
+
+class _HTMLBodyTextParser(HTMLParser):
+    _BLOCK_TAGS = {
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "br",
+        "dd",
+        "div",
+        "dl",
+        "dt",
+        "figcaption",
+        "figure",
+        "footer",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "hr",
+        "li",
+        "main",
+        "nav",
+        "ol",
+        "p",
+        "pre",
+        "section",
+        "table",
+        "td",
+        "th",
+        "tr",
+        "ul",
+    }
+    _SKIP_TAGS = {"script", "style", "svg", "noscript", "title"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._chunks: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag in self._SKIP_TAGS:
+            self._skip_depth += 1
+        if tag in self._BLOCK_TAGS:
+            self._chunks.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in self._SKIP_TAGS and self._skip_depth:
+            self._skip_depth -= 1
+        if tag in self._BLOCK_TAGS:
+            self._chunks.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        if data.strip():
+            self._chunks.append(data)
+
+    def text(self) -> str:
+        return html_lib.unescape(" ".join(self._chunks))
+
+
+def extract_text_from_html_bytes(raw: bytes) -> str:
+    parser = _HTMLBodyTextParser()
+    parser.feed(raw.decode("utf-8", errors="ignore"))
+    return parser.text()
 
 
 def looks_like_postscript(raw: bytes, source: str) -> bool:
@@ -457,8 +545,8 @@ _LABEL_TOKEN = r"[0-9]+(?:\.[0-9A-Za-z]+)*|[A-Z]\.[0-9]+(?:\.[0-9]+)*"
 # A theorem header starts at text start or after a sentence boundary, so a
 # mid-sentence reference like "by Theorem 5" does not split a statement.
 _HEADER_RE = re.compile(
-    rf"(?:(?<=[.:;]\s)|^)(?P<kind>{_THEOREM_KINDS})"
-    rf"(?:\s+(?P<label>{_LABEL_TOKEN}))?"
+    rf"(?:(?<=[.:;]\s)|(?<=\\\)\s)|(?<=\\\]\s)|(?<=\\\s)|^)(?P<kind>{_THEOREM_KINDS})"
+    rf"(?:\s+(?:\\\((?P<label_tex>{_LABEL_TOKEN})\\\)|(?P<label>{_LABEL_TOKEN})))?"
     rf"(?:\s*\((?P<name>[^)]+)\))?"
     rf"\s*[.:]?\s",
     flags=re.IGNORECASE,
@@ -489,12 +577,12 @@ def extract_theorems(text: str, *, source_ref_id: str) -> list[dict]:
     theorems = []
     for index, match in enumerate(headers, start=1):
         kind = match.group("kind").lower()
-        raw_label = (match.group("label") or "").strip()
+        raw_label = (match.group("label") or match.group("label_tex") or "").strip()
         name = (match.group("name") or "").strip()
         end = headers[index].start() if index < len(headers) else len(normalized)
         body = normalized[match.end():end]
         statement = clean_statement(fallback_statement_text(body))
-        if not statement:
+        if not statement or len(statement) < 20:
             continue
         context_start = max(0, match.start() - 180)
         context_end = min(len(normalized), min(end, match.end() + len(statement) + 180))

@@ -1832,6 +1832,12 @@ def test_classify_failures_routes_typed_categories(tmp_path: Path) -> None:
     result = CliRunner().invoke(app, ["classify-failures", "--run", str(run_dir)])
     assert result.exit_code == 0, result.output
     report = read_yaml(run_dir / "failure_classification.yaml")
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert manifest["optional_artifacts"]["failure_classification"] == "failure_classification.yaml"
+    assert manifest["optional_artifacts"]["failure_pattern_audit"] == "failure_pattern_audit.yaml"
+    assert manifest["optional_artifacts"]["stage_status"] == "stage_status.yaml"
+    assert (run_dir / "failure_pattern_audit.yaml").exists()
+    assert "Pattern audit:" in result.output
     categories = {item["category"] for item in report["classifications"]}
     assert "source_gap" in categories
     assert "strategy_failed_by_example" in categories

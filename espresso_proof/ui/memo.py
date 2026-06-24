@@ -221,6 +221,16 @@ def build_concise_memo(run_dir: Path) -> str:
     if _ui_rel and (run_dir / _ui_rel).exists():
         update_inbox = read_yaml(run_dir / _ui_rel)
 
+    line_numbered_proof: dict = {}
+    _lnp_rel = optional_artifacts.get("line_numbered_proof")
+    if _lnp_rel and (run_dir / _lnp_rel).exists():
+        line_numbered_proof = read_yaml(run_dir / _lnp_rel)
+
+    agent_consensus_review: dict = {}
+    _acr_rel_for_warnings = optional_artifacts.get("agent_consensus_review")
+    if _acr_rel_for_warnings and (run_dir / _acr_rel_for_warnings).exists():
+        agent_consensus_review = read_yaml(run_dir / _acr_rel_for_warnings)
+
     # Autonomous literature search (optional): candidate sources found without a
     # human-provided source. Rendered as "Found by autonomous literature search"
     # + "Proposed, not checked"; it never claims reference support by itself.
@@ -277,6 +287,8 @@ def build_concise_memo(run_dir: Path) -> str:
         source_grounding=source_grounding,
         theorem_applicability=theorem_applicability,
         update_inbox=update_inbox,
+        line_numbered_proof=line_numbered_proof,
+        agent_consensus_review=agent_consensus_review,
     ))
     if warning_lines:
         lines.append("")
