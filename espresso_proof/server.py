@@ -67,10 +67,8 @@ _PROJECT_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _AGENT_ALIASES = {"failure-patterns": "failure_patterns"}
 
 # Human-facing run modes -> internal provider. Users never see provider words.
-# The product UI now starts real-agent runs only; the deterministic fast/stub
-# path remains for tests, smoke loops, demos, and explicit API callers.
-# Demos are a separate "Open demo" path (Goal 32) — never a mode or provider.
-_MODE_PROVIDER = {"fast": "stub", "codex": "external"}
+# The product UI supports one run mode: Codex through the external adapter.
+_MODE_PROVIDER = {"codex": "external"}
 
 
 
@@ -87,7 +85,7 @@ def _friendly_error(raw: str) -> str:
     """
 
     lowered = (raw or "").strip().lower()
-    if "espresso_external_agent_command" in lowered or "openai_api_key" in lowered:
+    if "espresso_external_agent_command" in lowered:
         return (
             "The Codex deep run is not set up on this machine. Your math state is "
             "unchanged — no mathematical results were written. Set up the Codex "
@@ -346,7 +344,7 @@ class Workbench:
                 input_path=input_path,
                 output_root=self.root,
                 provider=provider,
-                front_half=provider if provider != "stub" else "stub",
+                front_half=provider,
                 fast=True,
             )
         finally:
@@ -1215,7 +1213,10 @@ def _make_handler(workbench: Workbench):
                 if parts == ["api", "info"]:
                     # display-only server info for the settings panel — no paths.
                     self._send_json(
-                        {"provider": workbench.provider, "runs": len(workbench.list_runs())}
+                        {
+                            "provider": "codex" if workbench.provider == "external" else workbench.provider,
+                            "runs": len(workbench.list_runs()),
+                        }
                     )
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "snapshot":

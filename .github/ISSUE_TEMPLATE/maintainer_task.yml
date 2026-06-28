@@ -50,11 +50,11 @@ body:
     id: affected
     attributes:
       label: Affected artifacts or files
-      description: List code paths, schemas, fixtures, docs, or UI surfaces.
+      description: List code paths, model schemas, fixtures, docs, or UI surfaces.
       placeholder: |
         - espresso_proof/...
         - tests/...
-        - schemas/...
+        - espresso_proof/...
     validations:
       required: true
   - type: textarea
@@ -75,8 +75,8 @@ body:
       label: Tests and evals to run
       description: Prefer commands from `.ai/project-outline.yaml` release_gate when relevant.
       value: |
-        - [ ] `.venv/bin/python -m pytest -q`
-        - [ ] `.venv/bin/espresso eval --mode mock`
-        - [ ] `.venv/bin/espresso eval --schemas-only`
+        - [ ] `uv run python -m pytest -q`
+        - [ ] `uv run espresso eval --mode mock`
+        - [ ] `uv run espresso eval --schemas-only`
     validations:
       required: false

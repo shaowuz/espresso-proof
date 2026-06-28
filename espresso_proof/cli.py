@@ -109,7 +109,6 @@ from espresso_proof.kernel.models import (
     AdmissionCheck,
     AgentContracts,
     ContinueDecision,
-    ExampleBank,
     ExampleFeedbackSummary,
     ExplorationMode,
     HumanChoice,
@@ -124,6 +123,7 @@ from espresso_proof.kernel.models import (
     TheoremExtractionReport,
     WorkflowSpec,
 )
+from espresso_proof.kernel.schema_export import check_schemas, write_schemas
 from espresso_proof.kernel.validators import KernelValidationError, validate_run
 from espresso_proof.orchestration.workflow_generator import generate_workflow_spec
 
@@ -132,22 +132,43 @@ app = typer.Typer(help="Espresso Proof local kernel.")
 _WINDOWS_RUN_PATH_LIMIT = 240
 
 
+@app.command("export-schemas")
+def export_schemas_command(
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help="Fail if local exported schemas are stale.",
+    ),
+    out_dir: Path = typer.Option(Path("schemas"), "--out-dir", file_okay=False),
+) -> None:
+    """Export local JSON Schemas from the package model registry."""
+
+    if check:
+        raise typer.Exit(code=check_schemas(out_dir))
+    write_schemas(out_dir)
+    typer.echo(f"Exported schemas to {out_dir}")
+
+
 def _guard_windows_run_path_length(output_root: Path, project: str) -> None:
     """Fail early when a fresh run path is likely to exceed legacy MAX_PATH."""
 
     if os.name != "nt":
         return
     sample_run_id = f"{project}-YYYYMMDD-HHMMSS-xxxxxxxx"
-    sample = (
-        output_root.resolve(strict=False)
-        / "projects"
-        / project
-        / "runs"
-        / sample_run_id
-        / "prover_rounds"
-        / "round_001_initial_llm_prover_review_attempt.yaml"
+    try:
+        root = str(output_root.resolve(strict=False))
+    except Exception:  # noqa: BLE001 - pathlib can reject WindowsPath on non-Windows tests
+        root = str(output_root)
+    sample = os.path.join(
+        root,
+        "projects",
+        project,
+        "runs",
+        sample_run_id,
+        "prover_rounds",
+        "round_001_initial_llm_prover_review_attempt.yaml",
     )
-    if len(str(sample)) >= _WINDOWS_RUN_PATH_LIMIT:
+    if len(sample) >= _WINDOWS_RUN_PATH_LIMIT:
         raise typer.BadParameter(
             "Windows run path would likely exceed MAX_PATH. Use a shorter "
             "--output-root such as C:\\tmp\\espresso_runs or a shorter --project."
@@ -911,7 +932,7 @@ def serve_command(
     runs_root: Path = typer.Option(Path("."), "--runs-root", file_okay=False, help="Project-runs root (where projects/<name>/runs/<id> live or will be created)."),
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address (localhost by default)."),
     port: int = typer.Option(8765, "--port", min=1, max=65535),
-    provider: str = typer.Option("external", "--provider", help="Internal agent provider for UI fallback runs. Product default: external. stub is dev/test only."),
+    provider: str = typer.Option("external", "--provider", help="Internal provider for the Codex adapter. Only external is supported."),
 ) -> None:
     """Start the local Product Workbench server (interactive browser UI).
 
@@ -922,13 +943,12 @@ def serve_command(
     confines every run id to the runs root, and never runs an arbitrary shell
     command from browser input.
 
-    This is the canonical product entry. It defaults to the external Codex-agent
-    path; pass --provider stub only for explicit dev/test smoke runs.
+    This is the canonical product entry. It uses the external Codex-agent path.
     """
     from espresso_proof.server import serve
 
-    if provider not in {"stub", "openai", "external"}:
-        raise typer.BadParameter("provider must be stub, openai, or external")
+    if provider != "external":
+        raise typer.BadParameter("espresso serve supports only provider=external (Codex adapter)")
     serve(runs_root, host=host, port=port, provider=provider)
 
 
@@ -2859,202 +2879,6 @@ def scorecard(
         raise typer.Exit(code=1)
 
 
-@app.command("loop-cycle")
-def loop_cycle(
-    out: Path = typer.Option(..., "--out", help="Loop root directory (e.g. loop_runs). Local only; never committed."),
-    cases: Path | None = typer.Option(None, "--cases", exists=True, dir_okay=False, help="Dogfood case YAML; defaults to the built-in family set."),
-    mode: str = typer.Option("smoke", "--mode", help="smoke = deterministic stub run; deep = external provider."),
-    cycle_id: str | None = typer.Option(None, "--cycle-id", help="Override the auto-numbered cycle id."),
-    max_cases: int = typer.Option(5, "--max-cases", min=1, max=6),
-) -> None:
-    """Goal 42A: run ONE observational dogfood improvement cycle.
-
-    Runs Espresso on 3-5 dogfood cases through the existing runtime and writes
-    the durable cycle folder (cases, run manifest, agent events/outputs,
-    timings, bottlenecks, failures, refutations, blockers, strategy trace,
-    subgoal progress, theorem-use ledger, summary) plus campaign-level
-    campaign_index / gap_ledger / loop_memory / stop_gate. Strictly
-    observational: it never changes code, never opens PRs, and no loop record
-    can upgrade any proof/source/evidence/grade/refutation/claim status.
-    """
-    from espresso_proof.loop.loop_harness import run_loop_cycle
-
-    cycle_dir = run_loop_cycle(
-        out_root=out, cases_path=cases, mode=mode, cycle_id=cycle_id, max_cases=max_cases
-    )
-    typer.echo(f"Cycle recorded at {cycle_dir}")
-    typer.echo(f"Campaign files updated under {out}")
-
-
-@app.command("loop-closure-scorecard")
-def loop_closure_scorecard_cmd(
-    cycle: Path = typer.Option(..., "--cycle", exists=True, file_okay=False, help="A recorded loop cycle directory."),
-    before: Path | None = typer.Option(None, "--before", exists=True, file_okay=False, help="A baseline cycle dir to compare against (before/after replay)."),
-    require: list[str] = typer.Option(None, "--require", help="Extra handoff predicate(s) the gate must satisfy (repeatable), e.g. --require reviewer_objection_bound_to_subgoal."),
-) -> None:
-    """Goal 54D: machine-check whether the human-in-the-loop loop CLOSED.
-
-    Reads a recorded dogfood cycle and writes loop_closure_scorecard.yaml +
-    loop_closure_summary.md: SAFETY (no unauthorized proof/source/evidence/grade/
-    claim/human_confirmed upgrade, no proof-complete language), HANDOFFS (human
-    feedback used, subgoal targeted + bound, reviewer objection bound to a subgoal
-    and written to the graph, ...), OBSERVABILITY (events/timings/agent_events),
-    and optional before/after replay. This is a WORKFLOW REPLAY check only — it is
-    NOT a proof of any theorem and upgrades no mathematical status. Exits non-zero
-    when the workflow gate fails so it can be used as a CI/replay gate.
-
-    Canonical replay command:
-        espresso loop-cycle --out <root> --mode smoke      # baseline cycle
-        # apply the selected fix, then:
-        espresso loop-cycle --out <root> --mode smoke      # replay cycle
-        espresso loop-closure-scorecard --cycle <replay_cycle> --before <baseline_cycle>
-    """
-    from espresso_proof.evaluation.loop_closure_scorecard import write_loop_closure_scorecard
-
-    required = list(require) if require else None
-    scorecard = write_loop_closure_scorecard(cycle, required_handoffs=required, before_cycle_dir=before)
-    verdict = "PASSED" if scorecard.workflow_gate_passed else "FAILED"
-    typer.echo(f"Loop-closure workflow replay {verdict}: {cycle}")
-    typer.echo(f"  scorecard: {cycle / 'loop_closure_scorecard.yaml'}")
-    typer.echo(f"  summary:   {cycle / 'loop_closure_summary.md'}")
-    for failure in scorecard.gate_failures:
-        typer.echo(f"  - FAIL: {failure}")
-    if not scorecard.workflow_gate_passed:
-        raise typer.Exit(code=1)
-
-
-@app.command("loop-review")
-def loop_review(
-    cycle: Path = typer.Option(..., "--cycle", exists=True, file_okay=False, help="A recorded loop cycle directory."),
-) -> None:
-    """Goal 42B: run the six independent artifact-grounded reviewers over a
-    recorded cycle. Read-only over product behavior: writes only
-    review_reports/ and the clearly-marked planted calibration probe inside
-    the cycle folder. Actionable findings always cite evidence paths;
-    unevidenced impressions are advisory and can never drive an autofix.
-    """
-    from espresso_proof.loop.loop_reviewers import run_review_pass
-
-    reports_dir = run_review_pass(cycle)
-    typer.echo(f"Six review reports written to {reports_dir}")
-
-
-@app.command("loop-triage")
-def loop_triage(
-    cycle: Path = typer.Option(..., "--cycle", exists=True, file_okay=False, help="A reviewed loop cycle directory."),
-    plan_file: list[str] = typer.Option([], "--plan-file", help="Expected file to change (repeatable; max 8)."),
-    plan_test: list[str] = typer.Option([], "--plan-test", help="Focused test for the fix (repeatable)."),
-    replay_case: list[str] = typer.Option([], "--replay-case", help="Case id to replay before/after the fix (repeatable)."),
-    why: str = typer.Option("", "--why", help="Why this gap now (required when planning)."),
-    extra_reviewer: list[str] = typer.Option([], "--extra-reviewer", help="Additional required reviewer (repeatable)."),
-) -> None:
-    """Goal 42C: aggregate the six reviews and choose EXACTLY ONE evidenced
-    gap (kernel-safety first, then status overclaims, then math capability).
-    Writes triage.yaml; oversized findings become new-goal proposals instead
-    of broad fixes. With --plan-* arguments it also writes the bounded
-    autofix_plan.yaml (8 files / 800 lines, Engineering + Kernel Safety
-    mandatory, replay cases required; protected safety surfaces refused).
-    Never changes code.
-    """
-    from espresso_proof.loop.loop_triage import build_autofix_plan, run_triage
-
-    decision = run_triage(cycle)
-    typer.echo(f"Selected gap: {decision.selected_gap_id} ({decision.selected_gap_kind})")
-    if decision.new_goal_proposal_path:
-        typer.echo(f"Oversized finding converted to goal proposal: {decision.new_goal_proposal_path}")
-    if plan_file or plan_test or replay_case:
-        if not (plan_file and plan_test and replay_case and why.strip()):
-            typer.echo("Planning requires --plan-file, --plan-test, --replay-case and --why together.")
-            raise typer.Exit(code=2)
-        plan = build_autofix_plan(
-            cycle,
-            files_expected_to_change=list(plan_file),
-            focused_tests=list(plan_test),
-            replay_cases=list(replay_case),
-            why_this_gap_now=why,
-            extra_reviewers=list(extra_reviewer),
-        )
-        typer.echo(f"Bounded autofix plan written for {plan.selected_gap_id}")
-    else:
-        typer.echo("No autofix plan written (provide --plan-* after investigating the gap).")
-
-
-@app.command("loop-replay")
-def loop_replay(
-    cycle: Path = typer.Option(..., "--cycle", exists=True, file_okay=False),
-    checkpoint: str = typer.Option(..., "--checkpoint", help="baseline | pre_merge | post_merge"),
-    probe: str = typer.Option(..., "--probe", help="Named deterministic problem probe."),
-    case: str = typer.Option(..., "--case", help="Triggering case id."),
-    sibling: list[str] = typer.Option([], "--sibling", help="Sibling case id (repeatable)."),
-    observed: str = typer.Option(..., "--observed", help="The observed problem being fixed."),
-    before_evidence: str = typer.Option(..., "--before-evidence", help="Evidence path of the BEFORE state."),
-    mode: str = typer.Option("smoke", "--mode"),
-) -> None:
-    """Goal 42D: replay the triggering dogfood case (+ siblings/holdouts)
-    through the real runtime and write replay_result.yaml. A replay without
-    improvement or without sibling/holdout no-regression evidence is never
-    successful; a failed pre-merge replay BLOCKS the merge (exit 1).
-    """
-    from espresso_proof.kernel.io import read_yaml as _read_yaml
-    from espresso_proof.loop.loop_harness import load_cases
-    from espresso_proof.loop.loop_replay import run_replay
-
-    # blinded holdouts: never cases that were in the reviewed cycle (those
-    # were used to select the fix), never the trigger/siblings.
-    recorded = {
-        c.get("case_id")
-        for c in _read_yaml(cycle / "cases.yaml").get("cases", [])
-    }
-    holdouts = [
-        c for c in load_cases(None)
-        if c.case_id not in recorded and c.case_id not in {case, *sibling}
-    ][:2]
-    try:
-        result = run_replay(
-            cycle,
-            checkpoint=checkpoint,
-            probe=probe,
-            triggering_case_id=case,
-            sibling_case_ids=list(sibling),
-            holdout_cases=holdouts,
-            observed_problem=observed,
-            before_evidence_path=before_evidence,
-            mode=mode,
-        )
-    except RuntimeError as exc:
-        typer.echo(f"REPLAY BLOCKED MERGE: {exc}")
-        raise typer.Exit(code=1) from exc
-    typer.echo(
-        f"Replay [{checkpoint}] fixed={result.after.fixed} "
-        f"successful={result.successful} ({result.after.observed_problem})"
-    )
-    if not result.successful and checkpoint != "baseline":
-        raise typer.Exit(code=1)
-
-
-@app.command("loop-stop-gate")
-def loop_stop_gate_command(
-    out: Path = typer.Option(..., "--out", exists=True, file_okay=False, help="Loop root directory."),
-) -> None:
-    """Goal 42D/E: recompute the machine-checkable campaign stop gate from
-    artifacts and command results. SUCCESS requires >=5 cycles, two
-    consecutive clean cycles on an unchanged commit, all eight gates, and no
-    open P0/P1; hitting max_cycles/max_wall_time is STOP_BUDGET_EXHAUSTED,
-    never acceptance.
-    """
-    from espresso_proof.loop.loop_stop_gate import evaluate_stop_gate
-
-    gate = evaluate_stop_gate(out, repo_root=Path.cwd())
-    typer.echo(
-        f"stop_gate: {gate.status} (cycles={gate.cycles_completed}, "
-        f"clean streak={gate.consecutive_clean_cycles_observed}/"
-        f"{gate.consecutive_clean_cycles_required})"
-    )
-    for name in ("safety", "capability", "ux", "dogfood_coverage", "replay", "holdout", "scorecard", "calibration"):
-        state = getattr(gate, f"{name}_gate")
-        typer.echo(f"  {name}_gate: {'PASS' if state.passed else 'fail'} — {state.note[:120]}")
-
-
 @app.command()
 def eval(
     mode: str = typer.Option("mock", "--mode"),
@@ -3183,16 +3007,13 @@ def improve_workflow(
 
 
 def _validate_seed_files() -> None:
-    WorkflowSpec.model_validate(read_yaml(Path("projects/hodge_atoms/workflow_spec.yaml")))
-    ExampleBank.model_validate(read_yaml(Path("projects/hodge_atoms/example_bank.yaml")))
-    contract_path = Path("projects/hodge_atoms/agent_contracts.yaml")
-    if contract_path.exists():
-        AgentContracts.model_validate(read_yaml(contract_path))
-    coherent_dir = Path("projects/coherent_base_change")
-    if coherent_dir.exists():
-        WorkflowSpec.model_validate(read_yaml(coherent_dir / "workflow_spec.yaml"))
-        ExampleBank.model_validate(read_yaml(coherent_dir / "example_bank.yaml"))
-        AgentContracts.model_validate(read_yaml(coherent_dir / "agent_contracts.yaml"))
+    WorkflowSpec.model_validate(
+        generate_workflow_spec("Hodge atom mirror symmetry", project_name="generated_hodge")
+    )
+    WorkflowSpec.model_validate(
+        generate_workflow_spec("flat coherent base change", project_name="generated_base_change")
+    )
+    AgentContracts.model_validate(default_agent_contracts("scratch"))
 
 
 def _next_feedback_id(existing: list[dict]) -> str:

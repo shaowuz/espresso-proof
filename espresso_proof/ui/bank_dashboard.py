@@ -7,7 +7,7 @@ layout and the old single-YAML layout, and it NEVER mutates run artifacts.
 
 Safety: this is a read-only view. It invents no statuses; it maps the existing
 example/counterexample/strategy statuses to human-readable wording (per
-``docs/goals/HUMAN_READABLE_OUTPUT_LABELS.md``) and emits no proof-complete
+the human-readable output label contract) and emits no proof-complete
 language. Missing optional fields render conservatively as an em dash.
 """
 

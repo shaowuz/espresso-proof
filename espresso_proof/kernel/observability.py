@@ -25,7 +25,7 @@ Artifacts produced (all OPTIONAL — old runs validate without them):
 Deliberate, backward-compatible scope note on ``events.jsonl``: the Goal-54A spec
 sketches a rich per-event schema (event_id, event_type, validation_status, state
 labels, ...). The existing ``events.jsonl`` is intentionally the *minimal canonical
-timeline* (kind/stage/detail) that ``loop_harness`` already parses; rewriting it to
+timeline* (kind/stage/detail) consumed by local diagnostics; rewriting it to
 the full schema would break that consumer. Instead, this layer (a) adds
 ``monotonic_ms`` + the agent_call_*/server_job/replay/note kinds to ``events.jsonl``,
 and (b) carries the rich per-call fields (provider/adapter/model/duration/status/

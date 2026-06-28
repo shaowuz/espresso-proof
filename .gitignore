@@ -1,4 +1,6 @@
 .venv/
+.uv-cache/
+schemas/
 .eval_runs/
 eval_runs/
 .benchmark_runs/

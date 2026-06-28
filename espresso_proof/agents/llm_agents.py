@@ -633,7 +633,11 @@ class ExternalCommandClient:
 
 
 def _is_codex_external_command(command: list[str]) -> bool:
-    return any(Path(part.strip("\"'")).name == "espresso_codex_agent.py" for part in command)
+    normalized = [part.strip("\"'") for part in command]
+    return (
+        any(Path(part).name in {"espresso_codex_agent.py", "espresso-codex-agent"} for part in normalized)
+        or "espresso_proof.agents.codex_adapter" in normalized
+    )
 
 
 def _split_external_command(raw_command: str) -> list[str]:
