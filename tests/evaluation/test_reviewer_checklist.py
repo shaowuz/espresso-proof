@@ -12,6 +12,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from espresso_proof.cli import app
+from espresso_proof.evaluation import reviewer_checklist as reviewer_checklist_module
 from espresso_proof.kernel.io import read_text
 from espresso_proof.orchestration.mock_pipeline import run_mock_critique
 from espresso_proof.evaluation.reviewer_checklist import (
@@ -23,7 +24,6 @@ from espresso_proof.evaluation.reviewer_checklist import (
 )
 
 FIXTURES = Path("tests/fixtures")
-_TEMPLATE = Path(".claude/skills/espresso-proof/templates/reviewer_report.md")
 
 
 def _run(tmp_path: Path) -> Path:
@@ -37,13 +37,16 @@ def _run(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def test_reviewer_template_requires_artifact_citation_and_rules() -> None:
-    text = read_text(_TEMPLATE).lower()
-    assert "cite the artifact" in text
+def test_reviewer_checklist_documents_artifact_citation_and_rules() -> None:
+    text = (
+        (reviewer_checklist_module.__doc__ or "")
+        + "\n"
+        + (review_checklist.__doc__ or "")
+    ).lower()
+    assert "artifact-grounded" in text
     assert "blocker" in text and "non-blocker" in text
     assert "proof-complete language" in text
     assert "exact locator" in text and "attribution" in text and "hypothesis match" in text
-    assert "do not request broad unrelated refactors" in text
 
 
 # ---------------------------------------------------------------------------

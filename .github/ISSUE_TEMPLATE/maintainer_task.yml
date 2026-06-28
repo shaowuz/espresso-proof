@@ -7,7 +7,7 @@ body:
     id: module
     attributes:
       label: Module
-      description: Match `.ai/project-outline.yaml` module ids.
+      description: Choose the product area this issue changes.
       options:
         - math-product
         - runtime
@@ -20,7 +20,7 @@ body:
     id: phase
     attributes:
       label: Phase
-      description: Match `.ai/project-outline.yaml` phase ids.
+      description: Choose the nearest current cleanup or product phase.
       options:
         - v0-local-kernel
         - v0-proof-sketch-critique
@@ -54,7 +54,7 @@ body:
       placeholder: |
         - espresso_proof/...
         - tests/...
-        - espresso_proof/...
+        - web/...
     validations:
       required: true
   - type: textarea
@@ -73,7 +73,7 @@ body:
     id: release_gate
     attributes:
       label: Tests and evals to run
-      description: Prefer commands from `.ai/project-outline.yaml` release_gate when relevant.
+      description: Prefer the README test commands when relevant.
       value: |
         - [ ] `uv run python -m pytest -q`
         - [ ] `uv run espresso eval --mode mock`
