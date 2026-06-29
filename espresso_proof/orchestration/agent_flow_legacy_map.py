@@ -1,4 +1,11 @@
-"""Compatibility map from AGENT_FLOW concepts to today's runtime surfaces.
+"""[COMPAT · reference data] Map from AGENT_FLOW concepts to today's runtime surfaces.
+
+Read-only mapping/reference data: it runs no agents, writes no run artifacts, and
+infers no mathematical trust. Note: the stage-order constants it defines (e.g.
+``LEGACY_FRONT_HALF_FAST_ORDER``) ARE consumed by the orchestrator's fast-core
+plan, so this module is reference data, not dead code.
+See docs/engineering/architecture-spine.md.
+
 
 This module is deliberately read-only. It records how each conceptual
 AGENT_FLOW stage maps onto the current coarse front-half stages, orchestrator
