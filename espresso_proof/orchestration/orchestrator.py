@@ -261,7 +261,97 @@ def orchestrate_run(
     provider fails closed before any artifact is written) and threads the
     resulting diagnostic into the agent pass.
     """
+    # Stage 0 — preflight providers (fail closed), then scaffold or attach the run.
+    provider_diagnostic = _preflight_providers(
+        provider=provider,
+        front_half=front_half,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        agent_network_preflight=agent_network_preflight,
+    )
+    run_dir, runner = _scaffold_or_resume(
+        run_dir=run_dir, project=project, input_path=input_path, output_root=output_root
+    )
 
+    # Resume guard: a run already past CLAIM_CLEAR whose claim is no longer clear
+    # finishes at the claim-clarification gate without an LLM pass.
+    early = _resume_claim_clear_guard(run_dir=run_dir, runner=runner)
+    if early is not None:
+        return early
+
+    # Goal 27 fast core pass: run only the FAST_CORE_STAGES in the front half and
+    # DEFER literature discovery + the evidence stages (examples / counterexamples),
+    # so the user sees an initial judgment + preliminary routes quickly. The
+    # deferred agents run later via ``run-agent``.
+    front_half_stages = front_half_stages_for_runner(fast=fast)
+    ran_front_half_agents = front_half != "mock" or front_half_client is not None
+
+    # Stage 1 — front-half agent pass (S1-S8), validated as one transaction.
+    _stage_front_half(
+        run_dir=run_dir,
+        runner=runner,
+        front_half=front_half,
+        front_half_client=front_half_client,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        front_half_stages=front_half_stages,
+    )
+
+    # Claim-clear gate: an unclear claim finishes here without an LLM pass.
+    early, artifacts, project_dir = _claim_clear_gate(run_dir=run_dir, runner=runner)
+    if early is not None:
+        return early
+
+    # Stage 2 — literature discovery (deferred to a later run-agent pass in fast core).
+    _stage_literature(
+        run_dir=run_dir,
+        runner=runner,
+        fast=fast,
+        project_dir=project_dir,
+        artifacts=artifacts,
+        max_references=max_references,
+        literature_mode=literature_mode,
+        literature_providers=literature_providers,
+    )
+
+    # Execute any front-half scoped-verification requests before the prover pass.
+    _auto_wire_scoped_verifications(run_dir=run_dir)
+
+    # Stage 3 — live Prover + Reviewers (skipped when the front half asked to stop);
+    # stops at the human gate.
+    _stage_prover_reviewers(
+        run_dir=run_dir,
+        runner=runner,
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        reviewer_set=reviewer_set,
+        provider_diagnostic=provider_diagnostic,
+        artifacts=artifacts,
+    )
+
+    # Initialise the per-agent process board + pressure status, then record stage status.
+    _init_process_board(
+        run_dir=run_dir, fast=fast, ran_front_half_agents=ran_front_half_agents
+    )
+    record_agent_flow_stage_status(run_dir, runner=runner)
+
+    return _finalize(run_dir=run_dir)
+
+
+def _preflight_providers(
+    *,
+    provider: str,
+    front_half: str,
+    model: str,
+    api_key_env: str,
+    external_agent_command_env: str,
+    agent_network_preflight: bool,
+) -> dict | None:
+    """Fail closed if a live provider is unconfigured; return the prover diagnostic."""
     # Fail early if a live provider is requested but not configured (avoids
     # scaffolding a run that cannot complete its agent pass). The front-half
     # provider is only configuration-checked; the prover provider honours the
@@ -277,7 +367,13 @@ def orchestrate_run(
         command_env=external_agent_command_env,
         network_check=agent_network_preflight,
     )
+    return provider_diagnostic
 
+
+def _scaffold_or_resume(
+    *, run_dir: Path | None, project: str, input_path: Path, output_root: Path
+) -> tuple[Path, StageRunner]:
+    """Stage 0 — scaffold a fresh genesis run, or attach a runner to an existing run."""
     # Stage 0 — scaffold a kernel-valid "unclear/needs_human" run for any claim.
     # The genesis stage creates the run; from here every stage advances lifecycle
     # state ONLY through the transactional StageRunner (snapshot -> mutate ->
@@ -294,7 +390,11 @@ def orchestrate_run(
         )
     else:
         runner = StageRunner(run_dir)
+    return run_dir, runner
 
+
+def _resume_claim_clear_guard(*, run_dir: Path, runner: StageRunner) -> dict | None:
+    """Finish at the claim-clarification gate if a resumed run's claim is no longer clear."""
     if _reached(run_dir, CLAIM_CLEAR):
         resume_gate = evaluate_claim_clear(run_dir, require_recorded_clear_gate=True)
         if not resume_gate.clear:
@@ -304,14 +404,39 @@ def orchestrate_run(
                 gate_result=resume_gate,
             )
             return _finish_without_llm_gate(run_dir, claim_gate=gate_report)
+    return None
 
-    # Goal 27 fast core pass: run only the FAST_CORE_STAGES in the front half and
-    # DEFER literature discovery + the evidence stages (examples / counterexamples),
-    # so the user sees an initial judgment + preliminary routes quickly. The
-    # deferred agents run later via ``run-agent``.
-    front_half_stages = front_half_stages_for_runner(fast=fast)
-    ran_front_half_agents = front_half != "mock" or front_half_client is not None
 
+def _claim_clear_gate(
+    *, run_dir: Path, runner: StageRunner
+) -> tuple[dict | None, dict | None, Path | None]:
+    """Record the claim-clear gate. Returns (early_finish | None, artifacts, project_dir)."""
+    gate_result = evaluate_claim_clear(run_dir)
+    gate_report = _record_claim_clear_gate_transaction(
+        run_dir,
+        runner=runner,
+        gate_result=gate_result,
+    )
+    if not gate_result.clear:
+        return _finish_without_llm_gate(run_dir, claim_gate=gate_report), None, None
+
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    artifacts = manifest["artifacts"]
+    project_dir = run_dir.parents[1]
+    return None, artifacts, project_dir
+
+
+def _stage_front_half(
+    *,
+    run_dir: Path,
+    runner: StageRunner,
+    front_half: str,
+    front_half_client,
+    model: str,
+    api_key_env: str,
+    external_agent_command_env: str,
+    front_half_stages: list[str],
+) -> None:
     # Stage 1 — front-half agents (S1–S8). Skipped when front_half == "mock".
     if not _reached(run_dir, "FRONT_HALF_DONE"):
         def _front_half() -> None:
@@ -344,19 +469,18 @@ def orchestrate_run(
             state_after="FRONT_HALF_DONE",
         )
 
-    gate_result = evaluate_claim_clear(run_dir)
-    gate_report = _record_claim_clear_gate_transaction(
-        run_dir,
-        runner=runner,
-        gate_result=gate_result,
-    )
-    if not gate_result.clear:
-        return _finish_without_llm_gate(run_dir, claim_gate=gate_report)
 
-    manifest = read_yaml(run_dir / "run_manifest.yaml")
-    artifacts = manifest["artifacts"]
-    project_dir = run_dir.parents[1]
-
+def _stage_literature(
+    *,
+    run_dir: Path,
+    runner: StageRunner,
+    fast: bool,
+    project_dir: Path,
+    artifacts: dict,
+    max_references: int,
+    literature_mode: str,
+    literature_providers: list[str] | None,
+) -> None:
     # Stage 2 — literature discovery (candidate references only; validated).
     # Goal 27: in the fast core pass literature is a DEFERRED evidence agent --
     # skip discovery here (the scaffolded candidate-only literature_review stays
@@ -387,6 +511,8 @@ def orchestrate_run(
             snapshot_paths=[artifacts["literature_review"]],
         )
 
+
+def _auto_wire_scoped_verifications(*, run_dir: Path) -> None:
     # Goal 42E cycle 3: execute any structured scoped-verification requests
     # the front half proposed BEFORE the prover/reviewer pass, so round 1
     # already sees the trusted machine evidence and computation requests can
@@ -398,6 +524,19 @@ def orchestrate_run(
 
         auto_wire_scoped_verifications(run_dir)
 
+
+def _stage_prover_reviewers(
+    *,
+    run_dir: Path,
+    runner: StageRunner,
+    provider: str,
+    model: str,
+    api_key_env: str,
+    external_agent_command_env: str,
+    reviewer_set: str,
+    provider_diagnostic: dict | None,
+    artifacts: dict,
+) -> None:
     # Stage 3 — live Prover + Reviewers; stop at the human gate.
     # Goal 65 control-flow fix (from the order-3 postmortem): if the front half
     # already concluded the claim needs a human BEFORE proof search
@@ -545,6 +684,8 @@ def orchestrate_run(
             )
             append_event(run_dir, "agent_call_finished", stage="llm_prover_reviewers")
 
+
+def _init_process_board(*, run_dir: Path, fast: bool, ran_front_half_agents: bool) -> None:
     # Goal 27 — initialize the per-agent run-status board. In the fast core pass
     # only claim_understanding has run; the evidence agents are not_run (to be run
     # on demand / in parallel). In a full pass literature + the evidence stages
@@ -560,8 +701,9 @@ def orchestrate_run(
                 done.add("counterexamples")
         init_agent_run_status(run_dir, done=done)
         build_pressure_status(run_dir, late_after_strategy=False)
-    record_agent_flow_stage_status(run_dir, runner=runner)
 
+
+def _finalize(*, run_dir: Path) -> dict:
     # Goal 54A: aggregate run timings + register the per-run observability logs as
     # optional artifacts (diagnostic only; both helpers fail closed and never gate).
     write_timings(run_dir)
