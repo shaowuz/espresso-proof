@@ -13,7 +13,7 @@ VERBATIM; ``match_status`` starts ``unknown`` and is NEVER inferred from the
 claim text (this builder does no matching at all — that is a later slice). The
 builder fails closed (validates the model before writing) and is idempotent.
 
-See docs/goals/product_completion/57A_THEOREM_CONDITION_LEDGER_AND_SOURCE_REQUEST_BINDING.md.
+See the theorem-condition ledger design notes.
 """
 
 from __future__ import annotations

@@ -585,7 +585,7 @@ def _fallback_route() -> dict[str, Any]:
 def _command_for(run_dir: Path, route_id: str, effort: str, *, completed: bool) -> str:
     scout = " \\\n  --literature-scout" if completed else ""
     return (
-        "PYTHONPATH=$PWD .venv/bin/espresso orchestrate \\\n"
+        "PYTHONPATH=$PWD uv run espresso orchestrate \\\n"
         f"  --resume {run_dir} \\\n"
         f"  --select-strategy {route_id} \\\n"
         f"  --effort {effort}"
@@ -1612,7 +1612,7 @@ const routeData = {route_json};
 function commandFor(routeId) {{
   const route = routeData[routeId];
   const scout = completed ? " \\\\\\n  --literature-scout" : "";
-  return `PYTHONPATH=$PWD .venv/bin/espresso orchestrate \\
+  return `PYTHONPATH=$PWD uv run espresso orchestrate \\
   --resume ${{runPath}} \\
   --select-strategy ${{routeId}} \\
   --effort ${{route.effort}}${{scout}}`;

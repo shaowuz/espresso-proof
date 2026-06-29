@@ -37,15 +37,11 @@ class SkillSelection:
     blocked_context: tuple[str, ...] = ()
 
 
-# Goal 65D (order-3 postmortem): a product mathematical run must NEVER auto-inject
-# repo maintenance context (the goal queue) into its prompt. The caller DECLARES
-# the request type; only an explicit maintenance/goal-running type may auto-load
-# the repo's CURRENT_CLAUDE_GOAL_QUEUE.md. Unknown/missing fails closed to the
-# restrictive product_math.
+# Product mathematical runs must never auto-inject repo maintenance context into
+# their prompts. Maintenance goal context is explicit-only: callers pass an
+# active_goal_file when they want one.
 PRODUCT_MATH = "product_math"
 _REQUEST_TYPES = frozenset({"product_math", "maintenance_goal", "dogfood_diagnostic", "reviewer"})
-_GOAL_LOADING_TYPES = frozenset({"maintenance_goal"})
-_DEFAULT_GOAL_REL = ("docs", "goals", "CURRENT_CLAUDE_GOAL_QUEUE.md")
 
 
 def _normalize_request_type(request_type: str | None) -> str:
@@ -161,15 +157,8 @@ def select_agent_skills(
     if not chosen:
         chosen = [_skill_by_name("claim-understanding")]
 
-    include_default_queue = request_type in _GOAL_LOADING_TYPES
-    goal = load_active_goal(
-        cwd=cwd, active_goal_file=active_goal_file, include_default_queue=include_default_queue
-    )
-    # Record the maintenance goal queue as blocked when this request type is not
-    # allowed to auto-load it (routing visibility for diagnostics).
+    goal = load_active_goal(cwd=cwd, active_goal_file=active_goal_file)
     blocked: tuple[str, ...] = ()
-    if not include_default_queue:
-        blocked = (str((cwd or Path.cwd()).joinpath(*_DEFAULT_GOAL_REL)),)
     skill_text = "\n\n".join([_read_skill(_SAFETY_FILE)] + [_read_skill(skill.file_name) for skill in chosen])
     stage = chosen[0].name
     return SkillSelection(
@@ -186,18 +175,17 @@ def load_active_goal(
     *,
     cwd: Path | None = None,
     active_goal_file: str | None = None,
-    include_default_queue: bool = True,
+    include_default_queue: bool = False,
 ) -> GoalContext:
-    """Load active-goal context for an agent prompt. An explicit ``active_goal_file``
-    is always honored; the repo's default ``CURRENT_CLAUDE_GOAL_QUEUE.md`` is
-    appended ONLY when ``include_default_queue`` is True (Goal 65D: product math
-    runs pass False so the maintenance queue is never auto-injected)."""
+    """Load explicit active-goal context for an agent prompt.
+
+    ``include_default_queue`` is accepted for old callers but intentionally
+    ignored. The repository no longer has a default maintenance goal queue.
+    """
     base = cwd or Path.cwd()
     candidates: list[Path] = []
     if active_goal_file:
         candidates.append(Path(active_goal_file).expanduser())
-    if include_default_queue:
-        candidates.append(base / "docs" / "goals" / "CURRENT_CLAUDE_GOAL_QUEUE.md")
 
     for path in candidates:
         if not path.is_absolute():

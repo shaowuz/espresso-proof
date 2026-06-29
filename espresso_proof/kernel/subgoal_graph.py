@@ -14,7 +14,7 @@ that the existing grounding / deterministic-verification gates actually earned
 (re-checked by ``validators._validate_subgoal_graph``). The builder fails closed
 and is idempotent.
 
-See docs/goals/product_completion/14_SUBGOAL_GRAPH_PROOF_SEARCH_GOAL.md.
+See the subgoal graph design notes.
 """
 
 from __future__ import annotations

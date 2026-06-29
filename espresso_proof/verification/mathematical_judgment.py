@@ -2,7 +2,7 @@
 mathematical RISK judgments without becoming a proof verifier.
 
 Six-Hour Autonomous Completion Goal, Phase 1
-(docs/goals/MATHEMATICAL_JUDGMENT_LAYER_GOAL.md).
+in the mathematical judgment design notes.
 
 This is advisory-only and deterministic: it reads already-validated run artifacts
 and classifies mathematical risk into findings that warn, request more evidence,

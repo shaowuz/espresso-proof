@@ -1,7 +1,6 @@
 """Phase 3: shared blocker-provenance classification.
 
-The blocker-provenance classifier used to live in ``loop_harness.py`` (a
-harness-only module) yet was imported by ``loop_replay.py`` (a proof gate), giving
+Blocker provenance is kept as a small shared classifier and is intentionally kept independent from removed campaign harnesses. This avoids
 the gate a hidden dependency on harness-internal logic. Phase 3 extracts it into
 this single, self-contained leaf module so BOTH the loop harness (cycle recording)
 and the loop replay gate share ONE source of truth and cannot drift apart.
@@ -20,7 +19,7 @@ from espresso_proof.kernel.io import read_yaml
 def _read_optional_artifact(run_dir: Path, name: str):
     """Fail-soft read of an artifact registered under the manifest's ``artifacts``
     or ``optional_artifacts`` map. A small self-contained copy of the loop-harness
-    helper so this module stays a leaf (no reverse dependency on loop_harness)."""
+    helper so this module stays a leaf (no reverse dependency on campaign harnesses)."""
     try:
         manifest = read_yaml(run_dir / "run_manifest.yaml")
     except Exception:  # noqa: BLE001

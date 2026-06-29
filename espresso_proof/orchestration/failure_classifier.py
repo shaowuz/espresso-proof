@@ -2,7 +2,7 @@
 actionable failure categories with routing.
 
 Step 5 (AGENT_AUTOMATION_ENGINEERING_PLAN; contract
-docs/goals/agent_goals/19_FAILURE_CLASSIFIER_AGENT_GOAL.md).
+the failure classifier design notes).
 
 This is advisory-only and deterministic: it reads already-validated run artifacts
 and classifies the current failure signals into categories that route the next

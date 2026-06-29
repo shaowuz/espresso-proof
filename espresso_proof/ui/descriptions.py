@@ -140,7 +140,7 @@ def describe_grade(
 # ``ComputationStatus``, ``ProofVerificationStatus``, ``RetrievedSourceStatus``,
 # ``FailurePatternTier`` ...). User-facing memo / inspect / report surfaces must
 # never print those raw enum tokens; they translate to plain mathematical
-# evidence phrases here. See ``docs/engineering/EVIDENCE_DISPLAY_WORDING.md``.
+# evidence phrases here.
 # These are display phrases only — they never set or upgrade any status.
 # ---------------------------------------------------------------------------
 

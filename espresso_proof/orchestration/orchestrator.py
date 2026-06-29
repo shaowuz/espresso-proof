@@ -7,8 +7,7 @@ the run after every stage, records lifecycle state in ``run_manifest.yaml``, and
 STOPS at the human gate. It is resumable from the recorded state and never
 upgrades proof / source / evidence status (the kernel remains the gate).
 
-See docs/goals/agent_goals/00_ORCHESTRATOR_GOAL.md and
-docs/goals/AGENT_INTEGRATION_BUILD_PLAN.md (S9).
+See the orchestration design notes.
 """
 
 from __future__ import annotations
