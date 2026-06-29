@@ -786,8 +786,6 @@ def _resume_run_locked(
     reviewer_set: str = "espresso",
     prover_client=None,
 ) -> str:
-    from espresso_proof.ui.memo import build_concise_memo  # local import to avoid a cycle
-
     run_dir = Path(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     # Phase 2: bring an old / external / denormalized persisted run up to the
@@ -798,35 +796,77 @@ def _resume_run_locked(
     ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     state = manifest.get("current_state", "")
     if state == "COMPLETED_MEMO":
-        # idempotent: do not re-resolve / re-append rounds. But a pre-loop step on
-        # this resume (e.g. --auto-wire-verifications / --audit-evidence) may have
-        # appended scoped evidence before the early return, so refresh the derived
-        # proof-search graph (fail closed) before the dashboard/memo so all three
-        # surfaces stay coherent. This never upgrades status: the graph
-        # re-validates through the kernel and only reflects already-earned evidence.
-        if (run_dir / "proof_goal_graph.yaml").exists():
-            from espresso_proof.kernel.subgoal_graph import build_subgoal_graph, remove_subgoal_graph
-            from espresso_proof.verification.theorem_condition_ledger import build_theorem_condition_ledger
-
-            try:
-                # Goal 57A: ensure the advisory theorem-condition ledger exists
-                # before the graph reads it (idempotent; writes an empty ledger
-                # when there is no llm_agent_run).
-                build_theorem_condition_ledger(run_dir)
-                build_subgoal_graph(run_dir)
-                validate_run(run_dir)
-            except Exception:  # noqa: BLE001 - advisory view must fail closed
-                remove_subgoal_graph(run_dir)
-                validate_run(run_dir)
-        write_timings(run_dir)
-        register_observability_artifacts(run_dir)
-        write_run_dashboard(run_dir)
-        return build_concise_memo(run_dir)
+        return _resume_idempotent_memo(run_dir=run_dir)
     if _state_index(state) < _state_index("WAITING_LLM_AGENT_HUMAN_GATE"):
         raise ValueError(
             f"run is not at the human gate (state={state!r}); finish the agent pass first"
         )
 
+    # Record the human's strategy choice, run a bounded Prover<->Reviewer loop, then
+    # the advisory layers. The kernel re-validates throughout and never upgrades
+    # proof / source / evidence status.
+    human_choice, continue_decision = _record_resume_human_choice(
+        run_dir=run_dir,
+        manifest=manifest,
+        selected_strategy=selected_strategy,
+        effort=effort,
+        taste_judgment=taste_judgment,
+    )
+    loop_summary = _run_resume_prover_loop(
+        run_dir=run_dir,
+        human_choice=human_choice,
+        continue_decision=continue_decision,
+        selected_strategy=selected_strategy,
+        prover_provider=prover_provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        reviewer_set=reviewer_set,
+        rounds=rounds,
+        prover_client=prover_client,
+    )
+    _run_resume_advisory_layers(run_dir=run_dir)
+    return _finalize_resume_memo(run_dir=run_dir, loop_summary=loop_summary)
+
+
+def _resume_idempotent_memo(*, run_dir: Path) -> str:
+    """A run already at COMPLETED_MEMO: refresh the derived graph + dashboards, return the memo."""
+    from espresso_proof.ui.memo import build_concise_memo
+    # idempotent: do not re-resolve / re-append rounds. But a pre-loop step on
+    # this resume (e.g. --auto-wire-verifications / --audit-evidence) may have
+    # appended scoped evidence before the early return, so refresh the derived
+    # proof-search graph (fail closed) before the dashboard/memo so all three
+    # surfaces stay coherent. This never upgrades status: the graph
+    # re-validates through the kernel and only reflects already-earned evidence.
+    if (run_dir / "proof_goal_graph.yaml").exists():
+        from espresso_proof.kernel.subgoal_graph import build_subgoal_graph, remove_subgoal_graph
+        from espresso_proof.verification.theorem_condition_ledger import build_theorem_condition_ledger
+
+        try:
+            # Goal 57A: ensure the advisory theorem-condition ledger exists
+            # before the graph reads it (idempotent; writes an empty ledger
+            # when there is no llm_agent_run).
+            build_theorem_condition_ledger(run_dir)
+            build_subgoal_graph(run_dir)
+            validate_run(run_dir)
+        except Exception:  # noqa: BLE001 - advisory view must fail closed
+            remove_subgoal_graph(run_dir)
+            validate_run(run_dir)
+    write_timings(run_dir)
+    register_observability_artifacts(run_dir)
+    write_run_dashboard(run_dir)
+    return build_concise_memo(run_dir)
+
+
+def _record_resume_human_choice(
+    *,
+    run_dir: Path,
+    manifest: dict,
+    selected_strategy: str,
+    effort: str | None,
+    taste_judgment: str,
+) -> tuple[dict, str]:
+    """Validate + persist the human strategy choice. Returns (human_choice, continue_decision)."""
     artifacts = manifest["artifacts"]
     claim = read_yaml(run_dir / artifacts["locked_claim"])
     # continue only makes sense with a real strategy; 'none' must stop.
@@ -857,7 +897,24 @@ def _resume_run_locked(
     HumanChoice.model_validate(human_choice)
     write_yaml(run_dir / artifacts["human_choice"], human_choice)
     validate_run(run_dir)
+    return human_choice, continue_decision
 
+
+def _run_resume_prover_loop(
+    *,
+    run_dir: Path,
+    human_choice: dict,
+    continue_decision: str,
+    selected_strategy: str,
+    prover_provider: str,
+    model: str,
+    api_key_env: str,
+    external_agent_command_env: str,
+    reviewer_set: str,
+    rounds: int | None,
+    prover_client,
+) -> tuple[int, str] | None:
+    """Resolve the agent gate and run a bounded Prover<->Reviewer loop (or stop)."""
     loop_summary: tuple[int, str] | None = None
     if continue_decision == "continue":
         # Resolve the LLM-agent gate + rebuild prover_loop with the real choice,
@@ -887,7 +944,11 @@ def _resume_run_locked(
             reason="human selected no strategy to continue",
             human_choice=human_choice,
         )
+    return loop_summary
 
+
+def _run_resume_advisory_layers(*, run_dir: Path) -> None:
+    """Advisory layers (judgment / failure-pattern / memory / subgoal graph); each re-validates."""
     # Mathematical Judgment Layer (advisory): record conservative risk findings
     # from the validated artifacts before rendering the memo. This NEVER upgrades
     # proof/source/evidence status (the report carries no status field) and
@@ -933,6 +994,10 @@ def _resume_run_locked(
         remove_subgoal_graph(run_dir)
         validate_run(run_dir)
 
+
+def _finalize_resume_memo(*, run_dir: Path, loop_summary: tuple[int, str] | None) -> str:
+    """Mark COMPLETED_MEMO, refresh dashboards, build the concise memo."""
+    from espresso_proof.ui.memo import build_concise_memo
     _set_state(run_dir, "COMPLETED_MEMO")
     record_agent_flow_stage_status(run_dir)
     write_timings(run_dir)
