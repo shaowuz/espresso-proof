@@ -149,12 +149,27 @@ def test_check_generator_enforces_per_step_and_per_run_caps(tmp_path: Path) -> N
 
 
 def test_check_generator_runtime_does_not_mutate_frozen_surfaces(tmp_path: Path) -> None:
-    frozen = [
-        Path("espresso_proof/kernel/validators.py"),
-        Path("espresso_proof/kernel/models.py"),
-        Path("espresso_proof/verification/verifier.py"),
-        *sorted(Path("espresso_proof/validation").glob("*.py")),
-    ]
+    # Trust-core source surfaces that the runtime must never mutate. validators and
+    # models are packages (split from single modules), so resolve a target to every
+    # .py under it when it is a directory, falling back to the single-file form.
+    def _frozen_sources() -> list[Path]:
+        targets = [
+            Path("espresso_proof/kernel/validators"),
+            Path("espresso_proof/kernel/models"),
+            Path("espresso_proof/verification/verifier.py"),
+            *sorted(Path("espresso_proof/validation").glob("*.py")),
+        ]
+        out: list[Path] = []
+        for target in targets:
+            if target.is_dir():
+                out.extend(sorted(target.rglob("*.py")))
+            elif target.exists():
+                out.append(target)
+            elif target.with_suffix(".py").exists():
+                out.append(target.with_suffix(".py"))
+        return out
+
+    frozen = _frozen_sources()
     before = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in frozen}
     run_dir, _artifacts, _claim_id = _prepared_run(tmp_path)
 
