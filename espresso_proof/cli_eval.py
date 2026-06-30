@@ -1,0 +1,453 @@
+"""Evaluation commands: benchmark / calibration / scorecard / judge (non-product).
+
+Registered on the shared Typer ``app`` from ``espresso_proof.cli``
+(flat command names, identical behavior). Imported for its side effects at
+the bottom of cli.py."""
+from __future__ import annotations
+
+import json
+import os
+from datetime import UTC, datetime
+from pathlib import Path
+
+import typer
+
+from espresso_proof.kernel.contracts import DEFAULT_AGENT_FLOW, default_agent_contracts
+from espresso_proof.ui.descriptions import (
+    describe_grade,
+    describe_proof_language,
+    evidence_phrase,
+    judgment_tier_phrase,
+    objection_phrase,
+)
+from espresso_proof.kernel.io import read_text, read_yaml, write_text, write_yaml
+from espresso_proof.literature.literature_discovery import discover_literature as run_literature_discovery
+from espresso_proof.literature.literature_review_agent import ReviewSourceSpec, run_literature_review_agent
+from espresso_proof.literature.literature_scout import run_literature_scout
+from espresso_proof.literature.retrieval_grounding import retrieve_and_ground
+from espresso_proof.agents.llm_agents import append_prover_loop_round
+from espresso_proof.agents.llm_agents import resolve_agent_gate as resolve_llm_agent_gate
+from espresso_proof.agents.llm_agents import build_client as build_llm_client
+from espresso_proof.agents.llm_agents import build_prover_loop_report
+from espresso_proof.agents.front_half_agents import run_front_half_agent_pass
+from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.orchestration.prover_loop_driver import continue_prover_loop
+from espresso_proof.kernel.run_lock import run_writer_lock
+from espresso_proof.agents.llm_agents import external_agent_diagnostic
+from espresso_proof.agents.llm_agents import openai_agent_diagnostic
+from espresso_proof.agents.llm_agents import route_initial_reviewer_blockers_to_update_inbox
+from espresso_proof.agents.llm_agents import run_llm_agent_pass
+from espresso_proof.agents.llm_agents import write_initial_prover_round_artifacts
+from espresso_proof.orchestration.failure_classifier import classify_failures
+from espresso_proof.kernel.failure_pattern_bank import audit_failure_patterns, seed_failure_pattern_bank
+from espresso_proof.literature.autonomous_retrieval import run_autonomous_retrieval
+from espresso_proof.ui.bank_dashboard import render_bank_dashboard
+from espresso_proof.orchestration.run_dashboard import render_run_dashboard, write_run_dashboard
+from espresso_proof.kernel.research_bank import (
+    _BANKABLE_KINDS,
+    append_bank_item,
+    load_bankable_dict,
+    materialize_run_banks,
+)
+# NOTE: literature_retrieval.retrieve_and_ground (corpus_dir/query, older
+# retrieve-sources --ground path) is a DIFFERENT function from
+# retrieval_grounding.retrieve_and_ground (Goal 03, candidate/local_corpus). Alias
+# this one so it does not shadow the Goal 03 import above (which the
+# `retrieve-and-ground` command depends on).
+from espresso_proof.literature.literature_retrieval import retrieve_and_ground as retrieve_and_ground_from_corpus
+from espresso_proof.literature.literature_retrieval import retrieve_sources
+from espresso_proof.verification.mathematical_judgment import judge_run
+from espresso_proof.memory.memory_context import build_memory_context
+from espresso_proof.kernel.subgoal_graph import build_subgoal_graph
+from espresso_proof.verification.finite_group_verifier import verify_identity_on_table
+from espresso_proof.verification.proof_verification import (
+    auto_wire_scoped_verifications,
+    verify_tensor_left_exact_counterexample_in_run,
+    verify_finite_groups,
+    verify_gl2_f3_solvable_in_run,
+    verify_identity_table_in_run,
+    verify_matrix_rank_in_run,
+    verify_ring_identity_in_run,
+)
+from espresso_proof.verification.symbolic_identity import SUPPORTED_RING_IDENTITIES
+from espresso_proof.evaluation.benchmark import run_benchmark
+from espresso_proof.evaluation.calibration import run_calibration
+from espresso_proof.evaluation.real_math_benchmark import (
+    build_real_math_capability_report,
+    case_from_run as real_math_case_from_run,
+)
+from espresso_proof.claim.claim_clear import (
+    CLAIM_CLEAR_BLOCKED_ON_DEMAND_AGENTS,
+    ClaimClearBlockedError,
+    ensure_claim_clear_for_downstream,
+)
+from espresso_proof.evaluation.scorecard import render_scorecard_markdown, run_scorecard
+from espresso_proof.ui.memo import build_concise_memo
+from espresso_proof.kernel.proof_language import scrub_proof_language
+from espresso_proof.kernel.surface_warnings import (
+    collect_surface_warnings,
+    refresh_final_report_disclosures,
+    render_warning_lines,
+)
+from espresso_proof.evaluation.reviewer_checklist import review_checklist
+from espresso_proof.memory.memory import load_memory_index, summarize_memory, write_memory_entry
+from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.literature.pdf_ingestion import (
+    extract_candidate_locators,
+    extract_source_text,
+    ingest_source_for_theorems,
+    read_source_bytes,
+)
+from espresso_proof.verification.source_verification import ground_run
+from espresso_proof.literature.source_grounding_stage import prepare_source_grounding
+from espresso_proof.kernel.external_tool_runner import (
+    DEFAULT_TIMEOUT_SECONDS,
+    FAKE_TOOLS,
+    UnknownToolError,
+    run_and_record_external_tool,
+    run_completed_cleanly,
+)
+from espresso_proof.verification.external_tool_adapters import run_exact_modexp_adapter
+from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
+from espresso_proof.verification.verifier import audit_evidence, verify_computation_checks
+from espresso_proof.kernel.models import (
+    AdmissionCheck,
+    AgentContracts,
+    ContinueDecision,
+    ExampleFeedbackSummary,
+    ExplorationMode,
+    HumanChoice,
+    HumanExampleFeedback,
+    LLMAgentRunReport,
+    LiteratureReviewAgentReport,
+    LiteratureReviewReport,
+    MemoryEntry,
+    ProverLoopReport,
+    ProofGapResolutionReport,
+    TheoremApplicabilityReport,
+    TheoremExtractionReport,
+    WorkflowSpec,
+)
+from espresso_proof.kernel.schema_export import check_schemas, write_schemas
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
+from espresso_proof.orchestration.workflow_generator import generate_workflow_spec
+
+from espresso_proof.cli import (
+    app,
+    _assert_fixture_expectations,
+    _resolve_front_half_mode,
+    _validate_seed_files,
+)
+
+
+@app.command("judge")
+def judge_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+) -> None:
+    """Record conservative mathematical risk judgments for a run (advisory only).
+
+    Writes mathematical_judgment.yaml and re-validates. The layer never upgrades
+    proof/source/evidence status: it can only warn, request more evidence,
+    downgrade confidence, or ask for human review. The kernel validators remain
+    the only gate that earns any status.
+    """
+    report = judge_run(run)
+    validate_run(run)
+    kinds = ", ".join(sorted({item["kind"] for item in report["findings"]})) or "none"
+    typer.echo(f"Recorded {len(report['findings'])} judgment finding(s): {kinds}")
+    typer.echo(f"-> {run / 'mathematical_judgment.yaml'}")
+
+
+@app.command("benchmark")
+def benchmark_command(
+    output_root: Path = typer.Option(Path(".benchmark_runs"), "--out-root", help="Where benchmark runs are written."),
+    json_out: Path | None = typer.Option(
+        None, "--json-out", help="Also write the full report as machine-readable JSON (Goal 40A)."
+    ),
+) -> None:
+    """Run the regression benchmark (curated conservative-behaviour cases over the
+    existing mock fixtures) and print a stable report. Exits non-zero if any case
+    regresses. Never asserts a claim is proved.
+    """
+    report = run_benchmark(output_root)
+    passed = sum(1 for row in report if row["passed"])
+    if json_out is not None:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(
+            json.dumps({"cases": report, "passed": passed, "total": len(report)},
+                       indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    for row in report:
+        mark = "PASS" if row["passed"] else "FAIL"
+        typer.echo(f"[{mark}] {row['category']:24s} {row['fixture']:42s} status={row['idea_status']}")
+        for problem in row["problems"]:
+            typer.echo(f"        - {problem}")
+    typer.echo(f"benchmark: {passed}/{len(report)} case(s) passed")
+    if passed != len(report):
+        raise typer.Exit(code=1)
+
+
+@app.command("real-math-capability")
+def real_math_capability_command(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    case_id: str | None = typer.Option(None, "--case-id"),
+    provider: str | None = typer.Option(
+        None, "--provider", help="Override provider; otherwise infer from llm_agent_run.yaml."
+    ),
+    model_fingerprint: str | None = typer.Option(
+        None,
+        "--model-fingerprint",
+        help="Override model fingerprint; otherwise infer from llm_agent_run.yaml.",
+    ),
+    prompt_version: str = typer.Option(..., "--prompt-version"),
+    repeat_count: int = typer.Option(1, "--repeat-count", min=1),
+    json_out: Path | None = typer.Option(
+        None, "--json-out", help="Write the capability report as machine-readable JSON."
+    ),
+) -> None:
+    """Evaluate one existing run against the real-math capability ledger.
+
+    Read-only: this command validates/inspects run artifacts and reports whether
+    the run was valid, used a ready real provider without adapter fallback, found
+    useful routes, and earned any scoped/source/formal/human capability labels.
+    It never upgrades proof/source/evidence status.
+    """
+
+    case = real_math_case_from_run(
+        run,
+        case_id=case_id,
+        provider=provider,
+        model_fingerprint=model_fingerprint,
+        prompt_version=prompt_version,
+        repeat_count=repeat_count,
+    )
+    report = build_real_math_capability_report([case])
+    row = report["cases"][0]
+    metrics = report["metrics"]
+    typer.echo(
+        "real-math capability: "
+        f"valid_run={row['valid_run']} "
+        f"real_agent_valid_run={row['real_agent_valid_run']} "
+        f"useful_route={row['useful_route_found']} "
+        f"source_supported={row['source_supported_argument']} "
+        f"checked_scoped={row['checked_scoped_fact']} "
+        f"formal={row['formal_solution']} "
+        f"human_attested={row['human_attested_solution']} "
+        f"overclaim_count={metrics['overclaim_count']}"
+    )
+    typer.echo(
+        "provider: "
+        f"{row['provider']} model={row['model_fingerprint']} "
+        f"ready={row['provider_ready']} adapter_fallback={row['adapter_fallback_used']}"
+    )
+    if json_out is not None:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+        typer.echo(f"Wrote real-math capability report -> {json_out}")
+    if metrics["overclaim_count"]:
+        raise typer.Exit(code=1)
+
+
+@app.command("real-agent-smoke")
+def real_agent_smoke_command(
+    input: Path = typer.Option(
+        Path("tests/fixtures/promising_but_unproved/input.md"),
+        "--input",
+        "-i",
+        exists=True,
+        dir_okay=False,
+    ),
+    project: str = typer.Option("real_codex_smoke", "--project", "-p"),
+    literature_mode: str = typer.Option("local", "--literature-mode"),
+    literature_provider: list[str] | None = typer.Option(None, "--literature-provider"),
+    max_references: int = typer.Option(8, "--max-references", min=1, max=25),
+    provider: str = typer.Option("external", "--provider"),
+    front_half: str = typer.Option("auto", "--front-half"),
+    model: str = typer.Option("codex-cli", "--model"),
+    reviewer_set: str = typer.Option("espresso", "--reviewer-set"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+        "--external-agent-command-env",
+    ),
+    output_root: Path = typer.Option(
+        Path(".real_agent_smoke_runs"), "--output-root", file_okay=False
+    ),
+    prompt_version: str = typer.Option("real-agent-smoke-v1", "--prompt-version"),
+    repeat_count: int = typer.Option(1, "--repeat-count", min=1),
+    json_out: Path | None = typer.Option(
+        None,
+        "--json-out",
+        help="Write the capability report here; default: <run>/real_math_capability.json.",
+    ),
+) -> None:
+    """Run the real-agent smoke gate and write a capability report.
+
+    This is a product-readiness smoke, not a solver claim. It requires a
+    non-stub provider, runs the normal orchestrator path with network preflight,
+    validates the run, and then writes the same read-only capability report as
+    ``real-math-capability``. Passing means "real agent produced a valid run
+    without adapter fallback or proof-language overclaim."
+    """
+
+    if literature_mode not in {"local", "live"}:
+        raise typer.BadParameter("literature-mode must be local or live")
+    if provider not in {"openai", "external"}:
+        raise typer.BadParameter("real-agent-smoke requires provider=openai or provider=external")
+    if front_half not in {"auto", "mock", "stub", "openai", "external"}:
+        raise typer.BadParameter("front-half must be auto, mock, stub, openai, or external")
+    if reviewer_set not in {"generic", "espresso"}:
+        raise typer.BadParameter("reviewer-set must be generic or espresso")
+    front_half = _resolve_front_half_mode(
+        provider=provider, front_half=front_half, command_name="real-agent-smoke"
+    )
+
+    result = orchestrate_run(
+        project=project,
+        input_path=input,
+        output_root=output_root,
+        provider=provider,
+        front_half=front_half,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        reviewer_set=reviewer_set,
+        literature_mode=literature_mode,
+        literature_providers=literature_provider,
+        max_references=max_references,
+        agent_network_preflight=True,
+    )
+    run_dir = Path(result["run_dir"])
+    report_path = json_out or (run_dir / "real_math_capability.json")
+    case = real_math_case_from_run(
+        run_dir,
+        case_id=run_dir.name,
+        prompt_version=prompt_version,
+        repeat_count=repeat_count,
+    )
+    report = build_real_math_capability_report([case])
+    row = report["cases"][0]
+    metrics = report["metrics"]
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    typer.echo(f"Wrote run artifacts to {run_dir}")
+    typer.echo(f"Wrote real-math capability report -> {report_path}")
+    typer.echo(
+        "real-agent smoke: "
+        f"valid_run={row['valid_run']} "
+        f"real_agent_valid_run={row['real_agent_valid_run']} "
+        f"provider_ready={row['provider_ready']} "
+        f"adapter_fallback={row['adapter_fallback_used']} "
+        f"agent_solved={row['agent_solved']} "
+        f"overclaim_count={metrics['overclaim_count']}"
+    )
+    if not row["real_agent_valid_run"] or metrics["overclaim_count"]:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def calibration(
+    output_root: Path = typer.Option(Path(".benchmark_runs"), "--out-root", help="Where calibration runs are written."),
+    json_out: Path | None = typer.Option(
+        None, "--json-out", help="Also write the full report as machine-readable JSON (Goal 40A)."
+    ),
+) -> None:
+    """Aggregate the product's core SAFETY metrics over the mock fixtures.
+
+    Reports per-fixture validation, source-support false positives, proof-language
+    violations, strategy high-score false positives, and memo honesty. All safety
+    metrics must be 0; the command exits non-zero on any regression. Earns no
+    status and never asserts a claim is proved.
+    """
+    report = run_calibration(output_root)
+    if json_out is not None:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    m = report["metrics"]
+    for row in report["rows"]:
+        mark = "ok " if row["memo_honest"] and not row["source_support_false_positives"] \
+            and not row["strategy_high_score_false_positives"] else "BAD"
+        typer.echo(
+            f"[{mark}] {row['fixture']:44s} validated={row['validated']} "
+            f"src_fp={row['source_support_false_positives']} "
+            f"hiscore_fp={row['strategy_high_score_false_positives']} "
+            f"proof_lang={len(row['proof_language'])}"
+        )
+    typer.echo(
+        f"calibration: {m['fixtures_validated']}/{m['fixtures_total']} validated; "
+        f"source-support false positives={m['source_support_false_positives']}; "
+        f"proof-language violations={m['proof_language_violations']}; "
+        f"high-score false positives={m['strategy_high_score_false_positives']}; "
+        f"memo honest={m['memo_honest']}/{m['fixtures_total']}"
+    )
+    if not m["clean"]:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def scorecard(
+    output_root: Path = typer.Option(Path(".benchmark_runs"), "--out-root", help="Where scorecard probe runs are written."),
+    json_out: Path | None = typer.Option(
+        None, "--json-out", help="Write the full scorecard as machine-readable JSON."
+    ),
+    markdown_out: Path | None = typer.Option(
+        None, "--markdown-out", help="Write the trend-friendly Markdown summary."
+    ),
+) -> None:
+    """Autoprover Behavior Scorecard (Goal 40B): deterministic safety AND
+    capability metrics over the mock fixtures — baseline regressions, earning-
+    pipeline wiring, seeded-gold-flaw reviewer recall, and a sanitized dogfood
+    replay. Exits non-zero on any regression. Metrics never earn or upgrade any
+    mathematical status; no claim is ever 'proved' by a scorecard.
+    """
+    report = run_scorecard(output_root)
+    if json_out is not None:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    markdown = render_scorecard_markdown(report)
+    if markdown_out is not None:
+        markdown_out.parent.mkdir(parents=True, exist_ok=True)
+        markdown_out.write_text(markdown, encoding="utf-8")
+    typer.echo(markdown)
+    if not report["clean"]:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def eval(
+    mode: str = typer.Option("mock", "--mode"),
+    schemas_only: bool = typer.Option(False, "--schemas-only"),
+    fixture: Path | None = typer.Option(None, "--fixture", exists=True, file_okay=False),
+) -> None:
+    """Run deterministic P0 evals."""
+    if schemas_only:
+        _validate_seed_files()
+        typer.echo("Schema-only validation passed")
+        return
+    if mode != "mock":
+        raise typer.BadParameter("P0 eval only supports --mode mock")
+    fixture_dirs = [fixture] if fixture else sorted(Path("tests/fixtures").iterdir())
+    passed = 0
+    for fixture_dir in fixture_dirs:
+        if not fixture_dir.is_dir():
+            continue
+        input_path = fixture_dir / "input.md"
+        expected_path = fixture_dir / "expected.yaml"
+        rubric_path = fixture_dir / "rubric.md"
+        missing = [
+            path.name
+            for path in (input_path, expected_path, rubric_path)
+            if not path.exists()
+        ]
+        if missing:
+            raise KernelValidationError(
+                f"{fixture_dir}: fixture is missing required files {missing}"
+            )
+        run_dir = run_mock_critique("hodge_atoms", input_path, Path(".eval_runs") / fixture_dir.name)
+        validate_run(run_dir)
+        _assert_fixture_expectations(run_dir, read_yaml(expected_path))
+        passed += 1
+        typer.echo(f"PASS {fixture_dir.name}")
+    typer.echo(f"{passed} fixture(s) passed")

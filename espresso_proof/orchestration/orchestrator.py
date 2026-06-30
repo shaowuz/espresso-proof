@@ -261,7 +261,97 @@ def orchestrate_run(
     provider fails closed before any artifact is written) and threads the
     resulting diagnostic into the agent pass.
     """
+    # Stage 0 — preflight providers (fail closed), then scaffold or attach the run.
+    provider_diagnostic = _preflight_providers(
+        provider=provider,
+        front_half=front_half,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        agent_network_preflight=agent_network_preflight,
+    )
+    run_dir, runner = _scaffold_or_resume(
+        run_dir=run_dir, project=project, input_path=input_path, output_root=output_root
+    )
 
+    # Resume guard: a run already past CLAIM_CLEAR whose claim is no longer clear
+    # finishes at the claim-clarification gate without an LLM pass.
+    early = _resume_claim_clear_guard(run_dir=run_dir, runner=runner)
+    if early is not None:
+        return early
+
+    # Goal 27 fast core pass: run only the FAST_CORE_STAGES in the front half and
+    # DEFER literature discovery + the evidence stages (examples / counterexamples),
+    # so the user sees an initial judgment + preliminary routes quickly. The
+    # deferred agents run later via ``run-agent``.
+    front_half_stages = front_half_stages_for_runner(fast=fast)
+    ran_front_half_agents = front_half != "mock" or front_half_client is not None
+
+    # Stage 1 — front-half agent pass (S1-S8), validated as one transaction.
+    _stage_front_half(
+        run_dir=run_dir,
+        runner=runner,
+        front_half=front_half,
+        front_half_client=front_half_client,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        front_half_stages=front_half_stages,
+    )
+
+    # Claim-clear gate: an unclear claim finishes here without an LLM pass.
+    early, artifacts, project_dir = _claim_clear_gate(run_dir=run_dir, runner=runner)
+    if early is not None:
+        return early
+
+    # Stage 2 — literature discovery (deferred to a later run-agent pass in fast core).
+    _stage_literature(
+        run_dir=run_dir,
+        runner=runner,
+        fast=fast,
+        project_dir=project_dir,
+        artifacts=artifacts,
+        max_references=max_references,
+        literature_mode=literature_mode,
+        literature_providers=literature_providers,
+    )
+
+    # Execute any front-half scoped-verification requests before the prover pass.
+    _auto_wire_scoped_verifications(run_dir=run_dir)
+
+    # Stage 3 — live Prover + Reviewers (skipped when the front half asked to stop);
+    # stops at the human gate.
+    _stage_prover_reviewers(
+        run_dir=run_dir,
+        runner=runner,
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        reviewer_set=reviewer_set,
+        provider_diagnostic=provider_diagnostic,
+        artifacts=artifacts,
+    )
+
+    # Initialise the per-agent process board + pressure status, then record stage status.
+    _init_process_board(
+        run_dir=run_dir, fast=fast, ran_front_half_agents=ran_front_half_agents
+    )
+    record_agent_flow_stage_status(run_dir, runner=runner)
+
+    return _finalize(run_dir=run_dir)
+
+
+def _preflight_providers(
+    *,
+    provider: str,
+    front_half: str,
+    model: str,
+    api_key_env: str,
+    external_agent_command_env: str,
+    agent_network_preflight: bool,
+) -> dict | None:
+    """Fail closed if a live provider is unconfigured; return the prover diagnostic."""
     # Fail early if a live provider is requested but not configured (avoids
     # scaffolding a run that cannot complete its agent pass). The front-half
     # provider is only configuration-checked; the prover provider honours the
@@ -277,7 +367,13 @@ def orchestrate_run(
         command_env=external_agent_command_env,
         network_check=agent_network_preflight,
     )
+    return provider_diagnostic
 
+
+def _scaffold_or_resume(
+    *, run_dir: Path | None, project: str, input_path: Path, output_root: Path
+) -> tuple[Path, StageRunner]:
+    """Stage 0 — scaffold a fresh genesis run, or attach a runner to an existing run."""
     # Stage 0 — scaffold a kernel-valid "unclear/needs_human" run for any claim.
     # The genesis stage creates the run; from here every stage advances lifecycle
     # state ONLY through the transactional StageRunner (snapshot -> mutate ->
@@ -294,7 +390,11 @@ def orchestrate_run(
         )
     else:
         runner = StageRunner(run_dir)
+    return run_dir, runner
 
+
+def _resume_claim_clear_guard(*, run_dir: Path, runner: StageRunner) -> dict | None:
+    """Finish at the claim-clarification gate if a resumed run's claim is no longer clear."""
     if _reached(run_dir, CLAIM_CLEAR):
         resume_gate = evaluate_claim_clear(run_dir, require_recorded_clear_gate=True)
         if not resume_gate.clear:
@@ -304,14 +404,39 @@ def orchestrate_run(
                 gate_result=resume_gate,
             )
             return _finish_without_llm_gate(run_dir, claim_gate=gate_report)
+    return None
 
-    # Goal 27 fast core pass: run only the FAST_CORE_STAGES in the front half and
-    # DEFER literature discovery + the evidence stages (examples / counterexamples),
-    # so the user sees an initial judgment + preliminary routes quickly. The
-    # deferred agents run later via ``run-agent``.
-    front_half_stages = front_half_stages_for_runner(fast=fast)
-    ran_front_half_agents = front_half != "mock" or front_half_client is not None
 
+def _claim_clear_gate(
+    *, run_dir: Path, runner: StageRunner
+) -> tuple[dict | None, dict | None, Path | None]:
+    """Record the claim-clear gate. Returns (early_finish | None, artifacts, project_dir)."""
+    gate_result = evaluate_claim_clear(run_dir)
+    gate_report = _record_claim_clear_gate_transaction(
+        run_dir,
+        runner=runner,
+        gate_result=gate_result,
+    )
+    if not gate_result.clear:
+        return _finish_without_llm_gate(run_dir, claim_gate=gate_report), None, None
+
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    artifacts = manifest["artifacts"]
+    project_dir = run_dir.parents[1]
+    return None, artifacts, project_dir
+
+
+def _stage_front_half(
+    *,
+    run_dir: Path,
+    runner: StageRunner,
+    front_half: str,
+    front_half_client,
+    model: str,
+    api_key_env: str,
+    external_agent_command_env: str,
+    front_half_stages: list[str],
+) -> None:
     # Stage 1 — front-half agents (S1–S8). Skipped when front_half == "mock".
     if not _reached(run_dir, "FRONT_HALF_DONE"):
         def _front_half() -> None:
@@ -344,19 +469,18 @@ def orchestrate_run(
             state_after="FRONT_HALF_DONE",
         )
 
-    gate_result = evaluate_claim_clear(run_dir)
-    gate_report = _record_claim_clear_gate_transaction(
-        run_dir,
-        runner=runner,
-        gate_result=gate_result,
-    )
-    if not gate_result.clear:
-        return _finish_without_llm_gate(run_dir, claim_gate=gate_report)
 
-    manifest = read_yaml(run_dir / "run_manifest.yaml")
-    artifacts = manifest["artifacts"]
-    project_dir = run_dir.parents[1]
-
+def _stage_literature(
+    *,
+    run_dir: Path,
+    runner: StageRunner,
+    fast: bool,
+    project_dir: Path,
+    artifacts: dict,
+    max_references: int,
+    literature_mode: str,
+    literature_providers: list[str] | None,
+) -> None:
     # Stage 2 — literature discovery (candidate references only; validated).
     # Goal 27: in the fast core pass literature is a DEFERRED evidence agent --
     # skip discovery here (the scaffolded candidate-only literature_review stays
@@ -387,6 +511,8 @@ def orchestrate_run(
             snapshot_paths=[artifacts["literature_review"]],
         )
 
+
+def _auto_wire_scoped_verifications(*, run_dir: Path) -> None:
     # Goal 42E cycle 3: execute any structured scoped-verification requests
     # the front half proposed BEFORE the prover/reviewer pass, so round 1
     # already sees the trusted machine evidence and computation requests can
@@ -398,6 +524,19 @@ def orchestrate_run(
 
         auto_wire_scoped_verifications(run_dir)
 
+
+def _stage_prover_reviewers(
+    *,
+    run_dir: Path,
+    runner: StageRunner,
+    provider: str,
+    model: str,
+    api_key_env: str,
+    external_agent_command_env: str,
+    reviewer_set: str,
+    provider_diagnostic: dict | None,
+    artifacts: dict,
+) -> None:
     # Stage 3 — live Prover + Reviewers; stop at the human gate.
     # Goal 65 control-flow fix (from the order-3 postmortem): if the front half
     # already concluded the claim needs a human BEFORE proof search
@@ -545,6 +684,8 @@ def orchestrate_run(
             )
             append_event(run_dir, "agent_call_finished", stage="llm_prover_reviewers")
 
+
+def _init_process_board(*, run_dir: Path, fast: bool, ran_front_half_agents: bool) -> None:
     # Goal 27 — initialize the per-agent run-status board. In the fast core pass
     # only claim_understanding has run; the evidence agents are not_run (to be run
     # on demand / in parallel). In a full pass literature + the evidence stages
@@ -560,8 +701,9 @@ def orchestrate_run(
                 done.add("counterexamples")
         init_agent_run_status(run_dir, done=done)
         build_pressure_status(run_dir, late_after_strategy=False)
-    record_agent_flow_stage_status(run_dir, runner=runner)
 
+
+def _finalize(*, run_dir: Path) -> dict:
     # Goal 54A: aggregate run timings + register the per-run observability logs as
     # optional artifacts (diagnostic only; both helpers fail closed and never gate).
     write_timings(run_dir)
@@ -644,8 +786,6 @@ def _resume_run_locked(
     reviewer_set: str = "espresso",
     prover_client=None,
 ) -> str:
-    from espresso_proof.ui.memo import build_concise_memo  # local import to avoid a cycle
-
     run_dir = Path(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     # Phase 2: bring an old / external / denormalized persisted run up to the
@@ -656,35 +796,77 @@ def _resume_run_locked(
     ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     state = manifest.get("current_state", "")
     if state == "COMPLETED_MEMO":
-        # idempotent: do not re-resolve / re-append rounds. But a pre-loop step on
-        # this resume (e.g. --auto-wire-verifications / --audit-evidence) may have
-        # appended scoped evidence before the early return, so refresh the derived
-        # proof-search graph (fail closed) before the dashboard/memo so all three
-        # surfaces stay coherent. This never upgrades status: the graph
-        # re-validates through the kernel and only reflects already-earned evidence.
-        if (run_dir / "proof_goal_graph.yaml").exists():
-            from espresso_proof.kernel.subgoal_graph import build_subgoal_graph, remove_subgoal_graph
-            from espresso_proof.verification.theorem_condition_ledger import build_theorem_condition_ledger
-
-            try:
-                # Goal 57A: ensure the advisory theorem-condition ledger exists
-                # before the graph reads it (idempotent; writes an empty ledger
-                # when there is no llm_agent_run).
-                build_theorem_condition_ledger(run_dir)
-                build_subgoal_graph(run_dir)
-                validate_run(run_dir)
-            except Exception:  # noqa: BLE001 - advisory view must fail closed
-                remove_subgoal_graph(run_dir)
-                validate_run(run_dir)
-        write_timings(run_dir)
-        register_observability_artifacts(run_dir)
-        write_run_dashboard(run_dir)
-        return build_concise_memo(run_dir)
+        return _resume_idempotent_memo(run_dir=run_dir)
     if _state_index(state) < _state_index("WAITING_LLM_AGENT_HUMAN_GATE"):
         raise ValueError(
             f"run is not at the human gate (state={state!r}); finish the agent pass first"
         )
 
+    # Record the human's strategy choice, run a bounded Prover<->Reviewer loop, then
+    # the advisory layers. The kernel re-validates throughout and never upgrades
+    # proof / source / evidence status.
+    human_choice, continue_decision = _record_resume_human_choice(
+        run_dir=run_dir,
+        manifest=manifest,
+        selected_strategy=selected_strategy,
+        effort=effort,
+        taste_judgment=taste_judgment,
+    )
+    loop_summary = _run_resume_prover_loop(
+        run_dir=run_dir,
+        human_choice=human_choice,
+        continue_decision=continue_decision,
+        selected_strategy=selected_strategy,
+        prover_provider=prover_provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        reviewer_set=reviewer_set,
+        rounds=rounds,
+        prover_client=prover_client,
+    )
+    _run_resume_advisory_layers(run_dir=run_dir)
+    return _finalize_resume_memo(run_dir=run_dir, loop_summary=loop_summary)
+
+
+def _resume_idempotent_memo(*, run_dir: Path) -> str:
+    """A run already at COMPLETED_MEMO: refresh the derived graph + dashboards, return the memo."""
+    from espresso_proof.ui.memo import build_concise_memo
+    # idempotent: do not re-resolve / re-append rounds. But a pre-loop step on
+    # this resume (e.g. --auto-wire-verifications / --audit-evidence) may have
+    # appended scoped evidence before the early return, so refresh the derived
+    # proof-search graph (fail closed) before the dashboard/memo so all three
+    # surfaces stay coherent. This never upgrades status: the graph
+    # re-validates through the kernel and only reflects already-earned evidence.
+    if (run_dir / "proof_goal_graph.yaml").exists():
+        from espresso_proof.kernel.subgoal_graph import build_subgoal_graph, remove_subgoal_graph
+        from espresso_proof.verification.theorem_condition_ledger import build_theorem_condition_ledger
+
+        try:
+            # Goal 57A: ensure the advisory theorem-condition ledger exists
+            # before the graph reads it (idempotent; writes an empty ledger
+            # when there is no llm_agent_run).
+            build_theorem_condition_ledger(run_dir)
+            build_subgoal_graph(run_dir)
+            validate_run(run_dir)
+        except Exception:  # noqa: BLE001 - advisory view must fail closed
+            remove_subgoal_graph(run_dir)
+            validate_run(run_dir)
+    write_timings(run_dir)
+    register_observability_artifacts(run_dir)
+    write_run_dashboard(run_dir)
+    return build_concise_memo(run_dir)
+
+
+def _record_resume_human_choice(
+    *,
+    run_dir: Path,
+    manifest: dict,
+    selected_strategy: str,
+    effort: str | None,
+    taste_judgment: str,
+) -> tuple[dict, str]:
+    """Validate + persist the human strategy choice. Returns (human_choice, continue_decision)."""
     artifacts = manifest["artifacts"]
     claim = read_yaml(run_dir / artifacts["locked_claim"])
     # continue only makes sense with a real strategy; 'none' must stop.
@@ -715,7 +897,24 @@ def _resume_run_locked(
     HumanChoice.model_validate(human_choice)
     write_yaml(run_dir / artifacts["human_choice"], human_choice)
     validate_run(run_dir)
+    return human_choice, continue_decision
 
+
+def _run_resume_prover_loop(
+    *,
+    run_dir: Path,
+    human_choice: dict,
+    continue_decision: str,
+    selected_strategy: str,
+    prover_provider: str,
+    model: str,
+    api_key_env: str,
+    external_agent_command_env: str,
+    reviewer_set: str,
+    rounds: int | None,
+    prover_client,
+) -> tuple[int, str] | None:
+    """Resolve the agent gate and run a bounded Prover<->Reviewer loop (or stop)."""
     loop_summary: tuple[int, str] | None = None
     if continue_decision == "continue":
         # Resolve the LLM-agent gate + rebuild prover_loop with the real choice,
@@ -745,7 +944,11 @@ def _resume_run_locked(
             reason="human selected no strategy to continue",
             human_choice=human_choice,
         )
+    return loop_summary
 
+
+def _run_resume_advisory_layers(*, run_dir: Path) -> None:
+    """Advisory layers (judgment / failure-pattern / memory / subgoal graph); each re-validates."""
     # Mathematical Judgment Layer (advisory): record conservative risk findings
     # from the validated artifacts before rendering the memo. This NEVER upgrades
     # proof/source/evidence status (the report carries no status field) and
@@ -791,6 +994,10 @@ def _resume_run_locked(
         remove_subgoal_graph(run_dir)
         validate_run(run_dir)
 
+
+def _finalize_resume_memo(*, run_dir: Path, loop_summary: tuple[int, str] | None) -> str:
+    """Mark COMPLETED_MEMO, refresh dashboards, build the concise memo."""
+    from espresso_proof.ui.memo import build_concise_memo
     _set_state(run_dir, "COMPLETED_MEMO")
     record_agent_flow_stage_status(run_dir)
     write_timings(run_dir)

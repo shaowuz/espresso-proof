@@ -80,7 +80,8 @@ npm --prefix web run build
 - [docs/project-structure.md](docs/project-structure.md) - current repository map.
 - [docs/file-overview.md](docs/file-overview.md) - important files and directories.
 - [docs/product-philosophy.md](docs/product-philosophy.md) - product principles and trust boundary.
+- [docs/engineering/architecture-spine.md](docs/engineering/architecture-spine.md) - product-spine runtime architecture (as-built, file:line verified).
+- [docs/engineering/agent-catalog.md](docs/engineering/agent-catalog.md) - how every agent is invoked: three surfaces, trust status (as-built).
 - [docs/engineering/agent-flow.md](docs/engineering/agent-flow.md) - target agent workflow narrative.
-- [docs/engineering/system-architecture.md](docs/engineering/system-architecture.md) - runtime architecture.
 - [docs/engineering/product-path-boundaries.md](docs/engineering/product-path-boundaries.md) - supported product surface.
 - [docs/engineering/espresso-agent-protocol.md](docs/engineering/espresso-agent-protocol.md) - external-agent contract.

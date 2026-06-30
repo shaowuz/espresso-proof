@@ -1,3 +1,14 @@
+"""[MIXED] Stage-0 genesis scaffold (LIVE) + fixed scenario templates (dev/test).
+
+``run_mock_critique`` is LIVE PRODUCT CODE: the canonical Stage-0 genesis scaffold
+called by ``orchestrate_run`` to create a kernel-valid run shell for any claim
+(every run starts here). Everything else in this module — the ``_detect_scenario``
+/ ``_*scenario*`` / ``_common_*`` / ``_finite_group_*`` builders — is fixed
+scenario-template data used to seed those shells, not a live agent path. Do NOT
+remove ``run_mock_critique`` as "mock cleanup". See
+docs/engineering/architecture-spine.md.
+"""
+
 from __future__ import annotations
 
 import re
