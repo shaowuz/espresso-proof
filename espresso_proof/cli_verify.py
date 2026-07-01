@@ -1,6 +1,6 @@
 """Machine-check verify-* commands (developer/verification surface).
 
-Registered on the shared Typer ``app`` from ``espresso_proof.cli``
+Registered on the shared Typer ``app`` from ``espresso_proof.cli_app``
 (flat command names, identical behavior). Imported for its side effects at
 the bottom of cli.py."""
 from __future__ import annotations
@@ -132,8 +132,8 @@ from espresso_proof.kernel.schema_export import check_schemas, write_schemas
 from espresso_proof.kernel.validators import KernelValidationError, validate_run
 from espresso_proof.orchestration.workflow_generator import generate_workflow_spec
 
-from espresso_proof.cli import (
-    app,
+from espresso_proof.cli_app import app
+from espresso_proof.cli_shared import (
     _refresh_derived_views,
     _require_claim_clear_for_cli,
 )
