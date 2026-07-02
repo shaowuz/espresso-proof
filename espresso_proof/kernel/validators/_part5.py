@@ -634,6 +634,13 @@ def _validate_strategy_brief(
 
 
 def _validate_human_choice(human_choice: HumanChoice, strategy_brief: StrategyBrief) -> None:
+    # Fail-closed provenance check (belt-and-suspenders over the HumanChoice
+    # model validator): an automatic selection can never claim human
+    # confirmation. selected_by == 'auto' forces human_confirmed == false.
+    if human_choice.selected_by == "auto" and human_choice.human_confirmed:
+        raise KernelValidationError(
+            "human_choice selected_by='auto' can never claim human_confirmed=true"
+        )
     if human_choice.status == HumanChoiceStatus.selected:
         strategy_ids = {strategy.id for strategy in strategy_brief.top_strategies}
         if human_choice.selected_strategy not in strategy_ids and human_choice.selected_strategy != "none":

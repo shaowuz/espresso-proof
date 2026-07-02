@@ -324,15 +324,32 @@ class HumanChoice(StrictBaseModel):
     taste_judgment: str = ""
     continue_decision: ContinueDecision
     # human_confirmed records ONLY that a human made THIS strategy selection (it is
-    # required true whenever status == selected, see validate_choice_state). It is
-    # NOT a proof/claim confirmation and NOT the LLM-agent human gate: a valid run
-    # can carry human_confirmed=true here while llm_agent_run.human_gate.status is
-    # still 'pending' (the human picked a route; the prover-pass output still awaits
-    # review). Do not read it as "the human confirmed the result".
+    # required true whenever status == selected AND selected_by == 'human', see
+    # validate_choice_state). It is NOT a proof/claim confirmation and NOT the
+    # LLM-agent human gate: a valid run can carry human_confirmed=true here while
+    # llm_agent_run.human_gate.status is still 'pending' (the human picked a route;
+    # the prover-pass output still awaits review). Do not read it as "the human
+    # confirmed the result".
     human_confirmed: bool = False
+    # Provenance of the selection. 'human' (default, today's behavior) means a real
+    # human picked the strategy; 'auto' means machinery picked it with no human in
+    # the loop. Auto provenance can NEVER claim human confirmation: selected_by ==
+    # 'auto' forces human_confirmed == false (fail closed, any status).
+    selected_by: Literal["human", "auto"] = "human"
 
     @model_validator(mode="after")
     def validate_choice_state(self) -> HumanChoice:
+        """Enforce choice-state consistency and honest selection provenance.
+
+        Auto provenance can never claim human confirmation: selected_by ==
+        'auto' requires human_confirmed == false regardless of status. A human
+        selection keeps today's rule: status == selected requires
+        human_confirmed == true.
+        """
+        if self.selected_by == "auto" and self.human_confirmed:
+            raise ValueError(
+                "auto-selected human choice can never claim human_confirmed=true"
+            )
         if self.status == HumanChoiceStatus.selected:
             if not self.selected_strategy:
                 raise ValueError("selected human choice requires selected_strategy")
@@ -340,7 +357,7 @@ class HumanChoice(StrictBaseModel):
                 raise ValueError("selected human choice requires effort")
             if self.continue_decision == ContinueDecision.pending:
                 raise ValueError("selected human choice requires a non-pending continue_decision")
-            if not self.human_confirmed:
+            if self.selected_by == "human" and not self.human_confirmed:
                 raise ValueError("selected human choice requires human_confirmed=true")
         if self.status == HumanChoiceStatus.pending:
             if self.selected_strategy is not None or self.effort is not None:
@@ -614,15 +631,32 @@ class LLMAgentHumanGate(StrictBaseModel):
     decision: Literal["continue", "revise", "stop"] | None = None
     reason: str | None = None
     human_confirmed: bool = False
+    # Provenance of the resolution. 'human' (default, today's behavior) means a
+    # real human resolved this gate; 'auto' means machinery resolved it with no
+    # human in the loop. Auto provenance can NEVER claim human confirmation:
+    # resolved_by == 'auto' forces human_confirmed == false (fail closed, any
+    # status) — an auto-resolved gate is honestly recorded as "no human involved".
+    resolved_by: Literal["human", "auto"] = "human"
     created_at: str
     resolved_at: str | None = None
 
     @model_validator(mode="after")
     def validate_resolution(self) -> LLMAgentHumanGate:
+        """Enforce gate-resolution consistency and honest resolution provenance.
+
+        Auto provenance can never claim human confirmation: resolved_by ==
+        'auto' requires human_confirmed == false regardless of status. A
+        human-resolved gate keeps today's rule: status == resolved requires
+        human_confirmed == true.
+        """
+        if self.resolved_by == "auto" and self.human_confirmed:
+            raise ValueError(
+                "auto-resolved human gate can never claim human_confirmed=true"
+            )
         if self.status == "resolved":
             if self.decision is None:
                 raise ValueError("resolved human gate requires a decision")
-            if not self.human_confirmed:
+            if self.resolved_by == "human" and not self.human_confirmed:
                 raise ValueError("resolved human gate requires human_confirmed=true")
             if not self.resolved_at:
                 raise ValueError("resolved human gate requires resolved_at")
