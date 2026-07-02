@@ -13,7 +13,7 @@ from espresso_proof.orchestration.agent_runner import run_single_agent, skip_age
 from espresso_proof.orchestration.orchestrator import orchestrate_run
 from espresso_proof.ui.research_timeline import build_timeline
 from espresso_proof.orchestration.run_dashboard import render_run_dashboard
-from espresso_proof.server import Workbench, WorkbenchError, _index_page, serve
+from espresso_proof.server import Workbench, WorkbenchError, serve
 from espresso_proof.kernel.validators import validate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
@@ -32,36 +32,6 @@ def _run(tmp_path: Path, name: str = "ux") -> Path:
 # --------------------------------------------------------------------------- #
 # entry page
 # --------------------------------------------------------------------------- #
-
-
-def test_entry_page_is_a_wide_product_page(tmp_path: Path) -> None:
-    wb = Workbench(tmp_path / "root", provider="stub")
-    html = _index_page(wb)
-    # a real product landing, not a tiny 760px debug form
-    assert "grid-template-columns:minmax(620px,1.15fr) minmax(500px,.85fr)" in html
-    assert "@media (max-width:1224px)" in html
-    assert "max-width:760px" not in html
-    # Product UI exposes the real-agent path only; deterministic smoke/stub
-    # remains backend-only for tests/demos, not a user mode.
-    assert "Real agent run" in html
-    assert "Fast preview" not in html
-    assert 'value="fast"' not in html
-    # Goal 32: demos are NOT a run mode; they live in a separate "Open demo"
-    # section.
-    assert "Demo mode" not in html
-    assert "Open demo" in html
-    assert ">stub<" not in html and ">external<" not in html
-    # workflow guidance + demos + recent runs
-    assert "How it works" in html
-    assert "Recent runs" in html
-    assert "p² group theorem" in html
-
-
-def test_entry_page_has_no_proof_complete_language(tmp_path: Path) -> None:
-    wb = Workbench(tmp_path / "root", provider="stub")
-    html = _index_page(wb).lower()
-    for w in _PROOF_WORDS:
-        assert w not in html
 
 
 # --------------------------------------------------------------------------- #

@@ -5,8 +5,9 @@ is computed server-side from validated artifacts via the safe display
 vocabulary; the "earned" (green-capable) tone exists only for kernel-earned
 evidence; missing artifacts yield explicit placeholders, never fabricated
 success; an invalid run is refused fail-closed. The built React app is served
-from web/dist with strict path confinement, and the legacy index remains both
-the no-build fallback and the /legacy route.
+from web/dist with strict path confinement; it is the ONLY UI — a missing
+build is an explicit 503 error (and serve() refuses to start), never a
+fallback page.
 """
 
 from __future__ import annotations
@@ -315,9 +316,9 @@ def test_serves_built_cockpit_when_dist_exists(client, web_dist) -> None:
     assert status == 200 and "text/javascript" in ctype
     status, ctype, raw = call("GET", "/assets/app.css")
     assert status == 200 and "text/css" in ctype
-    # the legacy index stays reachable for fallback workflows.
+    # the legacy index is gone — /legacy is just an unknown path now.
     status, ctype, raw = call("GET", "/legacy")
-    assert status == 200 and b"Espresso" in raw
+    assert status == 404
 
 
 def test_static_serving_is_confined(client, web_dist) -> None:
@@ -333,9 +334,20 @@ def test_static_serving_is_confined(client, web_dist) -> None:
     assert status == 200 and json.loads(raw)["ok"] is True
 
 
-def test_no_dist_falls_back_to_legacy_index(client, tmp_path, monkeypatch) -> None:
+def test_no_dist_is_an_explicit_error_not_a_fallback(client, tmp_path, monkeypatch) -> None:
+    # The old built-in page kept being mistaken for the product; a missing
+    # build must be loud, with the exact commands to fix it.
     monkeypatch.setattr(server_module, "_WEB_DIST", tmp_path / "absent")
     wb, call = client
     status, ctype, raw = call("GET", "/")
-    assert status == 200 and "text/html" in ctype
-    assert b"Espresso" in raw
+    assert status == 503 and "text/html" in ctype
+    assert b"build missing" in raw
+    assert b"npm --prefix web ci" in raw
+    # no trace of the legacy entry page
+    assert b"Run Espresso" not in raw and b"Open demo" not in raw
+
+
+def test_serve_refuses_to_start_without_build(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(server_module, "_WEB_DIST", tmp_path / "absent")
+    with pytest.raises(SystemExit, match="npm --prefix web"):
+        server_module.serve(tmp_path / "root")

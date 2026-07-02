@@ -9,7 +9,7 @@ from espresso_proof.kernel.agent_run_status import set_agent_status
 from espresso_proof.orchestration.agent_runner import run_single_agent
 from espresso_proof.orchestration.orchestrator import orchestrate_run
 from espresso_proof.orchestration.run_dashboard import render_run_dashboard
-from espresso_proof.server import Workbench, _index_page
+from espresso_proof.server import Workbench
 from espresso_proof.kernel.validators import validate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
@@ -74,25 +74,6 @@ def test_running_and_failed_agents_show_no_done_styling(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 # calm errors / entry-page job row
 # --------------------------------------------------------------------------- #
-
-
-def test_entry_page_has_durable_job_row_with_retry(tmp_path: Path) -> None:
-    wb = Workbench(tmp_path / "root", provider="stub")
-    html = _index_page(wb)
-    assert 'id="jobrow"' in html
-    assert 'id="jr-retry"' in html and "Retry" in html
-    assert "Check that Espresso is still running" in html
-    # the long-wait copy exists for deep runs
-    assert "Codex is still working" in html
-
-
-def test_entry_page_main_path_is_clean(tmp_path: Path) -> None:
-    """No raw terminal commands, YAML names, tracebacks, or provider enums on the
-    entry page."""
-    wb = Workbench(tmp_path / "root", provider="stub")
-    html = _index_page(wb)
-    for bad in ("espresso run-agent", "PYTHONPATH", ".yaml", "Traceback", ">stub<", ">external<", "provider="):
-        assert bad not in html, bad
 
 
 def test_run_page_main_path_hides_commands_and_enums(tmp_path: Path) -> None:
