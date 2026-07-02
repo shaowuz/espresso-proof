@@ -22,6 +22,7 @@ dev = [
 [project.scripts]
 espresso = "espresso_proof.cli:app"
 espresso-codex-agent = "espresso_proof.agents.codex_adapter:main"
+espresso-core-agent = "espresso_proof.agents.espresso_core_adapter:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
