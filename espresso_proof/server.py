@@ -5,11 +5,11 @@ that serves the React cockpit built into ``web/dist``. The build is REQUIRED:
 there is no fallback UI (a stale fallback kept being mistaken for the product),
 so ``serve()`` refuses to start without it and tells you how to build. Type a
 problem, get a quick core run, click Run Examples / Counterexamples /
-Literature, Continue a route, Skip an agent — with live progress — without
-typing terminal commands.
+Literature, Continue a route — with live progress — without typing terminal
+commands.
 
 Every browser action goes through the EXISTING kernel path:
-``orchestrate_run`` (fast core) / ``run_single_agent`` / ``skip_agent`` /
+``orchestrate_run`` (fast core) / ``run_single_agent`` /
 ``resume_run`` — each of which calls ``validate_run`` and fails closed. The
 server never sets mathematical status, never runs an arbitrary shell command
 from browser input, and confines every run_id to the project-runs root (no
@@ -32,17 +32,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from espresso_proof.orchestration.agent_runner import ON_DEMAND_AGENTS, run_single_agent, skip_agent
+from espresso_proof.orchestration.agent_runner import ON_DEMAND_AGENTS, run_single_agent
 from espresso_proof.orchestration.evidence_coordinator import run_evidence_batch_auto
 from espresso_proof.ui.cockpit_view import PANELS, build_panel, build_snapshot
 from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
 from espresso_proof.kernel.run_events import append_event
-from espresso_proof.orchestration.run_dashboard import (
-    render_run_dashboard,
-    render_evidence_panel_html,
-    render_topbar_status_html,
-    status_summary,
-)
+from espresso_proof.orchestration.run_dashboard import status_summary
 from espresso_proof.kernel.validators import validate_run
 
 # Goal 43A: the built React cockpit (web/dist), served at "/". The build is
@@ -370,31 +365,6 @@ class Workbench:
             "state": result["state"],
         }
 
-    def start_demo(self, demo_id: str) -> dict[str, Any]:
-        """Build a pre-validated showcase run on a background job (Goal 32).
-
-        Demos are NOT a run mode: each is a deterministic, model-free run built
-        through the existing kernel paths (and ``create_demo_run`` ends with
-        ``validate_run``, fail closed). Returns a ``job_id`` immediately.
-        """
-
-        from espresso_proof.orchestration.demos import DEMOS, create_demo_run
-
-        if demo_id not in DEMOS:
-            raise WorkbenchError(404, "unknown demo")
-        job_id = self._new_job(run_id=None, action="demo", agent=None)
-
-        def work() -> dict[str, Any]:
-            run_dir = create_demo_run(self.root, demo_id)
-            return {
-                "run_id": run_dir.name,
-                "project": run_dir.parents[1].name,
-                "demo": demo_id,
-            }
-
-        threading.Thread(target=self._run_job, args=(job_id, work), daemon=True).start()
-        return {"job_id": job_id, "demo": demo_id}
-
     def start_agent(self, run_id: str, agent: str) -> dict[str, Any]:
         run_dir = self.resolve_run(run_id)
         agent = _AGENT_ALIASES.get(agent, agent)
@@ -451,15 +421,6 @@ class Workbench:
             kwargs={"lock": self._run_lock(run_id)}, daemon=True,
         ).start()
         return {"job_id": job_id, "agents": resolved}
-
-    def skip(self, run_id: str, agent: str, *, reason: str | None = None) -> dict[str, Any]:
-        run_dir = self.resolve_run(run_id)
-        agent = _AGENT_ALIASES.get(agent, agent)
-        if agent not in ON_DEMAND_AGENTS:
-            raise WorkbenchError(400, f"unknown agent: {agent}")
-        with self._run_lock(run_id):
-            skip_agent(run_dir, agent, reason=reason)
-        return {"agent": agent, "status": "skipped", "summary": self.status(run_id)}
 
     def continue_route(self, run_id: str, strategy: str, effort: str | None) -> dict[str, Any]:
         run_dir = self.resolve_run(run_id)
@@ -764,8 +725,6 @@ class Workbench:
             ) from exc
         summary = status_summary(run_dir)
         summary["run_id"] = run_id
-        summary["evidence_html"] = render_evidence_panel_html(run_dir)
-        summary["topbar_html"] = render_topbar_status_html(run_dir)
         with self._status_cache_lock:
             self._status_cache[run_id] = (digest, json.dumps(summary, ensure_ascii=False))
             # bound the cache (display-only; eviction is always safe)
@@ -906,62 +865,6 @@ class Workbench:
             while len(self._status_cache) > 96:
                 self._status_cache.pop(next(iter(self._status_cache)))
         return slice_
-
-    def debug_info(self, run_id: str) -> dict[str, Any]:
-        """Confined technical log for the advanced/debug path (Goal 33 §7).
-
-        Tail-limited and redacted: the last jobs for this run (raw causes
-        truncated), the agent process board, and the front-half stage audit.
-        Path access goes through ``resolve_run`` only; home-directory prefixes
-        are redacted from every string. Display-only — never a truth source.
-        """
-
-        run_dir = self.resolve_run(run_id)
-        home = str(Path.home())
-
-        def _redact(value: Any) -> Any:
-            if isinstance(value, str):
-                return value.replace(home, "~")[:300]
-            if isinstance(value, list):
-                return [_redact(v) for v in value[:20]]
-            if isinstance(value, dict):
-                return {k: _redact(v) for k, v in value.items()}
-            return value
-
-        with self._jobs_lock:
-            jobs = [
-                dict(j) for j in self._jobs.values()
-                if j.get("run_id") == run_id
-                or (j.get("result") or {}).get("run_id") == run_id
-            ]
-        jobs = jobs[-20:]  # tail-limited
-        from espresso_proof.kernel.agent_run_status import load_agent_run_status
-        from espresso_proof.kernel.io import read_yaml
-
-        board = load_agent_run_status(run_dir) or {}
-        front_half: dict[str, Any] = {}
-        fh_path = run_dir / "front_half_run.yaml"
-        if fh_path.exists():
-            report = read_yaml(fh_path)
-            front_half = {
-                "provider": report.get("provider"),
-                "stages": [
-                    {"stage": s.get("stage"), "status": s.get("status"), "errors": s.get("errors", [])}
-                    for s in report.get("stages", [])[:20]
-                ],
-            }
-        return _redact({
-            "run_id": run_id,
-            "jobs": jobs,
-            "agent_board": board.get("agents", []),
-            "front_half": front_half,
-            "note": "Technical log (advanced). Process records only — never evidence or proof status.",
-        })
-
-    def dashboard_html(self, run_id: str) -> str:
-        run_dir = self.resolve_run(run_id)
-        validate_run(run_dir)
-        return render_run_dashboard(run_dir, interactive=True)
 
     def list_runs(self) -> list[dict[str, Any]]:
         runs: list[dict[str, Any]] = []
@@ -1253,17 +1156,11 @@ def _make_handler(workbench: Workbench):
                     self.end_headers()
                     self.wfile.write(body)
                     return
-                if len(parts) == 2 and parts[0] == "run":
-                    self._send_html(workbench.dashboard_html(parts[1]))
-                    return
                 if len(parts) == 3 and parts[:2] == ["api", "jobs"]:
                     self._send_json(workbench.get_job(parts[2]))
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "status":
                     self._send_json(workbench.status(parts[2]))
-                    return
-                if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "debug":
-                    self._send_json(workbench.debug_info(parts[2]))
                     return
                 if parts == ["api", "runs"]:
                     self._send_json({"runs": workbench.list_runs()})
@@ -1292,9 +1189,6 @@ def _make_handler(workbench: Workbench):
                         status=202,
                     )
                     return
-                if len(parts) == 3 and parts[:2] == ["api", "demos"]:
-                    self._send_json(workbench.start_demo(parts[2]), status=202)
-                    return
                 if len(parts) == 5 and parts[:2] == ["api", "runs"] and parts[3] == "agents":
                     self._send_json(workbench.start_agent(parts[2], parts[4]), status=202)
                     return
@@ -1308,11 +1202,6 @@ def _make_handler(workbench: Workbench):
                     self._send_json(
                         workbench.continue_route(parts[2], body.get("strategy", ""), body.get("effort")),
                         status=202,
-                    )
-                    return
-                if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "skip-agent":
-                    self._send_json(
-                        workbench.skip(parts[2], body.get("agent", ""), reason=body.get("reason"))
                     )
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "jobs"] and parts[3] == "cancel":

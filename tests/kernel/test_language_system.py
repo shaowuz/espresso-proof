@@ -90,7 +90,7 @@ def test_loop_stop_and_effort_phrases_are_human() -> None:
 
 def test_run_page_main_path_lexicon(tmp_path: Path) -> None:
     run_dir = _run(tmp_path)
-    text = _visible_text(render_run_dashboard(run_dir, interactive=True))
+    text = _visible_text(render_run_dashboard(run_dir))
     for bad in _FORBIDDEN_VISIBLE:
         assert bad not in text, bad
 
@@ -127,7 +127,7 @@ def test_memo_has_no_raw_effort_or_stop_enums(tmp_path: Path) -> None:
     # the POST-CONTINUATION run page (timeline includes the continued route)
     # also stays token-free on the main path (tokens only: this page echoes
     # model free text, where plain-English words like "external" are legitimate)
-    text = _visible_text(render_run_dashboard(run_dir, interactive=True))
+    text = _visible_text(render_run_dashboard(run_dir))
     for bad in _FORBIDDEN_TOKENS:
         assert bad not in text, bad
     # either the explicit stop-reason sentence or the 0-round budget sentence
@@ -203,7 +203,7 @@ def test_failed_job_keeps_raw_cause_only_in_detail(tmp_path: Path, monkeypatch) 
 
 def test_now_chips_have_explanatory_tooltips(tmp_path: Path) -> None:
     run_dir = _run(tmp_path)
-    html = render_run_dashboard(run_dir, interactive=True)
+    html = render_run_dashboard(run_dir)
     assert 'title="A deterministic machine check confirmed' in html
     assert 'title="A cited result supports one proof step' in html
     assert "A candidate supports nothing until grounding earns it." in html
@@ -212,7 +212,7 @@ def test_now_chips_have_explanatory_tooltips(tmp_path: Path) -> None:
 def test_proof_language_guard_still_strict(tmp_path: Path) -> None:
     run_dir = _run(tmp_path)
     memo = build_concise_memo(run_dir).lower()
-    html = render_run_dashboard(run_dir, interactive=True).lower()
+    html = render_run_dashboard(run_dir).lower()
     for phrase in ("proof-close", "proof complete", "the theorem is proved"):
         assert phrase not in memo
         assert phrase not in html

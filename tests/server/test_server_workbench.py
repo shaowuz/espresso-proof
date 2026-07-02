@@ -2,8 +2,8 @@
 
 Every browser action must go through the existing kernel path and fail closed;
 the server must confine run ids, isolate agent writes, and never let a click
-upgrade mathematical status. The interactive UI must use native buttons (no
-command blocks on the main path) and the static dashboard must keep working.
+upgrade mathematical status. The React cockpit is the only interactive UI;
+the static dashboard file must keep working.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ import pytest
 from espresso_proof.kernel.agent_run_status import init_agent_run_status
 from espresso_proof.claim.claim_clear import evaluate_claim_clear, write_claim_clear_gate
 from espresso_proof.kernel.io import read_yaml, write_yaml
+from espresso_proof.orchestration.agent_runner import skip_agent
 from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 from espresso_proof.server import Workbench, WorkbenchError, _make_handler
 from espresso_proof.kernel.validators import validate_run
@@ -128,7 +129,6 @@ def test_create_run_reaches_gate(client) -> None:
     agents = {a["agent"]: a["status"] for a in d["agents"]}
     assert agents["claim_understanding"] == "done"
     assert agents["examples"] == "not_run"
-    assert d["evidence_html"] and d["topbar_html"]
 
 
 def test_create_run_returns_immediately_with_slow_provider(client, monkeypatch) -> None:
@@ -310,10 +310,12 @@ def test_unknown_agent_rejected(client) -> None:
 
 
 def test_skip_agent_contributes_no_evidence(client) -> None:
+    # Skipping is a CLI/orchestration capability (run-agent --skip); the old
+    # server endpoint died with the legacy UI. The status view must still show
+    # a skipped agent honestly.
     wb, call, _ = client
     run_id = _create(call)
-    status, d = call("POST", f"/api/runs/{run_id}/skip-agent", {"agent": "counterexamples"})
-    assert status == 200
+    skip_agent(wb.resolve_run(run_id), "counterexamples")
     _, st = call("GET", f"/api/runs/{run_id}/status")
     agents = {a["agent"]: a["status"] for a in st["agents"]}
     assert agents["counterexamples"] == "skipped"
@@ -332,16 +334,13 @@ def test_continue_rejects_unknown_route(client) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_interactive_dashboard_uses_buttons_not_command_blocks(client) -> None:
-    _, call, get_text = client
+def test_legacy_run_page_is_gone(client) -> None:
+    # The legacy interactive per-run page died with the legacy UI: /run/<id>
+    # is an unknown path now (the React cockpit is the only interactive UI).
+    _, call, _ = client
     run_id = _create(call)
-    html = get_text(f"/run/{run_id}")
-    assert 'data-action="run-agent"' in html
-    assert 'data-action="continue"' in html
-    # command text must not appear on the MAIN path (only inside a debug drawer)
-    main_path = html.split('class="debug"')[0]
-    assert "espresso run-agent --run" not in main_path
-    assert '<pre class="cmd"' not in main_path
+    status, _ = call("GET", f"/run/{run_id}")
+    assert status == 404
 
 
 def test_static_dashboard_still_renders(tmp_path: Path) -> None:
@@ -377,7 +376,7 @@ def test_claim_card_has_no_foreign_domain_hypotheses(tmp_path: Path) -> None:
     names = " ".join(str(h.get("name", "")) for h in locked.get("hypotheses", [])).lower()
     assert "base field c" not in names
     assert "projective" not in names
-    html = render_run_dashboard(rd, interactive=True)
+    html = render_run_dashboard(rd)
     assert "base field C" not in html
     assert "Unclear conclusion" not in html or "concl" in html  # conclusion chip allowed, AG terms not
 

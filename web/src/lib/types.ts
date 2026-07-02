@@ -3,8 +3,7 @@
  *
  * All trust labels and tones are SERVER-computed. The client renders the
  * typed display fields verbatim and must never derive trust from raw
- * statuses. `evidence_html` / `topbar_html` exist on the wire but are
- * intentionally never rendered (raw HTML is banned in the React app).
+ * statuses. Raw HTML is banned in the React app.
  */
 
 export type Tone = "earned" | "warn" | "human" | "muted" | "neutral";
@@ -61,10 +60,6 @@ export interface StatusView {
   budget: Record<string, unknown>;
   agents: AgentView[];
   run_id?: string;
-  /** Present on the wire; NEVER rendered. */
-  evidence_html?: string;
-  /** Present on the wire; NEVER rendered. */
-  topbar_html?: string;
 }
 
 export interface StrategyView {
