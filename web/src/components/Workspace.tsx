@@ -563,18 +563,20 @@ function CompactResearchMemo({ memo }: { memo: string | undefined }) {
   );
 }
 
-function StrategyCard({
+export function StrategyCard({
   strategy,
   runId,
   onChanged,
   activeObject,
   onSetActiveObject,
+  continueAvailable,
 }: {
   strategy: StrategyView;
   runId: string;
   onChanged: () => void;
   activeObject: ActiveObject;
   onSetActiveObject: (activeObject: ActiveObject) => void;
+  continueAvailable: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const job = useJob();
@@ -665,7 +667,12 @@ function StrategyCard({
         <Button
           size="sm"
           variant="outline"
-          disabled={job.busy}
+          disabled={job.busy || !continueAvailable}
+          title={
+            continueAvailable
+              ? undefined
+              : "The initial pass is still running; Continue unlocks at your decision point."
+          }
           onClick={() =>
             job.start(
               // send an effort the kernel actually allows for this route.
@@ -677,6 +684,11 @@ function StrategyCard({
           <Play className="h-3 w-3" aria-hidden />
           Continue this route
         </Button>
+        {!continueAvailable && (
+          <span className="text-[13px] text-stone-500">
+            Unlocks at your decision point — the initial pass is still running.
+          </span>
+        )}
         <JobChip phase={job.phase} error={job.error} doneLabel="pass finished" />
       </div>
     </Card>
@@ -765,6 +777,9 @@ export function Workspace({
                 onChanged={onChanged}
                 activeObject={activeObject}
                 onSetActiveObject={onActiveObjectChange}
+                // absent on older servers → keep the button live (kernel still
+                // rejects honestly; the chip shows its error).
+                continueAvailable={status?.continue_available ?? true}
               />
             )}
           </AnimatedList>

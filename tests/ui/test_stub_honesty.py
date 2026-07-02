@@ -11,6 +11,7 @@ from pathlib import Path
 from espresso_proof.kernel import observability as obs
 from espresso_proof.orchestration.run_dashboard import (
     TEMPLATE_FALLBACK_NOTE,
+    _continue_available,
     _proof_label,
     _real_prover_ran,
     _state_label,
@@ -33,6 +34,17 @@ def test_state_label_template_run_is_not_reviewed():
 def test_proof_label_template_run_says_template_only():
     assert _proof_label({}, repair_needed=True, template_fallback=True) == "Template only — not a real attempt"
     assert _proof_label({}, repair_needed=True, template_fallback=False) == "Needs repair"
+
+
+def test_continue_available_only_at_or_past_the_gate():
+    # the UI's Continue affordance must mirror resume_run's boundary check:
+    # before the prover human gate a continue can only fail.
+    for state in ("", "SCAFFOLDED", "WAITING_CLAIM_CLARIFICATION", "FRONT_HALF_DONE",
+                  "CLAIM_CLEAR", "LITERATURE_DONE", "NOT_A_STATE"):
+        assert _continue_available(state) is False, state
+    for state in ("WAITING_LLM_AGENT_HUMAN_GATE", "HUMAN_CHOICE_CONTINUE_SELECTED",
+                  "AUTO_CHOICE_CONTINUE_SELECTED", "COMPLETED_MEMO"):
+        assert _continue_available(state) is True, state
 
 
 # --- _real_prover_ran: fail-closed provenance --------------------------------
@@ -76,3 +88,5 @@ def test_stub_run_status_is_template_fallback(tmp_path: Path):
     # the stub run is not presented as a reviewed real loop
     assert summary["state"] != "Reviewed"
     assert summary["proof_status"] == "Template only — not a real attempt"
+    # this run reached the prover human gate, so a continue is offerable
+    assert summary["continue_available"] is True

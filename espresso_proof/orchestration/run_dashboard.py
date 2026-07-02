@@ -160,6 +160,10 @@ def status_summary(run_dir: Path) -> dict[str, Any]:
     return {
         "state": state["state_label"],
         "proof_status": state["proof_label"],
+        # Whether resume/continue would be accepted right now (the run is at or
+        # past the prover human gate). The UI uses this to disable its Continue
+        # affordance instead of offering a click the kernel will reject.
+        "continue_available": _continue_available(state["current_state"]),
         # Goal 67C: honest provenance — a stub/template run is flagged so the UI
         # never presents it as a real prover/reviewer loop. Fail-closed.
         "template_fallback": state["template_fallback"],
@@ -492,6 +496,20 @@ def _real_prover_ran(run_dir: Path) -> bool:
                 return True
         return False
     except Exception:  # noqa: BLE001 - display helper; fail closed to template
+        return False
+
+
+def _continue_available(current_state: str) -> bool:
+    """True when resume_run's boundary check would accept a continue: the run
+    is at or past the prover human gate. Mirrors the ordered-state comparison
+    in orchestrator (imported lazily — orchestrator imports this module)."""
+    from espresso_proof.orchestration.orchestrator import ORCHESTRATION_STATES
+
+    try:
+        return ORCHESTRATION_STATES.index(current_state) >= ORCHESTRATION_STATES.index(
+            "WAITING_LLM_AGENT_HUMAN_GATE"
+        )
+    except ValueError:
         return False
 
 
