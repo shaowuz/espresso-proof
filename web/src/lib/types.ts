@@ -51,6 +51,9 @@ export interface PressureLaneView {
 export interface StatusView {
   state: string;
   proof_status: string;
+  /** True when the run is at or past the decision point, so a Continue would
+   * be accepted by the kernel (absent on older servers → treat as true). */
+  continue_available?: boolean;
   completed: boolean;
   routes_preliminary: boolean;
   selected_route: { id: string; title: string } | null;
