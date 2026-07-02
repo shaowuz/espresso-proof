@@ -111,6 +111,27 @@ def test_scorecard_markdown_is_stable_for_trends(tmp_path: Path) -> None:
     assert r1["capability"] == r2["capability"]
 
 
+def test_dogfood_replay_records_honest_auto_provenance(tmp_path: Path) -> None:
+    # Pivot PR1: the scorecard picks the strategy itself (no human in the loop),
+    # so the replayed run's gate artifacts must say so — selected_by/resolved_by
+    # 'auto' with human_confirmed=false — instead of the previous provenance lie
+    # (auto pick recorded as human_confirmed=true).
+    import espresso_proof.evaluation.scorecard as scorecard_mod
+    from espresso_proof.kernel.io import read_yaml
+
+    probe = scorecard_mod._probe_dogfood_replay(tmp_path)
+    assert probe["auto_provenance_honest"] is True
+    assert probe["passed"] is True
+    run_dirs = sorted(tmp_path.glob("projects/*/runs/*"))
+    assert run_dirs, "dogfood replay must leave a run dir"
+    human_choice = read_yaml(run_dirs[0] / "human_choice.yaml")
+    assert human_choice["selected_by"] == "auto"
+    assert human_choice["human_confirmed"] is False
+    gate = read_yaml(run_dirs[0] / "llm_agent_run.yaml")["human_gate"]
+    assert gate["resolved_by"] == "auto"
+    assert gate["human_confirmed"] is False
+
+
 def test_dogfood_replay_fails_on_proof_complete_memo(tmp_path: Path, monkeypatch) -> None:
     # Spec negative test: the replay cannot pass with proof-complete language.
     import espresso_proof.ui.memo as memo_mod

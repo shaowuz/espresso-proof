@@ -86,6 +86,13 @@ ORCHESTRATION_STATES: list[str] = [
     "HUMAN_CHOICE_CONTINUE_SELECTED",
     "HUMAN_CHOICE_REVISE_SELECTED",
     "HUMAN_CHOICE_STOP_SELECTED",
+    # Honest auto-provenance peer of HUMAN_CHOICE_CONTINUE_SELECTED (same
+    # ordering semantics: after the gate, before COMPLETED_MEMO). Machinery —
+    # not a human — selected the continue route; the matching human_choice.yaml
+    # carries selected_by='auto' and human_confirmed=false. Nothing writes this
+    # state yet (the auto-continue writer is a later PR); it is listed so the
+    # resume boundary check accepts a persisted run carrying it.
+    "AUTO_CHOICE_CONTINUE_SELECTED",
     "COMPLETED_MEMO",
 ]
 
@@ -739,11 +746,22 @@ def write_dashboard_and_return_run_summary(*, run_dir: Path) -> dict:
     }
 
 
-def _resolve_and_build_loop(run_dir: Path, *, decision: str, reason: str, human_choice: dict) -> None:
+def _resolve_and_build_loop(
+    run_dir: Path,
+    *,
+    decision: str,
+    reason: str,
+    human_choice: dict,
+    resolved_by: str = "human",
+) -> None:
     """Resolve the LLM-agent human gate and (re)build prover_loop with the real
-    human choice (mirrors the CLI ``resolve-agent-gate`` path)."""
+    choice (mirrors the CLI ``resolve-agent-gate`` path). ``resolved_by``
+    records honest provenance: 'auto' means no human resolved this gate and the
+    artifact must carry human_confirmed=false."""
 
-    report = resolve_agent_gate(run_dir=run_dir, decision=decision, reason=reason)
+    report = resolve_agent_gate(
+        run_dir=run_dir, decision=decision, reason=reason, resolved_by=resolved_by
+    )
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     artifacts = manifest["artifacts"]
     selected_strategy = human_choice.get("selected_strategy")
@@ -773,9 +791,14 @@ def _resolve_and_build_loop(run_dir: Path, *, decision: str, reason: str, human_
 
 
 def resume_run(*, run_dir: Path, **kwargs) -> str:
-    """Record a human choice, then run a BOUNDED Prover<->Reviewer loop and memo.
+    """Record a strategy choice, then run a BOUNDED Prover<->Reviewer loop and memo.
 
-    The human gate may direct ranking / time allocation only — it can NEVER
+    ``selected_by`` (keyword-only, default ``"human"``) records honest choice
+    provenance: pass ``"auto"`` when machinery — not a human — picked the
+    strategy; the persisted human_choice/gate artifacts then carry
+    human_confirmed=false (auto can never claim human confirmation).
+
+    The gate may direct ranking / time allocation only — it can NEVER
     upgrade proof / source / evidence status (the kernel re-validates throughout).
     Idempotent: a run already at COMPLETED_MEMO is not re-run. Returns the memo.
 
@@ -802,6 +825,7 @@ def _resume_run_locked(
     external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
     reviewer_set: str = "espresso",
     prover_client=None,
+    selected_by: str = "human",
 ) -> str:
     run_dir = Path(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
@@ -828,6 +852,7 @@ def _resume_run_locked(
         selected_strategy=selected_strategy,
         effort=effort,
         taste_judgment=taste_judgment,
+        selected_by=selected_by,
     )
     loop_summary = _run_resume_prover_loop(
         run_dir=run_dir,
@@ -841,6 +866,7 @@ def _resume_run_locked(
         reviewer_set=reviewer_set,
         rounds=rounds,
         prover_client=prover_client,
+        selected_by=selected_by,
     )
     _run_resume_advisory_layers(run_dir=run_dir)
     return _finalize_resume_memo(run_dir=run_dir, loop_summary=loop_summary)
@@ -882,8 +908,18 @@ def _record_resume_human_choice(
     selected_strategy: str,
     effort: str | None,
     taste_judgment: str,
+    selected_by: str = "human",
 ) -> tuple[dict, str]:
-    """Validate + persist the human strategy choice. Returns (human_choice, continue_decision)."""
+    """Validate + persist the strategy choice with honest provenance.
+
+    ``selected_by`` records WHO picked the strategy: ``"human"`` (default,
+    today's behavior) or ``"auto"`` (machinery, no human in the loop).
+    ``human_confirmed`` is derived from it — an auto selection can never claim
+    human confirmation (the kernel rejects auto + confirmed).
+    Returns (human_choice, continue_decision).
+    """
+    if selected_by not in {"human", "auto"}:
+        raise ValueError(f"selected_by must be 'human' or 'auto', got {selected_by!r}")
     artifacts = manifest["artifacts"]
     claim = read_yaml(run_dir / artifacts["locked_claim"])
     # continue only makes sense with a real strategy; 'none' must stop.
@@ -905,11 +941,14 @@ def _record_resume_human_choice(
         "effort": effort,
         "taste_judgment": taste_judgment,
         "continue_decision": continue_decision,
-        # human_confirmed records that the human made THIS strategy selection
-        # (required by the model for status=selected). It is NOT claim
-        # confirmation: the locked claim's own human_confirmed stays False, and
-        # the human gate never upgrades proof/source/evidence status.
-        "human_confirmed": True,
+        # human_confirmed records that a HUMAN made this strategy selection
+        # (required by the model for status=selected + selected_by=human). An
+        # auto selection must record human_confirmed=false — auto provenance
+        # can never claim human confirmation. It is NOT claim confirmation
+        # either way: the locked claim's own human_confirmed stays False, and
+        # the gate never upgrades proof/source/evidence status.
+        "human_confirmed": selected_by == "human",
+        "selected_by": selected_by,
     }
     HumanChoice.model_validate(human_choice)
     write_yaml(run_dir / artifacts["human_choice"], human_choice)
@@ -930,9 +969,13 @@ def _run_resume_prover_loop(
     reviewer_set: str,
     rounds: int | None,
     prover_client,
+    selected_by: str = "human",
 ) -> tuple[int, str] | None:
     """Resolve the agent gate and run a bounded Prover<->Reviewer loop (or stop)."""
     loop_summary: tuple[int, str] | None = None
+    # The gate resolution inherits the choice's provenance: an auto-selected
+    # strategy means the gate was ALSO resolved without a human.
+    resolver = "human" if selected_by == "human" else "auto"
     if continue_decision == "continue":
         # Resolve the LLM-agent gate + rebuild prover_loop with the real choice,
         # then run a bounded Prover<->Reviewer loop. The budget (max_rounds) comes
@@ -940,8 +983,9 @@ def _run_resume_prover_loop(
         _resolve_and_build_loop(
             run_dir,
             decision="continue",
-            reason=f"human selected strategy {selected_strategy!r}",
+            reason=f"{resolver} selected strategy {selected_strategy!r}",
             human_choice=human_choice,
+            resolved_by=resolver,
         )
         result = continue_prover_loop(
             run_dir=run_dir,
@@ -958,8 +1002,9 @@ def _run_resume_prover_loop(
         _resolve_and_build_loop(
             run_dir,
             decision="stop",
-            reason="human selected no strategy to continue",
+            reason=f"{resolver} selected no strategy to continue",
             human_choice=human_choice,
+            resolved_by=resolver,
         )
     return loop_summary
 

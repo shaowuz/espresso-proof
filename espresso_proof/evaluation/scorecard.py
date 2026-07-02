@@ -387,13 +387,30 @@ def _probe_dogfood_replay(root: Path) -> dict:
     brief = read_yaml(
         run_dir / manifest["artifacts"]["strategy_brief"]
     )
+    # The scorecard picks the strategy itself — no human is in this loop — so it
+    # must say so: selected_by="auto" records honest provenance and the persisted
+    # human_choice / gate artifacts carry human_confirmed=false.
     resume_run(
         run_dir=run_dir,
         selected_strategy=brief["top_strategies"][0]["id"],
         effort="normal_pass",
         prover_provider="stub",
+        selected_by="auto",
     )
     validate_run(run_dir)
+    # Provenance honesty check: this automated replay must never leave artifacts
+    # claiming a human confirmed anything.
+    human_choice = read_yaml(run_dir / manifest["artifacts"]["human_choice"])
+    agent_run_path = manifest.get("optional_artifacts", {}).get(
+        "llm_agent_run", "llm_agent_run.yaml"
+    )
+    agent_gate = read_yaml(run_dir / agent_run_path).get("human_gate", {})
+    auto_provenance_honest = (
+        human_choice.get("selected_by") == "auto"
+        and human_choice.get("human_confirmed") is False
+        and agent_gate.get("resolved_by") == "auto"
+        and agent_gate.get("human_confirmed") is False
+    )
     memo = build_concise_memo(run_dir)
     memo_honest = contains_proof_language(memo) is None
     sg = read_yaml(run_dir / "source_grounding.yaml")
@@ -424,8 +441,10 @@ def _probe_dogfood_replay(root: Path) -> dict:
         "rounds_run": last_round,
         "repair_round_non_regression": last_blockers <= first_blockers,
         "stop_bounded": bool(stop_bounded),
+        "auto_provenance_honest": bool(auto_provenance_honest),
         "passed": (
             memo_honest
+            and auto_provenance_honest
             and not unauthorized_steps
             and not unauthorized_refs
             and stop_bounded
