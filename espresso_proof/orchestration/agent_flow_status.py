@@ -13,11 +13,11 @@ from espresso_proof.kernel.io import path_exists, read_yaml, write_yaml
 from espresso_proof.kernel.models import StageStatusReport
 from espresso_proof.kernel.observability import now_iso
 from espresso_proof.kernel.pressure_status import artifact_revision_hash
-from espresso_proof.orchestration.agent_flow_legacy_map import (
+from espresso_proof.kernel.agent_flow_legacy_map import (
     LEGACY_MAPPING,
     AgentFlowLegacyMapping,
 )
-from espresso_proof.orchestration.agent_flow_spec import (
+from espresso_proof.kernel.agent_flow_spec import (
     get_stage,
     stages_blocked_by_unclear_claim,
 )

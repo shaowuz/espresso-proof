@@ -11,9 +11,9 @@ from pathlib import Path
 
 from espresso_proof.kernel.agent_run_status import AGENT_ARTIFACTS, AGENT_TITLES, agent_status
 from espresso_proof.kernel.validators import validate_run
-from espresso_proof.orchestration.agent_flow_spec import get_stage
+from espresso_proof.kernel.agent_flow_spec import get_stage
 from espresso_proof.orchestration.agent_flow_status import load_stage_status_projection
-from espresso_proof.orchestration.pressure_lane_barrier import load_pressure_lane_barrier
+from espresso_proof.kernel.pressure_lane_barrier import load_pressure_lane_barrier
 
 PRESSURE_LANE_STAGE_IDS: tuple[str, ...] = (
     "literature_review",

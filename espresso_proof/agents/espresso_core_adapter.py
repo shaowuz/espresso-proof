@@ -149,9 +149,9 @@ def _safe(text: object) -> str:
 def _safe_statement(text: object) -> str:
     """Gentler scrub for proof-line statements: keep the math, drop status prose."""
     try:
-        from espresso_proof.orchestration.advisory_proof_sketch import _scrub_sketch_text
+        from espresso_proof.orchestration.advisory_proof_sketch import scrub_sketch_text
 
-        scrubbed = _scrub_sketch_text(str(text))
+        scrubbed = scrub_sketch_text(str(text))
     except Exception:  # noqa: BLE001
         scrubbed = _local_neutralize(str(text))
     scrubbed = scrubbed.strip()[:600]

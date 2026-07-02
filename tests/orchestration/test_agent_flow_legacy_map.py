@@ -5,7 +5,7 @@ from pathlib import Path, PureWindowsPath
 import pytest
 
 from espresso_proof.front_half.registry import FRONT_HALF_STAGES
-from espresso_proof.orchestration.agent_flow_legacy_map import (
+from espresso_proof.kernel.agent_flow_legacy_map import (
     IMPLEMENTATION_STATUSES,
     LEGACY_FRONT_HALF_FAST_ORDER,
     LEGACY_FRONT_HALF_FULL_ORDER,
@@ -34,7 +34,7 @@ from espresso_proof.orchestration.agent_flow_legacy_map import (
     unmapped_stage_outputs,
     validate_agent_flow_legacy_map,
 )
-from espresso_proof.orchestration.agent_flow_spec import get_stage, ordered_stage_ids
+from espresso_proof.kernel.agent_flow_spec import get_stage, ordered_stage_ids
 from espresso_proof.orchestration.orchestrator import FAST_CORE_STAGES
 
 
@@ -126,14 +126,14 @@ def test_physical_stage_reverse_mapping_makes_runtime_folds_explicit() -> None:
         "strategy_grader",
         "strategy_brief",
     )
-    assert stage_ids_for_physical_stage("orchestration:pressure_lane_barrier") == (
+    assert stage_ids_for_physical_stage("kernel:pressure_lane_barrier") == (
         "literature_review",
         "examples",
         "counterexamples",
     )
     assert stage_ids_for_physical_stage("missing:stage") == ()
     assert shared_physical_stages() == {
-        "orchestration:pressure_lane_barrier": (
+        "kernel:pressure_lane_barrier": (
             "literature_review",
             "examples",
             "counterexamples",
@@ -303,7 +303,7 @@ def test_pressure_lane_mapping_reflects_barrier_backed_explicit_execution() -> N
         mapping = get_legacy_mapping(stage_id)
         text = "\n".join((*mapping.blocked_by_future_work, *mapping.notes))
 
-        assert "orchestration:pressure_lane_barrier" in mapping.physical_stages
+        assert "kernel:pressure_lane_barrier" in mapping.physical_stages
         assert "pressure_lane_barrier.yaml" in mapping.optional_artifacts
         assert mapping.pending_work == (
             "Orchestrator-default pressure-lane execution remains disabled.",
@@ -338,7 +338,7 @@ def test_update_inbox_mapping_reflects_service_boundary() -> None:
 
     assert mapping.implementation_status == "implemented_coarse"
     assert mapping.runtime_kind == "optional_runtime"
-    assert "orchestration:update_inbox_service" in mapping.physical_stages
+    assert "kernel:update_inbox_service" in mapping.physical_stages
     assert mapping.pending_work == ("Deeper prover-loop extraction remains future work.",)
     assert any("rejects forged, stale" in note for note in mapping.notes)
     assert any("consumed by scheduling, not resolved" in note for note in mapping.notes)

@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from espresso_proof.agents.llm_agents import safe_text
+from espresso_proof.kernel.proof_language import safe_text
 from espresso_proof.kernel.strategy_rules import (
     HIGH_SCORE_THRESHOLD,
     STANDARD_SCORE_LIFT_LIMIT,

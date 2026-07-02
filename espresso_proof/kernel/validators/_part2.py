@@ -95,13 +95,13 @@ from espresso_proof.kernel.surface_warnings import (
     collect_surface_warnings,
     final_report_missing_disclosures,
 )
-from espresso_proof.orchestration.agent_flow_spec import (
+from espresso_proof.kernel.agent_flow_spec import (
     get_stage,
     ordered_stage_ids,
     stages_blocked_by_unclear_claim,
 )
-from espresso_proof.orchestration.agent_flow_legacy_map import get_legacy_mapping
-from espresso_proof.orchestration.pressure_lane_barrier import (
+from espresso_proof.kernel.agent_flow_legacy_map import get_legacy_mapping
+from espresso_proof.kernel.pressure_lane_barrier import (
     PRESSURE_LANE_BARRIER_AGENT_ROLES,
     PRESSURE_LANE_BARRIER_AGENT_STAGE_IDS,
     PRESSURE_LANE_BARRIER_FILENAME,

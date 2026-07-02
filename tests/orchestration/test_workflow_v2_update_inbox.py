@@ -16,7 +16,7 @@ from espresso_proof.kernel.update_inbox import (
     load_update_inbox,
 )
 from espresso_proof.kernel.pressure_status import artifact_revision_hash
-from espresso_proof.orchestration.update_inbox_service import (
+from espresso_proof.kernel.update_inbox_service import (
     UpdateInboxServiceError,
     append_scheduling_update,
 )

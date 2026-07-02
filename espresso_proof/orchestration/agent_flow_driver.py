@@ -16,13 +16,13 @@ from typing import TYPE_CHECKING
 
 from espresso_proof.front_half.registry import FRONT_HALF_STAGES
 from espresso_proof.kernel.validators import validate_run
-from espresso_proof.orchestration.agent_flow_legacy_map import (
+from espresso_proof.kernel.agent_flow_legacy_map import (
     LEGACY_FRONT_HALF_FAST_ORDER,
     LEGACY_FRONT_HALF_FULL_ORDER,
     mapped_stage_ids,
     validate_agent_flow_legacy_map,
 )
-from espresso_proof.orchestration.agent_flow_spec import ordered_stage_ids
+from espresso_proof.kernel.agent_flow_spec import ordered_stage_ids
 from espresso_proof.orchestration.agent_flow_status import (
     STAGE_STATUS_FILENAME,
     write_stage_status_projection,

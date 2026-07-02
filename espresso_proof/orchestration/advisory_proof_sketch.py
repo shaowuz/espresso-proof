@@ -115,6 +115,11 @@ def _scrub_sketch_text(text: object) -> str:
     return " ".join(kept).strip()
 
 
+# Public name for cross-package callers (the external-agent adapters scrub
+# their raw model text through the same fail-closed pipeline).
+scrub_sketch_text = _scrub_sketch_text
+
+
 def capture_advisory_proof_sketch(
     run_dir: Path, agent_report: dict, *, source: str = "prover_attempt"
 ) -> Path | None:

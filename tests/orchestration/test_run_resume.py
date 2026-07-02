@@ -10,7 +10,7 @@ from espresso_proof.kernel.observability import now_iso
 from espresso_proof.kernel.validators import validate_run
 from espresso_proof.orchestration.evidence_coordinator import run_evidence_batch_parallel
 from espresso_proof.orchestration.orchestrator import orchestrate_run
-from espresso_proof.orchestration.pressure_lane_barrier import (
+from espresso_proof.kernel.pressure_lane_barrier import (
     PRESSURE_LANE_BARRIER_FILENAME,
     record_pressure_lane_barrier_committing,
     record_pressure_lane_barrier_compute,

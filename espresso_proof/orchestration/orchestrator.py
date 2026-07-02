@@ -57,7 +57,7 @@ from espresso_proof.orchestration.agent_flow_driver import (
     front_half_stages_for_runner,
     record_agent_flow_stage_status,
 )
-from espresso_proof.orchestration.agent_flow_legacy_map import LEGACY_FRONT_HALF_FAST_ORDER
+from espresso_proof.kernel.agent_flow_legacy_map import LEGACY_FRONT_HALF_FAST_ORDER
 from espresso_proof.kernel.run_lock import run_writer_lock
 from espresso_proof.kernel.stage_runner import StageError, StageRunner
 from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures

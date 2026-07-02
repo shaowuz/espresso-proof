@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from espresso_proof.kernel.models import RunState
-from espresso_proof.orchestration.agent_flow_spec import get_stage, ordered_stage_ids
+from espresso_proof.kernel.agent_flow_spec import get_stage, ordered_stage_ids
 from espresso_proof.validation.manifest import validate_relative_artifact_path
 
 ImplementationStatus = Literal[
@@ -167,7 +167,7 @@ LEGACY_MAPPING: tuple[AgentFlowLegacyMapping, ...] = (
         physical_stages=(
             "front_half:literature_review",
             "orchestrator:literature",
-            "orchestration:pressure_lane_barrier",
+            "kernel:pressure_lane_barrier",
         ),
         front_half_stages=("literature_review",),
         artifacts=("literature_review.yaml",),
@@ -186,7 +186,7 @@ LEGACY_MAPPING: tuple[AgentFlowLegacyMapping, ...] = (
         physical_stages=(
             "front_half:examples",
             "run-agent:examples",
-            "orchestration:pressure_lane_barrier",
+            "kernel:pressure_lane_barrier",
         ),
         front_half_stages=("examples",),
         artifacts=("examples.yaml", "computation_checks.yaml", "tests.yaml"),
@@ -205,7 +205,7 @@ LEGACY_MAPPING: tuple[AgentFlowLegacyMapping, ...] = (
         physical_stages=(
             "front_half:counterexamples",
             "run-agent:counterexamples",
-            "orchestration:pressure_lane_barrier",
+            "kernel:pressure_lane_barrier",
         ),
         front_half_stages=("counterexamples",),
         artifacts=("counterexamples.yaml", "tests.yaml"),
@@ -350,7 +350,7 @@ LEGACY_MAPPING: tuple[AgentFlowLegacyMapping, ...] = (
         implementation_status="implemented_coarse",
         runtime_kind="optional_runtime",
         physical_stages=(
-            "orchestration:update_inbox_service",
+            "kernel:update_inbox_service",
             "kernel:update_inbox",
             "llm_agents:reviewer_blocker_routing",
         ),

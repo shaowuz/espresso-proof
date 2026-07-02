@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from espresso_proof.agents.llm_agents import safe_text
+from espresso_proof.kernel.proof_language import safe_text
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.kernel.models import (
     ScopedVerificationRequests,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from espresso_proof.orchestration.agent_flow_spec import (
+from espresso_proof.kernel.agent_flow_spec import (
     AGENT_FLOW_STAGES,
     CLAIM_CLEAR_BLOCKED_STAGE_IDS,
     EVIDENCE_ROLES,

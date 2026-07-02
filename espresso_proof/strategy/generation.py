@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from espresso_proof.agents.llm_agents import LLMClient
+from espresso_proof.kernel.llm_client import LLMClient
 
 STRATEGY_SYSTEM = (
     "You are the Espresso Proof Strategy Generator. Propose CANDIDATE proof "

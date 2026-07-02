@@ -40,7 +40,7 @@ from espresso_proof.orchestration.agent_runner import (
     compute_agent,
     run_single_agent,
 )
-from espresso_proof.orchestration.pressure_lane_barrier import (
+from espresso_proof.kernel.pressure_lane_barrier import (
     PRESSURE_LANE_BARRIER_COMMIT_ORDER,
     PRESSURE_LANE_BARRIER_FILENAME,
     finalize_pressure_lane_barrier,
