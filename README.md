@@ -1,5 +1,7 @@
 # Espresso Proof
 
+Start here for architecture: [docs/engineering/EXECUTION_TRUNK.md](docs/engineering/EXECUTION_TRUNK.md) — the end-to-end call tree from problem text to output files.
+
 Espresso Proof is a local AI workspace for mathematical research. It helps a mathematician turn a claim or proof sketch into auditable project artifacts: claim state, source gaps, examples, counterexamples, strategy notes, reviewer objections, and a visible run trace.
 
 The supported product path is intentionally narrow:
