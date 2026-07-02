@@ -40,7 +40,7 @@ def _now_section(html: str) -> str:
 
 def test_now_strip_shows_trust_grouped_counts(tmp_path: Path) -> None:
     run_dir = _run(tmp_path)
-    html = render_run_dashboard(run_dir, interactive=True)
+    html = render_run_dashboard(run_dir)
     now = _now_section(html)
     assert "checked in finite/computational scope" in now
     assert "reference-supported" in now
@@ -52,7 +52,7 @@ def test_zero_earned_evidence_is_never_green(tmp_path: Path) -> None:
     """A fresh run has no earned evidence: the checked/reference chips must be
     grey (count 0), never the earned-green tone (candidate never green)."""
     run_dir = _run(tmp_path)
-    now = _now_section(render_run_dashboard(run_dir, interactive=True))
+    now = _now_section(render_run_dashboard(run_dir))
     assert "now-green" not in now
     # candidates, if any, are amber or grey — never green
     assert 'now-chip now-grey' in now
@@ -74,7 +74,7 @@ def test_candidate_sources_do_not_appear_as_checked(tmp_path: Path) -> None:
     write_yaml(lit_path, lit)
     set_agent_status(run_dir, "literature", "done")
     validate_run(run_dir)
-    now = _now_section(render_run_dashboard(run_dir, interactive=True))
+    now = _now_section(render_run_dashboard(run_dir))
     assert '<b>1</b> candidate source(s)' in now
     assert '<b>0</b> checked' in now
     assert '<b>0</b> reference-supported' in now
@@ -94,7 +94,7 @@ def test_missing_evidence_stays_visible_after_selecting_route(tmp_path: Path) ->
     effort = (choices.get(sid) or ["quick_test"])[0]
     resume_run(run_dir=run_dir, selected_strategy=sid, effort=effort)
     validate_run(run_dir)
-    now = _now_section(render_run_dashboard(run_dir, interactive=True))
+    now = _now_section(render_run_dashboard(run_dir))
     # skipped/not-run agents still counted as unfinished — selecting a route
     # never hides missing evidence
     assert "evidence agent(s) not finished" in now
@@ -108,7 +108,7 @@ def test_missing_evidence_stays_visible_after_selecting_route(tmp_path: Path) ->
 
 def test_next_action_suggests_running_missing_agents(tmp_path: Path) -> None:
     run_dir = _run(tmp_path)
-    now = _now_section(render_run_dashboard(run_dir, interactive=True))
+    now = _now_section(render_run_dashboard(run_dir))
     assert "Suggested next step" in now
     assert "Run the evidence agents" in now
     assert "Counterexamples" in now or "Examples" in now or "Literature" in now
@@ -122,7 +122,7 @@ def test_running_agent_never_yields_are_done(tmp_path: Path) -> None:
     set_agent_status(run_dir, "counterexamples", "running", increment_attempt=True)
     build_pressure_status(run_dir)
     validate_run(run_dir)
-    now = _now_section(render_run_dashboard(run_dir, interactive=True))
+    now = _now_section(render_run_dashboard(run_dir))
     assert "are done" not in now
     assert "Continue the selected route" not in now
     assert "still running" in now
@@ -138,7 +138,7 @@ def test_skipped_agents_without_selection_never_say_continue(tmp_path: Path) -> 
     for agent in ("literature", "counterexamples", "failure_patterns"):
         skip_agent(run_dir, agent, reason="defer")
     validate_run(run_dir)
-    now = _now_section(render_run_dashboard(run_dir, interactive=True))
+    now = _now_section(render_run_dashboard(run_dir))
     assert "Continue the selected route" not in now
     assert "Choose a route" in now
     # skips acknowledged, not silently treated as done
@@ -151,7 +151,7 @@ def test_suggestion_never_contradicts_unfinished_chip(tmp_path: Path) -> None:
     run_dir = _run(tmp_path)
     set_agent_status(run_dir, "literature", "queued")
     validate_run(run_dir)
-    now = _now_section(render_run_dashboard(run_dir, interactive=True))
+    now = _now_section(render_run_dashboard(run_dir))
     assert "evidence agent(s) not finished" in now
     assert "<b>0</b> evidence agent(s) not finished" not in now
     assert "are done" not in now
@@ -172,7 +172,7 @@ def test_next_action_for_admissible_refutation_is_read_counterexample(tmp_path: 
     set_agent_status(run_dir, "counterexamples", "done")
     build_pressure_status(run_dir)
     validate_run(run_dir)
-    now = _now_section(render_run_dashboard(run_dir, interactive=True))
+    now = _now_section(render_run_dashboard(run_dir))
     assert "Read the counterexample" in now
     assert "Continue the selected route" not in now
 
@@ -192,7 +192,7 @@ def test_route_only_attack_does_not_trigger_refutation_action(tmp_path: Path) ->
     write_yaml(ce_path, ce)
     build_pressure_status(run_dir)
     validate_run(run_dir)
-    now = _now_section(render_run_dashboard(run_dir, interactive=True))
+    now = _now_section(render_run_dashboard(run_dir))
     assert "Read the counterexample" not in now
 
 
@@ -202,22 +202,20 @@ def test_route_only_attack_does_not_trigger_refutation_action(tmp_path: Path) ->
 
 
 def test_first_screen_acceptance_elements_present(tmp_path: Path) -> None:
-    """Claim, state, route, agent status, next action all render; no command
-    block outside the debug drawer (spec first-screen checklist)."""
+    """Claim, state, route, agent status, next action all render (spec
+    first-screen checklist). The static page shows copy commands by design."""
     run_dir = _run(tmp_path)
-    html = render_run_dashboard(run_dir, interactive=True)
+    html = render_run_dashboard(run_dir)
     assert 'class="claim"' in html or "Claim &middot;" in html
     assert "Waiting" in html  # state chip
     assert 'aria-pressed="true"' in html  # a route is highlighted
     assert "Evidence Agents" in html
     assert "Suggested next step" in html
-    main_path = html.split('class="debug"')[0]
-    assert "espresso run-agent --run" not in main_path
 
 
 def test_selected_route_and_route_list_agree(tmp_path: Path) -> None:
     run_dir = _run(tmp_path)
-    html = render_run_dashboard(run_dir, interactive=True)
+    html = render_run_dashboard(run_dir)
     pressed_block = html.split('aria-pressed="true"')[1]
     pressed_title = pressed_block.split("<b>")[1].split("</b>")[0]
     plan_title = html.split('id="selected-title">')[1].split("<")[0]
@@ -229,6 +227,6 @@ def test_single_canonical_evidence_summary(tmp_path: Path) -> None:
     the one canonical evidence summary (no contradictory counts)."""
     run_dir = _run(tmp_path)
     run_single_agent(run_dir, "examples")
-    html = render_run_dashboard(run_dir, interactive=True)
+    html = render_run_dashboard(run_dir)
     assert "Run evidence so far" not in html
     assert html.count("checked in finite/computational scope") == 1

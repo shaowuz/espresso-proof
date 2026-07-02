@@ -19,18 +19,8 @@ from __future__ import annotations
 
 import html
 import json
-import threading
 from pathlib import Path
 from typing import Any
-
-# Per-render-thread flag: True while rendering the interactive (server) page, so
-# the evidence-panel helpers emit native buttons instead of copy commands without
-# threading the flag through every call site. Set/reset by the render entrypoints.
-_render_ctx = threading.local()
-
-
-def _interactive() -> bool:
-    return bool(getattr(_render_ctx, "interactive", False))
 
 from espresso_proof.orchestration.advisory_proof_sketch import read_advisory_proof_sketch
 from espresso_proof.kernel.agent_run_status import (
@@ -72,8 +62,8 @@ def write_run_dashboard(run_dir: Path, *, filename: str = DASHBOARD_FILENAME) ->
     """Write the STATIC dashboard into ``run_dir`` and return the path.
 
     The static file is openable directly (no server): controls degrade to copy
-    commands in a debug drawer. The interactive product page is served by
-    ``espresso serve`` via ``render_run_dashboard(..., interactive=True)``.
+    commands in a debug drawer. The interactive product UI is the React
+    cockpit served by ``espresso serve``.
     """
 
     run_dir = Path(run_dir)
@@ -82,69 +72,41 @@ def write_run_dashboard(run_dir: Path, *, filename: str = DASHBOARD_FILENAME) ->
     return out
 
 
-def render_run_dashboard(run_dir: Path, *, interactive: bool = False) -> str:
-    """Render the workspace HTML from existing run artifacts.
+def render_run_dashboard(run_dir: Path) -> str:
+    """Render the self-contained STATIC workspace HTML from run artifacts.
 
-    ``interactive=True`` adds native buttons + polling that call the local
-    workbench API (used by ``espresso serve``); ``False`` (default) keeps the
-    self-contained static page used by ``write_run_dashboard`` and every existing
-    test. Either way it is a read-only renderer that never upgrades status.
+    A read-only renderer that never upgrades status; controls degrade to copy
+    commands. (The old server-interactive variant died with the legacy UI —
+    the React cockpit is the only interactive surface.)
     """
 
     run_dir = Path(run_dir)
-    _render_ctx.interactive = interactive
-    try:
-        state = _load_run_state(run_dir)
-        state["interactive"] = interactive
-        route_data = _route_data(state)
-        selected_route = _selected_route_id(state, route_data)
-        initial = route_data.get(selected_route) or next(iter(route_data.values()), _fallback_route())
-        command = _command_for(run_dir, selected_route, initial["effort"], completed=state["completed"])
-        review = _review_result(state)
-
-        # Display-layer safety: redact any global proof-complete overclaim an
-        # echoed free-text artifact field might carry into the rendered HTML.
-        # Never upgrades status.
-        return scrub_proof_language(
-            _template(
-                state=state,
-                run_dir=run_dir,
-                routes_preliminary=_evidence_incomplete(run_dir),
-                route_data=route_data,
-                initial=initial,
-                command=command,
-                review=review,
-                interactive=interactive,
-            )
-        )
-    finally:
-        _render_ctx.interactive = False
-
-
-# --------------------------------------------------------------------------- #
-# server fragments + JSON status (used by espresso_proof.server)
-# --------------------------------------------------------------------------- #
-
-
-def render_evidence_panel_html(run_dir: Path) -> str:
-    """Inner HTML of the Evidence Agents panel (for live in-place refresh)."""
-
-    run_dir = Path(run_dir)
-    _render_ctx.interactive = True
-    try:
-        state = _load_run_state(run_dir)
-        state["interactive"] = True
-        return scrub_proof_language(_evidence_panel(run_dir, state))
-    finally:
-        _render_ctx.interactive = False
-
-
-def render_topbar_status_html(run_dir: Path) -> str:
-    """Inner HTML of the top-bar status group (state / proof status / budget)."""
-
-    run_dir = Path(run_dir)
     state = _load_run_state(run_dir)
-    return scrub_proof_language(_topbar_status_inner(state))
+    route_data = _route_data(state)
+    selected_route = _selected_route_id(state, route_data)
+    initial = route_data.get(selected_route) or next(iter(route_data.values()), _fallback_route())
+    command = _command_for(run_dir, selected_route, initial["effort"], completed=state["completed"])
+    review = _review_result(state)
+
+    # Display-layer safety: redact any global proof-complete overclaim an
+    # echoed free-text artifact field might carry into the rendered HTML.
+    # Never upgrades status.
+    return scrub_proof_language(
+        _template(
+            state=state,
+            run_dir=run_dir,
+            routes_preliminary=_evidence_incomplete(run_dir),
+            route_data=route_data,
+            initial=initial,
+            command=command,
+            review=review,
+        )
+    )
+
+
+# --------------------------------------------------------------------------- #
+# JSON status (used by espresso_proof.server)
+# --------------------------------------------------------------------------- #
 
 
 def status_summary(run_dir: Path) -> dict[str, Any]:
@@ -808,28 +770,6 @@ def _now_strip(
 </div></section>"""
 
 
-def _demo_panel(run_dir: Path) -> str:
-    """Goal 32: the "What this demo shows" panel, rendered only for demo runs
-    (project directory named ``demo-<id>``). Pure display copy from the demo
-    registry — it explains the showcase and its trust boundary, never a status."""
-
-    from espresso_proof.orchestration.demos import demo_for_project
-
-    demo = demo_for_project(Path(run_dir).parents[1].name)
-    if demo is None:
-        return ""
-    return f"""<section class="card demo-panel"><div class="pad">
-  <h2>What this demo shows</h2>
-  <p class="demo-line"><b>{_h(demo['title'])}</b> &mdash; {_h(demo['demonstrates'])}</p>
-  <p class="demo-line">{_h(demo['lesson'])}</p>
-  <div class="demo-meta">
-    <div><span class="now-label">First result</span> {_h(demo['first_result'])}</div>
-    <div><span class="now-label">Safe next click</span> {_h(demo['next_click'])}</div>
-  </div>
-  <div class="note">Trust boundary: {_h(demo['trust_boundary'])}</div>
-</div></section>"""
-
-
 def _claim_section(state: dict[str, Any]) -> str:
     claim = state["claim"]
     locked = "locked" if claim.get("locked") else "unlocked"
@@ -931,32 +871,12 @@ def _plan_section(
         else "This continues the search. It still does not claim the theorem is checked."
     )
     heading_extra = "Repair Next" if completed else "Continue"
-    interactive = bool(state.get("interactive"))
-    if interactive:
-        cont_label = "Repair next" if completed else "Continue this route"
-        efforts = [("quick_test", "quick test"), ("normal_pass", "normal pass"), ("deep_exploration", "deep exploration")]
-        opts = "".join(
-            f'<option value="{v}"{" selected" if v == initial["effort"] else ""}>{lab}</option>'
-            for v, lab in efforts
-        )
-        action_html = f"""<div class="plan-actions">
-    <button class="act primary" data-action="continue">{_h(cont_label)}</button>
-    <label class="effort-pick">effort
-      <select id="effort-sel">{opts}</select>
-    </label>
-    <span class="act-status" id="continue-status"></span>
-  </div>
-  <details class="debug"><summary>command line (advanced)</summary>
-    <pre class="cmd" id="command">{_h(command)}</pre>
-    <div class="actions"><button class="copy" id="copy">Copy command</button><span class="copy-status" id="copy-status"></span></div>
-  </details>"""
-    else:
-        lead = (
-            "Next useful work: pin exact sources or replace cited lemmas with a local derivation."
-            if completed
-            else "Run this to continue with the selected route:"
-        )
-        action_html = f"""<p class="sub" style="margin:12px 0 0">{_h(lead)}</p>
+    lead = (
+        "Next useful work: pin exact sources or replace cited lemmas with a local derivation."
+        if completed
+        else "Run this to continue with the selected route:"
+    )
+    action_html = f"""<p class="sub" style="margin:12px 0 0">{_h(lead)}</p>
   <pre class="cmd" id="command">{_h(command)}</pre>
   <div class="actions">
     <button class="copy" id="copy">Copy command</button>
@@ -1180,35 +1100,12 @@ _AGENT_CLI_NAME = {
 }
 
 
-def _agent_commands(run_dir: Path, agent: str, status: str, *, interactive: bool | None = None) -> str:
-    if interactive is None:
-        interactive = _interactive()
+def _agent_commands(run_dir: Path, agent: str, status: str) -> str:
     if agent not in ("literature", "examples", "counterexamples", "failure_patterns"):
         return ""
     cli = _AGENT_CLI_NAME[agent]
     run_cmd = f"espresso run-agent --run {run_dir} --agent {cli}"
     skip_cmd = f"espresso run-agent --run {run_dir} --agent {cli} --skip"
-    if interactive:
-        # Native buttons that drive the local API; the raw command lives only in
-        # a collapsed debug drawer, never on the main product path.
-        if status in ("running", "queued"):
-            buttons = (
-                f'<button class="act" disabled data-agent="{_h(agent)}">Running…</button>'
-                f'<button class="act ghost" data-action="skip-agent" data-agent="{_h(agent)}">Skip</button>'
-            )
-        else:
-            verb = "Retry" if status in ("failed", "done") else "Run"
-            buttons = (
-                f'<button class="act" data-action="run-agent" data-agent="{_h(agent)}">{_h(verb)}</button>'
-                f'<button class="act ghost" data-action="skip-agent" data-agent="{_h(agent)}">Skip</button>'
-            )
-        drawer = (
-            f'<details class="debug"><summary>command</summary>'
-            f'<code>{_h(run_cmd)}</code>'
-            f'<a class="debug-link" href="/api/runs/{_h(run_dir.name)}/debug" target="_blank" rel="noopener">technical details</a>'
-            f'</details>'
-        )
-        return f'<div class="acts">{buttons}</div>{drawer}'
     if status in ("running", "queued"):
         # Static page, agent in flight: don't invite a duplicate launch.
         return f"""<div class="acmds">
@@ -1571,18 +1468,11 @@ def _template(
     initial: dict[str, Any],
     command: str,
     review: dict[str, Any],
-    interactive: bool = False,
 ) -> str:
     agent_rows = _agent_display_rows(run_dir)
     cx_pressure = _counterexample_pressure(state, agent_rows)
     review_html = _review_section(review) if review.get("show") else ""
     route_json = _js(route_data)
-    refresh_btn = (
-        '<button class="tb-refresh" data-action="refresh" type="button" title="Refresh">&#8635;</button>'
-        if interactive
-        else ""
-    )
-    interactive_js = _INTERACTIVE_JS.replace("__RUN_ID__", _js(run_dir.name)) if interactive else ""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1598,7 +1488,6 @@ def _template(
   <div class="brand"><span class="bean"></span>Espresso Proof</div>
   <div class="claim-mini">{_h(state["statement"])}</div>
   <div class="tb-status" id="topbar-status">{_topbar_status_inner(state)}</div>
-  {refresh_btn}
   <button class="music" id="music" type="button">
     <span class="note">&#9834;</span><span class="bars"><i></i><i></i><i></i></span> Classical
   </button>
@@ -1607,7 +1496,6 @@ def _template(
 
 <div class="wrap">
 <main class="maincol">
-  {_demo_panel(run_dir)}
   {_claim_section(state)}
   {_now_strip(state, agent_rows, routes_preliminary=routes_preliminary, has_routes=initial["id"] != "none")}
   {_routes_section(state, route_data, initial, routes_preliminary=routes_preliminary, cx_pressure=cx_pressure)}
@@ -1687,159 +1575,9 @@ music.addEventListener("click", async () => {{
     radio.pause(); music.classList.remove("playing");
   }}
 }});
-{interactive_js}
 </script>
 </body>
 </html>
-"""
-
-
-# Interactive controller (server mode only): drives the local workbench API,
-# polls jobs, and refreshes panels in place. ``__RUN_ID__`` is replaced with the
-# JSON-encoded run id. It calls only same-origin /api endpoints; no artifact is
-# ever mutated from the browser (the server routes every action through the
-# kernel). Errors fail closed with a friendly inline message.
-_INTERACTIVE_JS = r"""
-const RUN_ID = __RUN_ID__;
-const API = "/api/runs/" + encodeURIComponent(RUN_ID);
-
-function flash(el, msg, tone) {
-  // tone: "ok" only for a genuinely completed action; "info" (neutral) for
-  // in-progress copy — the earned-evidence green is never used while waiting.
-  if (!el) return;
-  el.textContent = msg;
-  el.className = "act-status " + (tone === true ? "ok" : tone === false ? "err" : tone);
-}
-
-function humanEffort(effort) {
-  return String(effort || "").replace(/_/g, " ");
-}
-
-function localizeTimes(rootEl) {
-  (rootEl || document).querySelectorAll(".aupdated[data-utc]").forEach(el => {
-    try {
-      const d = new Date(el.dataset.utc);
-      if (isNaN(d)) return;
-      const hh = String(d.getHours()).padStart(2, "0");
-      const mm = String(d.getMinutes()).padStart(2, "0");
-      el.textContent = el.textContent.replace(/updated \d{2}:\d{2} UTC/, "updated " + hh + ":" + mm);
-    } catch {}
-  });
-}
-document.addEventListener("DOMContentLoaded", () => localizeTimes());
-
-async function refreshPanels() {
-  // State-preserving refresh: remember which evidence cards the reader had
-  // open and the scroll position, swap the panel, then restore both — a
-  // background update must never make the user lose their place.
-  const ev = document.getElementById("evidence-panel");
-  const tb = document.getElementById("topbar-status");
-  const openAgents = ev
-    ? [...ev.querySelectorAll("details.agent[open]")].map(d => d.dataset.agent)
-    : [];
-  const scrollY = window.scrollY;
-  if (ev) ev.classList.add("refreshing");
-  try {
-    const r = await fetch(API + "/status");
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || "status failed");
-    if (ev && d.evidence_html) {
-      ev.innerHTML = d.evidence_html;
-      ev.querySelectorAll("details.agent").forEach(det => {
-        // restore the reader's exact open set — including "all closed"
-        if (openAgents.includes(det.dataset.agent)) det.setAttribute("open", "");
-        else det.removeAttribute("open");
-      });
-      localizeTimes(ev);
-      window.scrollTo({top: scrollY, behavior: "instant"});
-    }
-    if (tb && d.topbar_html) tb.innerHTML = d.topbar_html;
-  } catch (e) { /* leave the page as-is on a transient error */ }
-  finally { if (ev) ev.classList.remove("refreshing"); }
-}
-
-async function pollJob(jobId, onDone, onTick) {
-  const t0 = Date.now();
-  for (let i = 0; i < 600; i++) {
-    await new Promise(r => setTimeout(r, 800));
-    let d;
-    try { d = await (await fetch("/api/jobs/" + encodeURIComponent(jobId))).json(); }
-    catch { if (onTick) onTick(Math.round((Date.now() - t0) / 1000)); continue; }
-    if (onTick) onTick(Math.round((Date.now() - t0) / 1000));
-    if (d.state === "done") { onDone(null); return; }
-    if (d.state === "failed") { onDone(d.error || "action failed"); return; }
-  }
-  onDone("timed out");
-}
-
-function selectedRouteId() {
-  const b = document.querySelector(".route[aria-pressed=true]");
-  return b ? b.dataset.route : null;
-}
-
-document.addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-action]");
-  if (!btn) return;
-  const action = btn.dataset.action;
-
-  if (action === "refresh") { await refreshPanels(); return; }
-
-  if (action === "run-agent" || action === "skip-agent") {
-    const agent = btn.dataset.agent;
-    const sib = btn.parentElement;
-    btn.disabled = true;
-    btn.classList.add("busy");
-    const orig = btn.textContent;
-    btn.textContent = action === "skip-agent" ? "Skipping…" : "Running…";
-    const reset = () => { btn.disabled = false; btn.classList.remove("busy"); btn.textContent = orig; };
-    try {
-      if (action === "skip-agent") {
-        const r = await fetch(API + "/skip-agent", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({agent})});
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error || "skip failed");
-        await refreshPanels();
-      } else {
-        const r = await fetch(API + "/agents/" + encodeURIComponent(agent), {method:"POST"});
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error || "run failed");
-        await new Promise((res) => pollJob(d.job_id, async (err) => {
-          if (err && sib) { const s=document.createElement("span"); s.className="act-status err"; s.textContent=err; sib.appendChild(s); }
-          reset();  // never leave a stale busy spinner if the refresh fetch fails
-          await refreshPanels(); res();
-        }, (secs) => { if (secs >= 5) btn.textContent = "Running… " + secs + "s"; }));
-      }
-    } catch (err) {
-      reset();
-      if (sib) { const s=document.createElement("span"); s.className="act-status err"; s.textContent=err.message; sib.appendChild(s); }
-    }
-    return;
-  }
-
-  if (action === "continue") {
-    const strategy = selectedRouteId();
-    const effortSel = document.getElementById("effort-sel");
-    const effort = effortSel ? effortSel.value : "quick_test";
-    const st = document.getElementById("continue-status");
-    if (!strategy) { flash(st, "Pick a route first.", false); return; }
-    btn.disabled = true; btn.classList.add("busy"); btn.textContent = "Working…";
-    flash(st, "Continuing…", "info");
-    const reset = () => { btn.disabled = false; btn.classList.remove("busy"); btn.textContent = "Continue this route"; };
-    try {
-      const r = await fetch(API + "/continue", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({strategy, effort})});
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "continue failed");
-      pollJob(d.job_id, (err) => {
-        if (err) { reset(); flash(st, err, false); }
-        else { location.reload(); }
-      }, (secs) => {
-        flash(st, (secs >= 30 ? "Still working — the prover loop can take a while. " : "Continuing… ") + secs + "s", "info");
-      });
-    } catch (err) {
-      reset(); flash(st, err.message, false);
-    }
-    return;
-  }
-});
 """
 
 

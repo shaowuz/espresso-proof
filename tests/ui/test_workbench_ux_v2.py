@@ -105,7 +105,7 @@ def test_dashboard_renders_timeline_without_green_on_skip_or_fail(tmp_path: Path
     skip_agent(run_dir, "counterexamples", reason="defer")
     set_agent_status(run_dir, "literature", "failed", error_summary="x")
     validate_run(run_dir)
-    html = render_run_dashboard(run_dir, interactive=True)
+    html = render_run_dashboard(run_dir)
     assert "Research Timeline" in html
     # the skip/fail timeline rows use skip/fail tone classes, never the green tone
     assert 'class="tl skip"' in html
@@ -116,7 +116,7 @@ def test_dashboard_renders_timeline_without_green_on_skip_or_fail(tmp_path: Path
 def test_run_page_has_no_proof_complete_language(tmp_path: Path) -> None:
     run_dir = _run(tmp_path)
     run_single_agent(run_dir, "examples")
-    html = render_run_dashboard(run_dir, interactive=True).lower()
+    html = render_run_dashboard(run_dir).lower()
     for w in _PROOF_WORDS:
         assert w not in html
 
