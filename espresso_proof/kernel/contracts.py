@@ -145,7 +145,12 @@ def default_agent_contracts(project_id: str) -> dict:
             "human_choice.yaml",
             "human_choice.schema.json",
             ["pending user choice", "invalid strategy id"],
-            ["select a strategy without human confirmation"],
+            # An automated selection is allowed (selected_by='auto') — what is
+            # forbidden is lying about it: auto can never claim a human.
+            [
+                "record an automated selection as human-confirmed",
+                "spell an automated choice as a human one",
+            ],
             "required",
         ),
         _contract(

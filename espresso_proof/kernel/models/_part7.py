@@ -268,9 +268,9 @@ class RunState(str, Enum):
     HUMAN_CHOICE_REVISE_SELECTED = "HUMAN_CHOICE_REVISE_SELECTED"
     HUMAN_CHOICE_STOP_SELECTED = "HUMAN_CHOICE_STOP_SELECTED"
     # Honest auto-provenance peer of HUMAN_CHOICE_CONTINUE_SELECTED: machinery
-    # (not a human) selected the continue route. Nothing writes it yet (the
-    # auto-continue writer lands in a later PR); the state machinery accepts it
-    # so a persisted run carrying it validates and resumes. It must NEVER be
+    # (not a human) selected the continue route. Written by
+    # orchestrate_run(auto_continue=True) just before the same-process resume;
+    # a persisted run carrying it validates and resumes. It must NEVER be
     # spelled as a HUMAN_CHOICE_* state — that would lie about provenance.
     AUTO_CHOICE_CONTINUE_SELECTED = "AUTO_CHOICE_CONTINUE_SELECTED"
     COMPLETED_MEMO = "COMPLETED_MEMO"

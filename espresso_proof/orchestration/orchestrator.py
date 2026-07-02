@@ -4,7 +4,10 @@ The orchestrator coordinates the Core Flow without ever becoming a proof writer:
 it scaffolds a run for an arbitrary claim, dispatches the front-half agent
 stages, runs literature discovery and the live Prover/Reviewers pass, validates
 the run after every stage, records lifecycle state in ``run_manifest.yaml``, and
-STOPS at the human gate. It is resumable from the recorded state and never
+STOPS at the human gate by default (``auto_continue=True`` continues past a
+pending prover gate with honest auto provenance — selected_by='auto',
+human_confirmed=false; earlier human questions still stop the run). It is
+resumable from the recorded state and never
 upgrades proof / source / evidence status (the kernel remains the gate).
 
 """
@@ -89,9 +92,9 @@ ORCHESTRATION_STATES: list[str] = [
     # Honest auto-provenance peer of HUMAN_CHOICE_CONTINUE_SELECTED (same
     # ordering semantics: after the gate, before COMPLETED_MEMO). Machinery —
     # not a human — selected the continue route; the matching human_choice.yaml
-    # carries selected_by='auto' and human_confirmed=false. Nothing writes this
-    # state yet (the auto-continue writer is a later PR); it is listed so the
-    # resume boundary check accepts a persisted run carrying it.
+    # carries selected_by='auto' and human_confirmed=false. Written by
+    # ``orchestrate_run(auto_continue=True)`` just before the same-process
+    # resume, so a crash mid-loop leaves the truthful state behind.
     "AUTO_CHOICE_CONTINUE_SELECTED",
     "COMPLETED_MEMO",
 ]
@@ -255,12 +258,24 @@ def orchestrate_run(
     run_dir: Path | None = None,
     front_half_client=None,
     fast: bool = False,
+    auto_continue: bool = False,
+    rounds: int | None = None,
 ) -> dict:
     """Drive a run from a fresh claim to the human gate, validating each stage.
 
     Returns a dict with the run_dir, the final lifecycle state, and the human
     gate status. Resumable: pass an existing ``run_dir`` to continue from its
     recorded state (completed stages are skipped).
+
+    ``auto_continue=True`` keeps going in the SAME process once the initial
+    round reaches a pending prover human gate: machinery picks the top-scored
+    strategy from the strategy brief and runs the bounded loop + memo, with
+    honest provenance (state AUTO_CHOICE_CONTINUE_SELECTED, selected_by /
+    resolved_by = 'auto', human_confirmed=false — auto can never claim human
+    confirmation). Any earlier stop (claim clarification, front-half
+    ask_human, claim-not-clear) is a HUMAN question and is NOT auto-answered:
+    the run halts exactly where the default path halts. ``rounds`` caps the
+    auto loop's budget further, as in ``resume_run``.
 
     This is the single canonical runtime path. ``agent_network_preflight=True``
     performs a real provider call before scaffolding (so an unreachable live
@@ -337,7 +352,19 @@ def orchestrate_run(
     )
     record_agent_flow_stage_status(run_dir, runner=runner)
 
-    return write_dashboard_and_return_run_summary(run_dir=run_dir)
+    summary = write_dashboard_and_return_run_summary(run_dir=run_dir)
+    if not auto_continue:
+        return summary
+    return _auto_continue_from_gate(
+        run_dir=run_dir,
+        summary=summary,
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        reviewer_set=reviewer_set,
+        rounds=rounds,
+    )
 
 
 def verify_agent_providers_before_run_exists(
@@ -788,6 +815,126 @@ def _resolve_and_build_loop(
     write_yaml(run_dir / "run_manifest.yaml", manifest)
     refresh_final_report_disclosures(run_dir)
     validate_run(run_dir)
+
+
+def _pick_auto_choice(strategy_brief: dict) -> dict:
+    """Pure picking rule for an automated (no-human) strategy selection.
+
+    Deterministic and never wider than a human's menu: only strategies offered
+    in ``allowed_human_choices`` are eligible; the highest ``score`` wins with
+    brief order breaking ties; effort is the strategy's ``estimated_effort``
+    when the brief offers it, else the first offered option. No eligible
+    strategy -> ``none`` (stop). Returns {selected_strategy, effort, score}.
+    """
+    allowed = {
+        str(choice["strategy_id"]): [str(option) for option in (choice.get("effort_options") or [])]
+        for choice in (strategy_brief.get("allowed_human_choices") or [])
+        if choice.get("strategy_id")
+    }
+    candidates = [
+        strategy
+        for strategy in (strategy_brief.get("top_strategies") or [])
+        if strategy.get("id") and allowed.get(str(strategy["id"]))
+    ]
+    if not candidates:
+        # the 'none' choice option only offers quick_test (see resume); fall
+        # back to it so the honest outcome is a recorded stop, not a crash.
+        none_options = allowed.get("none") or ["quick_test"]
+        return {"selected_strategy": "none", "effort": none_options[0], "score": None}
+    top = max(candidates, key=lambda strategy: int(strategy.get("score", 0)))
+    options = allowed[str(top["id"])]
+    estimated = str(top.get("estimated_effort") or "")
+    return {
+        "selected_strategy": str(top["id"]),
+        "effort": estimated if estimated in options else options[0],
+        "score": int(top.get("score", 0)),
+    }
+
+
+def auto_select_strategy(*, run_dir: Path) -> dict:
+    """Pick the top-scored strategy from the run's strategy brief — no human involved.
+
+    The caller owns the honesty contract: pass the result to ``resume_run``
+    with ``selected_by='auto'`` so the persisted human_choice / gate artifacts
+    carry human_confirmed=false. The kernel rejects an auto selection that
+    claims human confirmation.
+    """
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    brief = read_yaml(run_dir / manifest["artifacts"]["strategy_brief"])
+    return _pick_auto_choice(brief)
+
+
+def _auto_continue_from_gate(
+    *,
+    run_dir: Path,
+    summary: dict,
+    provider: str,
+    model: str,
+    api_key_env: str,
+    external_agent_command_env: str,
+    reviewer_set: str,
+    rounds: int | None,
+) -> dict:
+    """Same-process continuation after the initial round, with honest auto provenance.
+
+    Fail closed: continues ONLY from a pending prover human gate. Any other
+    state (an earlier human question, an already-resolved gate, a completed
+    run) is left exactly as the default path leaves it, with the skip recorded
+    in the returned summary — machinery never answers a question that was
+    addressed to a human.
+    """
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    state = str(manifest.get("current_state", ""))
+    gate_status = (summary.get("human_gate") or {}).get("status")
+    if state != "WAITING_LLM_AGENT_HUMAN_GATE" or gate_status != "pending":
+        summary["auto_continue"] = {
+            "attempted": False,
+            "reason": (
+                f"run is not at a pending prover human gate "
+                f"(state={state or 'unknown'!r}, gate={gate_status!r})"
+            ),
+        }
+        return summary
+    choice = auto_select_strategy(run_dir=run_dir)
+    decision = "stop" if choice["selected_strategy"] == "none" else "continue"
+    append_event(
+        run_dir,
+        "auto_choice_selected",
+        stage="human_choice",
+        detail=(
+            f"machinery selected strategy {choice['selected_strategy']!r} "
+            f"(score={choice['score']}, effort={choice['effort']}, decision={decision}); "
+            "no human involved — recorded with selected_by=auto, human_confirmed=false"
+        ),
+    )
+    if decision == "continue":
+        # Honest peer of HUMAN_CHOICE_CONTINUE_SELECTED — an auto decision is
+        # never spelled as a HUMAN_CHOICE_* state. Set BEFORE the loop so a
+        # crash mid-loop leaves the truthful state behind; validate fail-closed.
+        _set_state(run_dir, "AUTO_CHOICE_CONTINUE_SELECTED")
+        validate_run(run_dir)
+    memo = resume_run(
+        run_dir=run_dir,
+        selected_strategy=choice["selected_strategy"],
+        effort=choice["effort"],
+        rounds=rounds,
+        prover_provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        reviewer_set=reviewer_set,
+        selected_by="auto",
+    )
+    summary = write_dashboard_and_return_run_summary(run_dir=run_dir)
+    summary["memo"] = memo
+    summary["auto_continue"] = {
+        "attempted": True,
+        "selected_strategy": choice["selected_strategy"],
+        "effort": choice["effort"],
+        "decision": decision,
+        "selected_by": "auto",
+    }
+    return summary
 
 
 def resume_run(*, run_dir: Path, **kwargs) -> str:
