@@ -26,7 +26,11 @@ jobs:
   python-suite:
     name: Python suite (tests + eval + benchmark + scorecard)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 30 was not enough on hosted runners: the first two merge-gate runs died
+    # at 30:17 in "Run pytest" (conclusion=cancelled), before eval/benchmark/
+    # scorecard even started. Local full suite is ~14 min on an M-series; the
+    # ubuntu runner needs roughly double, plus the post-pytest steps.
+    timeout-minutes: 60
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
