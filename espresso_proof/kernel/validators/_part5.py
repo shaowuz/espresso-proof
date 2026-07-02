@@ -633,14 +633,44 @@ def _validate_strategy_brief(
     )
 
 
-def _validate_human_choice(human_choice: HumanChoice, strategy_brief: StrategyBrief) -> None:
+def _validate_human_choice(
+    human_choice: HumanChoice,
+    strategy_brief: StrategyBrief,
+    manifest: RunManifest,
+) -> None:
     # Fail-closed provenance check (belt-and-suspenders over the HumanChoice
-    # model validator): an automatic selection can never claim human
-    # confirmation. selected_by == 'auto' forces human_confirmed == false.
-    if human_choice.selected_by == "auto" and human_choice.human_confirmed:
+    # model validator): only selected_by == 'human' may claim human
+    # confirmation. Written exhaustively (!= 'human', not == 'auto') so a future
+    # provenance value can never claim confirmation by falling between checks.
+    if human_choice.human_confirmed and human_choice.selected_by != "human":
         raise KernelValidationError(
-            "human_choice selected_by='auto' can never claim human_confirmed=true"
+            f"human_choice selected_by={human_choice.selected_by!r} can never claim "
+            "human_confirmed=true (only a real human selection may)"
         )
+    # State-name / provenance cross-check: the two CONTINUE_SELECTED state
+    # spellings advertise WHO selected, so a RECORDED (status=selected) choice
+    # must agree — otherwise a state-name reader is misled about human
+    # involvement. A still-pending choice is exempt: the auto path honestly
+    # writes AUTO_CHOICE_CONTINUE_SELECTED (and validates) BEFORE recording the
+    # choice, so that transient window must stay valid (crash-truthful state).
+    current_state = getattr(manifest.current_state, "value", manifest.current_state)
+    if human_choice.status == HumanChoiceStatus.selected:
+        if (
+            current_state == "HUMAN_CHOICE_CONTINUE_SELECTED"
+            and human_choice.selected_by != "human"
+        ):
+            raise KernelValidationError(
+                "run_manifest current_state=HUMAN_CHOICE_CONTINUE_SELECTED requires "
+                f"human_choice selected_by='human' (got {human_choice.selected_by!r})"
+            )
+        if (
+            current_state == "AUTO_CHOICE_CONTINUE_SELECTED"
+            and human_choice.selected_by != "auto"
+        ):
+            raise KernelValidationError(
+                "run_manifest current_state=AUTO_CHOICE_CONTINUE_SELECTED requires "
+                f"human_choice selected_by='auto' (got {human_choice.selected_by!r})"
+            )
     if human_choice.status == HumanChoiceStatus.selected:
         strategy_ids = {strategy.id for strategy in strategy_brief.top_strategies}
         if human_choice.selected_strategy not in strategy_ids and human_choice.selected_strategy != "none":

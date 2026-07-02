@@ -1745,14 +1745,16 @@ def resolve_agent_gate(
     run_dir: Path,
     decision: str,
     reason: str,
-    resolved_by: str = "human",
+    resolved_by: str,
 ) -> dict:
     """Resolve the LLM-agent human gate with honest provenance.
 
-    ``resolved_by`` records WHO resolved the gate: ``"human"`` (default,
-    today's behavior) or ``"auto"`` (machinery, no human in the loop).
-    ``human_confirmed`` is derived from it — an auto resolution can never
-    claim human confirmation (the kernel model rejects auto + confirmed).
+    ``resolved_by`` records WHO resolved the gate: ``"human"`` (a real human)
+    or ``"auto"`` (machinery, no human in the loop). It is REQUIRED — there is
+    deliberately no default, so a caller can never mint human provenance by
+    forgetting the kwarg. ``human_confirmed`` is derived from it — an auto
+    resolution can never claim human confirmation (the kernel model rejects
+    auto + confirmed).
     """
     if resolved_by not in {"human", "auto"}:
         raise ValueError(f"resolved_by must be 'human' or 'auto', got {resolved_by!r}")

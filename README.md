@@ -57,6 +57,11 @@ source grounding, and special-example tests that could break the argument.
 
 ## Run tests
 
+Fast-iteration policy: while developing, run only the scoped checks you need
+(e.g. `pytest tests/<subsystem> -q`). The full suite is required only when a
+PR merges into main — GitHub runs it automatically via
+`.github/workflows/full-ci.yml`.
+
 Run these directly; there is no wrapper script.
 
 For a deterministic server smoke check that does not call Codex:

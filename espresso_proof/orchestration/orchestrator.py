@@ -779,12 +779,12 @@ def _resolve_and_build_loop(
     decision: str,
     reason: str,
     human_choice: dict,
-    resolved_by: str = "human",
+    resolved_by: str,
 ) -> None:
     """Resolve the LLM-agent human gate and (re)build prover_loop with the real
-    choice (mirrors the CLI ``resolve-agent-gate`` path). ``resolved_by``
-    records honest provenance: 'auto' means no human resolved this gate and the
-    artifact must carry human_confirmed=false."""
+    choice (mirrors the CLI ``resolve-agent-gate`` path). ``resolved_by`` is
+    required (no default) and records honest provenance: 'auto' means no human
+    resolved this gate and the artifact must carry human_confirmed=false."""
 
     report = resolve_agent_gate(
         run_dir=run_dir, decision=decision, reason=reason, resolved_by=resolved_by
@@ -940,10 +940,13 @@ def _auto_continue_from_gate(
 def resume_run(*, run_dir: Path, **kwargs) -> str:
     """Record a strategy choice, then run a BOUNDED Prover<->Reviewer loop and memo.
 
-    ``selected_by`` (keyword-only, default ``"human"``) records honest choice
-    provenance: pass ``"auto"`` when machinery — not a human — picked the
-    strategy; the persisted human_choice/gate artifacts then carry
-    human_confirmed=false (auto can never claim human confirmation).
+    ``selected_by`` (keyword-only, default ``"auto"``) records honest choice
+    provenance. The default is deliberately FAIL-CLOSED: a caller that does not
+    say who picked the strategy is recorded as machinery ("auto", carrying
+    human_confirmed=false — an under-claim at worst). Pass
+    ``selected_by="human"`` ONLY from an entry point where a real human made
+    the selection (typed CLI choice, cockpit button); forgetting the kwarg must
+    never mint human provenance.
 
     The gate may direct ranking / time allocation only — it can NEVER
     upgrade proof / source / evidence status (the kernel re-validates throughout).
@@ -972,7 +975,9 @@ def _resume_run_locked(
     external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
     reviewer_set: str = "espresso",
     prover_client=None,
-    selected_by: str = "human",
+    # Fail-closed default: an unspecified caller is recorded as machinery.
+    # Only real human entry points may pass selected_by="human".
+    selected_by: str = "auto",
 ) -> str:
     run_dir = Path(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
@@ -1055,12 +1060,13 @@ def _record_resume_human_choice(
     selected_strategy: str,
     effort: str | None,
     taste_judgment: str,
-    selected_by: str = "human",
+    selected_by: str,
 ) -> tuple[dict, str]:
     """Validate + persist the strategy choice with honest provenance.
 
-    ``selected_by`` records WHO picked the strategy: ``"human"`` (default,
-    today's behavior) or ``"auto"`` (machinery, no human in the loop).
+    ``selected_by`` records WHO picked the strategy: ``"human"`` (a real
+    human) or ``"auto"`` (machinery, no human in the loop). It is REQUIRED —
+    there is deliberately no default, so every caller must state provenance.
     ``human_confirmed`` is derived from it — an auto selection can never claim
     human confirmation (the kernel rejects auto + confirmed).
     Returns (human_choice, continue_decision).
@@ -1116,9 +1122,12 @@ def _run_resume_prover_loop(
     reviewer_set: str,
     rounds: int | None,
     prover_client,
-    selected_by: str = "human",
+    selected_by: str,
 ) -> tuple[int, str] | None:
-    """Resolve the agent gate and run a bounded Prover<->Reviewer loop (or stop)."""
+    """Resolve the agent gate and run a bounded Prover<->Reviewer loop (or stop).
+
+    ``selected_by`` is required (no default): provenance must flow explicitly
+    from the recorded human_choice."""
     loop_summary: tuple[int, str] | None = None
     # The gate resolution inherits the choice's provenance: an auto-selected
     # strategy means the gate was ALSO resolved without a human.

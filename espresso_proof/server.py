@@ -499,6 +499,11 @@ class Workbench:
                 effort=effort,
                 taste_judgment=taste,
                 prover_provider=self.provider,
+                # The continue endpoint is driven by a human clicking the
+                # cockpit button. This is browser-asserted provenance (the
+                # server cannot authenticate humanness); a script driving this
+                # endpoint against a human's session is on the caller's honesty.
+                selected_by="human",
             )
             # advisory explanatory ledger of what the round did (display only).
             write_latest_round_ledger(

@@ -341,14 +341,16 @@ class HumanChoice(StrictBaseModel):
     def validate_choice_state(self) -> HumanChoice:
         """Enforce choice-state consistency and honest selection provenance.
 
-        Auto provenance can never claim human confirmation: selected_by ==
-        'auto' requires human_confirmed == false regardless of status. A human
-        selection keeps today's rule: status == selected requires
-        human_confirmed == true.
+        Only selected_by == 'human' may claim human confirmation: any other
+        provenance value (auto today, anything a future Literal widening might
+        add) requires human_confirmed == false regardless of status — the check
+        is exhaustive on purpose, not an 'auto' special case. A human selection
+        keeps today's rule: status == selected requires human_confirmed == true.
         """
-        if self.selected_by == "auto" and self.human_confirmed:
+        if self.human_confirmed and self.selected_by != "human":
             raise ValueError(
-                "auto-selected human choice can never claim human_confirmed=true"
+                f"selected_by={self.selected_by!r} can never claim human_confirmed=true "
+                "(only a real human selection may)"
             )
         if self.status == HumanChoiceStatus.selected:
             if not self.selected_strategy:
@@ -644,14 +646,17 @@ class LLMAgentHumanGate(StrictBaseModel):
     def validate_resolution(self) -> LLMAgentHumanGate:
         """Enforce gate-resolution consistency and honest resolution provenance.
 
-        Auto provenance can never claim human confirmation: resolved_by ==
-        'auto' requires human_confirmed == false regardless of status. A
-        human-resolved gate keeps today's rule: status == resolved requires
+        Only resolved_by == 'human' may claim human confirmation: any other
+        provenance value (auto today, anything a future Literal widening might
+        add) requires human_confirmed == false regardless of status — the check
+        is exhaustive on purpose, not an 'auto' special case. A human-resolved
+        gate keeps today's rule: status == resolved requires
         human_confirmed == true.
         """
-        if self.resolved_by == "auto" and self.human_confirmed:
+        if self.human_confirmed and self.resolved_by != "human":
             raise ValueError(
-                "auto-resolved human gate can never claim human_confirmed=true"
+                f"resolved_by={self.resolved_by!r} can never claim human_confirmed=true "
+                "(only a real human resolution may)"
             )
         if self.status == "resolved":
             if self.decision is None:

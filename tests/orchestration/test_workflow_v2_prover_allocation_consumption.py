@@ -121,6 +121,7 @@ def _resolve_for_append(run_dir: Path) -> str:
         decision="continue",
         reason="task06a test",
         human_choice=human_choice,
+        resolved_by="human",
     )
     validate_run(run_dir)
     return selected

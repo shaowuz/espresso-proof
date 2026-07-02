@@ -1,6 +1,9 @@
 name: CI (light)
 
+# Light CI: quick schema checks on every PR. The full suite lives in
+# full-ci.yml and runs only when merging into main.
 on:
+  pull_request:
   workflow_dispatch:
 
 concurrency:

@@ -579,6 +579,9 @@ def choose_strategy(
             "taste_judgment": reason.strip(),
             "continue_decision": decision.value,
             "human_confirmed": True,
+            # Explicit provenance: a typed choose-strategy command is a real
+            # human at the terminal. Never rely on the model default.
+            "selected_by": "human",
         }
         HumanChoice.model_validate(choice)
         run_id = manifest["run_id"]
@@ -661,11 +664,22 @@ def resolve_agent_gate(
     # Cross-process writer lock (Goal 35B): gate resolution writes the loop +
     # initial round artifacts and must not race a concurrent resume.
     with run_writer_lock(run, action="gate resolution"):
-        report = resolve_llm_agent_gate(run_dir=run, decision=decision, reason=reason)
-        LLMAgentRunReport.model_validate(report)
         manifest = read_yaml(run / "run_manifest.yaml")
         artifacts = manifest["artifacts"]
         human_choice = read_yaml(run / artifacts["human_choice"])
+        # A human-confirmed gate resolution on top of an auto-selected strategy
+        # would trip the kernel's choice/gate provenance cross-check. Refuse up
+        # front with a usable message instead of failing validate_run afterwards.
+        if human_choice.get("selected_by") == "auto":
+            raise typer.BadParameter(
+                "this run's strategy was auto-selected (human_choice selected_by='auto'); "
+                "a human gate resolution cannot be recorded on top of it — resume the run "
+                "with --auto-continue instead"
+            )
+        report = resolve_llm_agent_gate(
+            run_dir=run, decision=decision, reason=reason, resolved_by="human"
+        )
+        LLMAgentRunReport.model_validate(report)
         if decision == "continue":
             route_initial_reviewer_blockers_to_update_inbox(
                 run_dir=run,

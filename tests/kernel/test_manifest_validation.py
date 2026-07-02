@@ -159,3 +159,41 @@ def test_front_half_run_rejects_windows_parent_traversal_on_posix(tmp_path: Path
 
     with pytest.raises(KernelValidationError, match="cannot contain"):
         validate_front_half_run(run_dir)
+
+
+# ---------------------------------------------------------------------------
+# Symlink artifacts are rejected outright (even in-root ones): kernel io never
+# writes symlinks, so a symlinked artifact is an aliasing vector, not a run
+# file. These are the repo's only symlink hard-negatives — keep them.
+# ---------------------------------------------------------------------------
+
+
+def test_manifest_rejects_in_root_symlink_artifact(tmp_path: Path) -> None:
+    run_dir = _mock_run(tmp_path)
+    alias = run_dir / "claim_alias.yaml"
+    alias.symlink_to("locked_claim.yaml")  # resolves INSIDE the run dir
+    manifest_path = run_dir / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    manifest["artifacts"]["locked_claim"] = "claim_alias.yaml"
+    write_yaml(manifest_path, manifest)
+
+    with pytest.raises(KernelValidationError, match="symlink"):
+        validate_run(run_dir)
+
+
+def test_manifest_rejects_symlink_escaping_run_dir(tmp_path: Path) -> None:
+    run_dir = _mock_run(tmp_path)
+    outside = tmp_path / "outside_claim.yaml"
+    outside.write_text(
+        (run_dir / "locked_claim.yaml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    alias = run_dir / "escape_claim.yaml"
+    alias.symlink_to(outside)
+    manifest_path = run_dir / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    manifest["artifacts"]["locked_claim"] = "escape_claim.yaml"
+    write_yaml(manifest_path, manifest)
+
+    with pytest.raises(KernelValidationError, match="symlink"):
+        validate_run(run_dir)
