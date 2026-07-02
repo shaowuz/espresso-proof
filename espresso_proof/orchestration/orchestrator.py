@@ -7,7 +7,6 @@ the run after every stage, records lifecycle state in ``run_manifest.yaml``, and
 STOPS at the human gate. It is resumable from the recorded state and never
 upgrades proof / source / evidence status (the kernel remains the gate).
 
-See the orchestration design notes.
 """
 
 from __future__ import annotations
@@ -261,8 +260,9 @@ def orchestrate_run(
     provider fails closed before any artifact is written) and threads the
     resulting diagnostic into the agent pass.
     """
-    # Stage 0 — preflight providers (fail closed), then scaffold or attach the run.
-    provider_diagnostic = _preflight_providers(
+    # A fresh run is a dataflow over artifacts: claim artifacts -> candidate
+    # context -> prover attempt -> reviewer reports -> human gate.
+    provider_diagnostic = verify_agent_providers_before_run_exists(
         provider=provider,
         front_half=front_half,
         model=model,
@@ -270,13 +270,11 @@ def orchestrate_run(
         external_agent_command_env=external_agent_command_env,
         agent_network_preflight=agent_network_preflight,
     )
-    run_dir, runner = _scaffold_or_resume(
+    run_dir, runner = create_or_attach_genesis_run(
         run_dir=run_dir, project=project, input_path=input_path, output_root=output_root
     )
 
-    # Resume guard: a run already past CLAIM_CLEAR whose claim is no longer clear
-    # finishes at the claim-clarification gate without an LLM pass.
-    early = _resume_claim_clear_guard(run_dir=run_dir, runner=runner)
+    early = finish_if_resumed_claim_is_no_longer_clear(run_dir=run_dir, runner=runner)
     if early is not None:
         return early
 
@@ -287,8 +285,7 @@ def orchestrate_run(
     front_half_stages = front_half_stages_for_runner(fast=fast)
     ran_front_half_agents = front_half != "mock" or front_half_client is not None
 
-    # Stage 1 — front-half agent pass (S1-S8), validated as one transaction.
-    _stage_front_half(
+    build_front_half_context_artifacts(
         run_dir=run_dir,
         runner=runner,
         front_half=front_half,
@@ -299,13 +296,11 @@ def orchestrate_run(
         front_half_stages=front_half_stages,
     )
 
-    # Claim-clear gate: an unclear claim finishes here without an LLM pass.
-    early, artifacts, project_dir = _claim_clear_gate(run_dir=run_dir, runner=runner)
+    early, artifacts, project_dir = stop_if_claim_is_not_clear(run_dir=run_dir, runner=runner)
     if early is not None:
         return early
 
-    # Stage 2 — literature discovery (deferred to a later run-agent pass in fast core).
-    _stage_literature(
+    collect_candidate_literature(
         run_dir=run_dir,
         runner=runner,
         fast=fast,
@@ -316,12 +311,9 @@ def orchestrate_run(
         literature_providers=literature_providers,
     )
 
-    # Execute any front-half scoped-verification requests before the prover pass.
-    _auto_wire_scoped_verifications(run_dir=run_dir)
+    attach_scoped_machine_checks(run_dir=run_dir)
 
-    # Stage 3 — live Prover + Reviewers (skipped when the front half asked to stop);
-    # stops at the human gate.
-    _stage_prover_reviewers(
+    run_initial_prover_reviewer_round_to_human_gate(
         run_dir=run_dir,
         runner=runner,
         provider=provider,
@@ -333,16 +325,15 @@ def orchestrate_run(
         artifacts=artifacts,
     )
 
-    # Initialise the per-agent process board + pressure status, then record stage status.
-    _init_process_board(
+    publish_agent_process_board(
         run_dir=run_dir, fast=fast, ran_front_half_agents=ran_front_half_agents
     )
     record_agent_flow_stage_status(run_dir, runner=runner)
 
-    return _finalize(run_dir=run_dir)
+    return write_dashboard_and_return_run_summary(run_dir=run_dir)
 
 
-def _preflight_providers(
+def verify_agent_providers_before_run_exists(
     *,
     provider: str,
     front_half: str,
@@ -370,7 +361,7 @@ def _preflight_providers(
     return provider_diagnostic
 
 
-def _scaffold_or_resume(
+def create_or_attach_genesis_run(
     *, run_dir: Path | None, project: str, input_path: Path, output_root: Path
 ) -> tuple[Path, StageRunner]:
     """Stage 0 — scaffold a fresh genesis run, or attach a runner to an existing run."""
@@ -393,7 +384,7 @@ def _scaffold_or_resume(
     return run_dir, runner
 
 
-def _resume_claim_clear_guard(*, run_dir: Path, runner: StageRunner) -> dict | None:
+def finish_if_resumed_claim_is_no_longer_clear(*, run_dir: Path, runner: StageRunner) -> dict | None:
     """Finish at the claim-clarification gate if a resumed run's claim is no longer clear."""
     if _reached(run_dir, CLAIM_CLEAR):
         resume_gate = evaluate_claim_clear(run_dir, require_recorded_clear_gate=True)
@@ -407,7 +398,7 @@ def _resume_claim_clear_guard(*, run_dir: Path, runner: StageRunner) -> dict | N
     return None
 
 
-def _claim_clear_gate(
+def stop_if_claim_is_not_clear(
     *, run_dir: Path, runner: StageRunner
 ) -> tuple[dict | None, dict | None, Path | None]:
     """Record the claim-clear gate. Returns (early_finish | None, artifacts, project_dir)."""
@@ -426,7 +417,7 @@ def _claim_clear_gate(
     return None, artifacts, project_dir
 
 
-def _stage_front_half(
+def build_front_half_context_artifacts(
     *,
     run_dir: Path,
     runner: StageRunner,
@@ -470,7 +461,7 @@ def _stage_front_half(
         )
 
 
-def _stage_literature(
+def collect_candidate_literature(
     *,
     run_dir: Path,
     runner: StageRunner,
@@ -512,7 +503,7 @@ def _stage_literature(
         )
 
 
-def _auto_wire_scoped_verifications(*, run_dir: Path) -> None:
+def attach_scoped_machine_checks(*, run_dir: Path) -> None:
     # Goal 42E cycle 3: execute any structured scoped-verification requests
     # the front half proposed BEFORE the prover/reviewer pass, so round 1
     # already sees the trusted machine evidence and computation requests can
@@ -525,7 +516,7 @@ def _auto_wire_scoped_verifications(*, run_dir: Path) -> None:
         auto_wire_scoped_verifications(run_dir)
 
 
-def _stage_prover_reviewers(
+def run_initial_prover_reviewer_round_to_human_gate(
     *,
     run_dir: Path,
     runner: StageRunner,
@@ -604,26 +595,11 @@ def _stage_prover_reviewers(
                 append_event(run_dir, "agent_call_failed", stage="llm_prover_reviewers", detail=str(exc))
                 raise
             llm_agent_event_summary.update(run_id=run_id, started_at=_started, t0=_t0)
-            LLMAgentRunReport.model_validate(agent_report)
-            loop_report = build_prover_loop_report(
-                agent_report=agent_report,
-                strategy_brief=read_yaml(run_dir / artifacts["strategy_brief"]),
-                human_choice=read_yaml(run_dir / artifacts["human_choice"]),
-                run_dir=run_dir,
-            )
-            ProverLoopReport.model_validate(loop_report)
-            stage_manifest = read_yaml(run_dir / "run_manifest.yaml")
-            stage_manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
-            stage_manifest["optional_artifacts"]["prover_loop"] = "prover_loop.yaml"
-            stage_manifest["optional_artifacts"]["prover_round_index"] = "prover_rounds/index.yaml"
-            write_yaml(run_dir / "llm_agent_run.yaml", agent_report)
-            write_yaml(run_dir / "prover_loop.yaml", loop_report)
-            write_initial_prover_round_artifacts(
+            write_initial_prover_reviewer_artifacts(
                 run_dir=run_dir,
                 agent_report=agent_report,
-                loop_report=loop_report,
+                artifacts=artifacts,
             )
-            write_yaml(run_dir / "run_manifest.yaml", stage_manifest)
             # Goal 67B: capture the prover attempt's (scrubbed, advisory-only)
             # reasoning into a snapshot-EXCLUDED sidecar. If validate_run below
             # rejects this round (e.g. a step smuggled a status field), the whole
@@ -685,7 +661,46 @@ def _stage_prover_reviewers(
             append_event(run_dir, "agent_call_finished", stage="llm_prover_reviewers")
 
 
-def _init_process_board(*, run_dir: Path, fast: bool, ran_front_half_agents: bool) -> None:
+def write_initial_prover_reviewer_artifacts(
+    *,
+    run_dir: Path,
+    agent_report: dict,
+    artifacts: dict,
+) -> None:
+    """Persist the initial Prover -> Reviewers dataflow.
+
+    Writes:
+    - ``llm_agent_run.yaml``: one prover attempt plus reviewer reports.
+    - ``prover_loop.yaml``: route attempts and reviewer blockers derived from
+      those reports.
+    - ``prover_rounds/round_001_*.yaml`` + index: durable per-strategy round
+      artifacts consumed by later resume/prover-loop steps.
+    """
+
+    LLMAgentRunReport.model_validate(agent_report)
+    loop_report = build_prover_loop_report(
+        agent_report=agent_report,
+        strategy_brief=read_yaml(run_dir / artifacts["strategy_brief"]),
+        human_choice=read_yaml(run_dir / artifacts["human_choice"]),
+        run_dir=run_dir,
+    )
+    ProverLoopReport.model_validate(loop_report)
+    stage_manifest = read_yaml(run_dir / "run_manifest.yaml")
+    optional = stage_manifest.setdefault("optional_artifacts", {})
+    optional["llm_agent_run"] = "llm_agent_run.yaml"
+    optional["prover_loop"] = "prover_loop.yaml"
+    optional["prover_round_index"] = "prover_rounds/index.yaml"
+    write_yaml(run_dir / "llm_agent_run.yaml", agent_report)
+    write_yaml(run_dir / "prover_loop.yaml", loop_report)
+    write_initial_prover_round_artifacts(
+        run_dir=run_dir,
+        agent_report=agent_report,
+        loop_report=loop_report,
+    )
+    write_yaml(run_dir / "run_manifest.yaml", stage_manifest)
+
+
+def publish_agent_process_board(*, run_dir: Path, fast: bool, ran_front_half_agents: bool) -> None:
     # Goal 27 — initialize the per-agent run-status board. In the fast core pass
     # only claim_understanding has run; the evidence agents are not_run (to be run
     # on demand / in parallel). In a full pass literature + the evidence stages
@@ -703,7 +718,7 @@ def _init_process_board(*, run_dir: Path, fast: bool, ran_front_half_agents: boo
         build_pressure_status(run_dir, late_after_strategy=False)
 
 
-def _finalize(*, run_dir: Path) -> dict:
+def write_dashboard_and_return_run_summary(*, run_dir: Path) -> dict:
     # Goal 54A: aggregate run timings + register the per-run observability logs as
     # optional artifacts (diagnostic only; both helpers fail closed and never gate).
     write_timings(run_dir)

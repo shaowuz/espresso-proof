@@ -1014,21 +1014,72 @@ def run_llm_agent_pass(
     reviewer_set: str = "generic",
     provider_diagnostic: dict | None = None,
 ) -> dict:
+    """Run the initial Prover -> Reviewers pass and return its artifact payload.
+
+    This function does not write files. The orchestrator persists the returned
+    data into ``llm_agent_run.yaml`` and derives ``prover_loop.yaml`` plus
+    ``prover_rounds/`` from it.
+    """
+
     ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
-    allocation_plan = ensure_prover_time_allocation_plan(run_dir)
     client = build_client(
         provider=provider,
         model=model,
         api_key_env=api_key_env,
         external_agent_command_env=external_agent_command_env,
     )
+    context, input_artifacts = load_context_artifacts_for_initial_agent_pass(run_dir)
+    agent_call_diagnostics: list[dict] = []
+    now = datetime.now(UTC).isoformat()
+    prover = ask_prover_for_candidate_route(
+        client=client,
+        context=context,
+        input_artifacts=input_artifacts,
+        created_at=now,
+        agent_call_diagnostics=agent_call_diagnostics,
+    )
+    verifier_reviews = ask_reviewers_to_attack_candidate_route(
+        client=client,
+        context=context,
+        prover_attempt=prover,
+        reviewer_set=reviewer_set,
+        verifier_count=verifier_count,
+        agent_call_diagnostics=agent_call_diagnostics,
+    )
+    return assemble_llm_agent_run_report(
+        context=context,
+        client=client,
+        generated_at=now,
+        input_artifacts=input_artifacts,
+        prover_attempt=prover,
+        verifier_reviews=verifier_reviews,
+        reviewer_set=reviewer_set,
+        provider_diagnostic=provider_diagnostic,
+        agent_call_diagnostics=agent_call_diagnostics,
+    )
+
+
+def load_context_artifacts_for_initial_agent_pass(run_dir: Path) -> tuple[dict, list[str]]:
+    allocation_plan = ensure_prover_time_allocation_plan(run_dir)
     context = load_agent_context(run_dir)
     time_context = _time_allocation_context(run_dir, allocation_plan)
     context["time_allocation_plan"] = time_context
     context["prover_missing_context_to_record"] = time_context["missing_context"]
     input_artifacts = _agent_input_artifacts(context["manifest"])
-    agent_call_diagnostics: list[dict] = []
-    now = datetime.now(UTC).isoformat()
+    return context, input_artifacts
+
+
+def ask_prover_for_candidate_route(
+    *,
+    client: LLMClient,
+    context: dict,
+    input_artifacts: list[str],
+    created_at: str,
+    agent_call_diagnostics: list[dict],
+) -> dict:
+    """Feed context artifacts to the prover and normalize its candidate route."""
+
+    time_context = context["time_allocation_plan"]
     prover_raw = _complete_agent_json(
         client=client,
         role="prover",
@@ -1039,10 +1090,24 @@ def run_llm_agent_pass(
     prover = make_prover_attempt(
         prover_raw,
         client=client,
-        created_at=now,
+        created_at=created_at,
         input_artifacts=input_artifacts,
     )
     _apply_missing_context_notes(prover, time_context)
+    return prover
+
+
+def ask_reviewers_to_attack_candidate_route(
+    *,
+    client: LLMClient,
+    context: dict,
+    prover_attempt: dict,
+    reviewer_set: str,
+    verifier_count: int,
+    agent_call_diagnostics: list[dict],
+) -> list[dict]:
+    """Feed the prover attempt back into independent reviewers."""
+
     verifier_reviews = []
     reviewer_roles = _reviewer_roles(reviewer_set, verifier_count)
     for index, reviewer_role in enumerate(reviewer_roles, start=1):
@@ -1052,7 +1117,7 @@ def run_llm_agent_pass(
             call_diagnostics=agent_call_diagnostics,
             system=verifier_system_prompt(index, reviewer_role=reviewer_role),
             prompt=agent_prompt(
-                {**context, "prover_attempt": prover},
+                {**context, "prover_attempt": prover_attempt},
                 role=reviewer_role,
             ),
         )
@@ -1065,16 +1130,32 @@ def run_llm_agent_pass(
                 reviewer_role=reviewer_role,
             )
         )
+    return verifier_reviews
+
+
+def assemble_llm_agent_run_report(
+    *,
+    context: dict,
+    client: LLMClient,
+    generated_at: str,
+    input_artifacts: list[str],
+    prover_attempt: dict,
+    verifier_reviews: list[dict],
+    reviewer_set: str,
+    provider_diagnostic: dict | None,
+    agent_call_diagnostics: list[dict],
+) -> dict:
+    reviewer_roles = _reviewer_roles(reviewer_set, len(verifier_reviews))
     gate = make_human_gate(verifier_reviews)
     report = {
         "schema_version": 1,
         "claim_id": context["claim"]["id"],
         "run_id": context["manifest"]["run_id"],
-        "generated_at": now,
+        "generated_at": generated_at,
         "provider": client.provider,
         "model": client.model,
         "input_artifacts": input_artifacts,
-        "prover_attempt": prover,
+        "prover_attempt": prover_attempt,
         "verifier_reviews": verifier_reviews,
         "human_gate": gate,
         "provider_diagnostic": provider_diagnostic,
@@ -1722,78 +1803,16 @@ def append_prover_loop_round(
     context = load_agent_context(run_dir)
     time_context = _time_allocation_context(run_dir, allocation_plan)
     input_artifacts = _agent_input_artifacts(manifest)
-    # Goal 26: the subgoal graph is the scheduling center. Pick the highest-value
-    # OPEN subgoal and NAME it to the prover so the round works on that specific
-    # subgoal id + local claim (not the whole claim). This is scheduling only: it
-    # never sets/upgrades any status, and a contradicted (refuted) main goal
-    # yields no target (stale optimism cannot override a checked refutation).
-    from espresso_proof.kernel.subgoal_graph import assemble_subgoal_graph, select_next_subgoal
-
-    target_node = select_next_subgoal(assemble_subgoal_graph(run_dir))
-    target_subgoal = (
-        {
-            "id": target_node.get("id"),
-            "local_claim": target_node.get("statement"),
-            "state": target_node.get("state"),
-            "instruction": (
-                "Work on THIS subgoal only; cite its id in your steps. Produce "
-                "candidate work for this local claim. Do not claim the whole claim "
-                "is proved. Status upgrades require the kernel's hard gates."
-            ),
-        }
-        if target_node is not None
-        else {
-            "id": None,
-            "local_claim": None,
-            "state": None,
-            "instruction": (
-                "No open subgoal is selectable (the claim may be refuted or every "
-                "subgoal is already resolved/blocked). Do not invent progress."
-            ),
-        }
+    round_context, target_subgoal = build_next_prover_input_from_reviewer_feedback(
+        run_dir=run_dir,
+        context=context,
+        loop_report=loop_report,
+        parent_attempt=parent_attempt,
+        selected_strategy_id=selected_strategy_id,
+        next_round=next_round,
+        allocation_plan=allocation_plan,
+        time_context=time_context,
     )
-    # Phase 5: feed the prior round's reviewer objections that NAMED this subgoal
-    # back to the prover so a repair attempt can directly address them (instead of
-    # only seeing the same free-text blockers). Advisory prompt context only — the
-    # round's outputs are re-validated by the kernel, and the pairing is recorded in
-    # a snapshot-excluded, never-validated sidecar (can never upgrade any status).
-    from espresso_proof.orchestration.repair_target import (
-        capture_repair_target,
-        collect_repair_target_objections,
-    )
-
-    repair_target_objections = collect_repair_target_objections(
-        run_dir, target_subgoal.get("id")
-    )
-    capture_repair_target(
-        run_dir,
-        round_index=next_round,
-        strategy_id=selected_strategy_id,
-        target_subgoal_id=target_subgoal.get("id"),
-        objections=repair_target_objections,
-    )
-    round_context = {
-        **context,
-        "previous_prover_loop_attempt": parent_attempt,
-        "reviewer_blockers_to_repair": parent_attempt.get("blockers", []),
-        "repair_target_objections": repair_target_objections,
-        "loop_decision": loop_report.get("loop_decision"),
-        "time_allocation": parent_attempt.get("time_allocation"),
-        "time_allocation_plan": time_context,
-        "time_allocation_entry": _route_allocation_entry(
-            allocation_plan, parent_attempt.get("strategy_id")
-        ),
-        "prover_missing_context_to_record": time_context["missing_context"],
-        "target_subgoal": target_subgoal,
-        # Goal 43C: the human's advisory ranking/time-allocation note for this
-        # continuation (from human_choice.taste_judgment). It is prompt context
-        # ONLY — the round's outputs are re-validated by the kernel, so this can
-        # never upgrade proof/source/evidence/grade/claim status.
-        "human_feedback_advisory": _human_feedback_advisory(run_dir),
-        # Goal 54C: structured human strategy feedback (score/priority/note) +
-        # the derived advisory allocation hint, as prompt context. Advisory only.
-        "human_time_allocation": time_allocation_prompt_context(run_dir, selected_strategy_id),
-    }
     created_at = datetime.now(UTC).isoformat()
     prover_raw = client.complete_json(
         system=prover_system_prompt(),
@@ -1938,6 +1957,100 @@ def append_prover_loop_round(
     ):
         write_time_allocation_from_update_inbox(run_dir)
     return loop_report
+
+
+def build_next_prover_input_from_reviewer_feedback(
+    *,
+    run_dir: Path,
+    context: dict,
+    loop_report: dict,
+    parent_attempt: dict,
+    selected_strategy_id: str | None,
+    next_round: int,
+    allocation_plan,
+    time_context: dict,
+) -> tuple[dict, dict]:
+    """Build the next prover prompt context from prior reviewer output.
+
+    The key feedback lane is:
+    ``prover_loop.yaml.attempts[-1].blockers`` plus scoped repair objections
+    -> ``agent_prompt(..., role="prover_loop_round")``.
+    """
+
+    # Goal 26: the subgoal graph is the scheduling center. Pick the highest-value
+    # OPEN subgoal and NAME it to the prover so the round works on that specific
+    # subgoal id + local claim (not the whole claim). This is scheduling only: it
+    # never sets/upgrades any status, and a contradicted (refuted) main goal
+    # yields no target (stale optimism cannot override a checked refutation).
+    from espresso_proof.kernel.subgoal_graph import assemble_subgoal_graph, select_next_subgoal
+
+    target_node = select_next_subgoal(assemble_subgoal_graph(run_dir))
+    target_subgoal = (
+        {
+            "id": target_node.get("id"),
+            "local_claim": target_node.get("statement"),
+            "state": target_node.get("state"),
+            "instruction": (
+                "Work on THIS subgoal only; cite its id in your steps. Produce "
+                "candidate work for this local claim. Do not claim the whole claim "
+                "is proved. Status upgrades require the kernel's hard gates."
+            ),
+        }
+        if target_node is not None
+        else {
+            "id": None,
+            "local_claim": None,
+            "state": None,
+            "instruction": (
+                "No open subgoal is selectable (the claim may be refuted or every "
+                "subgoal is already resolved/blocked). Do not invent progress."
+            ),
+        }
+    )
+
+    # Phase 5: feed the prior round's reviewer objections that NAMED this subgoal
+    # back to the prover so a repair attempt can directly address them (instead of
+    # only seeing the same free-text blockers). Advisory prompt context only — the
+    # round's outputs are re-validated by the kernel, and the pairing is recorded in
+    # a snapshot-excluded, never-validated sidecar (can never upgrade any status).
+    from espresso_proof.orchestration.repair_target import (
+        capture_repair_target,
+        collect_repair_target_objections,
+    )
+
+    repair_target_objections = collect_repair_target_objections(
+        run_dir, target_subgoal.get("id")
+    )
+    capture_repair_target(
+        run_dir,
+        round_index=next_round,
+        strategy_id=selected_strategy_id,
+        target_subgoal_id=target_subgoal.get("id"),
+        objections=repair_target_objections,
+    )
+    round_context = {
+        **context,
+        "previous_prover_loop_attempt": parent_attempt,
+        "reviewer_blockers_to_repair": parent_attempt.get("blockers", []),
+        "repair_target_objections": repair_target_objections,
+        "loop_decision": loop_report.get("loop_decision"),
+        "time_allocation": parent_attempt.get("time_allocation"),
+        "time_allocation_plan": time_context,
+        "time_allocation_entry": _route_allocation_entry(
+            allocation_plan, parent_attempt.get("strategy_id")
+        ),
+        "prover_missing_context_to_record": time_context["missing_context"],
+        "target_subgoal": target_subgoal,
+        # Goal 43C: the human's advisory ranking/time-allocation note for this
+        # continuation (from human_choice.taste_judgment). It is prompt context
+        # ONLY — the round's outputs are re-validated by the kernel, so this can
+        # never upgrade proof/source/evidence/grade/claim status.
+        "human_feedback_advisory": _human_feedback_advisory(run_dir),
+        # Goal 54C: structured human strategy feedback (score/priority/note) +
+        # the derived advisory allocation hint, as prompt context. Advisory only.
+        "human_time_allocation": time_allocation_prompt_context(run_dir, selected_strategy_id),
+    }
+    return round_context, target_subgoal
 
 
 def _select_parent_attempt(attempts: list[dict], selected_strategy_id: str | None) -> dict:

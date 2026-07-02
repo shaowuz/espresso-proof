@@ -772,7 +772,7 @@ def seal_consensus(
 # Register + re-export the developer / evaluation / verify / legacy command
 # groups on the shared ``app`` (flat command names; behavior unchanged). The
 # re-export keeps `from espresso_proof.cli import <command>` working.
-# See docs/engineering/architecture-spine.md.
+# See espresso_proof.orchestration.orchestrator for the runtime dataflow.
 from espresso_proof.cli_verify import (  # noqa: E402,F401
     verify_exact_modexp_command,
     verify_finite_groups_command,

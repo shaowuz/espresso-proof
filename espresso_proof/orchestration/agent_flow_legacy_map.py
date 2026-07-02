@@ -4,7 +4,7 @@ Read-only mapping/reference data: it runs no agents, writes no run artifacts, an
 infers no mathematical trust. Note: the stage-order constants it defines (e.g.
 ``LEGACY_FRONT_HALF_FAST_ORDER``) ARE consumed by the orchestrator's fast-core
 plan, so this module is reference data, not dead code.
-See docs/engineering/architecture-spine.md.
+The executable runtime dataflow lives in espresso_proof.orchestration.orchestrator.
 
 
 This module is deliberately read-only. It records how each conceptual

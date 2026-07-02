@@ -6,7 +6,7 @@ called by ``orchestrate_run`` to create a kernel-valid run shell for any claim
 / ``_*scenario*`` / ``_common_*`` / ``_finite_group_*`` builders — is fixed
 scenario-template data used to seed those shells, not a live agent path. Do NOT
 remove ``run_mock_critique`` as "mock cleanup". See
-docs/engineering/architecture-spine.md.
+espresso_proof.orchestration.orchestrator.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Developer / diagnostic commands (not part of the product spine).
+"""Developer / diagnostic commands (not part of the product runtime).
 
 Registered on the shared Typer ``app`` from ``espresso_proof.cli_app``
 (flat command names, identical behavior). Imported for its side effects at
