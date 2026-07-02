@@ -1736,7 +1736,17 @@ def resolve_agent_gate(
     run_dir: Path,
     decision: str,
     reason: str,
+    resolved_by: str = "human",
 ) -> dict:
+    """Resolve the LLM-agent human gate with honest provenance.
+
+    ``resolved_by`` records WHO resolved the gate: ``"human"`` (default,
+    today's behavior) or ``"auto"`` (machinery, no human in the loop).
+    ``human_confirmed`` is derived from it — an auto resolution can never
+    claim human confirmation (the kernel model rejects auto + confirmed).
+    """
+    if resolved_by not in {"human", "auto"}:
+        raise ValueError(f"resolved_by must be 'human' or 'auto', got {resolved_by!r}")
     ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     agent_path = manifest.get("optional_artifacts", {}).get("llm_agent_run")
@@ -1753,7 +1763,10 @@ def resolve_agent_gate(
             "status": "resolved",
             "decision": decision,
             "reason": reason,
-            "human_confirmed": True,
+            # Honest provenance: only a real human resolution may claim human
+            # confirmation. resolved_by='auto' records "no human involved".
+            "human_confirmed": resolved_by == "human",
+            "resolved_by": resolved_by,
             "resolved_at": datetime.now(UTC).isoformat(),
         }
     )

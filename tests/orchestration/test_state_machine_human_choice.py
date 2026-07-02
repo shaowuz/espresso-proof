@@ -59,3 +59,35 @@ def test_front_half_done_precedes_claim_clear() -> None:
     # (post claim-clear gate). Reordering would make `if not _reached(CLAIM_CLEAR)`
     # short-circuit and CLAIM_CLEAR would never be set. Lock the order in.
     assert _state_index("FRONT_HALF_DONE") < _state_index("CLAIM_CLEAR")
+
+
+# Pivot PR1: AUTO_CHOICE_CONTINUE_SELECTED is the honest auto-provenance peer of
+# HUMAN_CHOICE_CONTINUE_SELECTED. Nothing writes it yet (the auto-continue writer
+# is a later PR), but the state machinery must already accept it with identical
+# ordering semantics so a persisted run carrying it validates and resumes.
+AUTO_CHOICE_STATE = "AUTO_CHOICE_CONTINUE_SELECTED"
+
+
+def test_auto_choice_state_is_known_to_the_state_machine() -> None:
+    assert AUTO_CHOICE_STATE in ORCHESTRATION_STATES
+    assert _state_index(AUTO_CHOICE_STATE) >= 0
+
+
+def test_auto_choice_state_is_a_kernel_run_state() -> None:
+    # RunManifest.current_state is a closed RunState enum: the kernel must
+    # accept the auto state or a persisted run carrying it fails validation.
+    from espresso_proof.kernel.models import RunState
+
+    assert RunState(AUTO_CHOICE_STATE).value == AUTO_CHOICE_STATE
+
+
+def test_auto_choice_state_orders_like_its_human_peer() -> None:
+    # Identical ordering semantics to HUMAN_CHOICE_CONTINUE_SELECTED: after the
+    # gate, before COMPLETED_MEMO, and never falsely rejected by the resume
+    # boundary check (`_state_index(state) < _state_index(GATE)`).
+    gate_idx = _state_index(GATE)
+    memo_idx = _state_index("COMPLETED_MEMO")
+    idx = _state_index(AUTO_CHOICE_STATE)
+    assert idx >= gate_idx
+    assert idx < memo_idx
+    assert not (idx < gate_idx)

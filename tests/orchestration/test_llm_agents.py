@@ -922,6 +922,60 @@ def test_resolve_agent_gate_cannot_overwrite_resolved_gate(tmp_path: Path) -> No
     assert read_yaml(run_dir / "llm_agent_run.yaml") == before_report
 
 
+def test_resolve_agent_gate_auto_records_no_human_involvement(tmp_path: Path) -> None:
+    # Pivot PR1 (d): an auto resolution writes honest provenance — resolved_by=auto
+    # and human_confirmed=false — and the run stays kernel-valid.
+    from espresso_proof.orchestration.orchestrator import _resolve_and_build_loop
+
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    _mark_claim_clear(run_dir)
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["run-llm-agents", "--run", str(run_dir), "--provider", "stub"],
+    )
+    assert result.exit_code == 0, result.output
+
+    human_choice = read_yaml(run_dir / "human_choice.yaml")
+    _resolve_and_build_loop(
+        run_dir,
+        decision="revise",
+        reason="auto resolution for provenance test",
+        human_choice=human_choice,
+        resolved_by="auto",
+    )
+
+    validate_run(run_dir)
+    report = LLMAgentRunReport.model_validate(read_yaml(run_dir / "llm_agent_run.yaml"))
+    assert report.human_gate.status == "resolved"
+    assert report.human_gate.resolved_by == "auto"
+    assert report.human_gate.human_confirmed is False
+
+
+def test_resolve_agent_gate_rejects_unknown_provenance(tmp_path: Path) -> None:
+    import pytest
+
+    from espresso_proof.agents.llm_agents import resolve_agent_gate
+
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    _mark_claim_clear(run_dir)
+    with pytest.raises(ValueError, match="resolved_by"):
+        resolve_agent_gate(
+            run_dir=run_dir,
+            decision="revise",
+            reason="bad provenance value",
+            resolved_by="robot",
+        )
+
+
 def test_human_choice_routes_prover_loop_strategy_and_effort(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
         "hodge_atoms",

@@ -394,6 +394,14 @@ def _validate_llm_loop_artifacts(
         raise KernelValidationError(
             f"llm_agent_run references unknown input artifacts {sorted(unknown_inputs)}"
         )
+    # Fail-closed provenance check (belt-and-suspenders over the
+    # LLMAgentHumanGate model validator): an automatically resolved gate can
+    # never claim human confirmation. resolved_by == 'auto' forces
+    # human_confirmed == false.
+    if llm_agent_run.human_gate.resolved_by == "auto" and llm_agent_run.human_gate.human_confirmed:
+        raise KernelValidationError(
+            "llm_agent_run human_gate resolved_by='auto' can never claim human_confirmed=true"
+        )
 
     if prover_loop is None:
         if prover_round_index is not None:
