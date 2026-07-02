@@ -1,10 +1,12 @@
 """Espresso Product Workbench — a local, read-mostly interactive server.
 
 This is a small standard-library HTTP server (no web framework, no new stack)
-that serves the React cockpit when ``web/dist`` exists, with a legacy built-in
-HTML fallback for CI/dev. Type a problem, get a quick core run, click Run
-Examples / Counterexamples / Literature, Continue a route, Skip an agent — with
-live progress — without typing terminal commands.
+that serves the React cockpit built into ``web/dist``. The build is REQUIRED:
+there is no fallback UI (a stale fallback kept being mistaken for the product),
+so ``serve()`` refuses to start without it and tells you how to build. Type a
+problem, get a quick core run, click Run Examples / Counterexamples /
+Literature, Continue a route, Skip an agent — with live progress — without
+typing terminal commands.
 
 Every browser action goes through the EXISTING kernel path:
 ``orchestrate_run`` (fast core) / ``run_single_agent`` / ``skip_agent`` /
@@ -43,11 +45,23 @@ from espresso_proof.orchestration.run_dashboard import (
 )
 from espresso_proof.kernel.validators import validate_run
 
-# Goal 43A: the built React cockpit (web/dist). When the build exists the
-# server serves it at "/" (the legacy index stays at /legacy and remains the
-# automatic fallback when no build is present, e.g. in CI). Static assets are
+# Goal 43A: the built React cockpit (web/dist), served at "/". The build is
+# the ONLY UI — no fallback (the old built-in page kept being mistaken for the
+# product). serve() refuses to start without it; a request that finds it gone
+# mid-flight gets an explicit 503 build-instructions page. Static assets are
 # confined to this directory and to a fixed content-type allowlist.
 _WEB_DIST = Path(__file__).resolve().parents[1] / "web" / "dist"
+
+_BUILD_COMMANDS = "npm --prefix web ci && npm --prefix web run build"
+
+_MISSING_BUILD_PAGE = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Espresso Proof — cockpit build missing</title></head>
+<body style="font-family:system-ui;max-width:640px;margin:80px auto;line-height:1.5">
+<h1>Cockpit build missing</h1>
+<p>The React cockpit build (<code>web/dist</code>) was not found. There is no
+fallback UI. Build it, then reload:</p>
+<pre><code>{_BUILD_COMMANDS}</code></pre>
+</body></html>"""
 _STATIC_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
@@ -1202,10 +1216,10 @@ def _make_handler(workbench: Workbench):
                     if index.is_file():
                         self._send_html(index.read_text(encoding="utf-8"))
                     else:
-                        self._send_html(_index_page(workbench))
-                    return
-                if parts == ["legacy"]:
-                    self._send_html(_index_page(workbench))
+                        # No silent fallback UI: a missing build is an error the
+                        # operator must see, not a degraded page to mistake for
+                        # the product (serve() also refuses to start without it).
+                        self._send_html(_MISSING_BUILD_PAGE, status=503)
                     return
                 if parts == ["api", "health"]:
                     self._send_json({"ok": True})
@@ -1349,224 +1363,21 @@ def _make_handler(workbench: Workbench):
     return Handler
 
 
-_STATE_WORDS = {
-    "SCAFFOLDED": "Starting",
-    "FRONT_HALF_DONE": "Initial read",
-    "LITERATURE_DONE": "Initial read",
-    "WAITING_LLM_AGENT_HUMAN_GATE": "Waiting at your decision",
-    "COMPLETED_MEMO": "Memo ready",
-}
-
-
-def _index_page(workbench: Workbench) -> str:
-    import html as _html
-
-    runs = list(reversed(workbench.list_runs()))
-    rows = "".join(
-        f'<li><a href="/run/{_html.escape(r["run_id"])}">{_html.escape(r["statement"] or r["run_id"])}</a>'
-        f'<span class="st">{_html.escape(_STATE_WORDS.get(r["state"], r["state"].replace("_", " ").title()))}</span></li>'
-        for r in runs
-    )
-    from espresso_proof.orchestration.demos import DEMOS
-
-    demo_cards = "".join(
-        f'<div class="demo-card">'
-        f'<b>{_html.escape(d["title"])}</b>'
-        f'<span class="demo-what">{_html.escape(d["demonstrates"])}</span>'
-        f'<span class="demo-lesson">{_html.escape(d["lesson"])}</span>'
-        f'<button type="button" class="demo-open" data-demo="{_html.escape(demo_id)}">Open demo</button>'
-        f'</div>'
-        for demo_id, d in DEMOS.items()
-    )
-    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Espresso Proof — Workbench</title>
-<style>{_INDEX_STYLE}</style></head><body>
-<header class="top"><div class="brand"><span class="bean"></span>Espresso Proof</div>
-<div class="tagline">Local mathematical research workbench</div></header>
-<main class="grid">
-  <section class="enter card">
-    <h1>Study a claim</h1>
-    <p class="lead">Type a mathematical claim. You get a quick initial read and 2-3 proof routes, then run evidence agents and continue a route — all in the browser, no terminal.</p>
-    <textarea id="text" placeholder="e.g. Every group of order p^2, where p is prime, is abelian."></textarea>
-    <input type="hidden" name="mode" value="codex">
-    <p class="mode-note"><b>Real agent run.</b> Uses the configured real agent; slower than a template smoke run, but meaningful.</p>
-    <div class="go-row"><button id="go" type="button" class="go">Run Espresso</button></div>
-    <div class="jobrow" id="jobrow" hidden>
-      <div class="jr-head"><span class="jr-spin"></span><b id="jr-stage">Starting run…</b><span class="jr-elapsed" id="jr-elapsed"></span></div>
-      <div class="jr-bar"><i></i></div>
-      <p class="jr-note" id="jr-note">Espresso is creating the run. This page stays usable while it works.</p>
-      <div class="jr-fail" id="jr-fail" hidden>
-        <p class="err" id="jr-err"></p>
-        <div class="jr-actions">
-          <button type="button" class="go small" id="jr-retry">Retry</button>
-        </div>
-      </div>
-    </div>
-    <p class="err" id="err"></p>
-  </section>
-  <aside class="side">
-    <div class="card how">
-      <h2>How it works</h2>
-      <ol>
-        <li><b>Quick read</b> — claim understanding + preliminary routes.</li>
-        <li><b>Choose a route</b> — your call steers ranking and time, never evidence.</li>
-        <li><b>Run evidence</b> — examples, counterexamples, literature, on demand.</li>
-        <li><b>Continue the proof search</b> — read what is checked, cited, or still missing.</li>
-      </ol>
-    </div>
-    <div class="card demos"><h2>Open demo</h2>
-      <p class="demo-note">Pre-validated showcase runs — instant, model-free, honest about every trust boundary.</p>
-      <div class="demo-grid">{demo_cards}</div></div>
-    <div class="card runs"><h2>Recent runs</h2><ul>{rows or '<li class="st">No runs yet.</li>'}</ul></div>
-  </aside>
-</main>
-<script>
-const go=document.getElementById("go"),err=document.getElementById("err");
-const textEl=document.getElementById("text");
-function selectedMode(){{return "codex";}}
-// Open demo: one click creates a pre-validated showcase run (model-free,
-// deterministic) via its own endpoint — demos are NOT a run mode.
-document.querySelectorAll(".demo-open").forEach(b=>b.addEventListener("click",()=>{{
-  openDemo(b.dataset.demo,b);
-}}));
-async function openDemo(demoId,btn){{
-  btn.disabled=true;btn.textContent="Opening…";err.textContent="";
-  jobrow.hidden=false;jobrow.classList.remove("failed");jrFail.hidden=true;
-  jrStage.textContent="Preparing the demo…";
-  jrNote.textContent="Espresso is building a pre-validated showcase run. This is model-free and takes a few seconds.";
-  jrElapsed.textContent="";
-  const t0=Date.now();
-  try{{
-    const r=await fetch("/api/demos/"+encodeURIComponent(demoId),{{method:"POST"}});
-    const d=await r.json();
-    if(!r.ok)throw new Error(d.error||"failed");
-    for(let i=0;i<300;i++){{
-      await new Promise(res=>setTimeout(res,600));
-      let j;
-      try{{j=await (await fetch("/api/jobs/"+encodeURIComponent(d.job_id))).json();}}
-      catch{{jrNote.textContent="The local server did not answer. Check that Espresso is still running, then retry.";continue;}}
-      jrElapsed.textContent=Math.round((Date.now()-t0)/1000)+"s";
-      if(j.state==="done"&&j.result&&j.result.run_id){{jrStage.textContent="Demo ready — opening…";location.href="/run/"+encodeURIComponent(j.result.run_id);return;}}
-      if(j.state==="failed"){{jobFailed(j.error||"The demo could not be opened.",false);btn.disabled=false;btn.textContent="Open demo";return;}}
-    }}
-    jobFailed("Timed out preparing the demo.",false);btn.disabled=false;btn.textContent="Open demo";
-  }}catch(e){{jobFailed(e.message,false);btn.disabled=false;btn.textContent="Open demo";}}
-}}
-// Durable job row: the click is acknowledged immediately, the row stays visible
-// while the background job works (stage + elapsed + alive bar), and a failure
-// offers Retry — never a frozen page or raw fetch error.
-const jobrow=document.getElementById("jobrow"),jrStage=document.getElementById("jr-stage"),
-  jrElapsed=document.getElementById("jr-elapsed"),jrNote=document.getElementById("jr-note"),
-  jrFail=document.getElementById("jr-fail"),jrErr=document.getElementById("jr-err"),
-  jrRetry=document.getElementById("jr-retry");
-function jobFailed(msg,wasCodex){{
-  jrStage.textContent="Run failed";jobrow.classList.add("failed");
-  jrNote.textContent="";jrFail.hidden=false;jrErr.textContent=msg;
-  go.disabled=false;go.textContent="Run Espresso";
-}}
-async function startRun(){{
-  const text=textEl.value.trim();
-  if(!text){{err.textContent="Enter a claim first.";return;}}
-  const mode=selectedMode(),slow=mode==="codex";
-  go.disabled=true;go.textContent="Starting run…";err.textContent="";
-  jobrow.hidden=false;jobrow.classList.remove("failed");jrFail.hidden=true;
-  jrStage.textContent=slow?"Starting Codex deep run…":"Starting run…";
-  jrNote.textContent="Espresso is creating the run. This page stays usable while it works.";
-  jrElapsed.textContent="";
-  const t0=Date.now();
-  try{{
-    const r=await fetch("/api/runs",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{text,mode}})}});
-    const d=await r.json();
-    if(!r.ok)throw new Error(d.error||"failed");
-    const jobId=d.job_id;
-    for(let i=0;i<2000;i++){{
-      await new Promise(res=>setTimeout(res,800));
-      let j;
-      try{{j=await (await fetch("/api/jobs/"+encodeURIComponent(jobId))).json();}}
-      catch{{jrNote.textContent="The local server did not answer. Check that Espresso is still running, then retry.";continue;}}
-      const secs=Math.round((Date.now()-t0)/1000);
-      jrElapsed.textContent=secs+"s";
-      jrStage.textContent=slow?(secs>=30?"Codex is still working — deep runs take a while":"Codex is working…"):"Working…";
-      if(j.state==="done"&&j.result&&j.result.run_id){{jrStage.textContent="Run ready — opening…";location.href="/run/"+encodeURIComponent(j.result.run_id);return;}}
-      if(j.state==="failed"){{jobFailed(j.error||"The run could not be created.",slow);return;}}
-    }}
-    jobFailed("Timed out starting the run.",slow);
-  }}catch(e){{jobFailed(e.message,slow);}}
-}}
-go.addEventListener("click",startRun);
-jrRetry.addEventListener("click",startRun);
-</script></body></html>"""
-
-
-_INDEX_STYLE = """
-:root{--paper:#faf7f1;--card:#fffdf9;--ink:#211d16;--muted:#7a7367;--line:#e6dfd2;--esp:#6b4a2f;--esp-deep:#4d3521;--esp-soft:#f3ebe2;--esp-line:#d9c9b8;--green:#2e7d54}
-*{box-sizing:border-box}
-body{margin:0;min-height:100vh;background:linear-gradient(180deg,#fbfaf6,var(--paper) 360px);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-.top{display:flex;align-items:baseline;gap:16px;padding:20px clamp(28px,4vw,72px);border-bottom:1px solid var(--line)}
-.brand{display:flex;align-items:center;gap:9px;font-weight:700}
-.bean{width:14px;height:14px;border-radius:50% 50% 50% 50%/60% 60% 40% 40%;background:radial-gradient(circle at 35% 30%,#9a6f4b,#5a3d24)}
-.tagline{color:var(--muted);font-style:italic;font-family:Georgia,serif}
-.grid{width:min(1720px,calc(100vw - 72px));margin:0 auto;padding:42px 0 96px;display:grid;grid-template-columns:minmax(620px,1.15fr) minmax(500px,.85fr);gap:32px;align-items:start}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px rgba(43,33,21,.05),0 12px 32px rgba(43,33,21,.06)}
-.enter{padding:38px 42px}
-.enter h1{font-family:Georgia,serif;font-weight:500;font-size:clamp(40px,4.2vw,64px);line-height:1.02;margin:0 0 14px;max-width:12ch}
-.lead{color:var(--muted);margin:0 0 24px;max-width:68ch;font-size:17px}
-textarea{width:100%;min-height:220px;padding:18px 20px;border:1px solid var(--esp-line);border-radius:14px;font:inherit;font-size:18px;line-height:1.55;background:#fffefb;resize:vertical}
-.modes{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}
-.mode{border:1px solid var(--line);border-radius:12px;padding:14px 15px;cursor:pointer;background:#fffefb;display:block;min-height:86px}
-.mode:hover{border-color:var(--esp-line)}
-.mode input{margin-right:7px}
-.mode b{font-size:14px}.mode span{display:block;color:var(--muted);font-size:13px;margin-top:4px;padding-left:21px;line-height:1.45}
-.mode:has(input:checked){background:var(--esp-soft);border-color:var(--esp)}
-.go-row{display:flex;align-items:center;gap:14px;margin-top:8px}
-.go{appearance:none;border:0;background:var(--esp);color:#fff;font:inherit;font-weight:700;font-size:17px;padding:15px 32px;border-radius:12px;cursor:pointer}
-.go:hover{background:var(--esp-deep)}.go:disabled{opacity:.6;cursor:progress}
-.status{color:var(--muted);font-size:14px}
-.err{color:#9c3f2d;font-size:14px;margin:10px 0 0;min-height:1.2em}
-.jobrow{margin-top:16px;border:1px solid var(--esp-line);border-radius:11px;background:var(--esp-soft);padding:14px 16px;transition:border-color .2s ease,background .2s ease}
-.jobrow.failed{border-color:#dcb4a8;background:#faf0ec}
-.jr-head{display:flex;align-items:center;gap:10px}
-.jr-head b{font-size:14.5px}
-.jr-elapsed{margin-left:auto;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
-.jr-spin{width:13px;height:13px;border:2px solid rgba(107,74,47,.25);border-top-color:var(--esp);border-radius:50%;animation:jrspin .8s linear infinite;flex:0 0 auto}
-.jobrow.failed .jr-spin{display:none}
-@keyframes jrspin{to{transform:rotate(360deg)}}
-.jr-bar{height:4px;border-radius:99px;background:rgba(107,74,47,.12);overflow:hidden;margin:10px 0 8px}
-.jr-bar i{display:block;height:100%;width:34%;border-radius:99px;background:var(--esp);animation:jrslide 1.5s ease-in-out infinite}
-.jobrow.failed .jr-bar{display:none}
-@keyframes jrslide{0%{transform:translateX(-110%)}100%{transform:translateX(320%)}}
-.jr-note{color:var(--muted);font-size:13px;margin:0}
-.jr-actions{display:flex;gap:10px;margin-top:8px}
-.go.small{padding:8px 16px;font-size:14px}
-.ghost.small{appearance:none;border:1px solid var(--esp-line);background:transparent;color:var(--esp);font:inherit;font-size:14px;font-weight:650;padding:8px 16px;border-radius:10px;cursor:pointer}
-.ghost.small:hover{background:var(--esp-soft)}
-.side{display:grid;gap:20px}
-.card.how,.card.demos,.card.runs{padding:24px 26px}
-.side h2{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:0 0 12px}
-.how ol{margin:0;padding-left:20px;display:grid;gap:9px}.how li{font-size:15px}.how b{color:var(--esp-deep)}
-.demo-note{color:var(--muted);font-size:13.5px;margin:-4px 0 14px}
-.demo-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-.demo-card{border:1px solid var(--line);background:#fffefb;border-radius:12px;padding:15px 16px;min-height:154px;display:flex;flex-direction:column}
-.demo-card b{display:block;font-size:15px}
-.demo-what{display:block;color:var(--ink);font-size:13px;margin-top:3px}
-.demo-lesson{display:block;color:var(--muted);font-size:12.5px;margin-top:5px;line-height:1.5}
-.demo-open{appearance:none;margin-top:auto;align-self:flex-start;border:1px solid var(--esp-line);background:transparent;color:var(--esp);font:inherit;font-size:12.5px;font-weight:650;padding:7px 14px;border-radius:8px;cursor:pointer}
-.demo-open:hover{background:var(--esp-soft)}
-.demo-open:disabled{opacity:.6;cursor:progress}
-.runs ul{list-style:none;padding:0;margin:0;display:grid;gap:7px}
-.runs li{display:flex;justify-content:space-between;gap:10px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:#fffefb}
-.runs a{color:var(--ink);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
-.runs a:hover{color:var(--esp)}
-.st{color:var(--muted);font-size:12.5px;white-space:nowrap}
-@media (max-width:1224px){.grid{grid-template-columns:1fr;width:min(900px,calc(100vw - 40px));padding:28px 0 72px}.enter h1{max-width:none}.demo-grid{grid-template-columns:1fr}}
-@media (max-width:700px){.grid{width:calc(100vw - 28px);padding:18px 0 54px}.top{padding:15px 16px}.tagline{display:none}.enter{padding:24px 22px}.enter h1{font-size:36px}.modes{grid-template-columns:1fr}textarea{min-height:180px}.card.how,.card.demos,.card.runs{padding:20px}}
-""".strip()
 
 
 def serve(runs_root: Path, *, host: str = "127.0.0.1", port: int = 8765, provider: str = "external") -> None:
-    """Start the workbench server (blocking). Binds to localhost by default."""
+    """Start the workbench server (blocking). Binds to localhost by default.
 
+    Fails closed when the React cockpit build is missing: starting anyway would
+    either show nothing or (historically) a stale fallback UI that gets
+    mistaken for the product.
+    """
+
+    if not (_WEB_DIST / "index.html").is_file():
+        raise SystemExit(
+            "The React cockpit build (web/dist) was not found; there is no "
+            f"fallback UI. Build it first:\n  {_BUILD_COMMANDS}"
+        )
     workbench = Workbench(runs_root, provider=provider)
     httpd = ThreadingHTTPServer((host, port), _make_handler(workbench))
     url = f"http://{host}:{port}/"

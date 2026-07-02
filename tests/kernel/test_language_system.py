@@ -14,7 +14,7 @@ from espresso_proof.ui.descriptions import (
 from espresso_proof.ui.memo import build_concise_memo
 from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
 from espresso_proof.orchestration.run_dashboard import render_run_dashboard
-from espresso_proof.server import Workbench, _friendly_error, _index_page
+from espresso_proof.server import Workbench, _friendly_error
 from espresso_proof.kernel.validators import validate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
@@ -86,13 +86,6 @@ def test_loop_stop_and_effort_phrases_are_human() -> None:
 # --------------------------------------------------------------------------- #
 # main-path lexicon: entry / run / memo
 # --------------------------------------------------------------------------- #
-
-
-def test_entry_page_main_path_lexicon(tmp_path: Path) -> None:
-    wb = Workbench(tmp_path / "root", provider="stub")
-    text = _visible_text(_index_page(wb))
-    for bad in _FORBIDDEN_VISIBLE:
-        assert bad not in text, bad
 
 
 def test_run_page_main_path_lexicon(tmp_path: Path) -> None:

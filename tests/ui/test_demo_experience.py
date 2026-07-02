@@ -17,7 +17,7 @@ from espresso_proof.orchestration.demos import DEMOS, create_demo_run, demo_for_
 from espresso_proof.kernel.io import read_yaml
 from espresso_proof.ui.memo import build_concise_memo
 from espresso_proof.orchestration.run_dashboard import render_run_dashboard
-from espresso_proof.server import Workbench, _index_page, _make_handler
+from espresso_proof.server import Workbench, _make_handler
 from espresso_proof.kernel.validators import validate_run
 
 _PROOF_WORDS = ("proof-close", "proof complete", "the theorem is proved", "we have proved")
@@ -107,17 +107,6 @@ def test_demo_run_page_shows_what_this_demo_shows(tmp_path: Path) -> None:
     assert DEMOS["p2-group"]["next_click"] in html
     # non-demo runs get no panel
     assert demo_for_project("workbench") is None
-
-
-def test_entry_page_open_demo_section(tmp_path: Path) -> None:
-    wb = Workbench(tmp_path / "root", provider="stub")
-    html = _index_page(wb)
-    assert "Open demo" in html
-    assert "Demo mode" not in html  # demos are not a mode
-    for card in DEMOS.values():
-        assert card["title"] in html
-        assert card["demonstrates"] in html
-    assert 'data-demo="p2-group"' in html
 
 
 def test_demo_pages_show_no_private_paths(tmp_path: Path) -> None:
