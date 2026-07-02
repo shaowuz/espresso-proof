@@ -1,13 +1,11 @@
-"""Phase 3: shared blocker-provenance classification.
+"""Blocker-provenance classification for the prover loop.
 
-Blocker provenance is kept as a small shared classifier and is intentionally kept independent from removed campaign harnesses. This avoids
-the gate a hidden dependency on harness-internal logic. Phase 3 extracts it into
-this single, self-contained leaf module so BOTH the loop harness (cycle recording)
-and the loop replay gate share ONE source of truth and cannot drift apart.
-
-This is a behavior-preserving move: the functions are unchanged (no new retry
-semantics). ``provenance_is_human_gated`` remains the single predicate for "this
-blocker can never be a bounded loop-autofix target".
+A small, self-contained leaf classifier consumed by
+``orchestration.prover_loop_driver`` (its old homes — the dogfood loop harness
+and the loop replay gate — were deleted; the module moved here from the
+now-removed ``loop/`` package). ``provenance_is_human_gated`` remains the
+single predicate for "this blocker can never be a bounded loop-autofix
+target".
 """
 from __future__ import annotations
 

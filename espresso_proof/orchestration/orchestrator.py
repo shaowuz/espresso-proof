@@ -26,7 +26,7 @@ from espresso_proof.claim.claim_clear import (
     write_claim_clear_gate,
 )
 from espresso_proof.claim.persisted_claim_normalization import normalize_persisted_claim_ledger
-from espresso_proof.agents.front_half_agents import run_front_half_agent_pass, write_front_half_run
+from espresso_proof.front_half import run_front_half_agent_pass, write_front_half_run
 from espresso_proof.validation.front_half import validate_front_half_run
 from espresso_proof.kernel.io import read_text, read_yaml, write_yaml
 from espresso_proof.literature.literature_discovery import discover_literature as run_literature_discovery

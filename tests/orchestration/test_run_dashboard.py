@@ -6,7 +6,8 @@ from typer.testing import CliRunner
 
 from espresso_proof.kernel.agent_run_status import set_agent_status
 from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
-from espresso_proof.cli import app, bank_dashboard_command, run_dashboard_command, serve_command
+from espresso_proof.cli import app, serve_command
+from espresso_proof.cli_dev import bank_dashboard_command, run_dashboard_command
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
 from espresso_proof.orchestration.run_dashboard import render_run_dashboard, write_run_dashboard
