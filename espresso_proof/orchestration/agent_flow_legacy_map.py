@@ -310,14 +310,26 @@ LEGACY_MAPPING: tuple[AgentFlowLegacyMapping, ...] = (
         stage_id="human_strategy_preference",
         implementation_status="implemented",
         runtime_kind="direct_runtime",
-        physical_stages=("orchestrator:resume_run", "cli:choose-strategy", "server:choice"),
+        physical_stages=(
+            "orchestrator:resume_run",
+            "orchestrator:auto_continue",
+            "cli:choose-strategy",
+            "server:choice",
+        ),
         artifacts=("human_choice.yaml",),
         manifest_states=(
             "HUMAN_CHOICE_CONTINUE_SELECTED",
             "HUMAN_CHOICE_REVISE_SELECTED",
             "HUMAN_CHOICE_STOP_SELECTED",
+            # honest auto peer: machinery picked the continue route
+            # (selected_by='auto', human_confirmed=false); never HUMAN_*.
+            "AUTO_CHOICE_CONTINUE_SELECTED",
         ),
-        notes=("Human choice steers route/budget only; it is not evidence.",),
+        notes=(
+            "Human choice steers route/budget only; it is not evidence.",
+            "auto_continue records the same choice with selected_by='auto'; "
+            "it can never claim human confirmation.",
+        ),
     ),
     AgentFlowLegacyMapping(
         stage_id="time_allocation",

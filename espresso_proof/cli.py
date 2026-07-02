@@ -43,7 +43,11 @@ from espresso_proof.agents.llm_agents import resolve_agent_gate as resolve_llm_a
 from espresso_proof.agents.llm_agents import build_client as build_llm_client
 from espresso_proof.agents.llm_agents import build_prover_loop_report
 from espresso_proof.agents.front_half_agents import run_front_half_agent_pass
-from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
+from espresso_proof.orchestration.orchestrator import (
+    auto_select_strategy,
+    orchestrate_run,
+    resume_run,
+)
 from espresso_proof.orchestration.prover_loop_driver import continue_prover_loop
 from espresso_proof.kernel.run_lock import run_writer_lock
 from espresso_proof.agents.llm_agents import external_agent_diagnostic
@@ -176,19 +180,30 @@ def orchestrate(
     run_lit_scout: bool = typer.Option(False, "--literature-scout", help="Run the LLM Literature Scout (candidate sources per proof step) before the loop (resume)."),
     auto_ground: Path | None = typer.Option(None, "--auto-ground", file_okay=False, help="Local corpus directory: auto resolve + ground a source from it before the loop (resume; fail-closed)."),
     fast: bool = typer.Option(False, "--fast", help="Fast core pass: show an initial claim judgment + preliminary routes quickly; DEFER literature/examples/counterexamples to on-demand 'run-agent' (fresh run only)."),
+    auto_continue: bool = typer.Option(False, "--auto-continue", help="Continue past a PENDING prover human gate in the same process: machinery selects the top-scored strategy, recorded honestly (selected_by=auto, human_confirmed=false). Earlier human questions (claim clarification, ask_human) still stop the run. With --resume, replaces --select-strategy."),
 ) -> None:
     """Run the Core Flow end-to-end for an arbitrary claim, stopping at the human gate.
 
     Fresh run: provide --input. The orchestrator scaffolds the run, dispatches the
     front-half agents, runs literature + the live Prover/Reviewers, validates after
-    each stage, and stops at the human gate. Resume: provide --resume <run_dir>
-    with --select-strategy (and --effort) to record the human choice and render the
-    concise memo. The kernel validates every stage; nothing here upgrades
-    proof/source/evidence status.
+    each stage, and stops at the human gate — or, with --auto-continue, keeps going
+    past a pending prover gate with an honestly-recorded automated selection.
+    Resume: provide --resume <run_dir> with --select-strategy (and --effort) to
+    record the human choice — or --auto-continue for the automated selection — and
+    render the concise memo. The kernel validates every stage; nothing here
+    upgrades proof/source/evidence status, and an automated choice can never claim
+    human confirmation.
     """
     if resume is not None:
-        if not select_strategy:
-            raise typer.BadParameter("--resume requires --select-strategy")
+        if select_strategy and auto_continue:
+            raise typer.BadParameter(
+                "--select-strategy records a HUMAN choice; drop it or drop --auto-continue"
+            )
+        if not select_strategy and not auto_continue:
+            raise typer.BadParameter(
+                "--resume requires --select-strategy (or --auto-continue for an "
+                "automated, honestly-recorded selection)"
+            )
         if provider not in {"stub", "openai", "external"}:
             raise typer.BadParameter("provider must be stub, openai, or external")
         validate_run(resume)
@@ -245,6 +260,16 @@ def orchestrate(
                 f"Auto-ground (local-first): resolution={ag['resolution_status']} "
                 f"(retrieval never sets source_backed; the grounding gate decides)"
             )
+        if auto_continue:
+            choice = auto_select_strategy(run_dir=resume)
+            select_strategy = choice["selected_strategy"]
+            if effort is None:
+                effort = choice["effort"]
+            typer.echo(
+                f"Auto-continue: machinery selected strategy {select_strategy!r} "
+                f"(score={choice['score']}, effort={effort}); recorded honestly as "
+                "selected_by=auto, human_confirmed=false"
+            )
         memo = resume_run(
             run_dir=resume,
             selected_strategy=select_strategy,
@@ -255,6 +280,7 @@ def orchestrate(
             api_key_env=api_key_env,
             external_agent_command_env=external_agent_command_env,
             reviewer_set=reviewer_set,
+            selected_by="auto" if auto_continue else "human",
         )
         typer.echo(memo)
         dashboard = write_run_dashboard(resume)
@@ -286,6 +312,8 @@ def orchestrate(
         reviewer_set=reviewer_set,
         literature_mode=literature_mode,
         fast=fast,
+        auto_continue=auto_continue,
+        rounds=rounds,
     )
     typer.echo(f"Wrote run artifacts to {result['run_dir']}")
     typer.echo(f"Dashboard: {result['dashboard']}")
@@ -298,6 +326,27 @@ def orchestrate(
             f"  espresso run-agent --run {result['run_dir']} --agent counterexamples\n"
             f"  espresso run-agent --run {result['run_dir']} --agent literature\n"
             f"  espresso run-agent --run {result['run_dir']} --agent failure-patterns"
+        )
+    auto_report = result.get("auto_continue")
+    if auto_report and auto_report.get("attempted"):
+        typer.echo(
+            f"Auto-continue: machinery selected strategy "
+            f"{auto_report['selected_strategy']!r} (effort={auto_report['effort']}, "
+            f"decision={auto_report['decision']}); recorded honestly as "
+            "selected_by=auto, human_confirmed=false"
+        )
+        typer.echo(result["memo"])
+        return
+    if auto_report is not None:
+        # honest skip: an earlier human question stopped the run; machinery
+        # must not answer it.
+        typer.echo(f"Auto-continue skipped: {auto_report['reason']}")
+    elif auto_continue:
+        # the run returned before the prover gate (e.g. claim clarification);
+        # that question is a human's to answer.
+        typer.echo(
+            "Auto-continue skipped: the run stopped at an earlier human "
+            "question, which machinery must not answer"
         )
     typer.echo(
         f"Resume with: espresso orchestrate --resume {result['run_dir']} "

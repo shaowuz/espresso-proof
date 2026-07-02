@@ -164,6 +164,7 @@ def test_manifest_state_mappings_are_known_and_single_owner() -> None:
         "HUMAN_CHOICE_CONTINUE_SELECTED",
         "HUMAN_CHOICE_REVISE_SELECTED",
         "HUMAN_CHOICE_STOP_SELECTED",
+        "AUTO_CHOICE_CONTINUE_SELECTED",
         "WAITING_LLM_AGENT_HUMAN_GATE",
     )
     assert stage_ids_for_manifest_state("SCAFFOLDED") == ("scaffold",)

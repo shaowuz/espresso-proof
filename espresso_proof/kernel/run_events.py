@@ -50,6 +50,10 @@ EVENT_KINDS = (
     # Goal 65 control-flow: the Prover pass was intentionally not run because the
     # front half asked to stop before proof search (loop_control stop/ask_human).
     "prover_pass_skipped",
+    # Pivot PR2: machinery (not a human) selected the strategy at the prover
+    # human gate; the artifacts record selected_by/resolved_by='auto' with
+    # human_confirmed=false. Diagnostic timeline entry only.
+    "auto_choice_selected",
 )
 
 
