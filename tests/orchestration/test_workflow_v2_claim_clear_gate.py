@@ -24,7 +24,6 @@ from espresso_proof.orchestration.prover_loop_driver import continue_prover_loop
 from espresso_proof.literature.retrieval_grounding import retrieve_and_ground
 from espresso_proof.orchestration.run_dashboard import (
     render_run_dashboard,
-    render_topbar_status_html,
     status_summary,
 )
 from espresso_proof.ui.cockpit_view import build_snapshot
@@ -223,7 +222,7 @@ def test_unclear_claim_runtime_and_ui_snapshots_agree(
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     summary = status_summary(run_dir)
     dashboard = render_run_dashboard(run_dir)
-    topbar = render_topbar_status_html(run_dir)
+    topbar = dashboard  # topbar inner HTML is embedded in the static dashboard
     cockpit = build_snapshot(run_dir, run_dir.name, summary)
     assert manifest["current_state"] == "WAITING_CLAIM_CLARIFICATION"
     assert summary["state"] == "Waiting Claim Clarification"

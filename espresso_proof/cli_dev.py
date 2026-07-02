@@ -6,13 +6,12 @@ the bottom of cli.py."""
 from __future__ import annotations
 
 import json
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 
-from espresso_proof.kernel.contracts import DEFAULT_AGENT_FLOW, default_agent_contracts
+from espresso_proof.kernel.contracts import default_agent_contracts
 from espresso_proof.ui.descriptions import (
     describe_grade,
     describe_proof_language,
@@ -25,17 +24,12 @@ from espresso_proof.literature.literature_discovery import discover_literature a
 from espresso_proof.literature.literature_review_agent import ReviewSourceSpec, run_literature_review_agent
 from espresso_proof.literature.literature_scout import run_literature_scout
 from espresso_proof.literature.retrieval_grounding import retrieve_and_ground
-from espresso_proof.agents.llm_agents import append_prover_loop_round
-from espresso_proof.agents.llm_agents import resolve_agent_gate as resolve_llm_agent_gate
 from espresso_proof.agents.llm_agents import build_client as build_llm_client
 from espresso_proof.agents.llm_agents import build_prover_loop_report
-from espresso_proof.agents.front_half_agents import run_front_half_agent_pass
-from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
 from espresso_proof.orchestration.prover_loop_driver import continue_prover_loop
 from espresso_proof.kernel.run_lock import run_writer_lock
 from espresso_proof.agents.llm_agents import external_agent_diagnostic
 from espresso_proof.agents.llm_agents import openai_agent_diagnostic
-from espresso_proof.agents.llm_agents import route_initial_reviewer_blockers_to_update_inbox
 from espresso_proof.agents.llm_agents import run_llm_agent_pass
 from espresso_proof.agents.llm_agents import write_initial_prover_round_artifacts
 from espresso_proof.orchestration.failure_classifier import classify_failures
@@ -56,32 +50,8 @@ from espresso_proof.kernel.research_bank import (
 # `retrieve-and-ground` command depends on).
 from espresso_proof.literature.literature_retrieval import retrieve_and_ground as retrieve_and_ground_from_corpus
 from espresso_proof.literature.literature_retrieval import retrieve_sources
-from espresso_proof.verification.mathematical_judgment import judge_run
 from espresso_proof.memory.memory_context import build_memory_context
 from espresso_proof.kernel.subgoal_graph import build_subgoal_graph
-from espresso_proof.verification.finite_group_verifier import verify_identity_on_table
-from espresso_proof.verification.proof_verification import (
-    auto_wire_scoped_verifications,
-    verify_tensor_left_exact_counterexample_in_run,
-    verify_finite_groups,
-    verify_gl2_f3_solvable_in_run,
-    verify_identity_table_in_run,
-    verify_matrix_rank_in_run,
-    verify_ring_identity_in_run,
-)
-from espresso_proof.verification.symbolic_identity import SUPPORTED_RING_IDENTITIES
-from espresso_proof.evaluation.benchmark import run_benchmark
-from espresso_proof.evaluation.calibration import run_calibration
-from espresso_proof.evaluation.real_math_benchmark import (
-    build_real_math_capability_report,
-    case_from_run as real_math_case_from_run,
-)
-from espresso_proof.claim.claim_clear import (
-    CLAIM_CLEAR_BLOCKED_ON_DEMAND_AGENTS,
-    ClaimClearBlockedError,
-    ensure_claim_clear_for_downstream,
-)
-from espresso_proof.evaluation.scorecard import render_scorecard_markdown, run_scorecard
 from espresso_proof.ui.memo import build_concise_memo
 from espresso_proof.kernel.proof_language import scrub_proof_language
 from espresso_proof.kernel.surface_warnings import (
@@ -90,7 +60,7 @@ from espresso_proof.kernel.surface_warnings import (
     render_warning_lines,
 )
 from espresso_proof.evaluation.reviewer_checklist import review_checklist
-from espresso_proof.memory.memory import load_memory_index, summarize_memory, write_memory_entry
+from espresso_proof.memory.memory import summarize_memory
 from espresso_proof.orchestration.mock_pipeline import run_mock_critique
 from espresso_proof.literature.pdf_ingestion import (
     extract_candidate_locators,
@@ -98,8 +68,6 @@ from espresso_proof.literature.pdf_ingestion import (
     ingest_source_for_theorems,
     read_source_bytes,
 )
-from espresso_proof.verification.source_verification import ground_run
-from espresso_proof.literature.source_grounding_stage import prepare_source_grounding
 from espresso_proof.kernel.external_tool_runner import (
     DEFAULT_TIMEOUT_SECONDS,
     FAKE_TOOLS,
@@ -107,21 +75,15 @@ from espresso_proof.kernel.external_tool_runner import (
     run_and_record_external_tool,
     run_completed_cleanly,
 )
-from espresso_proof.verification.external_tool_adapters import run_exact_modexp_adapter
 from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
-from espresso_proof.verification.verifier import audit_evidence, verify_computation_checks
 from espresso_proof.kernel.models import (
     AdmissionCheck,
     AgentContracts,
-    ContinueDecision,
     ExampleFeedbackSummary,
-    ExplorationMode,
-    HumanChoice,
     HumanExampleFeedback,
     LLMAgentRunReport,
     LiteratureReviewAgentReport,
     LiteratureReviewReport,
-    MemoryEntry,
     ProverLoopReport,
     ProofGapResolutionReport,
     TheoremApplicabilityReport,
@@ -1100,24 +1062,6 @@ def review_theorem_applicability_command(
         "source status unchanged."
     )
     typer.echo(f"-> {run / 'theorem_applicability_review.yaml'}")
-
-
-@app.command("audit-evidence")
-def audit_evidence_command(
-    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
-) -> None:
-    """Evidence Auditor: a computation EARNS computation_checked only from a
-    confirming machine result (refuted -> wrong, error/unsupported -> human_needed).
-    The machine earns the status; the agent never self-certifies. idea_grade is
-    untouched."""
-    validate_run(run)
-    _require_claim_clear_for_cli(run)
-    computations = audit_evidence(run)
-    checked = sum(1 for c in computations.get("checks", []) if c.get("status") == "checked")
-    typer.echo(
-        f"Evidence audit: {checked} computation(s) machine-checked "
-        f"-> {run / 'computation_checks.yaml'}"
-    )
 
 
 @app.command("review-literature-agent")

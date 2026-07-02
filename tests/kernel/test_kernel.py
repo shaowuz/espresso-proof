@@ -9,7 +9,8 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from espresso_proof.cli import _assert_fixture_expectations, app
+from espresso_proof.cli import app
+from espresso_proof.cli_shared import _assert_fixture_expectations
 from espresso_proof.kernel.contracts import default_agent_contracts
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.orchestration.mock_pipeline import run_mock_critique

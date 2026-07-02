@@ -16,7 +16,6 @@ from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_ru
 from espresso_proof.kernel.proof_language import contains_proof_language
 from espresso_proof.orchestration.run_dashboard import (
     render_run_dashboard,
-    render_topbar_status_html,
     status_summary,
 )
 from espresso_proof.ui.cockpit_view import build_snapshot
@@ -1173,7 +1172,7 @@ def test_task09a_runtime_ui_kernel_and_vscode_parity_for_advisory_surfaces(
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     summary = status_summary(run_dir)
     dashboard = render_run_dashboard(run_dir)
-    topbar = render_topbar_status_html(run_dir)
+    topbar = dashboard  # topbar inner HTML is embedded in the static dashboard
     cockpit = build_snapshot(run_dir, run_dir.name, summary)
     optional = manifest.get("optional_artifacts", {})
     assert optional["time_allocation"] == "time_allocation.yaml"

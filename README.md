@@ -64,10 +64,11 @@ PR merges into main — GitHub runs it automatically via
 
 Run these directly; there is no wrapper script.
 
-For a deterministic server smoke check that does not call Codex:
+For a deterministic end-to-end smoke check that does not call a real model
+(the server itself supports only `--provider external`):
 
 ```bash
-uv run espresso serve --provider stub
+uv run espresso orchestrate --input problem.md --project demo --provider stub --front-half stub
 ```
 
 ```bash

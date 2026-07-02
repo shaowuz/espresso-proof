@@ -17,7 +17,7 @@ from pathlib import Path
 from espresso_proof.orchestration.advisory_proof_sketch import capture_advisory_proof_sketch_from_latest_round
 from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.claim.persisted_claim_normalization import normalize_persisted_claim_ledger
-from espresso_proof.loop.blocker_provenance import blocker_provenance, classify_blocker
+from espresso_proof.orchestration.blocker_provenance import blocker_provenance, classify_blocker
 from espresso_proof.kernel.io import (
     list_files_with_suffix,
     path_exists,
