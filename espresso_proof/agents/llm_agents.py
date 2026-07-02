@@ -24,7 +24,15 @@ from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.kernel.io import path_exists, read_yaml, write_yaml
 from espresso_proof.kernel.models import LLMAgentRunReport, ProverLoopReport, ProverRoundIndex, ProverRoundReport
 from espresso_proof.kernel.pressure_status import artifact_revision_hash
-from espresso_proof.kernel.proof_language import PROOF_COMPLETE_PHRASES
+from espresso_proof.kernel.llm_client import LLMClient  # noqa: F401 - canonical home; re-exported for existing importers
+from espresso_proof.kernel.proof_language import (  # noqa: F401 - re-exported
+    FORBIDDEN_LANGUAGE,
+    PROOF_COMPLETE_PHRASES,
+    RESERVED_STATUS_LANGUAGE,
+    forbidden_pattern,
+    safe_list,
+    safe_text,
+)
 from espresso_proof.kernel.research_bank import load_bankable_dict
 from espresso_proof.kernel.time_allocation import (
     TIME_ALLOCATION_FILENAME,
@@ -32,7 +40,7 @@ from espresso_proof.kernel.time_allocation import (
     ensure_prover_time_allocation_plan,
     time_allocation_prompt_payload,
 )
-from espresso_proof.orchestration.update_inbox_service import (
+from espresso_proof.kernel.update_inbox_service import (
     append_scheduling_update,
     write_time_allocation_from_update_inbox,
 )
@@ -199,67 +207,6 @@ PROOF_GAP_RESOLVER_OUTPUT_SCHEMA = {
 # detects but redaction misses would let a live reviewer/prover sentence (e.g.
 # "... is proven irrational") fail the run closed instead of being contained.
 # test_forbidden_language_redaction_covers_validator pins this invariant.
-FORBIDDEN_LANGUAGE = [
-    "proved",
-    "proven",
-    "proves",
-    "verified",
-    "certainly",
-    "obviously",
-    "clearly",
-    "complete proof",
-    "proof complete",
-    "this proof",
-    "full proof",
-    "proof establishes",
-    "establishes the theorem",
-    "establishes the claim",
-    "no gaps remain",
-    "the claim is true",
-    "the theorem is established",
-    "proof-close",
-    # Goal 41: Chinese global completion markers (FORBIDDEN_LANGUAGE must stay
-    # a superset of the validator's parse-time gate; the ASCII lookarounds in
-    # forbidden_pattern() are satisfied around CJK characters).
-    "证毕",
-    "证明完毕",
-    "证明完成",
-    "定理得证",
-    "命题得证",
-    "猜想得证",
-    "定理已证明",
-    "命题已证明",
-    "我们证明了该定理",
-    "我们证明了这个定理",
-]
-FORBIDDEN_LANGUAGE = list(dict.fromkeys([*FORBIDDEN_LANGUAGE, *PROOF_COMPLETE_PHRASES]))
-
-RESERVED_STATUS_LANGUAGE = [
-    "proof_status",
-    "proof-language status",
-    "proof language status",
-    "source_status",
-    "source status",
-    "source_backed_status",
-    "source-backed status",
-    "source backed status",
-    "source_backed",
-    "source-backed",
-    "source backed",
-    "checked_evidence",
-    "checked evidence",
-    "evidence_status",
-    "evidence status",
-    "refutation_status",
-    "refutation status",
-    "grade_status",
-    "grade status",
-    "agent_consensus_mock_checked",
-    "agent consensus mock checked",
-    "mock_checked",
-    "mock checked",
-]
-RESERVED_STATUS_LANGUAGE = list(dict.fromkeys(RESERVED_STATUS_LANGUAGE))
 
 INPUT_ARTIFACTS = [
     "locked_claim.yaml",
@@ -325,12 +272,6 @@ EXTERNAL_AGENT_TIMEOUT_ENV = "ESPRESSO_EXTERNAL_AGENT_TIMEOUT_SECONDS"
 CODEX_ADAPTER_DIAGNOSTIC_KEY = "_espresso_codex_adapter"
 
 
-class LLMClient(Protocol):
-    provider: str
-    model: str
-
-    def complete_json(self, *, system: str, prompt: str) -> dict:
-        ...
 
 
 def _required_json_schema_for_system(system: str) -> dict:
@@ -2517,10 +2458,6 @@ def _reviewer_roles(reviewer_set: str, verifier_count: int) -> list[str]:
     return ["verifier" for _ in range(max(3, verifier_count))]
 
 
-def safe_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [safe_text(item) for item in value if str(item).strip()][:12]
 
 
 def safe_prover_list(value: object) -> tuple[list[str], bool]:
@@ -2581,23 +2518,6 @@ def _neutralize_unchecked_pressure_support(text: str) -> str:
     return out
 
 
-def safe_text(value: object) -> str:
-    text = re.sub(r"\s+", " ", str(value)).strip()
-    for phrase in sorted(RESERVED_STATUS_LANGUAGE, key=len, reverse=True):
-        text = re.sub(
-            forbidden_pattern(phrase),
-            "[withheld status phrase]",
-            text,
-            flags=re.IGNORECASE,
-        )
-    for phrase in sorted(FORBIDDEN_LANGUAGE, key=len, reverse=True):
-        text = re.sub(
-            forbidden_pattern(phrase),
-            "[withheld proof-like phrase]",
-            text,
-            flags=re.IGNORECASE,
-        )
-    return text[:1200] or "No usable agent text returned."
 
 
 def collect_unsafe_language(raw: dict) -> list[str]:
@@ -2615,9 +2535,6 @@ def collect_unsafe_language(raw: dict) -> list[str]:
     ]
 
 
-def forbidden_pattern(phrase: str) -> str:
-    escaped = re.escape(phrase).replace(r"\ ", r"\s+")
-    return rf"(?<![A-Za-z0-9_]){escaped}(?![A-Za-z0-9_])"
 
 
 def normalize_verdict(value: object) -> str:

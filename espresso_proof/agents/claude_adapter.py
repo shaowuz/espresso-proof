@@ -227,13 +227,13 @@ def _scrub_candidate(data: dict) -> dict:
     try:
         if str(ROOT) not in sys.path:
             sys.path.insert(0, str(ROOT))
-        from espresso_proof.orchestration.advisory_proof_sketch import _scrub_sketch_text
+        from espresso_proof.orchestration.advisory_proof_sketch import scrub_sketch_text
     except Exception:  # noqa: BLE001 - never block on the scrubber being importable
         return data
 
     def scrub(value):
         if isinstance(value, str):
-            return _scrub_sketch_text(value)
+            return scrub_sketch_text(value)
         if isinstance(value, list):
             return [scrub(v) for v in value]
         return value

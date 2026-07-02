@@ -14,7 +14,7 @@ from espresso_proof.kernel.time_allocation import (
 from espresso_proof.kernel.models import TimeAllocationPlan
 from espresso_proof.kernel.update_inbox import append_update_inbox_event, load_update_inbox
 from espresso_proof.kernel.surface_warnings import pending_update_inbox_ids, refresh_final_report_disclosures
-from espresso_proof.orchestration.update_inbox_service import update_inbox_consumption_rows
+from espresso_proof.kernel.update_inbox_service import update_inbox_consumption_rows
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.kernel.validators import validate_run
 

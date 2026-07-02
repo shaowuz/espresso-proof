@@ -12,12 +12,12 @@ from espresso_proof.orchestration.agent_flow_driver import (
     front_half_stages_for_runner,
     record_agent_flow_stage_status,
 )
-from espresso_proof.orchestration.agent_flow_legacy_map import (
+from espresso_proof.kernel.agent_flow_legacy_map import (
     LEGACY_FRONT_HALF_FAST_ORDER,
     LEGACY_FRONT_HALF_FULL_ORDER,
     mapped_stage_ids,
 )
-from espresso_proof.orchestration.agent_flow_spec import ordered_stage_ids
+from espresso_proof.kernel.agent_flow_spec import ordered_stage_ids
 from espresso_proof.orchestration.agent_flow_status import STAGE_STATUS_FILENAME
 from espresso_proof.orchestration.agent_runner import run_single_agent
 from espresso_proof.orchestration.mock_pipeline import run_mock_critique

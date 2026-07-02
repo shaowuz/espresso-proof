@@ -181,3 +181,104 @@ __all__ = [
     "scrub_source_support_language",
     "scrub_draft_status_claims",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# Agent-output sanitization (moved here from agents.llm_agents: this file is
+# the language system's single home, and strategy/front_half/literature must
+# be able to sanitize agent text without importing the agents package).
+# --------------------------------------------------------------------------- #
+
+# A superset of the proof-complete phrases the validators forbid at parse time
+# (test_forbidden_language_redaction_covers_validator pins the invariant).
+FORBIDDEN_LANGUAGE = [
+    "proved",
+    "proven",
+    "proves",
+    "verified",
+    "certainly",
+    "obviously",
+    "clearly",
+    "complete proof",
+    "proof complete",
+    "this proof",
+    "full proof",
+    "proof establishes",
+    "establishes the theorem",
+    "establishes the claim",
+    "no gaps remain",
+    "the claim is true",
+    "the theorem is established",
+    "proof-close",
+    # Goal 41: Chinese global completion markers (FORBIDDEN_LANGUAGE must stay
+    # a superset of the validator's parse-time gate; the ASCII lookarounds in
+    # forbidden_pattern() are satisfied around CJK characters).
+    "证毕",
+    "证明完毕",
+    "证明完成",
+    "定理得证",
+    "命题得证",
+    "猜想得证",
+    "定理已证明",
+    "命题已证明",
+    "我们证明了该定理",
+    "我们证明了这个定理",
+]
+FORBIDDEN_LANGUAGE = list(dict.fromkeys([*FORBIDDEN_LANGUAGE, *PROOF_COMPLETE_PHRASES]))
+
+RESERVED_STATUS_LANGUAGE = [
+    "proof_status",
+    "proof-language status",
+    "proof language status",
+    "source_status",
+    "source status",
+    "source_backed_status",
+    "source-backed status",
+    "source backed status",
+    "source_backed",
+    "source-backed",
+    "source backed",
+    "checked_evidence",
+    "checked evidence",
+    "evidence_status",
+    "evidence status",
+    "refutation_status",
+    "refutation status",
+    "grade_status",
+    "grade status",
+    "agent_consensus_mock_checked",
+    "agent consensus mock checked",
+    "mock_checked",
+    "mock checked",
+]
+RESERVED_STATUS_LANGUAGE = list(dict.fromkeys(RESERVED_STATUS_LANGUAGE))
+
+
+def forbidden_pattern(phrase: str) -> str:
+    escaped = re.escape(phrase).replace(r"\ ", r"\s+")
+    return rf"(?<![A-Za-z0-9_]){escaped}(?![A-Za-z0-9_])"
+
+
+def safe_text(value: object) -> str:
+    text = re.sub(r"\s+", " ", str(value)).strip()
+    for phrase in sorted(RESERVED_STATUS_LANGUAGE, key=len, reverse=True):
+        text = re.sub(
+            forbidden_pattern(phrase),
+            "[withheld status phrase]",
+            text,
+            flags=re.IGNORECASE,
+        )
+    for phrase in sorted(FORBIDDEN_LANGUAGE, key=len, reverse=True):
+        text = re.sub(
+            forbidden_pattern(phrase),
+            "[withheld proof-like phrase]",
+            text,
+            flags=re.IGNORECASE,
+        )
+    return text[:1200] or "No usable agent text returned."
+
+
+def safe_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [safe_text(item) for item in value if str(item).strip()][:12]
