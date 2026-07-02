@@ -9,7 +9,7 @@ import pytest
 from espresso_proof.agents.llm_agents import load_agent_context
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.kernel.validators import validate_run
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.strategy.brief import build_strategy_artifacts, write_strategy_artifacts
 from espresso_proof.strategy.generation import generate_strategy_candidates
 from espresso_proof.strategy.grading import StrategyGradingResult, grade_strategy_candidates

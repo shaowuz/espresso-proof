@@ -17,7 +17,7 @@ from espresso_proof.agents.front_half_agents import run_front_half_agent_pass
 from espresso_proof.kernel.io import read_yaml, write_yaml
 import espresso_proof.agents.llm_agents as llm_agents
 from espresso_proof.agents.llm_agents import StubLLMClient
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
 from espresso_proof.literature.pdf_ingestion import ingest_source_for_theorems
 from espresso_proof.orchestration.prover_loop_driver import continue_prover_loop

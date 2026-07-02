@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
 from espresso_proof.kernel.run_events import EVENT_KINDS, EVENTS_FILENAME, append_event, read_events
 from espresso_proof.kernel.run_lock import RunLockedError, run_writer_lock

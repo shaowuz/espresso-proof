@@ -17,7 +17,7 @@ from espresso_proof.kernel.ai_review import DISCLAIMER, assess_ai_review, build_
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.ui.memo import build_concise_memo
 from espresso_proof.kernel.models import AIReviewAssessment, AIReviewVerdict
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.orchestration.orchestrator import orchestrate_run
 from espresso_proof.kernel.validators import validate_run
 

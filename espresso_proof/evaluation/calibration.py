@@ -23,7 +23,7 @@ from pathlib import Path
 from espresso_proof.evaluation.benchmark import FIXTURES_DIR, FORBIDDEN_PHRASES
 from espresso_proof.kernel.io import read_yaml
 from espresso_proof.ui.memo import build_concise_memo
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.strategy_rules import HIGH_SCORE_THRESHOLD
 from espresso_proof.kernel.validators import validate_run
 

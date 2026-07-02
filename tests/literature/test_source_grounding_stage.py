@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.literature.source_grounding_stage import prepare_source_grounding
 from espresso_proof.kernel.stage_runner import StageError
 from espresso_proof.kernel.validators import validate_run

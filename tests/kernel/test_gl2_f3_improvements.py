@@ -14,7 +14,7 @@ from espresso_proof.evaluation.real_math_benchmark import real_math_target_cases
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.kernel.validators import validate_run
 from espresso_proof.literature.pdf_ingestion import ingest_source_for_theorems
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.verification.finite_group_verifier import gl2_f3_solvability_witness
 from espresso_proof.verification.proof_verification import verify_gl2_f3_solvable_in_run
 from espresso_proof.verification.theorem_applicability import (

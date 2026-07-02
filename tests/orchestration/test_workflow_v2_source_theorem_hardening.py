@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.models import (
     LiteratureReviewReport,
     SourceRef,

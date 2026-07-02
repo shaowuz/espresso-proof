@@ -25,7 +25,7 @@ from espresso_proof.orchestration.agent_flow_status import (
     STAGE_STATUS_FILENAME,
     write_stage_status_projection,
 )
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.server import Workbench, _make_handler
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."

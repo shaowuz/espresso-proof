@@ -36,7 +36,7 @@ def _build(tmp_path: Path) -> Path:
 
 
 def run_mock_critique_pv(tmp_path: Path) -> Path:
-    from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+    from espresso_proof.orchestration.genesis import run_mock_critique
 
     run_dir = run_mock_critique("aw", FIXTURES / "vague_claim_unclear" / "input.md", tmp_path)
     manifest = read_yaml(run_dir / "run_manifest.yaml")

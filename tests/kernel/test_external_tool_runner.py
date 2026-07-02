@@ -20,7 +20,7 @@ from espresso_proof.kernel.external_tool_runner import (
 )
 from espresso_proof.kernel.io import read_yaml
 from espresso_proof.ui.memo import build_concise_memo
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.proof_language import contains_proof_language
 from espresso_proof.kernel.validators import validate_run
 

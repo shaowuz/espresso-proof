@@ -20,7 +20,7 @@ from espresso_proof.verification.finite_group_verifier import (
 )
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.ui.memo import build_concise_memo
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.models import ProofVerificationStatus
 from espresso_proof.verification.proof_verification import (
     verify_finite_groups,

@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.models import Locator
 from espresso_proof.literature.pdf_ingestion import (
     extract_source_text,

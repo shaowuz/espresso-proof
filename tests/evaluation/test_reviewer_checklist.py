@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 from espresso_proof.cli import app
 from espresso_proof.evaluation import reviewer_checklist as reviewer_checklist_module
 from espresso_proof.kernel.io import read_text
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.evaluation.reviewer_checklist import (
     detect_proof_complete_language,
     find_invalid_source_backed,

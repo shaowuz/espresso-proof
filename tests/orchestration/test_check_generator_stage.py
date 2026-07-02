@@ -7,7 +7,7 @@ from pathlib import Path
 
 from espresso_proof.agents.front_half_agents import run_front_half_agent_pass
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
 from espresso_proof.kernel.validators import validate_run
 

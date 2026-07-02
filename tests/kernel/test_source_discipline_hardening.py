@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.literature.pdf_ingestion import ingest_source_for_theorems
 from espresso_proof.verification.source_verification import (
     check_hypothesis_applicability,
