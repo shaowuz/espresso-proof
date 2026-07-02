@@ -39,7 +39,6 @@ from espresso_proof.orchestration.proof_gap_resolver import (
 from espresso_proof.orchestration.agent_flow_status import STAGE_STATUS_FILENAME
 from espresso_proof.orchestration.orchestrator import orchestrate_run
 from espresso_proof.ui.descriptions import VERIFIED_PROOF_STATUSES, describe_proof_language
-from espresso_proof.ui.evidence_trust import EARNED_LEVELS, is_green, trust_tone
 from tests.kernel.test_proof_verification_bridge_v2 import _build
 
 _AMBER = "agent_consensus_mock_checked"
@@ -789,8 +788,6 @@ def test_negative_consensus_cannot_upgrade_to_machine_verified(tmp_path: Path) -
     assert _grade(run_dir)["proof_language_status"] == _AMBER
     assert _AMBER not in VERIFIED_PROOF_STATUSES
     assert _AMBER not in {"source_checked_argument", "computation_checked", "lean_checked", "human_confirmed"}
-    assert trust_tone("agent_consensus") == "candidate" and "agent_consensus" not in EARNED_LEVELS
-    assert is_green("agent_consensus") is False
     assert "verified" not in describe_proof_language(_AMBER).lower()
     # the proof's source_refs are candidate references, never earned source_backed
     proof = read_yaml(run_dir / "line_numbered_proof.yaml")

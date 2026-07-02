@@ -78,9 +78,7 @@ npm --prefix web run build
 
 ## Reference
 
-- [docs/real-agent-runbook.md](docs/real-agent-runbook.md) - run the Codex-backed agent path.
-- [docs/project-structure.md](docs/project-structure.md) - current repository map.
-- [docs/file-overview.md](docs/file-overview.md) - important files and directories.
+- [docs/engineering/EXECUTION_TRUNK.md](docs/engineering/EXECUTION_TRUNK.md) - end-to-end execution map and trust boundary summary.
 - [docs/product-philosophy.md](docs/product-philosophy.md) - product principles and trust boundary.
 - [docs/engineering/product-path-boundaries.md](docs/engineering/product-path-boundaries.md) - supported product surface.
-- [docs/engineering/espresso-agent-protocol.md](docs/engineering/espresso-agent-protocol.md) - external-agent contract.
+- [docs/engineering/ESPRESSO_CORE_INTEGRATION.md](docs/engineering/ESPRESSO_CORE_INTEGRATION.md) - espresso-core external-agent contract.

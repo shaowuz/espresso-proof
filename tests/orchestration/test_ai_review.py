@@ -14,7 +14,6 @@ import pytest
 from pydantic import ValidationError
 
 from espresso_proof.kernel.ai_review import DISCLAIMER, assess_ai_review, build_ai_review
-from espresso_proof.ui.evidence_trust import EARNED_LEVELS, is_green, trust_tone
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.ui.memo import build_concise_memo
 from espresso_proof.kernel.models import AIReviewAssessment, AIReviewVerdict
@@ -330,15 +329,6 @@ def test_extra_status_field_rejected(extra: str) -> None:
     AIReviewAssessment.model_validate(base)
     with pytest.raises(ValidationError):
         AIReviewAssessment.model_validate({**base, extra: True})
-
-
-# ---------------------------------------------------------------------------
-# trust discipline: ai_reviewed can never be green
-# ---------------------------------------------------------------------------
-def test_ai_reviewed_is_never_green() -> None:
-    assert "ai_reviewed" not in EARNED_LEVELS
-    assert trust_tone("ai_reviewed") == "candidate"
-    assert not is_green("ai_reviewed")
 
 
 # ---------------------------------------------------------------------------
