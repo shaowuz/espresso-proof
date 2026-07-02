@@ -1,6 +1,13 @@
-name: Full CI (manual)
+name: Full CI (merge gate)
 
+# Full-suite policy: the full gate runs ONLY here, when a change is merging
+# into main on GitHub (PR into main + the merge commit itself). Local
+# iteration uses quick/scoped checks only — never run the full suite locally.
 on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       ref:
