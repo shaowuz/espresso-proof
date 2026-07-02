@@ -16,7 +16,7 @@ from espresso_proof.ui.bank_dashboard import (
     _strategy_card,
     render_bank_dashboard,
 )
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.research_bank import materialize_run_banks
 from espresso_proof.kernel.validators import validate_run
 

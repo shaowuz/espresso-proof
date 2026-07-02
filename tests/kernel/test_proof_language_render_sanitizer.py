@@ -19,7 +19,7 @@ from espresso_proof.cli import app
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.ui.memo import build_concise_memo
 from espresso_proof.memory.memory import summarize_memory, write_memory_entry
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.proof_language import contains_proof_language, scrub_proof_language
 from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures

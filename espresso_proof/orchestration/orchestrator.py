@@ -41,7 +41,7 @@ from espresso_proof.agents.llm_agents import (
     run_llm_agent_pass,
     write_initial_prover_round_artifacts,
 )
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.observability import (
     append_agent_event,
     monotonic_ms,

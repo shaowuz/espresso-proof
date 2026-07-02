@@ -11,7 +11,7 @@ from espresso_proof.orchestration.agent_flow_status import (
     load_stage_status_projection,
     write_stage_status_projection,
 )
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.validation.errors import KernelValidationError
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"

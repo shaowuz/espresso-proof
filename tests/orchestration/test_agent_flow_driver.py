@@ -20,7 +20,7 @@ from espresso_proof.kernel.agent_flow_legacy_map import (
 from espresso_proof.kernel.agent_flow_spec import ordered_stage_ids
 from espresso_proof.orchestration.agent_flow_status import STAGE_STATUS_FILENAME
 from espresso_proof.orchestration.agent_runner import run_single_agent
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.orchestration.orchestrator import FAST_CORE_STAGES, orchestrate_run
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian.\n"

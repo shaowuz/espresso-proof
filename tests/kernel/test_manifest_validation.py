@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 
 from espresso_proof.cli import app
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.validation.front_half import validate_front_half_run
 from espresso_proof.kernel.validators import validate_run

@@ -25,7 +25,7 @@ from espresso_proof.literature.literature_retrieval import (
     retrieve_local_corpus,
     retrieve_sources,
 )
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.models import LiteratureRetrievalReport, RetrievedSourceStatus
 from espresso_proof.kernel.validators import KernelValidationError, validate_run
 

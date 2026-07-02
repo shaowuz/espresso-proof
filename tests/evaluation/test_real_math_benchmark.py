@@ -18,7 +18,7 @@ from espresso_proof.kernel.io import read_yaml, write_text, write_yaml
 from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
 from espresso_proof.kernel.validators import validate_run
 from espresso_proof.literature.pdf_ingestion import ingest_source_for_theorems
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.verification.finite_group_verifier import cyclic_group_table
 from espresso_proof.verification.proof_verification import verify_identity_table_in_run
 from espresso_proof.verification.source_verification import ground_run

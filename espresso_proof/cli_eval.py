@@ -25,7 +25,7 @@ from espresso_proof.evaluation.real_math_benchmark import (
     case_from_run as real_math_case_from_run,
 )
 from espresso_proof.evaluation.scorecard import render_scorecard_markdown, run_scorecard
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 from espresso_proof.cli_app import app

@@ -27,7 +27,7 @@ from espresso_proof.agents.llm_agents import (
     prover_system_prompt,
     safe_text,
 )
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.models import (
     LLMAgentAttempt,
     LLMAgentRunReport,

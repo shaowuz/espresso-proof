@@ -11,7 +11,7 @@ from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.literature.literature_discovery import discover_local_literature
 from espresso_proof.literature.live_search import parse_ads_json, parse_arxiv_atom, parse_crossref_json
 from espresso_proof.literature.literature_review_agent import ReviewSourceSpec, run_literature_review_agent
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.models import (
     LiteratureReviewAgentReport,
     LiteratureReviewReport,

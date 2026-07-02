@@ -16,7 +16,7 @@ from espresso_proof.memory.memory import (
     write_run_memory,
 )
 from espresso_proof.memory.memory_context import build_memory_context
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.kernel.validators import validate_run
 

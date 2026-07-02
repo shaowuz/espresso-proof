@@ -61,7 +61,7 @@ from espresso_proof.kernel.surface_warnings import (
 )
 from espresso_proof.evaluation.reviewer_checklist import review_checklist
 from espresso_proof.memory.memory import summarize_memory
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.literature.pdf_ingestion import (
     extract_candidate_locators,
     extract_source_text,

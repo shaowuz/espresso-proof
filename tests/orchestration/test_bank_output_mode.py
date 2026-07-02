@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from espresso_proof.kernel.io import read_yaml
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.research_bank import (
     is_bank_dir,
     load_counterexamples_artifact,

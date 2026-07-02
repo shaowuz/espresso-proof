@@ -23,7 +23,7 @@ from pathlib import Path
 from espresso_proof.evaluation.benchmark import run_benchmark
 from espresso_proof.evaluation.calibration import run_calibration
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.proof_language import contains_proof_language
 
 SCORECARD_SCHEMA_VERSION = 2

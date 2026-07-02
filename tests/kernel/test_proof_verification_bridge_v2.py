@@ -20,7 +20,7 @@ from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.verification.finite_group_verifier import cyclic_group_table
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.ui.memo import build_concise_memo
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.verification.proof_verification import (
     append_verification_entries,
     verify_identity_table_in_run,

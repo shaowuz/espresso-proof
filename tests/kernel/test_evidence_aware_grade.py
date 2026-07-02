@@ -17,7 +17,7 @@ from typer.testing import CliRunner
 from espresso_proof.cli import app
 from espresso_proof.agents.front_half_agents import run_front_half_agent_pass
 from espresso_proof.kernel.io import read_yaml
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_run
 from espresso_proof.kernel.validators import validate_run
 

@@ -8,7 +8,7 @@ import espresso_proof.orchestration.prover_loop_driver as drv
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
 from espresso_proof.agents.llm_agents import run_llm_agent_pass
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.orchestration.orchestrator import _resolve_and_build_loop, orchestrate_run
 from espresso_proof.orchestration.prover_loop_driver import continue_prover_loop
 from espresso_proof.validation.errors import KernelValidationError

@@ -13,7 +13,7 @@ import pytest
 
 from espresso_proof.kernel import research_bank as rb
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.research_bank import append_bank_item, load_bank
 from espresso_proof.validation.errors import KernelValidationError
 

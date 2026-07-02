@@ -13,7 +13,7 @@ from espresso_proof.orchestration.agent_flow_status import (
     write_stage_status_projection,
 )
 from espresso_proof.kernel.agent_flow_spec import ordered_stage_ids
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 

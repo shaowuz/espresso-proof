@@ -25,7 +25,7 @@ from espresso_proof.kernel.failure_pattern_bank import (
 )
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.kernel.models import FailurePatternAudit
-from espresso_proof.orchestration.mock_pipeline import run_mock_critique
+from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 FIXTURES = Path("tests/fixtures")
