@@ -1,9 +1,10 @@
 """Runtime skill selection for Espresso external agents.
 
-The Codex CLI adapter injects these role-specific skills into each external
-agent call. This is deterministic prompt assembly, not model-side status logic:
-skills can guide candidate generation, but the kernel still owns every trusted
-state transition.
+The external CLI adapters (Codex: ``espresso_proof.agents.codex_adapter``;
+Claude Max: ``espresso_proof.agents.claude_adapter``) inject these role-specific
+skills into each external agent call. This is deterministic prompt assembly,
+not model-side status logic: skills can guide candidate generation, but the
+kernel still owns every trusted state transition.
 """
 
 from __future__ import annotations
@@ -52,6 +53,42 @@ def _normalize_request_type(request_type: str | None) -> str:
 
 
 _SKILLS: tuple[AgentSkill, ...] = (
+    # Back-half proof roles (Goal 69/70) are listed FIRST on purpose:
+    # ``selection.stage`` takes the first hit in this tuple, and these calls also
+    # match broad companion triggers further down (e.g. "counterexample" appears
+    # in the proof-writer system prompt and in agent_prompt protocol_rules), so
+    # the role skill must precede them to own the stage. Their triggers are
+    # copied verbatim from the runtime system prompts in
+    # ``llm_agents.line_numbered_proof_writer_system_prompt`` /
+    # ``proof_consensus_system_prompt`` / ``proof_gap_resolver_system_prompt``
+    # and from the ``agent_prompt(role=...)`` JSON payloads, and appear nowhere
+    # else in prompt-producing code.
+    AgentSkill(
+        "proof-writer",
+        "proof_writer.md",
+        ("line-numbered proof writer", '"role": "line_numbered_proof_writer"'),
+    ),
+    AgentSkill(
+        "proof-gap-resolver",
+        "proof_gap_resolver.md",
+        ("proof gap resolver", '"role": "proof_gap_resolver"'),
+    ),
+    AgentSkill(
+        "reviewer-theorem-applicability",
+        "reviewer_theorem_applicability.md",
+        (
+            "theorem/lemma applicability reviewer",
+            '"role": "proof_review_theorem_lemma_applicability_reviewer"',
+        ),
+    ),
+    AgentSkill(
+        "reviewer-adversarial-gap",
+        "reviewer_adversarial_gap.md",
+        (
+            "adversarial gap reviewer",
+            '"role": "proof_review_adversarial_gap_reviewer"',
+        ),
+    ),
     AgentSkill(
         "claim-understanding",
         "claim_understanding.md",

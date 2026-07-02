@@ -10,7 +10,15 @@ import pytest
 
 from espresso_proof.agents import codex_adapter
 from espresso_proof.agents.agent_skill_catalog import select_agent_skills
-from espresso_proof.agents.llm_agents import ExternalCommandClient
+from espresso_proof.agents.llm_agents import (
+    ExternalCommandClient,
+    agent_prompt,
+    line_numbered_proof_writer_system_prompt,
+    proof_consensus_system_prompt,
+    proof_gap_resolver_system_prompt,
+    prover_system_prompt,
+    verifier_system_prompt,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -232,6 +240,118 @@ def test_codex_skill_selection_covers_core_subagent_roles() -> None:
     for system, prompt, expected in cases:
         selected = select_agent_skills(system=system, prompt=prompt, cwd=ROOT)
         assert selected.skills == expected
+
+
+_NEW_BACKHALF_SKILLS = (
+    "proof-writer",
+    "proof-gap-resolver",
+    "reviewer-theorem-applicability",
+    "reviewer-adversarial-gap",
+)
+
+
+def test_skill_selection_covers_backhalf_proof_roles_with_runtime_prompts() -> None:
+    """Each Goal-69/70 back-half role selects its own skill against the EXACT
+    system/prompt text the runtime sends (llm_agents prompt builders), and the
+    role skill owns ``selection.stage`` (first hit in the catalog)."""
+    cases = [
+        (
+            line_numbered_proof_writer_system_prompt(),
+            agent_prompt({}, role="line_numbered_proof_writer"),
+            "proof-writer",
+        ),
+        (
+            proof_gap_resolver_system_prompt(),
+            agent_prompt({}, role="proof_gap_resolver"),
+            "proof-gap-resolver",
+        ),
+        (
+            proof_consensus_system_prompt("theorem_lemma_applicability_reviewer"),
+            agent_prompt({}, role="proof_review_theorem_lemma_applicability_reviewer"),
+            "reviewer-theorem-applicability",
+        ),
+        (
+            proof_consensus_system_prompt("adversarial_gap_reviewer"),
+            agent_prompt({}, role="proof_review_adversarial_gap_reviewer"),
+            "reviewer-adversarial-gap",
+        ),
+    ]
+    for system, prompt, expected_skill in cases:
+        selected = select_agent_skills(system=system, prompt=prompt, cwd=ROOT)
+        assert expected_skill in selected.skills, (expected_skill, selected.skills)
+        assert selected.stage == expected_skill
+        # The role skill's own MD file is injected (safety skill always first).
+        assert "Skill: mathematical-safety" in selected.skill_text
+        assert f"Skill: {expected_skill}" in selected.skill_text
+        # No cross-injection between the four back-half role skills.
+        for other in _NEW_BACKHALF_SKILLS:
+            if other != expected_skill:
+                assert other not in selected.skills, (system[:60], selected.skills)
+
+
+def test_third_consensus_seat_still_selects_line_proof_reviewer_skill() -> None:
+    selected = select_agent_skills(
+        system=proof_consensus_system_prompt("line_proof_reviewer"),
+        prompt=agent_prompt({}, role="proof_review_line_proof_reviewer"),
+        cwd=ROOT,
+    )
+    assert "line-proof-reviewer" in selected.skills
+    for skill in _NEW_BACKHALF_SKILLS:
+        assert skill not in selected.skills
+
+
+def test_backhalf_skills_do_not_fire_on_prover_or_verifier_rounds() -> None:
+    """Negative: a plain prover round / verifier reviews (real runtime prompt
+    text) must not pick up any of the four back-half role skills, and their
+    pre-existing selection is unchanged."""
+    prover_selected = select_agent_skills(
+        system=prover_system_prompt(),
+        prompt=agent_prompt({}, role="prover"),
+        cwd=ROOT,
+    )
+    for skill in _NEW_BACKHALF_SKILLS:
+        assert skill not in prover_selected.skills
+    assert "prover" in prover_selected.skills
+    for role in ("strategy_reviewer", "evidence_reviewer", "line_proof_reviewer", "verifier"):
+        selected = select_agent_skills(
+            system=verifier_system_prompt(1, reviewer_role=role),
+            prompt=agent_prompt({}, role=role),
+            cwd=ROOT,
+        )
+        for skill in _NEW_BACKHALF_SKILLS:
+            assert skill not in selected.skills, (role, selected.skills)
+
+
+def test_backhalf_skills_do_not_fire_on_front_half_stage_calls() -> None:
+    """Negative: the real front-half stage system prompts never trigger the
+    back-half proof skills (no accidental cross-injection)."""
+    from espresso_proof.front_half.stages.attacker import _ATTACKER_SYSTEM
+    from espresso_proof.front_half.stages.check_generator import _CHECK_GENERATOR_SYSTEM
+    from espresso_proof.front_half.stages.counterexamples import _COUNTEREXAMPLES_SYSTEM
+    from espresso_proof.front_half.stages.examples import _EXAMPLES_SYSTEM
+    from espresso_proof.front_half.stages.grade import _GRADE_SYSTEM
+    from espresso_proof.front_half.stages.literature import _LITERATURE_SYSTEM
+    from espresso_proof.front_half.stages.source import _SOURCE_THEOREM_SYSTEM
+    from espresso_proof.front_half.stages.understanding import _UNDERSTANDING_SYSTEM
+
+    front_half_systems = (
+        _ATTACKER_SYSTEM,
+        _CHECK_GENERATOR_SYSTEM,
+        _COUNTEREXAMPLES_SYSTEM,
+        _EXAMPLES_SYSTEM,
+        _GRADE_SYSTEM,
+        _LITERATURE_SYSTEM,
+        _SOURCE_THEOREM_SYSTEM,
+        _UNDERSTANDING_SYSTEM,
+    )
+    for system in front_half_systems:
+        selected = select_agent_skills(
+            system=system,
+            prompt='{"claim": "Every group of order p^2 is abelian."}',
+            cwd=ROOT,
+        )
+        for skill in _NEW_BACKHALF_SKILLS:
+            assert skill not in selected.skills, (system[:60], selected.skills)
 
 
 def test_codex_adapter_schema_gate_covers_proof_specific_roles() -> None:
