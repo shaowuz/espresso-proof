@@ -318,7 +318,7 @@ def orchestrate_run(
         literature_providers=literature_providers,
     )
 
-    attach_scoped_machine_checks(run_dir=run_dir)
+    execute_scoped_machine_checks(run_dir=run_dir)
 
     run_initial_prover_reviewer_round_to_human_gate(
         run_dir=run_dir,
@@ -510,13 +510,15 @@ def collect_candidate_literature(
         )
 
 
-def attach_scoped_machine_checks(*, run_dir: Path) -> None:
-    # Goal 42E cycle 3: execute any structured scoped-verification requests
+def execute_scoped_machine_checks(*, run_dir: Path) -> None:
+    # Goal 42E cycle 3: EXECUTE any structured scoped-verification requests
     # the front half proposed BEFORE the prover/reviewer pass, so round 1
     # already sees the trusted machine evidence and computation requests can
-    # be machine-answered instead of recurring. Idempotent and fail-closed
-    # (re-validates; a run without requests wires nothing; a confirming
-    # result earns instance_checked only — never a universal status).
+    # be machine-answered instead of recurring. This stage can EARN trusted
+    # instance_checked / computation_checked evidence — it is not passive
+    # wiring. Idempotent and fail-closed (re-validates; a run without
+    # requests wires nothing; a confirming result earns instance_checked
+    # only — never a universal status).
     if not _reached(run_dir, "WAITING_LLM_AGENT_HUMAN_GATE"):
         from espresso_proof.verification.proof_verification import auto_wire_scoped_verifications
 

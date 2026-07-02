@@ -735,9 +735,9 @@ def _now_strip(
 ) -> str:
     """Goal 30: the 5-second comprehension strip under the claim.
 
-    One line of trust-grouped evidence counts (single canonical summary, colours
-    via the evidence_trust discipline — green only when something is genuinely
-    earned) plus one derived 'suggested next step'. Display-only; counts come
+    One line of trust-grouped evidence counts (single canonical summary; colour
+    discipline: green only when something is genuinely earned) plus one derived
+    'suggested next step'. Display-only; counts come
     from validated artifacts and the process board, never from UI state.
     """
 

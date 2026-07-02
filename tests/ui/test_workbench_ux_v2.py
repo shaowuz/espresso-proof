@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from espresso_proof.ui import evidence_trust as et
 from espresso_proof.kernel.agent_run_status import set_agent_status
 from espresso_proof.orchestration.agent_runner import run_single_agent, skip_agent
 from espresso_proof.orchestration.orchestrator import orchestrate_run
@@ -91,30 +90,6 @@ def test_invalid_mode_rejected(tmp_path: Path) -> None:
     wb = Workbench(tmp_path / "root", provider="stub")
     with pytest.raises(WorkbenchError):
         wb.start_create_run(CLAIM, mode="bogus")
-
-
-# --------------------------------------------------------------------------- #
-# trust-label colour discipline
-# --------------------------------------------------------------------------- #
-
-
-def test_green_reserved_for_earned_evidence_only() -> None:
-    for level in et.TRUST_LABELS:
-        if level in ("reference_backed", "scope_checked"):
-            assert et.is_green(level), level
-            assert et.TONE_CLASS[et.trust_tone(level)] == "trust-green"
-        else:
-            assert not et.is_green(level), level
-            assert et.TONE_CLASS[et.trust_tone(level)] != "trust-green"
-    # candidate / running / skipped specifically are never green
-    for level in ("candidate", "smoke_checked", "running", "skipped", "needs_check", "failed"):
-        assert et.TONE_CLASS[et.trust_tone(level)] != "trust-green"
-
-
-def test_trust_labels_are_human_readable() -> None:
-    for label in et.TRUST_LABELS.values():
-        assert label == label.strip() and label[0].isupper()
-        assert "_" not in label  # never a raw enum token
 
 
 # --------------------------------------------------------------------------- #

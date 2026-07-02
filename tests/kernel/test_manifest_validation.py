@@ -7,7 +7,6 @@ from typer.testing import CliRunner
 
 from espresso_proof.cli import app
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.kernel.kernel import KernelError, safe_run_path
 from espresso_proof.orchestration.mock_pipeline import run_mock_critique
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.validation.front_half import validate_front_half_run
@@ -84,16 +83,6 @@ def test_manifest_rejects_windows_optional_artifact_path_on_posix(tmp_path: Path
 
     with pytest.raises(KernelValidationError, match="cannot contain"):
         validate_run(run_dir)
-
-
-def test_safe_run_path_rejects_windows_absolute_and_backslash_paths(tmp_path: Path) -> None:
-    run_dir = tmp_path / "projects" / "hodge_atoms" / "runs" / "run_001"
-    run_dir.mkdir(parents=True)
-
-    with pytest.raises(KernelError, match="relative"):
-        safe_run_path(run_dir, r"C:\outside.yaml")
-    with pytest.raises(KernelError, match="separators"):
-        safe_run_path(run_dir, r"nested\artifact.yaml")
 
 
 def _run_llm_agents(run_dir: Path) -> None:

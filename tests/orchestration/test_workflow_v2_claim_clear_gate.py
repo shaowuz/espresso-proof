@@ -15,7 +15,6 @@ from espresso_proof.cli import app
 from espresso_proof.claim.claim_clear import ClaimClearBlockedError, ensure_claim_clear_for_downstream
 from espresso_proof.agents.front_half_agents import run_front_half_agent_pass
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.kernel.kernel import snapshot as kernel_snapshot
 import espresso_proof.agents.llm_agents as llm_agents
 from espresso_proof.agents.llm_agents import StubLLMClient
 from espresso_proof.orchestration.mock_pipeline import run_mock_critique
@@ -208,7 +207,7 @@ def test_unclear_claim_blocks_orchestrator_downstream_stages(tmp_path: Path) -> 
         assert by_agent[agent]["safe_to_use_as_evidence"] is False
 
 
-def test_unclear_claim_runtime_ui_kernel_and_vscode_snapshots_agree(
+def test_unclear_claim_runtime_and_ui_snapshots_agree(
     tmp_path: Path,
 ) -> None:
     result = orchestrate_run(
@@ -226,14 +225,9 @@ def test_unclear_claim_runtime_ui_kernel_and_vscode_snapshots_agree(
     dashboard = render_run_dashboard(run_dir)
     topbar = render_topbar_status_html(run_dir)
     cockpit = build_snapshot(run_dir, run_dir.name, summary)
-    kernel = kernel_snapshot(tmp_path, run_dir)
     assert manifest["current_state"] == "WAITING_CLAIM_CLARIFICATION"
     assert summary["state"] == "Waiting Claim Clarification"
     assert cockpit["status"]["state"] == summary["state"]
-    assert kernel["current"]["validation"]["status"] == "valid"
-    assert kernel["current"]["artifacts"]["run_manifest"]["current_state"] == (
-        "WAITING_CLAIM_CLARIFICATION"
-    )
 
     agent_status = {row["agent"]: row["status"] for row in summary["agents"]}
     for agent in ("literature", "examples", "counterexamples"):

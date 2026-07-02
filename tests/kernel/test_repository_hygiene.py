@@ -17,7 +17,7 @@ def test_runtime_dataflow_is_expressed_in_python_entrypoints() -> None:
         "build_front_half_context_artifacts",
         "stop_if_claim_is_not_clear",
         "collect_candidate_literature",
-        "attach_scoped_machine_checks",
+        "execute_scoped_machine_checks",
         "run_initial_prover_reviewer_round_to_human_gate",
         "write_initial_prover_reviewer_artifacts",
     ):

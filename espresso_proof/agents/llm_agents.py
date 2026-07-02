@@ -28,6 +28,7 @@ from espresso_proof.kernel.proof_language import PROOF_COMPLETE_PHRASES
 from espresso_proof.kernel.research_bank import load_bankable_dict
 from espresso_proof.kernel.time_allocation import (
     TIME_ALLOCATION_FILENAME,
+    TimeAllocationPlan,
     ensure_prover_time_allocation_plan,
     time_allocation_prompt_payload,
 )
@@ -1022,13 +1023,20 @@ def run_llm_agent_pass(
     """
 
     ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
+    # Order matters: the time-allocation plan is written (and registered in the
+    # manifest) BEFORE the client is built, so a provider misconfiguration
+    # surfaces the graded-strategy requirement first and non-snapshot callers
+    # (dev CLI) still persist the plan when build_client fails.
+    allocation_plan = ensure_prover_time_allocation_plan(run_dir)
     client = build_client(
         provider=provider,
         model=model,
         api_key_env=api_key_env,
         external_agent_command_env=external_agent_command_env,
     )
-    context, input_artifacts = load_context_artifacts_for_initial_agent_pass(run_dir)
+    context, input_artifacts = load_context_artifacts_for_initial_agent_pass(
+        run_dir, allocation_plan
+    )
     agent_call_diagnostics: list[dict] = []
     now = datetime.now(UTC).isoformat()
     prover = ask_prover_for_candidate_route(
@@ -1059,8 +1067,9 @@ def run_llm_agent_pass(
     )
 
 
-def load_context_artifacts_for_initial_agent_pass(run_dir: Path) -> tuple[dict, list[str]]:
-    allocation_plan = ensure_prover_time_allocation_plan(run_dir)
+def load_context_artifacts_for_initial_agent_pass(
+    run_dir: Path, allocation_plan: TimeAllocationPlan
+) -> tuple[dict, list[str]]:
     context = load_agent_context(run_dir)
     time_context = _time_allocation_context(run_dir, allocation_plan)
     context["time_allocation_plan"] = time_context

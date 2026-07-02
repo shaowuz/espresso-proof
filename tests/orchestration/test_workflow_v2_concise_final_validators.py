@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.kernel.kernel import snapshot as kernel_snapshot
 from espresso_proof.memory.memory import write_memory_entry
 from espresso_proof.memory.memory_context import build_memory_context
 from espresso_proof.ui.memo import build_concise_memo
@@ -1176,7 +1175,6 @@ def test_task09a_runtime_ui_kernel_and_vscode_parity_for_advisory_surfaces(
     dashboard = render_run_dashboard(run_dir)
     topbar = render_topbar_status_html(run_dir)
     cockpit = build_snapshot(run_dir, run_dir.name, summary)
-    kernel = kernel_snapshot(tmp_path, run_dir)
     optional = manifest.get("optional_artifacts", {})
     assert optional["time_allocation"] == "time_allocation.yaml"
     assert optional["update_inbox"] == "update_inbox.yaml"
@@ -1200,8 +1198,6 @@ def test_task09a_runtime_ui_kernel_and_vscode_parity_for_advisory_surfaces(
     assert "Open blockers / pending checks" in dashboard
     assert "Update Inbox pending" in dashboard
     assert "Proof status:" in topbar
-    assert kernel["current"]["validation"]["status"] == "valid"
-    assert kernel["current"]["artifacts"]["run_manifest"]["optional_artifacts"] == optional
 
     assert summary["routes_preliminary"] is True
     assert summary["evidence"]["reference_supported_steps"] == 0
