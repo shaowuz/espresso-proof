@@ -77,17 +77,23 @@ def main() -> int:
         request = {}
     system = str(request.get("system", ""))
     prompt = str(request.get("prompt", ""))
-    # NOTE: do NOT append request["required_json_schema"]. Each stage already
-    # embeds its OWN required_json_schema inside `prompt` (the Prover/Reviewer
-    # agent_prompt and every front-half payload). The top-level
-    # request["required_json_schema"] is hardcoded to the Prover schema by
-    # ExternalCommandClient, so appending it would override the front-half stage's
-    # schema and force Prover-shaped output for every stage.
+    # required_json_schema handling: ExternalCommandClient dispatches it per role
+    # (_required_json_schema_for_system). For FRONT-HALF stages it is the generic
+    # prover default while the stage payload embeds its own schema — appending it
+    # would force prover-shaped output, so we don't. For BACK-HALF roles (prover,
+    # reviewers, proof writer, consensus, gap resolver) it is the authoritative
+    # schema, and the payload may embed the WRONG generic one (agent_prompt always
+    # embeds AGENT_OUTPUT_SCHEMA) — the Codex adapter enforces it via
+    # --output-schema; without this, real Claude runs return prover-shaped JSON
+    # for write-proof and the kernel rejects the artifact (verified by live smoke).
+    output_schema = _authoritative_output_schema(request, system=system, prompt=prompt)
 
     try:
         selection = _select_skills(system=system, prompt=prompt)
         _emit_status(selection=selection)
-        full_prompt = _build_full_prompt(system=system, prompt=prompt, selection=selection)
+        full_prompt = _build_full_prompt(
+            system=system, prompt=prompt, selection=selection, output_schema=output_schema
+        )
         data = _extract_json(_run_claude(full_prompt))
         if not isinstance(data, dict):
             raise ValueError("claude output was not a JSON object")
@@ -142,24 +148,54 @@ def _select_skills(*, system: str, prompt: str):
     )
 
 
-def _build_full_prompt(*, system: str, prompt: str, selection) -> str:
+def _authoritative_output_schema(request: dict, *, system: str, prompt: str) -> dict | None:
+    """Return request["required_json_schema"] when it is authoritative for this
+    call (back-half roles, same marker set the Codex adapter enforces
+    --output-schema for); None for front-half stages, whose payloads carry their
+    own schema that must not be overridden. Fails open to the old passthrough
+    behavior if the marker check cannot be imported."""
+    schema = request.get("required_json_schema")
+    if not isinstance(schema, dict) or not schema.get("required"):
+        return None
+    try:
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from espresso_proof.agents.codex_adapter import _uses_generic_agent_output
+
+        if _uses_generic_agent_output(system=system, prompt=prompt):
+            return schema
+    except Exception:  # noqa: BLE001 - keep old behavior rather than crash
+        return None
+    return None
+
+
+def _build_full_prompt(*, system: str, prompt: str, selection, output_schema: dict | None = None) -> str:
     """Mirror the Codex adapter's prompt assembly: active goal + selected skill
     text ahead of the stage's own system/prompt, closed by the output contract."""
-    return "\n\n".join(
-        [
-            "ESPRESSO ACTIVE GOAL",
-            selection.goal.text,
-            "ESPRESSO SELECTED SKILLS",
-            ", ".join(selection.skills),
-            selection.skill_text,
-            "ESPRESSO SYSTEM PROMPT",
-            system,
-            "ESPRESSO STAGE REQUEST",
-            prompt,
-            "ESPRESSO OUTPUT CONTRACT",
-            _INSTRUCTION,
+    sections = [
+        "ESPRESSO ACTIVE GOAL",
+        selection.goal.text,
+        "ESPRESSO SELECTED SKILLS",
+        ", ".join(selection.skills),
+        selection.skill_text,
+        "ESPRESSO SYSTEM PROMPT",
+        system,
+        "ESPRESSO STAGE REQUEST",
+        prompt,
+    ]
+    if output_schema is not None:
+        sections += [
+            "ESPRESSO REQUIRED OUTPUT SCHEMA (authoritative for this call)",
+            json.dumps(output_schema, indent=2),
+            "If a schema embedded in the stage request above disagrees with this "
+            "one, THIS schema wins: return a single JSON object with exactly its "
+            "required keys.",
         ]
-    )
+    sections += [
+        "ESPRESSO OUTPUT CONTRACT",
+        _INSTRUCTION,
+    ]
+    return "\n\n".join(sections)
 
 
 def _emit_status(*, selection) -> None:

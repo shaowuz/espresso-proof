@@ -68,6 +68,7 @@ def _run_adapter(
     prompt: str,
     fake_claude: Path,
     goal_file: Path | None = None,
+    schema: dict | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["ESPRESSO_CLAUDE_CLI"] = str(fake_claude)
@@ -80,7 +81,7 @@ def _run_adapter(
         "prompt": prompt,
         "provider": "external",
         "model": "ignored-by-claude-adapter",
-        "required_json_schema": {},
+        "required_json_schema": {} if schema is None else schema,
     }
     return subprocess.run(
         [sys.executable, "-m", "espresso_proof.agents.claude_adapter"],
@@ -159,6 +160,57 @@ def test_claude_adapter_injects_backhalf_proof_writer_skill(tmp_path: Path) -> N
     assert "Skill: proof-writer" in full_prompt
     assert "Skill: mathematical-safety" in full_prompt
     assert "proof-writer" in completed.stderr
+
+
+def test_claude_adapter_appends_authoritative_schema_for_backhalf_roles(tmp_path: Path) -> None:
+    """Back-half calls (proof writer, consensus, gap resolver, prover rounds)
+    receive request["required_json_schema"] as an authoritative output-schema
+    section — agent_prompt embeds the WRONG generic schema for these roles, and
+    a live Claude smoke returned prover-shaped JSON for write-proof without this
+    (the Codex adapter enforces the same schema via --output-schema)."""
+    fake_claude = _write_fake_claude(tmp_path)
+    writer_schema = {
+        "type": "object",
+        "required": ["proof_kind", "lines"],
+        "properties": {"proof_kind": {"type": "string"}, "lines": {"type": "array"}},
+    }
+
+    completed = _run_adapter(
+        tmp_path=tmp_path,
+        system=line_numbered_proof_writer_system_prompt(),
+        prompt='{"role": "line_numbered_proof_writer"}',
+        fake_claude=fake_claude,
+        schema=writer_schema,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    full_prompt = (tmp_path / "claude_prompt.txt").read_text(encoding="utf-8")
+    assert "ESPRESSO REQUIRED OUTPUT SCHEMA (authoritative for this call)" in full_prompt
+    assert '"proof_kind"' in full_prompt
+    assert "THIS schema wins" in full_prompt
+
+
+def test_claude_adapter_does_not_override_front_half_stage_schema(tmp_path: Path) -> None:
+    """Front-half stage calls embed their OWN schema in the payload; the
+    top-level request schema is the generic prover default there and must NOT be
+    appended (it would force prover-shaped output for every stage)."""
+    fake_claude = _write_fake_claude(tmp_path)
+    generic_schema = {
+        "type": "object",
+        "required": ["summary", "steps", "verdict"],
+    }
+
+    completed = _run_adapter(
+        tmp_path=tmp_path,
+        system="You are the Espresso Proof Literature-Review agent. Return JSON only.",
+        prompt='{"task": "propose_candidate_references"}',
+        fake_claude=fake_claude,
+        schema=generic_schema,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    full_prompt = (tmp_path / "claude_prompt.txt").read_text(encoding="utf-8")
+    assert "ESPRESSO REQUIRED OUTPUT SCHEMA" not in full_prompt
 
 
 def test_claude_adapter_scrubs_prose_fields_with_kernel_detectors(tmp_path: Path) -> None:
