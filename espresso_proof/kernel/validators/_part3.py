@@ -555,8 +555,9 @@ def _validate_proof_verification(
     - a checked status (``instance_checked`` / ``computation_checked``) requires
       ``trusted`` AND ``confirmed`` AND the matching trusted ``verifier_type``;
     - ``lean_checked`` is NOT earnable in V0 (reserved) -> always rejected;
-    - ``human_attested`` requires ``verifier_type == human_checked`` and is never
-      a machine-checked status;
+    - ``human_attested`` is NOT earnable in V0 either -> always rejected: there
+      is no human-attestation artifact for the kernel to re-derive it from, so
+      an entry claiming it is unverifiable say-so (fail closed);
     - a non-trusted or non-confirming entry, and any ``lean_bridge`` entry, must be
       ``unverified``.
 
@@ -592,11 +593,11 @@ def _validate_proof_verification(
                     f"earn {earned!r}"
                 )
         elif earned == "human_attested":
-            if vt != "human_checked":
-                raise KernelValidationError(
-                    f"proof_verification entry {entry.id!r}: human_attested requires "
-                    "verifier_type=human_checked"
-                )
+            raise KernelValidationError(
+                f"proof_verification entry {entry.id!r}: human_attested is not earnable "
+                "in V0: there is no human-attestation artifact for the kernel to check, "
+                "so a recorded attestation would be unverifiable say-so (fail closed)"
+            )
         # earned == unverified is always acceptable (fail-closed default)
         if vt == "lean_bridge" and earned != "unverified":
             raise KernelValidationError(
@@ -629,6 +630,10 @@ def _validate_grade_proof_language_backed(
     - ``lean_checked`` / ``human_confirmed`` are NOT earnable in V0: Espresso has
       no Lean/global-proof lane and no human-proof-attestation artifact (and human
       feedback may never upgrade proof status). Fail closed.
+    - Any OTHER status (i.e. a future enum member) is rejected outright: a new
+      proof-language status must add an explicit backing rule here before a run
+      carrying it can validate. Only the two weak statuses (``idea_sketch``,
+      ``proof_candidate``) validate without backing.
     """
     status = idea_grade.proof_language_status
     if status == ProofLanguageStatus.agent_consensus_mock_checked:
@@ -687,6 +692,18 @@ def _validate_grade_proof_language_backed(
             f"idea_grade.proof_language_status={status.value} is not earnable in V0: "
             "Espresso has no Lean/global-proof lane and no human-proof-attestation "
             "artifact (human feedback cannot upgrade proof status)"
+        )
+    elif status not in {
+        ProofLanguageStatus.idea_sketch,
+        ProofLanguageStatus.proof_candidate,
+    }:
+        # Default-deny backstop: a proof-language status with no explicit backing
+        # rule above must never validate. Without this, adding a new enum member
+        # would silently fall through as if it needed no backing at all.
+        raise KernelValidationError(
+            f"idea_grade.proof_language_status={getattr(status, 'value', status)!r} has "
+            "no backing rule in the kernel validator; a new status must add an explicit "
+            "fail-closed branch here before a run carrying it can validate"
         )
 
 

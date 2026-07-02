@@ -49,7 +49,15 @@ def validate_manifest_paths(run_dir: Path, manifest: RunManifest) -> None:
 
     for label, raw_path in manifest_paths.items():
         path = validate_relative_artifact_path(label, raw_path)
-        resolved = (run_dir / path).resolve()
+        candidate = run_dir / path
+        # Reject symlink artifacts outright — even one that resolves inside the
+        # run dir. Kernel io never writes symlinks, so a symlinked artifact is
+        # an aliasing/confusion vector, not a legitimate run file (fail closed).
+        if candidate.is_symlink():
+            raise ManifestPathValidationError(
+                f"{label}: manifest path is a symlink: {raw_path!r}"
+            )
+        resolved = candidate.resolve()
         try:
             resolved.relative_to(root)
         except ValueError as exc:

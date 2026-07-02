@@ -101,16 +101,40 @@ def test_orchestrate_resume_to_memo_is_honest(tmp_path: Path) -> None:
     assert claim["human_confirmed"] is False
 
 
-def test_orchestrate_resume_default_keeps_human_provenance(tmp_path: Path) -> None:
-    # Pivot PR1 guard: without selected_by, the human path is unchanged —
-    # human_choice records a human selection with human_confirmed=true and the
-    # agent gate records a human resolution.
+def test_orchestrate_resume_default_is_fail_closed_auto(tmp_path: Path) -> None:
+    # Fail-closed default: a caller that does NOT say who picked the strategy
+    # is recorded as machinery — under-claiming, never minting human
+    # provenance. (The old default 'human' let any automated caller that
+    # forgot the kwarg silently record a human confirmation.)
     run_dir = _orchestrate(tmp_path, CLEAR_CLAIM, "clear", front_half="mock")
     selected = _first_strategy_id(run_dir)
     resume_run(
         run_dir=run_dir,
         selected_strategy=selected,
         effort=_first_allowed_effort(run_dir, selected),
+    )
+    validate_run(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    human_choice = read_yaml(run_dir / manifest["artifacts"]["human_choice"])
+    assert human_choice["selected_by"] == "auto"
+    assert human_choice["human_confirmed"] is False
+    gate = read_yaml(run_dir / "llm_agent_run.yaml")["human_gate"]
+    assert gate["resolved_by"] == "auto"
+    assert gate["human_confirmed"] is False
+
+
+def test_orchestrate_resume_explicit_human_keeps_human_provenance(
+    tmp_path: Path,
+) -> None:
+    # The human path is opt-in and explicit: selected_by='human' records a
+    # human selection with human_confirmed=true and a human gate resolution.
+    run_dir = _orchestrate(tmp_path, CLEAR_CLAIM, "clear", front_half="mock")
+    selected = _first_strategy_id(run_dir)
+    resume_run(
+        run_dir=run_dir,
+        selected_strategy=selected,
+        effort=_first_allowed_effort(run_dir, selected),
+        selected_by="human",
     )
     validate_run(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")

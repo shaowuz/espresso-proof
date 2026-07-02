@@ -376,6 +376,7 @@ def _validate_llm_loop_artifacts(
     prover_loop: ProverLoopReport | None,
     prover_round_index: ProverRoundIndex | None,
     strategy_brief: StrategyBrief,
+    human_choice: HumanChoice,
 ) -> None:
     if llm_agent_run is None:
         if prover_loop is not None:
@@ -395,12 +396,25 @@ def _validate_llm_loop_artifacts(
             f"llm_agent_run references unknown input artifacts {sorted(unknown_inputs)}"
         )
     # Fail-closed provenance check (belt-and-suspenders over the
-    # LLMAgentHumanGate model validator): an automatically resolved gate can
-    # never claim human confirmation. resolved_by == 'auto' forces
-    # human_confirmed == false.
-    if llm_agent_run.human_gate.resolved_by == "auto" and llm_agent_run.human_gate.human_confirmed:
+    # LLMAgentHumanGate model validator): only resolved_by == 'human' may claim
+    # human confirmation. Written exhaustively (!= 'human', not == 'auto') so a
+    # future provenance value can never claim confirmation by falling between
+    # checks.
+    if llm_agent_run.human_gate.human_confirmed and llm_agent_run.human_gate.resolved_by != "human":
         raise KernelValidationError(
-            "llm_agent_run human_gate resolved_by='auto' can never claim human_confirmed=true"
+            f"llm_agent_run human_gate resolved_by={llm_agent_run.human_gate.resolved_by!r} "
+            "can never claim human_confirmed=true (only a real human resolution may)"
+        )
+    # Choice/gate provenance cross-check: when the strategy was picked by
+    # machinery (selected_by='auto'), the gate resolution that flows from that
+    # choice cannot claim a human confirmed it. Every supported writer pairs
+    # these consistently (the gate inherits the choice's provenance); a mixed
+    # pair only arises from a forged or dishonest artifact, so it fails closed.
+    if human_choice.selected_by == "auto" and llm_agent_run.human_gate.human_confirmed:
+        raise KernelValidationError(
+            "llm_agent_run human_gate claims human_confirmed=true but human_choice "
+            "selected_by='auto': an automated strategy selection cannot carry a "
+            "human-confirmed gate resolution"
         )
 
     if prover_loop is None:
@@ -1086,7 +1100,7 @@ def validate_run(run_dir: Path) -> None:
         computations,
         tests,
     )
-    _validate_human_choice(human_choice, strategy_brief)
+    _validate_human_choice(human_choice, strategy_brief, manifest)
     _validate_human_feedback(
         manifest,
         claim,
@@ -1106,6 +1120,7 @@ def validate_run(run_dir: Path) -> None:
         prover_loop,
         prover_round_index,
         strategy_brief,
+        human_choice,
     )
     _validate_agent_run_status(agent_run_status, claim, manifest, run_dir)
     _validate_pressure_status(

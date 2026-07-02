@@ -542,6 +542,7 @@ def test_changed_hypothesis_ledger_blocks_resume_and_direct_prover_paths(
             run_dir=run_dir,
             decision="continue",
             reason="should be blocked",
+            resolved_by="human",
         )
     assert read_yaml(run_dir / "llm_agent_run.yaml")["human_gate"]["status"] != "resolved"
 

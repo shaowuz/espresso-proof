@@ -353,18 +353,28 @@ def test_real_math_benchmark_counts_scoped_machine_checks_without_global_proof(
 def test_real_math_benchmark_keeps_human_attestation_out_of_agent_solved(
     tmp_path: Path,
 ) -> None:
+    # V0 has no human-attestation artifact, so a recorded human_attested entry
+    # is unverifiable say-so: the kernel rejects the whole run (fail closed),
+    # and an invalid run can never count as ANY kind of solution — least of
+    # all an agent-solved one.
+    from espresso_proof.validation.errors import KernelValidationError
+
     run_dir = _basic_run(tmp_path)
     _append_human_attestation(run_dir)
+    with pytest.raises(KernelValidationError, match="human_attested is not earnable"):
+        validate_run(run_dir)
+
     report = build_real_math_capability_report([_case(run_dir, "human_attested")])
     row = _row(report)
 
-    assert row["valid_run"] is True
-    assert row["human_attested_solution"] is True
+    assert row["valid_run"] is False
+    assert row["human_attested_solution"] is False
     assert row["agent_solved"] is False
     assert row["checked_scoped_fact"] is False
     assert row["source_supported_argument"] is False
     assert row["formal_solution"] is False
-    assert report["metrics"]["human_attested_solution_rate"] == 1.0
+    assert row["solved_full_claim"] is False
+    assert report["metrics"]["human_attested_solution_rate"] == 0.0
     assert report["metrics"]["agent_solved_rate"] == 0.0
 
 

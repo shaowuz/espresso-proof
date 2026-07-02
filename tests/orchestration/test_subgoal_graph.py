@@ -52,6 +52,9 @@ def _resumed_run(tmp_path: Path) -> Path:
         run_dir=run_dir,
         selected_strategy=selected,
         effort=_first_allowed_effort(brief, selected),
+        # These tests simulate a human picking the strategy; provenance must be
+        # explicit now that the fail-closed default records 'auto'.
+        selected_by="human",
     )
     return run_dir
 

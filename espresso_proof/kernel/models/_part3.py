@@ -172,8 +172,8 @@ class VerifierType(str, Enum):
       (implemented elsewhere; trusted).
     - ``lean_bridge``: a Lean/mathlib proof check (NOT executed in V0; registry
       only -- it cannot earn a checked status here).
-    - ``human_checked``: a human attestation (NOT machine verification; a
-      separate, clearly-labelled status).
+    - ``human_checked``: a human attestation (NOT machine verification; registry
+      only in V0 -- no attestation artifact exists, so it cannot earn a status).
     """
 
     finite_group_cayley = "finite_group_cayley"
@@ -192,7 +192,8 @@ class ProofVerificationStatus(str, Enum):
     - ``instance_checked``: a specific finite instance was machine-checked.
     - ``computation_checked``: a computation was confirmed by a trusted backend.
     - ``lean_checked``: a Lean proof compiled (reserved; not earnable in V0).
-    - ``human_attested``: a human checked it (separate from machine verification).
+    - ``human_attested``: a human checked it (reserved; NOT earnable in V0 --
+      there is no human-attestation artifact for the kernel to check).
     - ``unverified``: nothing earned / the verifier failed (fail closed).
     """
 
@@ -238,8 +239,9 @@ class ProofVerificationReport(StrictBaseModel):
     language prover/reviewer approval is not verification and cannot reach this
     report. The model has no ``proved`` status: a finite/instance check earns only
     ``instance_checked`` / ``computation_checked`` for what it actually covered;
-    ``lean_checked`` is reserved and not earnable in V0; a human check is recorded
-    as the separate ``human_attested``. The validator fails closed.
+    ``lean_checked`` is reserved and not earnable in V0; ``human_attested`` is
+    likewise reserved and not earnable in V0 (no human-attestation artifact
+    exists for the kernel to check). The validator fails closed.
     """
 
     schema_version: Literal[1] = 1

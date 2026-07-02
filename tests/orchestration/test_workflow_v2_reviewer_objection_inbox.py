@@ -97,6 +97,7 @@ def _run_to_resolved_loop(tmp_path: Path) -> tuple[Path, str]:
         decision="continue",
         reason="task06b test",
         human_choice=human_choice,
+        resolved_by="human",
     )
     validate_run(run_dir)
     return run_dir, selected

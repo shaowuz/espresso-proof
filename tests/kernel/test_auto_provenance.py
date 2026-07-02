@@ -17,15 +17,40 @@ from pydantic import ValidationError
 
 from espresso_proof.kernel.io import read_yaml
 from espresso_proof.kernel.models import (
+    Claim,
     HumanChoice,
     LLMAgentHumanGate,
+    LLMAgentRunReport,
+    RunManifest,
     StrategyBrief,
 )
 from espresso_proof.kernel.validators import KernelValidationError, validate_run
 from espresso_proof.kernel.validators._part5 import _validate_human_choice
+from espresso_proof.kernel.validators._part6 import _validate_llm_loop_artifacts
 from espresso_proof.orchestration.mock_pipeline import run_mock_critique
 
 FIXTURES = Path("tests/fixtures")
+
+
+def _construct_manifest(state: str = "WAITING_LLM_AGENT_HUMAN_GATE") -> RunManifest:
+    return RunManifest.model_construct(
+        run_id="run_test", artifacts={}, optional_artifacts={}, current_state=state
+    )
+
+
+def _construct_choice(**overrides) -> HumanChoice:
+    fields = {
+        "claim_id": "claim_test",
+        "status": "pending",
+        "selected_strategy": None,
+        "effort": None,
+        "taste_judgment": "",
+        "continue_decision": "pending",
+        "human_confirmed": False,
+        "selected_by": "human",
+    }
+    fields.update(overrides)
+    return HumanChoice.model_construct(**fields)
 
 
 def _selected_choice(**overrides) -> dict:
@@ -169,29 +194,17 @@ def test_agent_gate_auto_lie_is_rejected_when_pending() -> None:
 def test_validator_layer_rejects_auto_confirmed_choice_even_if_model_bypassed() -> None:
     # model_construct bypasses the pydantic validator on purpose: the kernel
     # validator layer must fail closed on its own.
-    lying_choice = HumanChoice.model_construct(
-        claim_id="claim_test",
-        status="pending",
-        selected_strategy=None,
-        effort=None,
-        taste_judgment="",
-        continue_decision="pending",
-        human_confirmed=True,
-        selected_by="auto",
-    )
+    lying_choice = _construct_choice(human_confirmed=True, selected_by="auto")
     with pytest.raises(KernelValidationError, match="selected_by='auto'"):
-        _validate_human_choice(lying_choice, StrategyBrief.model_construct())
+        _validate_human_choice(
+            lying_choice, StrategyBrief.model_construct(), _construct_manifest()
+        )
 
 
 def test_validator_layer_rejects_auto_confirmed_gate_even_if_model_bypassed(
     tmp_path: Path,
 ) -> None:
-    from espresso_proof.kernel.models import Claim, LLMAgentRunReport, RunManifest
-    from espresso_proof.kernel.validators._part6 import _validate_llm_loop_artifacts
-
-    manifest = RunManifest.model_construct(
-        run_id="run_test", artifacts={}, optional_artifacts={}
-    )
+    manifest = _construct_manifest()
     claim = Claim.model_construct(id="claim_test")
     lying_gate = LLMAgentHumanGate.model_construct(
         gate_id="gate_test",
@@ -214,6 +227,7 @@ def test_validator_layer_rejects_auto_confirmed_gate_even_if_model_bypassed(
             None,
             None,
             StrategyBrief.model_construct(),
+            _construct_choice(),
         )
 
 
@@ -279,3 +293,163 @@ def test_validate_run_accepts_run_dir_with_honest_auto_choice(tmp_path: Path) ->
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
     validate_run(run_dir)
+
+
+# ---------------------------------------------------------------------------
+# (d) Exhaustive provenance: only 'human' may ever claim confirmation
+# ---------------------------------------------------------------------------
+
+
+def test_validator_layer_rejects_unknown_provenance_claiming_confirmation() -> None:
+    # If the selected_by Literal is ever widened (e.g. 'delegated'), the new
+    # value must not slip between an =='auto' check and an =='human' check:
+    # the kernel check is exhaustive — anything that is not 'human' can never
+    # claim human_confirmed=true.
+    lying_choice = _construct_choice(human_confirmed=True, selected_by="delegated")
+    with pytest.raises(KernelValidationError, match="can never claim human_confirmed"):
+        _validate_human_choice(
+            lying_choice, StrategyBrief.model_construct(), _construct_manifest()
+        )
+
+
+def test_validator_layer_rejects_unknown_gate_provenance_claiming_confirmation(
+    tmp_path: Path,
+) -> None:
+    lying_gate = LLMAgentHumanGate.model_construct(
+        gate_id="gate_test",
+        status="resolved",
+        human_confirmed=True,
+        resolved_by="delegated",
+    )
+    report = LLMAgentRunReport.model_construct(
+        claim_id="claim_test",
+        run_id="run_test",
+        input_artifacts=[],
+        human_gate=lying_gate,
+    )
+    with pytest.raises(KernelValidationError, match="can never claim human_confirmed"):
+        _validate_llm_loop_artifacts(
+            tmp_path,
+            _construct_manifest(),
+            Claim.model_construct(id="claim_test"),
+            report,
+            None,
+            None,
+            StrategyBrief.model_construct(),
+            _construct_choice(),
+        )
+
+
+# ---------------------------------------------------------------------------
+# (e) State-name / choice-provenance cross-check
+# ---------------------------------------------------------------------------
+
+
+def test_human_state_name_with_auto_choice_is_rejected() -> None:
+    honest_auto = _construct_choice(status="selected", selected_by="auto")
+    with pytest.raises(
+        KernelValidationError, match="HUMAN_CHOICE_CONTINUE_SELECTED requires"
+    ):
+        _validate_human_choice(
+            honest_auto,
+            StrategyBrief.model_construct(),
+            _construct_manifest("HUMAN_CHOICE_CONTINUE_SELECTED"),
+        )
+
+
+def test_auto_state_name_with_human_choice_is_rejected() -> None:
+    human_choice = _construct_choice(status="selected", selected_by="human")
+    with pytest.raises(
+        KernelValidationError, match="AUTO_CHOICE_CONTINUE_SELECTED requires"
+    ):
+        _validate_human_choice(
+            human_choice,
+            StrategyBrief.model_construct(),
+            _construct_manifest("AUTO_CHOICE_CONTINUE_SELECTED"),
+        )
+
+
+def test_pending_choice_is_exempt_from_state_cross_check() -> None:
+    # The auto path writes AUTO_CHOICE_CONTINUE_SELECTED (and validates) BEFORE
+    # recording the choice; that transient pending window must stay valid.
+    _validate_human_choice(
+        _construct_choice(status="pending", selected_by="human"),
+        StrategyBrief.model_construct(),
+        _construct_manifest("AUTO_CHOICE_CONTINUE_SELECTED"),
+    )
+
+
+def test_validate_run_rejects_auto_state_name_with_human_choice(
+    tmp_path: Path,
+) -> None:
+    # End to end: an auto-advertising state name over a human-claiming choice
+    # artifact is a provenance mismatch a state-name reader would be misled by.
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    strategy_brief = read_yaml(run_dir / "strategy_brief.yaml")
+    strategy_id, effort = _first_allowed_real_choice(strategy_brief)
+    choice_path = run_dir / "human_choice.yaml"
+    data = read_yaml(choice_path)
+    data.update(
+        {
+            "status": "selected",
+            "selected_strategy": strategy_id,
+            "effort": effort,
+            "taste_judgment": "A human picked this route.",
+            "continue_decision": "continue",
+            "human_confirmed": True,
+            "selected_by": "human",
+        }
+    )
+    choice_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    manifest_path = run_dir / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    manifest["current_state"] = "AUTO_CHOICE_CONTINUE_SELECTED"
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(
+        KernelValidationError, match="AUTO_CHOICE_CONTINUE_SELECTED requires"
+    ):
+        validate_run(run_dir)
+
+
+# ---------------------------------------------------------------------------
+# (f) Choice/gate provenance cross-check
+# ---------------------------------------------------------------------------
+
+
+def test_validator_layer_rejects_human_confirmed_gate_on_auto_choice(
+    tmp_path: Path,
+) -> None:
+    # An auto-selected strategy cannot carry a gate resolution that claims a
+    # human confirmed it: every supported writer pairs these consistently, so
+    # the mixed pair only arises from a forged artifact.
+    honest_auto_choice = _construct_choice(selected_by="auto")
+    human_claiming_gate = LLMAgentHumanGate.model_construct(
+        gate_id="gate_test",
+        status="resolved",
+        human_confirmed=True,
+        resolved_by="human",
+    )
+    report = LLMAgentRunReport.model_construct(
+        claim_id="claim_test",
+        run_id="run_test",
+        input_artifacts=[],
+        human_gate=human_claiming_gate,
+    )
+    with pytest.raises(
+        KernelValidationError, match="selected_by='auto'"
+    ):
+        _validate_llm_loop_artifacts(
+            tmp_path,
+            _construct_manifest(),
+            Claim.model_construct(id="claim_test"),
+            report,
+            None,
+            None,
+            StrategyBrief.model_construct(),
+            honest_auto_choice,
+        )

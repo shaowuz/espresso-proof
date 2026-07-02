@@ -84,7 +84,13 @@ def _to_resolved_loop(tmp_path: Path, *, effort: str) -> tuple[Path, str]:
         "human_confirmed": True,
     }
     write_yaml(run_dir / artifacts["human_choice"], human_choice)
-    _resolve_and_build_loop(run_dir, decision="continue", reason="test", human_choice=human_choice)
+    _resolve_and_build_loop(
+        run_dir,
+        decision="continue",
+        reason="test",
+        human_choice=human_choice,
+        resolved_by="human",
+    )
     return run_dir, selected
 
 
