@@ -139,8 +139,9 @@ def main() -> int:
         fallback_reason: str | None = None
         parse_status = "not_run"
         result: dict
+        _raw_codex_stdout = ""
         try:
-            output, return_code = _run_codex(
+            output, return_code, _raw_codex_stdout = _run_codex(
                 command,
                 full_prompt=full_prompt,
                 last_message=last_message,
@@ -191,6 +192,7 @@ def main() -> int:
             fallback_reason=fallback_reason,
         )
 
+    usage = _usage_from_json_events(_raw_codex_stdout)
     result[_DIAGNOSTIC_META_KEY] = {
         "adapter": "espresso_codex_agent",
         "request_id": request_id,
@@ -199,6 +201,8 @@ def main() -> int:
         "fallback_reason": fallback_reason,
         "model": CODEX_MODEL,
         "effort": CODEX_REASONING_EFFORT,
+        "usage": usage,
+        "usage_source": "codex_event_stream" if usage else "unreported",
     }
 
     json.dump(result, sys.stdout)
@@ -385,7 +389,7 @@ def _build_full_prompt(
 
 def _run_codex(
     command: list[str], *, full_prompt: str, last_message: Path, timeout: int
-) -> tuple[str, int]:
+) -> tuple[str, int, str]:
     proc = subprocess.run(
         command,
         input=full_prompt,
@@ -400,7 +404,32 @@ def _run_codex(
     text = last_message.read_text(encoding="utf-8") if last_message.exists() else ""
     if not text.strip():
         text = _last_text_from_json_events(proc.stdout)
-    return text, proc.returncode
+    return text, proc.returncode, proc.stdout
+
+
+def _usage_from_json_events(stdout: str) -> dict | None:
+    """The last usage dict in the ``codex exec --json`` event stream, keys
+    passed through only when actually present (absent stays absent — null
+    means unknown, never 0)."""
+
+    usage: dict | None = None
+    for raw in (stdout or "").splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            event = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        candidate = event.get("usage")
+        if not isinstance(candidate, dict):
+            info = event.get("info")
+            candidate = info.get("usage") if isinstance(info, dict) else None
+        if isinstance(candidate, dict) and candidate:
+            usage = candidate
+    return usage
 
 
 def _last_text_from_json_events(stdout: str) -> str:

@@ -392,7 +392,7 @@ def test_codex_run_sends_utf8_stdin_to_cli(tmp_path: Path) -> None:
     prompt = "prime order café 数学"
     last_message = tmp_path / "last_message.txt"
 
-    text, return_code = codex_adapter._run_codex(
+    text, return_code, _stdout = codex_adapter._run_codex(
         [sys.executable, str(fake), "--output-last-message", str(last_message)],
         full_prompt=prompt,
         last_message=last_message,

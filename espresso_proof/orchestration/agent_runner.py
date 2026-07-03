@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from espresso_proof.kernel.observability import usage_sink_for_run
+
 from espresso_proof.kernel.agent_run_status import (
     AGENT_KINDS,
     has_status,
@@ -158,6 +160,7 @@ def compute_agent(
                 model=model,
                 api_key_env=api_key_env,
                 external_agent_command_env=external_agent_command_env,
+                usage_sink=usage_sink_for_run(run_dir),
             )
         context = load_agent_context(run_dir)
         compute = compute_examples if agent == "examples" else compute_counterexamples
@@ -332,6 +335,7 @@ def _run_single_agent_locked(
             model=model,
             api_key_env=api_key_env,
             external_agent_command_env=external_agent_command_env,
+            usage_sink=usage_sink_for_run(run_dir),
         )
 
     # Mark running BEFORE the snapshot so the attempt count + start time survive a

@@ -157,6 +157,11 @@ def build_front_half_run_report(
 
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])
+    if pass_report is not None:
+        # The artifact records the client that actually executed the pass
+        # (captured from the live client), never the CLI flag defaults.
+        provider = str(pass_report.get("provider") or provider)
+        model = str(pass_report.get("model") or model)
     if pass_report is None:
         stages = [
             {

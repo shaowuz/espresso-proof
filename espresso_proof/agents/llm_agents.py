@@ -59,6 +59,7 @@ from espresso_proof.agents.agent_pass import (  # noqa: F401 - re-exported
     run_llm_agent_pass,
 )
 from espresso_proof.agents.clients import (  # noqa: F401 - re-exported
+    ADAPTER_META_KEY,
     CODEX_ADAPTER_DIAGNOSTIC_KEY,
     CODEX_EXTERNAL_MODEL,
     DEFAULT_CODEX_EXTERNAL_TIMEOUT_SECONDS,
@@ -72,6 +73,7 @@ from espresso_proof.agents.clients import (  # noqa: F401 - re-exported
     StubLLMClient,
     build_client,
     external_agent_diagnostic,
+    recorded_model_for_events,
     openai_agent_diagnostic,
 )
 from espresso_proof.agents.output_schemas import (  # noqa: F401 - re-exported

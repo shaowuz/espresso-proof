@@ -4,6 +4,8 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
+from espresso_proof.kernel.observability import usage_sink_for_run
+
 from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.kernel.models import LiteratureReviewAgentReport, SourceGroundingReport, TheoremApplicabilityReport
@@ -559,6 +561,7 @@ def review_theorem_applicability_with_llm(
             model=model,
             api_key_env=api_key_env,
             external_agent_command_env=external_agent_command_env,
+            usage_sink=usage_sink_for_run(run_dir),
         )
         review_records: list[dict] = []
         usage_updates: dict[str, dict] = {}

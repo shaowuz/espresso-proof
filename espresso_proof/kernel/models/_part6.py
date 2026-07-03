@@ -24,6 +24,9 @@ from espresso_proof.kernel.models._part5 import (
 class LLMAgentProviderDiagnostic(StrictBaseModel):
     provider: Literal["openai", "external"]
     model: str
+    # Positive record of the resolved external executor (basename only — a
+    # full argv may embed secrets). Additive; old artifacts validate.
+    command_basename: str | None = None
     api_key_env: str | None = None
     api_key_present: bool | None = None
     command_env: str | None = None
@@ -55,6 +58,9 @@ class LLMAgentCallDiagnostic(StrictBaseModel):
     fallback_reason: str = ""
     request_id: str = ""
     verified_real_provider: bool = False
+    # Resolved-executor provenance (basename only). Additive; old artifacts
+    # validate.
+    command_basename: str = ""
 
 
 class LLMAgentRunReport(StrictBaseModel):

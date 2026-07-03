@@ -39,6 +39,7 @@ from espresso_proof.kernel.models import (
     ProverRoundIndex,
     ProverRoundReport,
 )
+from espresso_proof.kernel.observability import usage_sink_for_run
 from espresso_proof.kernel.time_allocation import ensure_prover_time_allocation_plan
 from espresso_proof.kernel.update_inbox_service import write_time_allocation_from_update_inbox
 from espresso_proof.strategy.human_time_allocation import (
@@ -505,11 +506,14 @@ def append_prover_loop_round(
     parent_attempt = _select_parent_attempt(attempts, selected_strategy_id)
     next_round = max(attempt["round_index"] for attempt in attempts) + 1
 
+    if client is not None and getattr(client, "usage_sink", None) is None and hasattr(client, "usage_sink"):
+        client.usage_sink = usage_sink_for_run(run_dir)
     client = client or build_client(
         provider=provider,
         model=model,
         api_key_env=api_key_env,
         external_agent_command_env=external_agent_command_env,
+        usage_sink=usage_sink_for_run(run_dir),
     )
     context = load_agent_context(run_dir)
     time_context = _time_allocation_context(run_dir, allocation_plan)

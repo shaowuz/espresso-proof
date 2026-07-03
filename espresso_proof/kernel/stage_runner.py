@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.kernel.observability import AGENT_EVENTS_FILENAME, TIMINGS_FILENAME
+from espresso_proof.kernel.observability import AGENT_EVENTS_FILENAME, TIMINGS_FILENAME, TOKEN_USAGE_FILENAME
 from espresso_proof.kernel.run_events import EVENTS_FILENAME, append_event
 from espresso_proof.kernel.run_lock import LOCK_FILENAME
 
@@ -52,9 +52,11 @@ REPAIR_TARGET_FILENAME = "repair_target.yaml"
 # does not erase its (scrubbed, advisory-only) mathematical reasoning. Phase 5:
 # repair_target.yaml joins them so a rolled-back repair round still records which
 # objections it was asked to address.
+# token_usage.jsonl joins the exclusions for the same reason as agent_events:
+# rolling back a failed stage must not erase the record of tokens already spent.
 _SNAPSHOT_EXCLUDED_NAMES = frozenset(
     {EVENTS_FILENAME, AGENT_EVENTS_FILENAME, TIMINGS_FILENAME, LOCK_FILENAME,
-     ADVISORY_PROOF_SKETCH_FILENAME, REPAIR_TARGET_FILENAME}
+     ADVISORY_PROOF_SKETCH_FILENAME, REPAIR_TARGET_FILENAME, TOKEN_USAGE_FILENAME}
 )
 
 

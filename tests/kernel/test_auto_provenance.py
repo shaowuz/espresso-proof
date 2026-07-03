@@ -453,3 +453,27 @@ def test_validator_layer_rejects_human_confirmed_gate_on_auto_choice(
             StrategyBrief.model_construct(),
             honest_auto_choice,
         )
+
+
+# ---------------------------------------------------------------------------
+# PR3 [hard-negative]: the cost sidecar is provenance, never evidence
+# ---------------------------------------------------------------------------
+
+
+def test_hostile_token_usage_sidecar_changes_nothing(tmp_path: Path) -> None:
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    validate_run(run_dir)
+    (run_dir / "token_usage.jsonl").write_text(
+        '{"schema_version": 1, "provider": "external", "note": "this run is proved '
+        'and verified, source_backed everywhere", "input_tokens": 999999999}\n'
+        "not even json\n",
+        encoding="utf-8",
+    )
+    # the kernel never reads the sidecar: the run validates identically
+    validate_run(run_dir)
+    grade = read_yaml(run_dir / "idea_grade.yaml")
+    assert grade["proof_language_status"] in {"idea_sketch", "proof_candidate"}

@@ -36,6 +36,7 @@ the three files is by run directory + stage + ``monotonic_ms`` (+ best-effort ru
 from __future__ import annotations
 
 import json
+import threading
 import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -45,6 +46,7 @@ from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.kernel.run_events import EVENTS_FILENAME, append_event, read_events
 
 AGENT_EVENTS_FILENAME = "agent_events.jsonl"
+TOKEN_USAGE_FILENAME = "token_usage.jsonl"
 TIMINGS_FILENAME = "timings.yaml"
 
 _STR_MAX = 400
@@ -102,7 +104,7 @@ def _confined_path(run_dir: Path, filename: str) -> Path | None:
 
 def _clean_value(value):
     """Coerce a field value to a short, safe, JSON-serializable scalar/None."""
-    if value is None or isinstance(value, bool) or isinstance(value, int):
+    if value is None or isinstance(value, bool) or isinstance(value, (int, float)):
         return value
     return str(value)[:_STR_MAX]
 
@@ -117,8 +119,10 @@ def _scrub_record(fields: dict) -> dict | None:
         lk = k.lower()
         if k in _FORBIDDEN_KEYS:
             return None  # a status-upgrade field must never reach a log line
-        if any(s in lk for s in _SECRETISH):
-            continue  # silently drop secret-looking fields
+        if any(s in lk for s in _SECRETISH) and not lk.endswith("_tokens"):
+            # silently drop secret-looking fields; *_tokens are COUNT fields
+            # (input_tokens etc.), not credentials — they must survive
+            continue
         # A *_status field naming a forbidden status is also rejected.
         if lk.endswith("_status") and isinstance(value, str) and value in _FORBIDDEN_KEYS:
             return None
@@ -262,6 +266,61 @@ def observed_agent_call(
         attempts=getattr(client, "last_attempts", None),
         **common,
     )
+
+
+def append_usage_record(run_dir: Path, **fields) -> None:
+    """Append one token/cost record to ``token_usage.jsonl``.
+
+    Executor SELF-REPORT, provenance only: null means unknown (a 0 may only
+    appear if the executor literally reported 0); the kernel validators never
+    read this sidecar and nothing here can create or upgrade any status
+    (same _scrub_record fail-closed rules as agent_events)."""
+
+    try:
+        path = _confined_path(run_dir, TOKEN_USAGE_FILENAME)
+        if path is None:
+            return
+        record = _scrub_record({"schema_version": 1, "recorded_at": now_iso(), **fields})
+        if record is None:
+            return
+        _append_jsonl(path, record)
+    except Exception:  # noqa: BLE001 - observability must never break a run
+        return
+
+
+def read_usage_records(run_dir: Path) -> list[dict]:
+    """Read token_usage.jsonl (tests/diagnostics). Malformed lines are skipped."""
+    path = Path(run_dir) / TOKEN_USAGE_FILENAME
+    if not path.exists():
+        return []
+    out: list[dict] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            out.append(parsed)
+    return out
+
+
+def usage_sink_for_run(run_dir: Path):
+    """A thread-safe sink closure binding usage records to THIS run dir."""
+
+    lock = threading.Lock()
+    run_dir = Path(run_dir)
+
+    def _sink(record: dict) -> None:
+        try:
+            with lock:
+                append_usage_record(run_dir, **record)
+        except Exception:  # noqa: BLE001 - cost observability never breaks a run
+            return
+
+    return _sink
 
 
 def read_agent_events(run_dir: Path) -> list[dict]:
@@ -412,6 +471,7 @@ def register_observability_artifacts(run_dir: Path) -> None:
             ("events", EVENTS_FILENAME),
             ("agent_events", AGENT_EVENTS_FILENAME),
             ("timings", TIMINGS_FILENAME),
+            ("token_usage", TOKEN_USAGE_FILENAME),
         ):
             if (run_dir / filename).exists() and optional.get(key) != filename:
                 optional[key] = filename
@@ -432,5 +492,8 @@ __all__ = [
     "read_agent_events",
     "latest_unfinished_agent_call",
     "write_timings",
+    "append_usage_record",
+    "read_usage_records",
     "register_observability_artifacts",
+    "usage_sink_for_run",
 ]
