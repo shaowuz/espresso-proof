@@ -12,6 +12,7 @@ from pathlib import Path
 
 from espresso_proof.agents.agent_pass import (
     INPUT_ARTIFACTS,
+    collect_open_reviewer_blockers,
     _agent_input_artifacts,
     _append_reviewer_objection_events,
     _apply_missing_context_notes,
@@ -49,6 +50,21 @@ from espresso_proof.strategy.human_time_allocation import (
 )
 
 
+# Only the EPHEMERAL prompt lane may cap blockers, and only with an explicit
+# disclosed count — the artifact list is always complete (no silent drops).
+_PROMPT_BLOCKER_CAP = 40
+
+
+def _prompt_blockers_with_disclosure(blockers: list) -> list:
+    items = list(blockers or [])
+    if len(items) <= _PROMPT_BLOCKER_CAP:
+        return items
+    hidden = len(items) - _PROMPT_BLOCKER_CAP
+    return items[:_PROMPT_BLOCKER_CAP] + [
+        f"[+{hidden} more open blockers recorded in prover_loop.yaml — not shown in this prompt]"
+    ]
+
+
 def _route_allocation_entry(plan, route_id: str | None) -> dict | None:
     if route_id is None:
         return None
@@ -77,20 +93,12 @@ def build_prover_loop_report(
         ]
     verifier_reviews = agent_report.get("verifier_reviews", [])
     reviewer_pointers = [_review_pointer(review) for review in verifier_reviews]
-    blockers = sorted(
-        {
-            item
-            for review in verifier_reviews
-            for item in (
-                review.get("objections", [])
-                + review.get("missing_hypotheses", [])
-                + review.get("source_requests", [])
-            )
-            if str(item).strip()
-        }
-    )
+    # Priority-ordered, deduplicated, UNCAPPED (no silent drops — the old
+    # alphabetical sorted-set + [:12] silently discarded the objections that
+    # sorted last).
+    blocker_details = collect_open_reviewer_blockers(verifier_reviews)
     blockers, machine_answered = _split_machine_answered_blockers(
-        blockers,
+        [detail["text"] for detail in blocker_details],
         run_dir=run_dir,
         claim_id=agent_report["claim_id"],
         source_request_texts={
@@ -99,7 +107,8 @@ def build_prover_loop_report(
             for item in review.get("source_requests", [])
         },
     )
-    blockers = blockers[:12]
+    open_texts = set(blockers)
+    blocker_details = [detail for detail in blocker_details if detail["text"] in open_texts]
     gate = agent_report["human_gate"]
     selected_strategy = _selected_strategy_from_choice(human_choice, top_strategies)
     approved_effort = _approved_effort_from_choice(human_choice, approved_effort)
@@ -132,6 +141,7 @@ def build_prover_loop_report(
                 "time_allocation": allocation,
                 "status": status,
                 "blockers": blockers,
+                "blocker_details": blocker_details,
                 "next_action": _next_action_for_strategy(
                     index=index,
                     strategy=strategy,
@@ -549,20 +559,11 @@ def append_prover_loop_round(
         review["verifier_id"] = f"round_{next_round:03d}_{review['verifier_id']}"
         verifier_reviews.append(review)
 
-    blockers = sorted(
-        {
-            item
-            for review in verifier_reviews
-            for item in (
-                review.get("objections", [])
-                + review.get("missing_hypotheses", [])
-                + review.get("source_requests", [])
-            )
-            if str(item).strip()
-        }
-    )
+    # Priority-ordered, deduplicated, UNCAPPED — same mechanism as the initial
+    # report (no silent drops in the deep-round lane either).
+    blocker_details = collect_open_reviewer_blockers(verifier_reviews)
     blockers, machine_answered = _split_machine_answered_blockers(
-        blockers,
+        [detail["text"] for detail in blocker_details],
         run_dir=run_dir,
         claim_id=loop_report["claim_id"],
         source_request_texts={
@@ -571,7 +572,8 @@ def append_prover_loop_round(
             for item in review.get("source_requests", [])
         },
     )
-    blockers = blockers[:12]
+    open_texts = set(blockers)
+    blocker_details = [detail for detail in blocker_details if detail["text"] in open_texts]
     reviewer_pointers = [_review_pointer(review) for review in verifier_reviews]
     selected_strategy_id = parent_attempt["strategy_id"]
     # Goal 54C: the selected route's human priority deterministically sets the
@@ -599,6 +601,7 @@ def append_prover_loop_round(
         "time_allocation": allocation,
         "status": "needs_repair" if blockers else "candidate",
         "blockers": blockers,
+        "blocker_details": blocker_details,
         "next_action": (
             "Repair reviewer blockers before another proof round."
             if blockers
@@ -732,7 +735,9 @@ def build_next_prover_input_from_reviewer_feedback(
     round_context = {
         **context,
         "previous_prover_loop_attempt": parent_attempt,
-        "reviewer_blockers_to_repair": parent_attempt.get("blockers", []),
+        "reviewer_blockers_to_repair": _prompt_blockers_with_disclosure(
+            parent_attempt.get("blockers", [])
+        ),
         "repair_target_objections": repair_target_objections,
         "loop_decision": loop_report.get("loop_decision"),
         "time_allocation": parent_attempt.get("time_allocation"),

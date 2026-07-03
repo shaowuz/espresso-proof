@@ -435,3 +435,22 @@ def test_blockers_all_repairable_gate() -> None:
     assert _blockers_all_repairable(["x"], {"x": {"missing_hypothesis"}}) is False
     # no blockers -> not escalatable
     assert _blockers_all_repairable([], {}) is False
+
+
+# ---------------------------------------------------------------------------
+# PR2: appended rounds carry uncapped, ordered blocker_details too
+# ---------------------------------------------------------------------------
+
+
+def test_appended_round_carries_matching_blocker_details(tmp_path: Path) -> None:
+    run_dir, _selected = _to_resolved_loop(tmp_path, effort="normal_pass")
+    loop = read_yaml(run_dir / "prover_loop.yaml")
+    for attempt in loop["attempts"]:
+        details = attempt.get("blocker_details") or []
+        if attempt.get("blockers"):
+            assert [d["text"] for d in details] == attempt["blockers"]
+            assert all(
+                d["severity"] in {"P0", "P1", "P2", "P3"}
+                and d["source_field"] in {"objections", "missing_hypotheses", "source_requests"}
+                for d in details
+            )

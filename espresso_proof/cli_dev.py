@@ -55,6 +55,7 @@ from espresso_proof.kernel.subgoal_graph import build_subgoal_graph
 from espresso_proof.ui.memo import build_concise_memo
 from espresso_proof.kernel.proof_language import scrub_proof_language
 from espresso_proof.kernel.surface_warnings import (
+    FRONT_HALF_REVIEW_PENDING_NOTE,
     collect_surface_warnings,
     refresh_final_report_disclosures,
     render_warning_lines,
@@ -594,6 +595,11 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     if line_numbered_proof_path is not None:
         line_numbered_proof = read_yaml(line_numbered_proof_path)
     agent_consensus_review = {}
+    prover_loop_for_warnings: dict = {}
+    _pl_path = _optional_artifact_path(run, optional_artifacts, "prover_loop")
+    if _pl_path is not None:
+        prover_loop_for_warnings = read_yaml(_pl_path)
+
     agent_consensus_review_path = _optional_artifact_path(
         run, optional_artifacts, "agent_consensus_review"
     )
@@ -639,7 +645,16 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
     )
     _echo("")
     _echo("Strongest Objection")
-    _echo(f"- {review.get('strongest_objection')}")
+    _strongest = str(review.get("strongest_objection") or "")
+    if (
+        _strongest.strip() == FRONT_HALF_REVIEW_PENDING_NOTE
+        and prover_loop_for_warnings.get("attempts")
+    ):
+        _strongest = (
+            "superseded front-half placeholder; see the prover-pass reviewer "
+            "blockers in the prover loop record"
+        )
+    _echo(f"- {_strongest}")
     _echo("")
     _echo("Failed Reviewers")
     _echo(f"- {', '.join(failed_reviewers) if failed_reviewers else 'none'}")
@@ -662,6 +677,7 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
         update_inbox=update_inbox,
         line_numbered_proof=line_numbered_proof,
         agent_consensus_review=agent_consensus_review,
+        prover_loop=prover_loop_for_warnings,
     ))
     if warning_lines:
         _echo("")
@@ -810,7 +826,16 @@ def inspect(run: Path = typer.Option(..., "--run", exists=True, file_okay=False)
                 f"{review.get('objection_count')} objection(s), "
                 f"action {review.get('recommended_human_action')}"
             )
-        _echo(f"- blockers: {', '.join(blockers[:3]) if blockers else 'none'}")
+        if blockers:
+            shown = blockers[:3]
+            suffix = (
+                f" (+{len(blockers) - len(shown)} more open; full list in prover_loop.yaml)"
+                if len(blockers) > len(shown)
+                else ""
+            )
+            _echo(f"- blockers: {', '.join(shown)}{suffix}")
+        else:
+            _echo("- blockers: none")
         if round_index is not None:
             rounds = round_index.get("rounds", [])
             _echo(f"- durable round artifacts: {len(rounds)}")
@@ -1243,6 +1268,9 @@ def run_llm_agents(
         loop_report=loop_report,
     )
     write_yaml(manifest_path, manifest)
+    # prover_loop.yaml may now carry open blockers the memo must disclose
+    # before validate_run's mandatory-disclosure check runs.
+    refresh_final_report_disclosures(run)
     validate_run(run)
     typer.echo(f"Wrote LLM agent run to {run / 'llm_agent_run.yaml'}")
     typer.echo("Agent output is candidate-only and requires human gate resolution.")

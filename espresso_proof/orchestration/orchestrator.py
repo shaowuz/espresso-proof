@@ -748,6 +748,10 @@ def write_initial_prover_reviewer_artifacts(
         loop_report=loop_report,
     )
     write_yaml(run_dir / "run_manifest.yaml", stage_manifest)
+    # prover_loop.yaml now exists (possibly with open blockers): the memo must
+    # disclose them BEFORE the stage's validate_run, which requires the
+    # prover_reviewer_blockers disclosure whenever the loop has open blockers.
+    refresh_final_report_disclosures(run_dir)
 
 
 def publish_agent_process_board(*, run_dir: Path, fast: bool, ran_front_half_agents: bool) -> None:

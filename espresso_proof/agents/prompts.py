@@ -82,7 +82,7 @@ def verifier_system_prompt(index: int, *, reviewer_role: str = "verifier") -> st
         "'scoped_objections' list: each item with text, scope (subgoal|proof_step|route|global), "
         "the matching subgoal_id or proof_step_id, kind (missing_source|hypothesis_gap|definition_gap|"
         "logical_gap|computation_needed|counterexample_pressure|unclear_claim|reviewer_disagreement|other), "
-        "severity (P0|P1|P2|P3), and a suggested_next_action. An objection only blocks or prioritizes "
+        "severity (P0 fatal flaw | P1 blocking step flaw | P2 blocking gap or source/computation request — the default | P3 non-blocking context note ONLY, never a step flaw), and a suggested_next_action. An objection only blocks or prioritizes "
         "repair; it never proves, refutes, or closes anything. "
         "Do not upgrade proof, evidence, source, or grade status. Return JSON only."
     )

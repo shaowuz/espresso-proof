@@ -907,6 +907,9 @@ def _validate_final_report_language(
         agent_consensus_review=_optional_final_report_context_artifact(
             final_report.parent, manifest, "agent_consensus_review"
         ),
+        prover_loop=_optional_final_report_context_artifact(
+            final_report.parent, manifest, "prover_loop"
+        ),
     )
     weak_statuses = {
         ProofLanguageStatus.idea_sketch,

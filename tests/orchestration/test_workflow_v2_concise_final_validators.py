@@ -1208,3 +1208,51 @@ def test_task09a_runtime_ui_kernel_and_vscode_parity_for_advisory_surfaces(
         assert "source_backed" not in rendered
         assert "checked_evidence" not in rendered
         assert "theorem_applicability_status" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# PR2 [hard-negative]: the memo must disclose open prover-pass blockers
+# ---------------------------------------------------------------------------
+
+
+def test_final_report_must_disclose_prover_pass_blockers(tmp_path: Path) -> None:
+    import pytest as _pytest
+
+    from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
+    from espresso_proof.validation.errors import KernelValidationError
+
+    claim = tmp_path / "claim.md"
+    claim.write_text(
+        "Every group of order p^2, where p is prime, is abelian.", encoding="utf-8"
+    )
+    result = orchestrate_run(
+        project="disclosure_gate",
+        input_path=claim,
+        output_root=tmp_path,
+        provider="stub",
+        front_half="mock",
+        auto_continue=True,
+    )
+    run_dir = Path(result["run_dir"])
+    loop = read_yaml(run_dir / "prover_loop.yaml")
+    has_open_blockers = any(a.get("blockers") for a in loop.get("attempts", []))
+    if not has_open_blockers:
+        _pytest.skip("stub run produced no open blockers to disclose")
+    validate_run(run_dir)  # fresh run: writer and validator agree
+
+    # hand-delete the prover-pass disclosure line -> validate_run fails closed
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    report_path = run_dir / manifest["artifacts"]["final_report"]
+    text = report_path.read_text(encoding="utf-8")
+    lines = [
+        line
+        for line in text.splitlines()
+        if "Prover-pass reviewer blockers still open" not in line
+    ]
+    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with _pytest.raises(KernelValidationError, match="prover_reviewer_blockers"):
+        validate_run(run_dir)
+
+    # the standard refresh restores the disclosure and the run passes again
+    refresh_final_report_disclosures(run_dir)
+    validate_run(run_dir)

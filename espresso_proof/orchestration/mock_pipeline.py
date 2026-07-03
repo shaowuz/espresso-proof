@@ -188,6 +188,7 @@ def _with_final_report_disclosures(text: str, artifacts: dict[str, object]) -> s
         source_grounding=_artifact_dict(artifacts, "source_grounding.yaml"),
         theorem_applicability=_artifact_dict(artifacts, "theorem_applicability.yaml"),
         update_inbox=_artifact_dict(artifacts, "update_inbox.yaml"),
+        prover_loop=_artifact_dict(artifacts, "prover_loop.yaml"),
     )
     lines = render_warning_lines(warnings)
     if not lines:

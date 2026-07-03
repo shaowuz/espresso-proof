@@ -32,7 +32,11 @@ from espresso_proof.kernel.proof_language import scrub_proof_language, scrub_sou
 from espresso_proof.kernel.research_bank import load_bankable_dict
 from espresso_proof.ui.route_table import build_route_step_rows, render_route_step_table_lines
 from espresso_proof.kernel.subgoal_graph import render_proof_search_lines
-from espresso_proof.kernel.surface_warnings import collect_surface_warnings, render_warning_lines
+from espresso_proof.kernel.surface_warnings import (
+    FRONT_HALF_REVIEW_PENDING_NOTE,
+    collect_surface_warnings,
+    render_warning_lines,
+)
 
 
 # Conservative defaults for a proof-route field that has no specific artifact
@@ -207,6 +211,20 @@ def build_concise_memo(run_dir: Path) -> str:
     claim_text = (claim.get("normalized_statement") or "").strip()
     claim_state = "locked" if claim.get("locked") else "unlocked"
     objection = (review.get("strongest_objection") or "none recorded").strip()
+    # The front-half placeholder ("Front-half review pending; ...") must not be
+    # presented as the strongest obstruction once the prover-pass reviewers
+    # actually ran; the real objections surface via the prover-pass warning.
+    _pl_rel_early = (manifest.get("optional_artifacts") or {}).get("prover_loop")
+    if (
+        objection == FRONT_HALF_REVIEW_PENDING_NOTE
+        and _pl_rel_early
+        and (run_dir / _pl_rel_early).exists()
+        and (read_yaml(run_dir / _pl_rel_early) or {}).get("attempts")
+    ):
+        objection = (
+            "superseded front-half placeholder; see the prover-pass reviewer "
+            "blockers in the prover loop record"
+        )
 
     # Theorem-applicability audit (optional) carries the recorded "why it applies"
     # reason for a source-backed step; load it if present (never invented here).
@@ -230,6 +248,11 @@ def build_concise_memo(run_dir: Path) -> str:
     _acr_rel_for_warnings = optional_artifacts.get("agent_consensus_review")
     if _acr_rel_for_warnings and (run_dir / _acr_rel_for_warnings).exists():
         agent_consensus_review = read_yaml(run_dir / _acr_rel_for_warnings)
+
+    prover_loop_for_warnings: dict = {}
+    _pl_rel_for_warnings = optional_artifacts.get("prover_loop")
+    if _pl_rel_for_warnings and (run_dir / _pl_rel_for_warnings).exists():
+        prover_loop_for_warnings = read_yaml(run_dir / _pl_rel_for_warnings)
 
     # Autonomous literature search (optional): candidate sources found without a
     # human-provided source. Rendered as "Found by autonomous literature search"
@@ -289,6 +312,7 @@ def build_concise_memo(run_dir: Path) -> str:
         update_inbox=update_inbox,
         line_numbered_proof=line_numbered_proof,
         agent_consensus_review=agent_consensus_review,
+        prover_loop=prover_loop_for_warnings,
     ))
     if warning_lines:
         lines.append("")
@@ -335,6 +359,18 @@ def build_concise_memo(run_dir: Path) -> str:
     if table_lines:
         lines.append("")
         lines.extend(table_lines)
+        from espresso_proof.orchestration.advisory_proof_sketch import (
+            read_advisory_proof_sketch,
+        )
+
+        sketch = read_advisory_proof_sketch(run_dir)
+        if isinstance(sketch, dict) and sketch.get("steps"):
+            lines.append(
+                f"A later prover attempt exists (advisory only, "
+                f"{len(sketch.get('steps') or [])} steps; see the advisory "
+                "proof sketch sidecar); it may deviate from the "
+                "source-grounding plan rows above."
+            )
     # Detailed per-step evidence shape for earned (reference/computation) steps.
     route_steps = render_proof_route_steps(
         source_grounding, computations, theorem_applicability

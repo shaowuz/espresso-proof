@@ -273,6 +273,7 @@ def _load_run_state(run_dir: Path) -> dict[str, Any]:
             update_inbox=update_inbox,
             line_numbered_proof=line_numbered_proof,
             agent_consensus_review=agent_consensus_review,
+            prover_loop=loop,
         ),
         "current_state": current_state,
         "completed": completed,
@@ -386,6 +387,25 @@ def _latest_attempt(loop: dict[str, Any], selected: str | None) -> dict[str, Any
     return sorted(candidates, key=lambda a: int(a.get("round_index") or 0))[-1]
 
 
+def _headline_blocker(latest: dict[str, Any], blockers: list[str]) -> str:
+    """The headline may never be a self-declared non-blocking (P3) context
+    note. blocker_details is priority-ordered by the writer; legacy attempts
+    without details fall back to blockers[0]."""
+
+    details = [d for d in (latest.get("blocker_details") or []) if isinstance(d, dict)]
+    if details:
+        for detail in details:
+            if str(detail.get("severity")) != "P3":
+                return _one_sentence(str(detail.get("text", "")))
+        return (
+            f"No blocking reviewer repair recorded; {len(details)} advisory "
+            "context note(s) recorded — see the prover loop record."
+        )
+    if blockers:
+        return _one_sentence(blockers[0])
+    return "No blocking reviewer repair recorded."
+
+
 def _review_result(state: dict[str, Any]) -> dict[str, Any]:
     latest = state["latest_attempt"]
     blockers = [str(item) for item in latest.get("blockers") or []]
@@ -403,7 +423,8 @@ def _review_result(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "show": state["completed"] or bool(findings) or bool(blockers),
         "title": "Repair needed" if state["repair_needed"] else "Review result",
-        "main": _one_sentence(blockers[0]) if blockers else "No blocking reviewer repair recorded.",
+        "main": _headline_blocker(latest, blockers),
+        "blocker_count": len(blockers),
         "side": "The objections attack proof support. They do not disprove the claim.",
         "chips": chips,
     }
@@ -1040,13 +1061,27 @@ def _route_table_section(state: dict[str, Any]) -> str:
         for row in rows
     )
     note = (
-        "Each row is LOCAL step evidence. A reference-supported or scoped-checked "
+        "Each row is LOCAL step evidence from the source-grounding PLAN (plus "
+        "confirmed scoped computations). A reference-supported or scoped-checked "
         "step is not a proof of the whole claim or route."
     )
+    advisory_html = ""
+    sketch = read_advisory_proof_sketch(Path(state["run_dir"])) if state.get("run_dir") else None
+    if isinstance(sketch, dict) and sketch.get("steps"):
+        steps_html = "".join(f"<li>{_h(str(step))}</li>" for step in sketch.get("steps") or [])
+        sketch_note = _h(str(sketch.get("note") or ""))
+        advisory_html = (
+            "<h3>Latest prover attempt (advisory, unvalidated)</h3>"
+            f"<ol class=\"muted\">{steps_html}</ol>"
+            f"<div class=\"note\">{sketch_note}</div>"
+            "<div class=\"note\">The latest prover attempt may deviate from the "
+            "plan rows above; advisory only &mdash; it carries no evidence status.</div>"
+        )
     return f"""<section class="card"><div class="pad">
-  <h2>Proof-Route Steps &mdash; evidence &amp; provenance</h2>
+  <h2>Proof-Route Steps &mdash; source-grounding plan (evidence &amp; provenance)</h2>
   <table class="route-table"><thead><tr>{header}</tr></thead><tbody>{body_rows}</tbody></table>
   <div class="note">{_h(note)}</div>
+  {advisory_html}
 </div></section>"""
 
 
@@ -1055,7 +1090,7 @@ def _review_section(review: dict[str, Any]) -> str:
     return f"""<section class="card"><div class="pad">
   <h2>Review Result</h2>
   <div class="review-grid">
-    <div class="review-card"><b>Main blocker</b><p class="muted">{_h(review.get("main"))}</p></div>
+    <div class="review-card"><b>Main blocker{(" (1 of " + str(review["blocker_count"]) + " open — full list in the prover loop record)") if review.get("blocker_count", 0) > 1 else ""}</b><p class="muted">{_h(review.get("main"))}</p></div>
     <div class="review-card"><b>Not a refutation</b><p class="muted">{_h(review.get("side"))}</p></div>
   </div>
   <div class="chips">{chips}</div>
