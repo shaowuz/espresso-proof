@@ -3,22 +3,24 @@
 
 from __future__ import annotations
 
-import re
-from datetime import datetime
-from enum import Enum
-from pathlib import Path, PureWindowsPath
-from typing import Any, Literal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 
-from espresso_proof.kernel.models._part1 import *  # noqa: F401,F403
-
-
-from espresso_proof.kernel.models._part2 import *  # noqa: F401,F403
-
-
-from espresso_proof.kernel.models._part3 import *  # noqa: F401,F403
+from espresso_proof.kernel.models._part1 import (
+    ComputationStatus,
+    ExampleStatus,
+    HypothesisMatch,
+    Locator,
+    SourceRef,
+    SourceStatus,
+    StrictBaseModel,
+)
+from espresso_proof.kernel.models._part3 import (
+    ExtractedTheorem,
+    _validate_literature_candidate_only_meanings,
+)
 
 
 class TheoremExtractionReport(StrictBaseModel):
