@@ -140,3 +140,95 @@ def test_failure_classifier_artifact_is_not_shadowed_by_not_run_board(
     assert stages["concise_answer"]["status"] == "done"
     assert agent_status(run_dir, "failure_patterns") == "not_run"
     validate_run(run_dir)
+
+
+# ---------------------------------------------------------------------------
+# PR1a: agent-event projection — crashed/hung external calls become visible
+# ---------------------------------------------------------------------------
+
+from espresso_proof.kernel.observability import append_agent_event
+from espresso_proof.orchestration.agent_flow_status import (
+    _agent_event_stage_projection,
+    _apply_agent_event_projection,
+)
+
+
+def _synthetic_stages() -> list[dict]:
+    return [
+        {"stage_id": "prover", "status": "done", "depends_on": []},
+        {
+            "stage_id": "line_numbered_proof_writer",
+            "status": "not_started",
+            "status_reason": "",
+            "started_at": None,
+            "finished_at": None,
+            "error_summary": None,
+            "depends_on": ["prover"],
+        },
+    ]
+
+
+def test_failed_agent_event_projects_failed_when_dependencies_done(tmp_path: Path) -> None:
+    append_agent_event(
+        tmp_path,
+        agent_name="line_numbered_proof_writer",
+        provider="external",
+        adapter="",
+        stage="line_numbered_proof_writer",
+        agent_status="started",
+        started_at="2026-07-02T00:00:00+00:00",
+    )
+    append_agent_event(
+        tmp_path,
+        agent_name="line_numbered_proof_writer",
+        provider="external",
+        adapter="",
+        stage="line_numbered_proof_writer",
+        agent_status="failed",
+        finished_at="2026-07-02T00:01:00+00:00",
+        error_summary="external agent died mid-call",
+    )
+    stages = _synthetic_stages()
+    _apply_agent_event_projection(stages, run_dir=tmp_path, generated_at="2026-07-02T00:02:00+00:00")
+    entry = stages[1]
+    assert entry["status"] == "failed"
+    assert "died mid-call" in entry["error_summary"]
+    assert entry["finished_at"] == "2026-07-02T00:01:00+00:00"
+
+
+def test_hanging_started_projects_running(tmp_path: Path) -> None:
+    # A SIGKILLed process leaves exactly this residue: started, no terminal.
+    append_agent_event(
+        tmp_path,
+        agent_name="line_numbered_proof_writer",
+        provider="external",
+        adapter="",
+        stage="line_numbered_proof_writer",
+        agent_status="started",
+        started_at="2026-07-02T00:00:00+00:00",
+    )
+    stages = _synthetic_stages()
+    _apply_agent_event_projection(stages, run_dir=tmp_path, generated_at="2026-07-02T00:02:00+00:00")
+    entry = stages[1]
+    assert entry["status"] == "running"
+    assert entry["started_at"] == "2026-07-02T00:00:00+00:00"
+    assert entry["finished_at"] is None
+    assert "agent_events.jsonl" in entry["status_reason"]
+
+
+def test_done_entries_and_non_dependency_ready_paths_are_untouched(tmp_path: Path) -> None:
+    append_agent_event(
+        tmp_path,
+        agent_name="line_numbered_proof_writer",
+        provider="external",
+        adapter="",
+        stage="line_numbered_proof_writer",
+        agent_status="failed",
+        finished_at="2026-07-02T00:01:00+00:00",
+        error_summary="boom",
+    )
+    stages = _synthetic_stages()
+    stages[1]["status"] = "skipped"  # e.g. claim-clear override already decided
+    before = [dict(s) for s in stages]
+    _apply_agent_event_projection(stages, run_dir=tmp_path, generated_at="2026-07-02T00:02:00+00:00")
+    assert stages == before

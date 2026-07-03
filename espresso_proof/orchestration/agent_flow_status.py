@@ -11,7 +11,7 @@ from pathlib import Path
 
 from espresso_proof.kernel.io import path_exists, read_yaml, write_yaml
 from espresso_proof.kernel.models import StageStatusReport
-from espresso_proof.kernel.observability import now_iso
+from espresso_proof.kernel.observability import now_iso, read_agent_events
 from espresso_proof.kernel.pressure_status import artifact_revision_hash
 from espresso_proof.kernel.agent_flow_legacy_map import (
     LEGACY_MAPPING,
@@ -131,6 +131,8 @@ def build_stage_status_projection(
         stages.append(entry)
 
     _withhold_status_until_dependencies_are_done(stages, generated_at=generated_at)
+
+    _apply_agent_event_projection(stages, run_dir=run_dir, generated_at=generated_at)
 
     return {
         "schema_version": 1,
@@ -296,6 +298,93 @@ def _apply_agent_status(entry: dict, agent_entry: dict, generated_at: str) -> No
         return
     entry["started_at"] = agent_entry.get("started_at")
     entry["finished_at"] = agent_entry.get("finished_at") or generated_at
+
+
+def _apply_agent_event_projection(
+    stages: list[dict], *, run_dir: Path, generated_at: str
+) -> None:
+    """Fill crashed/hung external-call visibility from agent_events.jsonl.
+
+    Runs LAST, and only into entries every earlier pass left at not_started:
+    legacy artifact rules, the claim-clear override (skipped entries are never
+    touched), and the withhold pass all keep precedence. It can only ever
+    produce running/failed — never done — so logs cannot upgrade a stage
+    (logs are not evidence). It also honors the same dependency rule the
+    kernel validator enforces (a stage cannot be running/failed before its
+    hard dependencies are done — mock/fast lanes mark upstream skipped, so
+    stray calls on such runs stay not_started rather than invalidating the
+    projection; on real full runs the dependencies are done and the crash
+    becomes visible).
+    """
+
+    status_by_id = {entry["stage_id"]: entry["status"] for entry in stages}
+    for entry in stages:
+        if entry["status"] != "not_started":
+            continue
+        if any(status_by_id.get(dep) != "done" for dep in entry["depends_on"]):
+            continue
+        projection = _agent_event_stage_projection(
+            run_dir, entry["stage_id"], generated_at
+        )
+        if projection:
+            entry.update(projection)
+
+
+_TERMINAL_AGENT_EVENT_STATUSES = {"finished", "failed", "timed_out"}
+
+
+def _agent_event_stage_projection(
+    run_dir: Path, stage_id: str, generated_at: str
+) -> dict | None:
+    """Project agent_events.jsonl records for one stage into process status.
+
+    Pairing follows the Goal-65 identity (stage, agent_name, retry_index,
+    round_index). A hanging ``started`` with no terminal record projects
+    ``running`` (a SIGKILLed process leaves exactly this residue); the latest
+    ``failed``/``timed_out`` terminal projects ``failed``. A ``finished``
+    terminal projects nothing — artifact-existence rules alone decide ``done``
+    (logs are not evidence and can never upgrade a stage).
+    """
+
+    open_calls: dict[tuple, dict] = {}
+    last_terminal: dict | None = None
+    for rec in read_agent_events(run_dir):
+        if rec.get("stage") != stage_id:
+            continue
+        key = (
+            rec.get("agent_name"),
+            rec.get("retry_index", 0),
+            rec.get("round_index"),
+        )
+        status = rec.get("agent_status")
+        if status == "started":
+            open_calls[key] = rec
+        elif status in _TERMINAL_AGENT_EVENT_STATUSES:
+            open_calls.pop(key, None)
+            last_terminal = rec
+
+    if open_calls:
+        hanging = list(open_calls.values())[-1]
+        started_at = hanging.get("started_at") or generated_at
+        return {
+            "status": "running",
+            "started_at": started_at,
+            "finished_at": None,
+            "status_reason": (
+                "agent call started; no terminal record (see agent_events.jsonl)"
+            ),
+            "error_summary": None,
+        }
+    if last_terminal and last_terminal.get("agent_status") in {"failed", "timed_out"}:
+        return {
+            "status": "failed",
+            "started_at": None,
+            "finished_at": last_terminal.get("finished_at") or generated_at,
+            "status_reason": "external agent call failed (see agent_events.jsonl)",
+            "error_summary": last_terminal.get("error_summary")
+            or last_terminal.get("agent_status"),
+        }
+    return None
 
 
 def _withhold_status_until_dependencies_are_done(

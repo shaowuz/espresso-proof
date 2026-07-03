@@ -7,8 +7,13 @@ Wire it up:
     uv run espresso serve --provider external
 
 Contract (espresso_proof.agents.llm_agents.ExternalCommandClient):
-- read one JSON request on stdin: {system, prompt, provider, model, required_json_schema}
-- print one JSON object on stdout.
+- read one JSON request on stdin: {system, prompt, provider, model,
+  required_json_schema, timeout_seconds?} — timeout_seconds is optional and
+  additive (the client's actual outer timeout; absent for older callers).
+- on success (or a safely-fallbackable failure) print one JSON object on
+  stdout and exit 0; when the role's required_json_schema cannot be satisfied
+  by the conservative fallback (back-half roles), a failure exits NON-ZERO
+  with a FATAL stderr line instead of emitting schema-invalid JSON.
 
 This adapter pins Codex to gpt-5.5 with medium reasoning by default, injects stage-specific Espresso skill text and any explicit active goal, and writes local replay logs. The
 Python kernel still owns every source/evidence/proof/grade status transition.
@@ -32,6 +37,11 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from espresso_proof.agents.adapter_runtime import (
+    DEFAULT_CODEX_EXTERNAL_TIMEOUT_SECONDS,
+    fallback_is_schema_valid,
+    resolve_inner_timeout,
+)
 from espresso_proof.agents.agent_logging import (
     log_event,
     log_prompt_record,
@@ -44,7 +54,6 @@ from espresso_proof.agents.agent_skill_catalog import select_agent_skills
 
 CODEX_MODEL = "gpt-5.5"
 CODEX_REASONING_EFFORT = os.environ.get("ESPRESSO_CODEX_REASONING_EFFORT", "medium")
-CODEX_TIMEOUT_SECONDS = 300
 
 _FALLBACK = {
     "summary": "No usable Codex agent output was produced.",
@@ -99,6 +108,9 @@ def main() -> int:
         skill_text=selection.skill_text,
     )
 
+    inner_timeout = resolve_inner_timeout(
+        request=request, default_outer=DEFAULT_CODEX_EXTERNAL_TIMEOUT_SECONDS
+    )
     with tempfile.TemporaryDirectory(prefix="espresso-codex-") as tmp:
         last_message = Path(tmp) / "last_message.txt"
         output_schema = _write_output_schema_if_needed(
@@ -132,6 +144,7 @@ def main() -> int:
                 command,
                 full_prompt=full_prompt,
                 last_message=last_message,
+                timeout=inner_timeout,
             )
             result = _extract_json(output)
             if not isinstance(result, dict):
@@ -143,8 +156,26 @@ def main() -> int:
                 prompt=prompt,
             )
             parse_status = "ok"
-        except Exception as exc:  # noqa: BLE001 - fail closed for live agents
+        except Exception as exc:  # noqa: BLE001 - fallback where safe, else fail closed
             fallback_reason = str(exc)[:500]
+            if not fallback_is_schema_valid(request, _FALLBACK):
+                # Back-half authoritative-schema role: the prover-shaped
+                # fallback would be schema-invalid downstream. Exit non-zero
+                # so the caller's transactional rollback takes over.
+                parse_status = "error_propagated"
+                duration = round(time.monotonic() - started, 3)
+                _log_finish(
+                    log_dir=log_dir,
+                    request_id=request_id,
+                    selection=selection,
+                    return_code=return_code,
+                    duration=duration,
+                    parse_status=parse_status,
+                    fallback_reason=fallback_reason,
+                )
+                reason = f"codex adapter could not produce usable JSON: {fallback_reason}"[:300]
+                print(f"[espresso-agent] FATAL: {reason}", file=sys.stderr)
+                return 1
             parse_status = "fallback"
             result = dict(_FALLBACK)
             result["summary"] = f"codex adapter could not produce usable JSON: {fallback_reason}"[:300]
@@ -352,14 +383,16 @@ def _build_full_prompt(
     )
 
 
-def _run_codex(command: list[str], *, full_prompt: str, last_message: Path) -> tuple[str, int]:
+def _run_codex(
+    command: list[str], *, full_prompt: str, last_message: Path, timeout: int
+) -> tuple[str, int]:
     proc = subprocess.run(
         command,
         input=full_prompt,
         text=True,
         encoding="utf-8",
         capture_output=True,
-        timeout=CODEX_TIMEOUT_SECONDS,
+        timeout=timeout,
     )
     if proc.returncode != 0:
         detail = proc.stderr.strip() or proc.stdout.strip() or "codex CLI returned non-zero"

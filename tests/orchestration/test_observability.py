@@ -308,3 +308,92 @@ def test_started_event_cannot_carry_status_upgrade(tmp_path: Path):
     obs.append_agent_event(tmp_path, agent_name="x", provider="stub", adapter="stub",
                            stage="s", agent_status="started", source_backed=True)
     assert obs.read_agent_events(tmp_path) == []  # dropped: forbidden key
+
+
+# ---------------------------------------------------------------------------
+# PR1a: observed_agent_call — paired records for back-half external calls
+# ---------------------------------------------------------------------------
+
+import pytest
+
+from espresso_proof.kernel.observability import (
+    latest_unfinished_agent_call,
+    observed_agent_call,
+    read_agent_events,
+)
+from espresso_proof.kernel.run_events import read_events
+
+
+class _ClientStub:
+    provider = "external"
+    model = "fake-model"
+    last_attempts = 2
+
+
+def test_observed_agent_call_success_writes_paired_records(tmp_path: Path) -> None:
+    with observed_agent_call(
+        tmp_path,
+        agent_name="line_numbered_proof_writer",
+        stage="line_numbered_proof_writer",
+        provider="external",
+        model="fake-model",
+        output_artifact_path="line_numbered_proof.yaml",
+        client=_ClientStub(),
+    ):
+        pass
+    recs = [r for r in read_agent_events(tmp_path) if r["stage"] == "line_numbered_proof_writer"]
+    assert [r["agent_status"] for r in recs] == ["started", "finished"]
+    assert recs[1]["duration_ms"] >= 0
+    assert recs[1]["attempts"] == 2
+    assert latest_unfinished_agent_call(tmp_path) is None
+    kinds = [e["kind"] for e in read_events(tmp_path)]
+    assert "agent_call_started" in kinds and "agent_call_failed" not in kinds
+
+
+def test_observed_agent_call_failure_records_and_reraises(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="adapter died"):
+        with observed_agent_call(
+            tmp_path,
+            agent_name="proof_consensus_line_proof",
+            stage="agent_consensus_seal",
+            provider="external",
+        ):
+            raise RuntimeError("adapter died")
+    recs = read_agent_events(tmp_path)
+    assert [r["agent_status"] for r in recs] == ["started", "failed"]
+    assert "adapter died" in recs[1]["error_summary"]
+    assert recs[1]["timed_out"] is False
+    kinds = [e["kind"] for e in read_events(tmp_path)]
+    assert "agent_call_failed" in kinds
+
+
+def test_observed_agent_call_timeout_is_duck_typed(tmp_path: Path) -> None:
+    class _Timeoutish(RuntimeError):
+        pass
+
+    exc = _Timeoutish("too slow")
+    exc.timeout_seconds = 120
+    with pytest.raises(_Timeoutish):
+        with observed_agent_call(
+            tmp_path, agent_name="w", stage="line_numbered_proof_writer", provider="external"
+        ):
+            raise exc
+    terminal = read_agent_events(tmp_path)[-1]
+    assert terminal["agent_status"] == "timed_out"
+    assert terminal["timed_out"] is True
+    assert terminal["timeout_ms"] == 120000
+
+
+def test_observed_agent_call_drops_forbidden_extra_fail_closed(tmp_path: Path) -> None:
+    # [hard-negative] a status-upgrade key smuggled through **extra drops the
+    # whole record (logs are never evidence) while the exception still flows.
+    with pytest.raises(RuntimeError):
+        with observed_agent_call(
+            tmp_path,
+            agent_name="w",
+            stage="line_numbered_proof_writer",
+            provider="external",
+            source_backed=True,
+        ):
+            raise RuntimeError("boom")
+    assert read_agent_events(tmp_path) == []

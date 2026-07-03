@@ -272,3 +272,127 @@ def test_claude_adapter_returns_safe_fallback_when_cli_fails(tmp_path: Path) -> 
     payload = json.loads(completed.stdout)
     assert payload["verdict"] == "needs_revision"
     assert "claude adapter could not produce usable JSON" in payload["summary"]
+
+
+# ---------------------------------------------------------------------------
+# PR1a: inner-timeout derivation + schema-aware fail-closed fallback
+# ---------------------------------------------------------------------------
+
+import io
+
+from espresso_proof.agents.adapter_runtime import (
+    EXTERNAL_AGENT_TIMEOUT_ENV,
+    fallback_is_schema_valid,
+    resolve_inner_timeout,
+)
+from espresso_proof.agents.llm_agents import (
+    AGENT_OUTPUT_SCHEMA,
+    LINE_NUMBERED_PROOF_OUTPUT_SCHEMA,
+)
+
+
+def test_resolve_inner_timeout_precedence_and_clamps() -> None:
+    # default: family outer minus the margin
+    assert resolve_inner_timeout(request={}, default_outer=120, environ={}) == 110
+    # env var finally reaches the inner call
+    assert (
+        resolve_inner_timeout(
+            request={}, default_outer=120, environ={EXTERNAL_AGENT_TIMEOUT_ENV: "200"}
+        )
+        == 190
+    )
+    # an explicit client-declared outer beats the env var
+    assert (
+        resolve_inner_timeout(
+            request={"timeout_seconds": 300},
+            default_outer=120,
+            environ={EXTERNAL_AGENT_TIMEOUT_ENV: "200"},
+        )
+        == 290
+    )
+    # min clamp: never below the floor
+    assert (
+        resolve_inner_timeout(
+            request={}, default_outer=120, environ={EXTERNAL_AGENT_TIMEOUT_ENV: "8"}
+        )
+        == 5
+    )
+    # malformed env is ignored on the adapter side (client fails closed on it)
+    assert (
+        resolve_inner_timeout(
+            request={}, default_outer=120, environ={EXTERNAL_AGENT_TIMEOUT_ENV: "soon"}
+        )
+        == 110
+    )
+    # a bool True is not a usable timeout value
+    assert (
+        resolve_inner_timeout(request={"timeout_seconds": True}, default_outer=120, environ={})
+        == 110
+    )
+
+
+def test_fallback_schema_validity_is_pure_required_keys() -> None:
+    from espresso_proof.agents.claude_adapter import _FALLBACK
+
+    # prover/reviewer schema: required keys are exactly the fallback keys
+    assert fallback_is_schema_valid({"required_json_schema": AGENT_OUTPUT_SCHEMA}, _FALLBACK)
+    # writer schema requires 'lines' etc. -> fallback is invalid -> fail closed
+    assert not fallback_is_schema_valid(
+        {"required_json_schema": LINE_NUMBERED_PROOF_OUTPUT_SCHEMA}, _FALLBACK
+    )
+    # no schema at all (old third-party callers): vacuously satisfiable
+    assert fallback_is_schema_valid({}, _FALLBACK)
+    assert fallback_is_schema_valid(None, _FALLBACK)
+
+
+def test_claude_adapter_passes_derived_timeout_to_cli(monkeypatch) -> None:
+    from espresso_proof.agents import claude_adapter
+
+    seen: dict = {}
+
+    def fake_run(prompt: str, *, timeout: int) -> str:
+        seen["timeout"] = timeout
+        return json.dumps({"summary": "ok", "verdict": "needs_revision"})
+
+    monkeypatch.setattr(claude_adapter, "_run_claude", fake_run)
+    monkeypatch.setenv(EXTERNAL_AGENT_TIMEOUT_ENV, "600")
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"system": "s", "prompt": "p", "required_json_schema": {}})),
+    )
+    assert claude_adapter.main() == 0
+    assert seen["timeout"] == 590
+
+
+def test_claude_adapter_fails_closed_for_writer_schema_on_cli_failure(tmp_path: Path) -> None:
+    # [hard-negative] the exact order-15 crash shape: writer role + dying CLI
+    # must NEVER emit the prover-shaped fallback (downstream would normalize it
+    # to lines=[]); it exits non-zero so the caller's rollback takes over.
+    fake_claude = _write_fake_claude(tmp_path, message="boom", return_code=3)
+    completed = _run_adapter(
+        tmp_path=tmp_path,
+        system=line_numbered_proof_writer_system_prompt(),
+        prompt="write the line-numbered proof",
+        fake_claude=fake_claude,
+        schema=LINE_NUMBERED_PROOF_OUTPUT_SCHEMA,
+    )
+    assert completed.returncode == 1
+    assert "FATAL" in completed.stderr
+    assert completed.stdout.strip() == ""
+
+
+def test_claude_adapter_prover_fallback_unchanged_on_cli_failure(tmp_path: Path) -> None:
+    # Regression guard: for the prover schema the conservative exit-0 fallback
+    # contract is byte-compatible with today (fallback keys satisfy required).
+    fake_claude = _write_fake_claude(tmp_path, message="boom", return_code=3)
+    completed = _run_adapter(
+        tmp_path=tmp_path,
+        system="You are the Espresso prover.",
+        prompt="attempt the route",
+        fake_claude=fake_claude,
+        schema=AGENT_OUTPUT_SCHEMA,
+    )
+    assert completed.returncode == 0
+    payload = json.loads(completed.stdout)
+    assert "could not produce usable JSON" in payload["summary"]
+    assert payload["verdict"] == "needs_revision"

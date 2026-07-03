@@ -51,7 +51,7 @@ from espresso_proof.kernel.models import (
     MemoryEntry,
     ProverLoopReport,
 )
-from espresso_proof.kernel.validators import validate_run
+from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 
 
@@ -634,13 +634,23 @@ def write_proof(
     validate_run(run)
     _require_claim_clear_for_cli(run)
     with run_writer_lock(run, action="line-numbered proof writer"):
-        record = write_line_numbered_proof(
-            run,
-            provider=provider,
-            model=model,
-            api_key_env=api_key_env,
-            external_agent_command_env=external_agent_command_env,
-        )
+        try:
+            record = write_line_numbered_proof(
+                run,
+                provider=provider,
+                model=model,
+                api_key_env=api_key_env,
+                external_agent_command_env=external_agent_command_env,
+            )
+        except (RuntimeError, ValueError, KernelValidationError) as exc:
+            # Same friendly fail-closed surface as seal-consensus: covers the
+            # external agent dying/timing out (RuntimeError incl.
+            # ExternalAgentTimeoutError), a schema-invalid writer reply
+            # (pydantic ValidationError ⊂ ValueError), and validate_run
+            # failures. Anything else is a real bug and keeps its traceback.
+            typer.echo(f"No proof written (failed closed; run rolled back): {exc}")
+            _refresh_process_status(run)
+            raise typer.Exit(code=1) from exc
     _refresh_process_status(run)
     typer.echo(
         f"Wrote line_numbered_proof.yaml ({len(record['lines'])} lines, "

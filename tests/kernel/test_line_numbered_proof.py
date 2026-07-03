@@ -907,3 +907,108 @@ def test_sealed_memo_is_scan_clean_and_discloses(tmp_path: Path) -> None:
     memo = (run_dir / fr).read_text()
     assert "Agent-consensus mock check" in memo and "not a machine check" in memo
     assert _first_forbidden_proof_language(memo.lower()) is None
+
+
+# ---------------------------------------------------------------------------
+# PR1a: back-half failure surface — rollback + observability + friendly CLI
+# ---------------------------------------------------------------------------
+
+import sys as _sys
+
+from espresso_proof.kernel.observability import read_agent_events
+from espresso_proof.kernel.run_events import read_events
+
+
+class _ExplodingClient:
+    provider = "external"
+    model = "fake-external"
+    last_attempts = 1
+
+    def complete_json(self, *, system: str, prompt: str) -> dict:
+        raise RuntimeError("external agent died mid-call")
+
+
+def test_write_proof_client_failure_rolls_back_and_records_events(tmp_path: Path) -> None:
+    run_dir = _admissible_run(tmp_path)
+    with pytest.raises(RuntimeError, match="died mid-call"):
+        write_line_numbered_proof(run_dir, client=_ExplodingClient())
+    # rollback complete: no artifact, no manifest key, run still valid
+    assert not (run_dir / "line_numbered_proof.yaml").exists()
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    assert "line_numbered_proof" not in (manifest.get("optional_artifacts") or {})
+    validate_run(run_dir)
+    # observability: paired started+failed records and an agent_call_failed event
+    recs = [r for r in read_agent_events(run_dir) if r["stage"] == "line_numbered_proof_writer"]
+    assert [r["agent_status"] for r in recs] == ["started", "failed"]
+    assert "died mid-call" in recs[1]["error_summary"]
+    assert "agent_call_failed" in [e["kind"] for e in read_events(run_dir)]
+
+
+def test_write_proof_cli_external_failure_is_friendly_and_marks_stage(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_dir = _admissible_run(tmp_path)
+    dying = tmp_path / "dying_agent.py"
+    dying.write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
+    monkeypatch.setenv(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND", f"{_sys.executable} {dying}"
+    )
+    result = CliRunner().invoke(
+        app, ["write-proof", "--run", str(run_dir), "--provider", "external"]
+    )
+    assert result.exit_code == 1
+    assert "No proof written (failed closed" in result.output
+    assert "Traceback" not in result.output
+    # the crash is on the observability record (this fixture's prover stage is
+    # not done, so the stage-status projection correctly withholds `failed` --
+    # the same dependency rule the kernel validator enforces; the positive
+    # projection case lives in test_agent_flow_stage_status.py)
+    recs = [r for r in read_agent_events(run_dir) if r["stage"] == "line_numbered_proof_writer"]
+    assert [r["agent_status"] for r in recs] == ["started", "failed"]
+    stage_status = read_yaml(run_dir / STAGE_STATUS_FILENAME)
+    entry = next(
+        s for s in stage_status["stages"] if s["stage_id"] == "line_numbered_proof_writer"
+    )
+    assert entry["status"] == "not_started"
+    validate_run(run_dir)
+
+
+class _SecondReviewerExplodes(StubLLMClient):
+    """First consensus reviewer answers like the stub; the second one dies."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def complete_json(self, *, system: str, prompt: str) -> dict:
+        if "proof-consensus review" in system.lower():
+            self.calls += 1
+            if self.calls >= 2:
+                raise RuntimeError("reviewer transport died")
+        return super().complete_json(system=system, prompt=prompt)
+
+
+def test_seal_reviewer_failure_changes_nothing_and_records_events(tmp_path: Path) -> None:
+    run_dir = _run_with_proof(tmp_path)
+    before = {
+        rel: (run_dir / rel).read_bytes()
+        for rel in (
+            "run_manifest.yaml",
+            _artifacts(run_dir)["idea_grade"],
+            "line_numbered_proof.yaml",
+        )
+    }
+    with pytest.raises(RuntimeError, match="reviewer transport died"):
+        seal_agent_consensus(run_dir, client=_SecondReviewerExplodes())
+    # reviewers run BEFORE the seal snapshot, so the guarantee is "nothing
+    # changed", not "rolled back": artifacts byte-identical, run valid, and
+    # absolutely no amber status.
+    for rel, blob in before.items():
+        assert (run_dir / rel).read_bytes() == blob
+    validate_run(run_dir)
+    grade = read_yaml(run_dir / _artifacts(run_dir)["idea_grade"])
+    assert grade["proof_language_status"] != "agent_consensus_mock_checked"
+    recs = [r for r in read_agent_events(run_dir) if r["stage"] == "agent_consensus_seal"]
+    statuses = [r["agent_status"] for r in recs]
+    assert statuses.count("started") == 2
+    assert statuses[-1] == "failed"
