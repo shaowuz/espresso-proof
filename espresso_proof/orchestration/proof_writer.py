@@ -26,6 +26,7 @@ from espresso_proof.agents.llm_agents import (
 )
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.kernel.models import LineNumberedProof, ProofLanguageStatus
+from espresso_proof.kernel.observability import observed_agent_call
 from espresso_proof.kernel.validators import validate_run
 
 LINE_NUMBERED_PROOF_FILENAME = "line_numbered_proof.yaml"
@@ -109,10 +110,21 @@ def write_line_numbered_proof(
     if direct_source_proof is not None:
         record = direct_source_proof
     else:
-        raw = client.complete_json(
-            system=line_numbered_proof_writer_system_prompt(),
-            prompt=agent_prompt(_writer_context(run_dir, manifest), role="line_numbered_proof_writer"),
-        )
+        # The direct-source shortcut above makes no external call, so only this
+        # branch is observed (started/terminal pair in agent_events.jsonl).
+        with observed_agent_call(
+            run_dir,
+            agent_name="line_numbered_proof_writer",
+            stage="line_numbered_proof_writer",
+            provider=getattr(client, "provider", provider),
+            model=getattr(client, "model", model),
+            output_artifact_path=LINE_NUMBERED_PROOF_FILENAME,
+            client=client,
+        ):
+            raw = client.complete_json(
+                system=line_numbered_proof_writer_system_prompt(),
+                prompt=agent_prompt(_writer_context(run_dir, manifest), role="line_numbered_proof_writer"),
+            )
         raw = raw if isinstance(raw, dict) else {}
         record = {
             "schema_version": 1,

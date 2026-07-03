@@ -1278,15 +1278,22 @@ def resolve_proof_gaps_command(
     validate_run(run)
     _require_claim_clear_for_cli(run)
     with run_writer_lock(run, action="proof gap resolver"):
-        report = resolve_proof_gaps(
-            run,
-            provider=provider,
-            model=model,
-            api_key_env=api_key_env,
-            external_agent_command_env=external_agent_command_env,
-            human_allow=human_allow or [],
-        )
-        ProofGapResolutionReport.model_validate(report)
+        try:
+            report = resolve_proof_gaps(
+                run,
+                provider=provider,
+                model=model,
+                api_key_env=api_key_env,
+                external_agent_command_env=external_agent_command_env,
+                human_allow=human_allow or [],
+            )
+            ProofGapResolutionReport.model_validate(report)
+        except (RuntimeError, ValueError) as exc:
+            # Friendly fail-closed surface (same as write-proof/seal-consensus):
+            # a dying/timing-out external agent must not print a raw traceback.
+            typer.echo(f"No repair plan written (failed closed): {exc}")
+            _refresh_process_status(run)
+            raise typer.Exit(code=1) from exc
     _refresh_process_status(run)
     attached = sum(
         1

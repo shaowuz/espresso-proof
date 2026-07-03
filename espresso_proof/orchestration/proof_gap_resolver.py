@@ -21,6 +21,7 @@ from espresso_proof.agents.llm_agents import (
 )
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.kernel.models import LineNumberedProof, ProofGapResolutionReport
+from espresso_proof.kernel.observability import observed_agent_call
 from espresso_proof.kernel.pressure_status import artifact_revision_hash
 from espresso_proof.kernel.validators import validate_run
 
@@ -702,10 +703,22 @@ def resolve_proof_gaps(
     human_candidates = _parse_human_allow(human_allow, unresolved)
     raw = {}
     if unresolved and not human_candidates:
-        raw = client.complete_json(
-            system=proof_gap_resolver_system_prompt(),
-            prompt=agent_prompt(_resolver_context(run_dir, proof, unresolved), role="proof_gap_resolver"),
-        )
+        # Events-only observability: the gap resolver has no stage_status row
+        # of its own (its stage id is not in the agent-flow spec), so the
+        # record lands in events/agent_events for diagnosis.
+        with observed_agent_call(
+            run_dir,
+            agent_name="proof_gap_resolver",
+            stage="proof_gap_resolver",
+            provider=getattr(client, "provider", "unknown"),
+            model=getattr(client, "model", None),
+            output_artifact_path="proof_gap_resolution.yaml",
+            client=client,
+        ):
+            raw = client.complete_json(
+                system=proof_gap_resolver_system_prompt(),
+                prompt=agent_prompt(_resolver_context(run_dir, proof, unresolved), role="proof_gap_resolver"),
+            )
     agent_candidates = [] if human_candidates else _normalize_agent_candidates(raw, unresolved)
     candidates = [*agent_candidates, *human_candidates]
     repair_plan = _repair_plan(candidates)

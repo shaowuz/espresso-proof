@@ -37,11 +37,12 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.kernel.run_events import EVENTS_FILENAME, read_events
+from espresso_proof.kernel.run_events import EVENTS_FILENAME, append_event, read_events
 
 AGENT_EVENTS_FILENAME = "agent_events.jsonl"
 TIMINGS_FILENAME = "timings.yaml"
@@ -192,6 +193,75 @@ def append_agent_event(
         _append_jsonl(path, record)
     except Exception:  # noqa: BLE001 - observability must never break a run
         return
+
+
+@contextmanager
+def observed_agent_call(
+    run_dir: Path,
+    *,
+    agent_name: str,
+    stage: str,
+    provider: str,
+    model: str | None = None,
+    adapter: str | None = None,
+    output_artifact_path: str | None = None,
+    client=None,
+    **extra,
+):
+    """Wrap ONE external agent call in paired Goal-65 observability records.
+
+    Enter: an ``agent_call_started`` events.jsonl line plus a ``started``
+    agent_events.jsonl record. Success: a matching ``finished`` record with
+    duration. Failure: a ``failed`` (or ``timed_out`` when the exception
+    carries a ``timeout_seconds`` attribute — duck-typed so this module never
+    imports the agents layer) record plus an ``agent_call_failed`` event, then
+    the exception is re-raised unchanged.
+
+    Diagnostic only: records go through ``_scrub_record`` (fail closed), and
+    nothing here can create, upgrade, or preserve any trusted status.
+    """
+
+    common = {
+        "agent_name": agent_name,
+        "provider": provider,
+        "adapter": adapter or "",
+        "stage": stage,
+        "model": model,
+        "output_artifact_path": output_artifact_path,
+        **extra,
+    }
+    started_wall = time.monotonic()
+    append_event(run_dir, "agent_call_started", stage=stage, detail=agent_name)
+    append_agent_event(
+        run_dir, agent_status="started", started_at=now_iso(), **common
+    )
+    try:
+        yield
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - started_wall) * 1000)
+        timeout_s = getattr(exc, "timeout_seconds", None)
+        append_agent_event(
+            run_dir,
+            agent_status="timed_out" if timeout_s is not None else "failed",
+            finished_at=now_iso(),
+            duration_ms=duration_ms,
+            timed_out=timeout_s is not None,
+            timeout_ms=int(timeout_s * 1000) if timeout_s is not None else None,
+            error_summary=str(exc)[:500],
+            attempts=getattr(client, "last_attempts", None),
+            **common,
+        )
+        append_event(run_dir, "agent_call_failed", stage=stage, detail=agent_name)
+        raise
+    duration_ms = int((time.monotonic() - started_wall) * 1000)
+    append_agent_event(
+        run_dir,
+        agent_status="finished",
+        finished_at=now_iso(),
+        duration_ms=duration_ms,
+        attempts=getattr(client, "last_attempts", None),
+        **common,
+    )
 
 
 def read_agent_events(run_dir: Path) -> list[dict]:

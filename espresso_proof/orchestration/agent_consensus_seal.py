@@ -40,6 +40,7 @@ from espresso_proof.kernel.models import (
     ProofGapResolutionReport,
     ProofLanguageStatus,
 )
+from espresso_proof.kernel.observability import observed_agent_call
 from espresso_proof.kernel.pressure_status import artifact_revision_hash
 from espresso_proof.kernel.validators import validate_run
 
@@ -274,10 +275,21 @@ def run_proof_reviewers(run_dir: Path, *, client, proof: dict | None = None) -> 
     context = _proof_review_context(run_dir, proof)
     entries: list[dict] = []
     for reviewer_id in PROOF_CONSENSUS_REVIEWERS:
-        raw = client.complete_json(
-            system=proof_consensus_system_prompt(reviewer_id),
-            prompt=agent_prompt(context, role=f"proof_review_{reviewer_id}"),
-        )
+        # Each reviewer leaves its own started/terminal observability pair; a
+        # raising reviewer aborts the seal BEFORE any snapshot/write happens,
+        # so the existing fail-closed CLI path takes over unchanged.
+        with observed_agent_call(
+            run_dir,
+            agent_name=f"proof_consensus_{reviewer_id}",
+            stage="agent_consensus_seal",
+            provider=getattr(client, "provider", "unknown"),
+            model=getattr(client, "model", None),
+            client=client,
+        ):
+            raw = client.complete_json(
+                system=proof_consensus_system_prompt(reviewer_id),
+                prompt=agent_prompt(context, role=f"proof_review_{reviewer_id}"),
+            )
         entries.append(_normalize_entry(raw, reviewer_id))
     return entries
 

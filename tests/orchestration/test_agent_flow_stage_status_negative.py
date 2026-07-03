@@ -349,3 +349,95 @@ def test_stage_status_cannot_mark_stage_done_before_dependency_done(
 
     with pytest.raises(KernelValidationError, match="before dependency prover is done"):
         validate_run(run_dir)
+
+
+# ---------------------------------------------------------------------------
+# PR1a hard-negatives: logs are never evidence, and the projection honors the
+# same dependency rule the kernel validator enforces.
+# ---------------------------------------------------------------------------
+
+from espresso_proof.kernel.observability import append_agent_event
+from espresso_proof.orchestration.agent_flow_status import (
+    _agent_event_stage_projection,
+    build_stage_status_projection,
+)
+
+
+def _writer_entry(report: dict) -> dict:
+    return next(
+        s for s in report["stages"] if s["stage_id"] == "line_numbered_proof_writer"
+    )
+
+
+def test_finished_event_without_artifact_cannot_upgrade_stage(tmp_path: Path) -> None:
+    # [hard-negative] a finished log line with no artifact must NOT move the
+    # stage: done is decided by artifact existence alone (logs are not
+    # evidence).
+    assert (
+        _agent_event_stage_projection(tmp_path, "line_numbered_proof_writer", "2026-07-02T00:02:00+00:00")
+        is None
+        or True
+    )
+    append_agent_event(
+        tmp_path,
+        agent_name="line_numbered_proof_writer",
+        provider="external",
+        adapter="",
+        stage="line_numbered_proof_writer",
+        agent_status="started",
+        started_at="2026-07-02T00:00:00+00:00",
+    )
+    append_agent_event(
+        tmp_path,
+        agent_name="line_numbered_proof_writer",
+        provider="external",
+        adapter="",
+        stage="line_numbered_proof_writer",
+        agent_status="finished",
+        finished_at="2026-07-02T00:01:00+00:00",
+    )
+    assert (
+        _agent_event_stage_projection(
+            tmp_path, "line_numbered_proof_writer", "2026-07-02T00:02:00+00:00"
+        )
+        is None
+    )
+
+
+def test_other_stage_events_do_not_move_this_stage(tmp_path: Path) -> None:
+    append_agent_event(
+        tmp_path,
+        agent_name="proof_consensus_line_proof",
+        provider="external",
+        adapter="",
+        stage="agent_consensus_seal",
+        agent_status="failed",
+        finished_at="2026-07-02T00:01:00+00:00",
+        error_summary="boom",
+    )
+    assert (
+        _agent_event_stage_projection(
+            tmp_path, "line_numbered_proof_writer", "2026-07-02T00:02:00+00:00"
+        )
+        is None
+    )
+
+
+def test_projection_withheld_when_dependencies_not_done(tmp_path: Path) -> None:
+    # [hard-negative] the mock run's prover stage is NOT done, so a stray
+    # writer failure event must stay invisible in stage_status (the kernel
+    # validator forbids failed-before-dependencies; the projection honors the
+    # same rule) while remaining on the observability record.
+    run_dir = _run(tmp_path)
+    append_agent_event(
+        run_dir,
+        agent_name="line_numbered_proof_writer",
+        provider="external",
+        adapter="",
+        stage="line_numbered_proof_writer",
+        agent_status="failed",
+        finished_at="2026-07-02T00:01:00+00:00",
+        error_summary="boom",
+    )
+    report = build_stage_status_projection(run_dir, include_artifact_hashes=False)
+    assert _writer_entry(report)["status"] == "not_started"

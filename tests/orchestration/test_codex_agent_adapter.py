@@ -79,6 +79,7 @@ def _run_adapter(
     prompt: str,
     fake_codex: Path,
     goal_file: Path | None = None,
+    schema: dict | None = None,
 ) -> subprocess.CompletedProcess[str]:
     log_dir = tmp_path / "logs"
     env = os.environ.copy()
@@ -91,7 +92,7 @@ def _run_adapter(
         "prompt": prompt,
         "provider": "external",
         "model": "ignored-by-codex-adapter",
-        "required_json_schema": {},
+        "required_json_schema": {} if schema is None else schema,
     }
     return subprocess.run(
         [sys.executable, "-m", "espresso_proof.agents.codex_adapter"],
@@ -395,6 +396,7 @@ def test_codex_run_sends_utf8_stdin_to_cli(tmp_path: Path) -> None:
         [sys.executable, str(fake), "--output-last-message", str(last_message)],
         full_prompt=prompt,
         last_message=last_message,
+        timeout=30,
     )
 
     assert return_code == 0
@@ -511,3 +513,54 @@ def test_external_client_timeout_defaults_and_env_override(
 
     monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_TIMEOUT_SECONDS", "450")
     assert ExternalCommandClient(model="external").timeout == 450
+
+
+# ---------------------------------------------------------------------------
+# PR1a: schema-aware fail-closed fallback for back-half roles
+# ---------------------------------------------------------------------------
+
+from espresso_proof.agents.llm_agents import (
+    AGENT_OUTPUT_SCHEMA,
+    LINE_NUMBERED_PROOF_OUTPUT_SCHEMA,
+    line_numbered_proof_writer_system_prompt,
+)
+
+
+def test_codex_adapter_fails_closed_for_writer_schema_on_cli_failure(tmp_path: Path) -> None:
+    # [hard-negative] writer role + dying codex CLI: no prover-shaped fallback
+    # may reach stdout; exit 1 and log parse_status=error_propagated instead.
+    fake_codex = _write_fake_codex(tmp_path, message="boom", return_code=3)
+    completed = _run_adapter(
+        tmp_path=tmp_path,
+        system=line_numbered_proof_writer_system_prompt(),
+        prompt="write the line-numbered proof",
+        fake_codex=fake_codex,
+        schema=LINE_NUMBERED_PROOF_OUTPUT_SCHEMA,
+    )
+    assert completed.returncode == 1
+    assert "FATAL" in completed.stderr
+    assert completed.stdout.strip() == ""
+    log_dir = tmp_path / "logs"
+    events = [
+        json.loads(line)
+        for path in sorted(log_dir.glob("*.jsonl"))
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    finish = [e for e in events if e.get("event") == "finish" or e.get("parse_status")]
+    assert any(e.get("parse_status") == "error_propagated" for e in finish)
+
+
+def test_codex_adapter_prover_fallback_unchanged_on_cli_failure(tmp_path: Path) -> None:
+    # Regression guard: prover-schema failures keep the exit-0 fallback contract.
+    fake_codex = _write_fake_codex(tmp_path, message="boom", return_code=3)
+    completed = _run_adapter(
+        tmp_path=tmp_path,
+        system="You are the Espresso prover.",
+        prompt="attempt the route",
+        fake_codex=fake_codex,
+        schema=AGENT_OUTPUT_SCHEMA,
+    )
+    assert completed.returncode == 0
+    payload = json.loads(completed.stdout)
+    assert "could not produce usable JSON" in payload["summary"]

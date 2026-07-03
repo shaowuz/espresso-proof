@@ -13,8 +13,16 @@ Wire it up:
     # or: espresso run-llm-agents --run <run_dir> --provider external
 
 Contract (espresso_proof.agents.llm_agents.ExternalCommandClient):
-- reads ONE JSON request on stdin: {system, prompt, provider, model, required_json_schema}
-- must print ONE JSON object on stdout.
+- reads ONE JSON request on stdin: {system, prompt, provider, model,
+  required_json_schema, timeout_seconds?} — timeout_seconds is optional and
+  additive (the client's actual outer timeout; absent for older callers).
+- on success (or a safely-fallbackable failure) prints ONE JSON object on
+  stdout and exits 0.
+- when the requesting role's required_json_schema CANNOT be satisfied by the
+  conservative fallback (back-half roles: proof writer, consensus reviewer,
+  gap resolver), a failure exits NON-ZERO with a FATAL line on stderr instead
+  of emitting schema-invalid JSON — the caller's transactional rollback takes
+  over (fail closed).
 
 This adapter is SCHEMA-AGNOSTIC: each Espresso stage (Prover/Reviewers AND the
 front-half agents — Understanding Claim, Literature, Examples, Counterexamples,
@@ -47,6 +55,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from espresso_proof.agents.adapter_runtime import (  # noqa: E402 - needs ROOT on sys.path
+    DEFAULT_EXTERNAL_TIMEOUT_SECONDS,
+    fallback_is_schema_valid,
+    resolve_inner_timeout,
+)
 
 # Conservative fallback. Includes the Prover/Reviewer keys so that path stays
 # safe even on failure; front-half normalizers ignore unknown keys and fall back
@@ -87,6 +101,9 @@ def main() -> int:
     # --output-schema; without this, real Claude runs return prover-shaped JSON
     # for write-proof and the kernel rejects the artifact (verified by live smoke).
     output_schema = _authoritative_output_schema(request, system=system, prompt=prompt)
+    inner_timeout = resolve_inner_timeout(
+        request=request, default_outer=DEFAULT_EXTERNAL_TIMEOUT_SECONDS
+    )
 
     try:
         selection = _select_skills(system=system, prompt=prompt)
@@ -94,19 +111,26 @@ def main() -> int:
         full_prompt = _build_full_prompt(
             system=system, prompt=prompt, selection=selection, output_schema=output_schema
         )
-        data = _extract_json(_run_claude(full_prompt))
+        data = _extract_json(_run_claude(full_prompt, timeout=inner_timeout))
         if not isinstance(data, dict):
             raise ValueError("claude output was not a JSON object")
         result = _scrub_candidate(data)  # neutralize any status smuggle in prose
-    except Exception as exc:  # noqa: BLE001 - emit safe fallback, never crash the run
+    except Exception as exc:  # noqa: BLE001 - fallback where safe, else fail closed
+        reason = f"claude adapter could not produce usable JSON: {exc}"[:300]
+        if not fallback_is_schema_valid(request, _FALLBACK):
+            # Back-half authoritative-schema role: the prover-shaped fallback
+            # would be normalized into garbage downstream (e.g. lines=[]).
+            # Exit non-zero so the caller's transactional rollback takes over.
+            print(f"[espresso-agent] FATAL: {reason}", file=sys.stderr)
+            return 1
         result = dict(_FALLBACK)
-        result["summary"] = f"claude adapter could not produce usable JSON: {exc}"[:300]
+        result["summary"] = reason
 
     json.dump(result, sys.stdout)
     return 0
 
 
-def _run_claude(prompt: str, timeout: int = 110) -> str:
+def _run_claude(prompt: str, *, timeout: int) -> str:
     claude_cli = os.environ.get("ESPRESSO_CLAUDE_CLI", "claude")
     proc = subprocess.run(
         [claude_cli, "-p", prompt],
