@@ -261,7 +261,13 @@ def test_inspect_reports_prover_loop_and_theorem_applicability(tmp_path: Path) -
     assert "Prover Loop" in inspected.output
     assert "decision ask_human" in inspected.output
     assert "reviewer strategy_reviewer_001" in inspected.output
-    assert "A sketch-only argument cannot become proof-complete evidence." in inspected.output
+    # blockers are now priority-ordered (severity/verdict/field), so this
+    # specific P2 risk may sit below the top-3 shown by inspect; the UNCAPPED
+    # artifact must still carry it.
+    loop = read_yaml(run_dir / "prover_loop.yaml")
+    all_blockers = [b for a in loop["attempts"] for b in a["blockers"]]
+    assert "A sketch-only argument cannot become proof-complete evidence." in all_blockers
+    assert "- blockers: " in inspected.output
     assert "durable round artifacts:" in inspected.output
     assert "latest attempt:" in inspected.output
     assert "proved the theorem" not in inspected.output.lower()
@@ -312,7 +318,14 @@ def test_inspect_focuses_selected_strategy_attempt(tmp_path: Path) -> None:
     assert "strategy strategy_pin_reference" in inspected.output
     assert "attempt strategy strategy_pin_reference" in inspected.output
     assert "attempt strategy strategy_stress_test_specials" not in inspected.output
-    assert "Exact locator for every external theorem step." in inspected.output
+    # priority ordering may move this P2 request below inspect's top-3 display;
+    # the uncapped artifact must still carry it on the focused attempt.
+    loop = read_yaml(run_dir / "prover_loop.yaml")
+    focused = [a for a in loop["attempts"] if a["strategy_id"] == "strategy_pin_reference"]
+    assert any(
+        "Exact locator for every external theorem step." in a["blockers"] for a in focused
+    )
+    assert "- blockers: " in inspected.output
 
 
 def test_inspect_ignores_undeclared_optional_artifact_files(tmp_path: Path) -> None:
@@ -1971,3 +1984,110 @@ def test_prover_output_summary_is_the_one_sanctioned_placeholder_home() -> None:
         created_at="2026-07-02T00:00:00+00:00",
     )
     assert attempt["output_summary"] == NO_AGENT_TEXT
+
+
+# ---------------------------------------------------------------------------
+# PR2: blockers uncapped + priority-ordered + disclosed prompt cap
+# ---------------------------------------------------------------------------
+
+import pytest
+
+from espresso_proof.agents.agent_pass import collect_open_reviewer_blockers
+from espresso_proof.agents.prover_loop import _prompt_blockers_with_disclosure
+from espresso_proof.kernel.models import ProverLoopAttempt
+
+
+def _review_with(verifier_id, verdict, objections=(), missing=(), sources=(), scoped=()):
+    return {
+        "verifier_id": verifier_id,
+        "verdict": verdict,
+        "objections": list(objections),
+        "missing_hypotheses": list(missing),
+        "source_requests": list(sources),
+        "scoped_objections": list(scoped),
+    }
+
+
+def test_blockers_uncapped_and_priority_ordered() -> None:
+    # 16 mixed items; the alphabetically-FIRST text is a P3 context note from
+    # the mildest reviewer — the exact shape the old sorted(set(...))[:12]
+    # promoted to the front while silently dropping the last four items.
+    context_note = "A global evidence note (non-blocking context, not a step flaw)"
+    reviews = [
+        _review_with(
+            "reviewer_003_context",
+            "plausible_direction",
+            objections=[context_note],
+            scoped=[{"text": context_note, "severity": "P3", "kind": "other"}],
+        ),
+        _review_with(
+            "reviewer_001_line_proof",
+            "blocked",
+            objections=["S6 induction gap", "S6 Lagrange element-order gap", "S7 distinctness gap"],
+            missing=["Missing coprimality hypothesis restatement"],
+            sources=["Sylow I locator", "Sylow III locator"],
+        ),
+        _review_with(
+            "reviewer_002_sources",
+            "needs_sources",
+            objections=["zz-last-alphabetically objection"],
+            missing=["another missing hypothesis"],
+            sources=[f"source request {i}" for i in range(7)],
+        ),
+    ]
+    records = collect_open_reviewer_blockers(reviews)
+    texts = [r["text"] for r in records]
+    assert len(texts) == 16  # nothing dropped
+    assert texts[0] == "S6 induction gap"  # worst verdict + objections field first
+    assert texts.index(context_note) > texts.index("zz-last-alphabetically objection")
+    assert records[texts.index(context_note)]["severity"] == "P3"
+    assert all({"text", "severity", "kind", "source_field", "verifier_id"} <= set(r) for r in records)
+
+
+def test_blocker_details_mismatch_rejected() -> None:
+    # [hard-negative] details can never disagree with the canonical list.
+    base = {
+        "attempt_id": "attempt_round_001_s1",
+        "round_index": 1,
+        "strategy_id": "s1",
+        "prover_attempt_id": "llm_prover_001",
+        "source_request_count": 0,
+        "risk_count": 0,
+        "reviewer_ids": ["r1"],
+        "reviewer_objections": [
+            {
+                "verifier_id": "r1",
+                "objection_count": 1,
+                "scope": "route",
+                "verdict": "needs_revision",
+                "recommended_human_action": "revise",
+            }
+        ],
+        "time_allocation": "repair",
+        "status": "needs_repair",
+        "blockers": ["real blocker"],
+        "next_action": "repair",
+    }
+    detail = {
+        "text": "a DIFFERENT text",
+        "severity": "P1",
+        "kind": "other",
+        "source_field": "objections",
+        "verifier_id": "r1",
+    }
+    with pytest.raises(Exception, match="blocker_details must match blockers"):
+        ProverLoopAttempt.model_validate({**base, "blocker_details": [detail]})
+    ProverLoopAttempt.model_validate(
+        {**base, "blocker_details": [{**detail, "text": "real blocker"}]}
+    )
+
+
+def test_prompt_blocker_cap_disclosed() -> None:
+    # [hard-negative] the ephemeral prompt lane may cap, but never silently.
+    many = [f"blocker {i:03d}" for i in range(45)]
+    shown = _prompt_blockers_with_disclosure(many)
+    assert len(shown) == 41
+    assert shown[:40] == many[:40]
+    assert shown[-1] == "[+5 more open blockers recorded in prover_loop.yaml — not shown in this prompt]"
+    few = [f"blocker {i}" for i in range(16)]
+    assert _prompt_blockers_with_disclosure(few) == few

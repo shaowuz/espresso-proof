@@ -114,8 +114,10 @@ def _default_investigation_route(idea_grade: dict) -> dict:
 
 
 # Neutral note used when a precise claim's placeholder failed review is relaxed.
-_PENDING_REVIEW_NOTE = (
-    "Front-half review pending; real reviewers run in the Prover/Reviewers pass."
+# Shared constant: the supersession logic in kernel/surface_warnings.py matches
+# this text by identity, so producer and superseder can never drift apart.
+from espresso_proof.kernel.surface_warnings import (  # noqa: E402
+    FRONT_HALF_REVIEW_PENDING_NOTE as _PENDING_REVIEW_NOTE,
 )
 
 # Stale scaffold "vagueness" language that must NOT survive for a precise claim

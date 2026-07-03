@@ -12,7 +12,15 @@ EXAMPLES_PENDING = "examples_pending"
 COUNTEREXAMPLES_PENDING = "counterexamples_pending"
 THEOREM_BLOCKERS = "theorem_blockers"
 REVIEWER_BLOCKERS = "reviewer_blockers"
+PROVER_REVIEWER_BLOCKERS = "prover_reviewer_blockers"
 UPDATE_INBOX_PENDING = "update_inbox_pending"
+
+# Single source of truth for the front-half placeholder wording: the producer
+# (front_half/safety.py) and the supersession logic below must share it, or a
+# wording edit silently breaks the supersession.
+FRONT_HALF_REVIEW_PENDING_NOTE = (
+    "Front-half review pending; real reviewers run in the Prover/Reviewers pass."
+)
 
 
 def _items(value: Any) -> list[dict[str, Any]]:
@@ -278,8 +286,22 @@ def collect_surface_warnings(
     update_inbox: dict[str, Any] | None = None,
     line_numbered_proof: dict[str, Any] | None = None,
     agent_consensus_review: dict[str, Any] | None = None,
+    prover_loop: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     warnings: list[dict[str, Any]] = []
+    prover_attempts = _items((prover_loop or {}).get("attempts"))
+    if prover_attempts:
+        # Real reviewers have run: the front-half placeholder review must not
+        # resurrect as a live warning. Supersede by IDENTITY with the shared
+        # constant (no prose heuristics), on a COPY of the review.
+        review = dict(review)
+        review["downgrade_reasons"] = [
+            reason
+            for reason in (review.get("downgrade_reasons") or [])
+            if str(reason).strip() != FRONT_HALF_REVIEW_PENDING_NOTE
+        ]
+        if str(review.get("strongest_objection") or "").strip() == FRONT_HALF_REVIEW_PENDING_NOTE:
+            review["strongest_objection"] = "none"
     source_gaps = _source_gap_items(grade, source_grounding or {})
     if source_gaps:
         warnings.append(
@@ -339,14 +361,36 @@ def collect_surface_warnings(
         "" if (agent_consensus_review or {}).get("consensus") is True else reviewer_blocker_summary(review)
     )
     if reviewer_summary:
+        suffix = (
+            " (front-half placeholder; prover-pass reviewers have since run)"
+            if prover_attempts
+            else ""
+        )
         warnings.append(
             {
                 "category": REVIEWER_BLOCKERS,
                 "title": "Reviewer blockers still open",
-                "text": f"Reviewer blockers still open: {reviewer_summary}.",
+                "text": f"Reviewer blockers still open: {reviewer_summary}.{suffix}",
                 "ids": [reviewer_summary],
             }
         )
+    if prover_attempts:
+        latest = max(prover_attempts, key=lambda a: int(a.get("round_index") or 0))
+        open_blockers = [str(b) for b in (latest.get("blockers") or []) if str(b).strip()]
+        if open_blockers:
+            reviewer_count = len(latest.get("reviewer_ids") or [])
+            warnings.append(
+                {
+                    "category": PROVER_REVIEWER_BLOCKERS,
+                    "title": "Prover-pass reviewer blockers still open",
+                    "text": (
+                        f"Prover-pass reviewer blockers still open: {len(open_blockers)} "
+                        f"open blocker(s) from round {latest.get('round_index')} "
+                        f"({reviewer_count} reviewer(s)); see the prover loop record."
+                    ),
+                    "ids": open_blockers,
+                }
+            )
     pending_updates = pending_update_inbox_ids(update_inbox or {})
     if pending_updates:
         warnings.append(
@@ -441,6 +485,7 @@ def collect_surface_warnings_from_run(run_dir: Path) -> list[dict[str, Any]]:
         update_inbox=optional_artifact("update_inbox"),
         line_numbered_proof=optional_artifact("line_numbered_proof"),
         agent_consensus_review=optional_artifact("agent_consensus_review"),
+        prover_loop=optional_artifact("prover_loop"),
     )
 
 

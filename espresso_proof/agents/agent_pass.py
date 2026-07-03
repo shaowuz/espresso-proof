@@ -485,6 +485,95 @@ def _split_machine_answered_blockers(
     return open_blockers, answered
 
 
+_BLOCKER_VERDICT_PRIORITY = {
+    "blocked": 0,
+    "needs_revision": 1,
+    "needs_sources": 2,
+    "plausible_direction": 3,
+}
+_BLOCKER_SEVERITY_PRIORITY = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+_BLOCKER_FIELD_PRIORITY = {"objections": 0, "missing_hypotheses": 1, "source_requests": 2}
+
+
+def _blocker_match_prefix(text: str) -> str:
+    """Whitespace-normalized 600-char prefix — the same truncation the scoped
+    objections apply, so severity lookup matches the objection it came from."""
+    return re.sub(r"\s+", " ", str(text)).strip()[:600].lower()
+
+
+def collect_open_reviewer_blockers(verifier_reviews: list[dict]) -> list[dict]:
+    """Every open reviewer blocker, deduplicated, in deterministic PRIORITY
+    order — NEVER capped (house rule: no silent drops; the old alphabetical
+    ``sorted(set(...))[:12]`` silently discarded whichever objections sorted
+    last, which in the order-15 evidence run was the three substantive
+    line-proof math objections).
+
+    Priority key, all from existing schema structure (no text pattern
+    matching, no domain special-casing): severity (P0<P1<P2<P3, looked up from
+    the review's scoped_objections by normalized 600-char prefix, default P2 —
+    explicit-scoped texts that do not derive from the blocker fields simply
+    stay P2), reviewer verdict rank (blocked < needs_revision < needs_sources
+    < plausible_direction), field class (objections < missing_hypotheses <
+    source_requests), review emission order, item order. Dedupe by normalized
+    text keeps the highest-priority slot.
+    """
+
+    keyed: list[tuple[tuple, dict]] = []
+    for review_index, review in enumerate(verifier_reviews):
+        severity_by_prefix: dict[str, dict] = {}
+        for objection in review.get("scoped_objections") or []:
+            if not isinstance(objection, dict):
+                continue
+            text = str(objection.get("text", "")).strip()
+            if text:
+                severity_by_prefix.setdefault(
+                    _blocker_match_prefix(text),
+                    {
+                        "severity": str(objection.get("severity") or "P2"),
+                        "kind": str(objection.get("kind") or "other"),
+                    },
+                )
+        verdict_rank = _BLOCKER_VERDICT_PRIORITY.get(str(review.get("verdict")), 1)
+        for field, field_rank in _BLOCKER_FIELD_PRIORITY.items():
+            for item_index, item in enumerate(review.get(field) or []):
+                text = str(item).strip()
+                if not text:
+                    continue
+                scoped = severity_by_prefix.get(_blocker_match_prefix(text), {})
+                severity = scoped.get("severity", "P2")
+                if severity not in _BLOCKER_SEVERITY_PRIORITY:
+                    severity = "P2"
+                key = (
+                    _BLOCKER_SEVERITY_PRIORITY[severity],
+                    verdict_rank,
+                    field_rank,
+                    review_index,
+                    item_index,
+                )
+                keyed.append(
+                    (
+                        key,
+                        {
+                            "text": text,
+                            "severity": severity,
+                            "kind": scoped.get("kind", "other"),
+                            "source_field": field,
+                            "verifier_id": str(review.get("verifier_id", "")),
+                        },
+                    )
+                )
+    keyed.sort(key=lambda pair: pair[0])
+    seen: set[str] = set()
+    records: list[dict] = []
+    for _, record in keyed:
+        normalized = _blocker_match_prefix(record["text"])
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        records.append(record)
+    return records
+
+
 def _machine_answer_note(answered: list[dict]) -> str:
     parts = "; ".join(
         f"{item['request']!r} answered by trusted machine check(s) "
@@ -576,20 +665,9 @@ def route_initial_reviewer_blockers_to_update_inbox(
     if not selected_strategy_id or selected_strategy_id == "none":
         return False
     verifier_reviews = agent_report.get("verifier_reviews", [])
-    blockers = sorted(
-        {
-            item
-            for review in verifier_reviews
-            for item in (
-                review.get("objections", [])
-                + review.get("missing_hypotheses", [])
-                + review.get("source_requests", [])
-            )
-            if str(item).strip()
-        }
-    )
+    blocker_details = collect_open_reviewer_blockers(verifier_reviews)
     blockers, _ = _split_machine_answered_blockers(
-        blockers,
+        [detail["text"] for detail in blocker_details],
         run_dir=run_dir,
         claim_id=agent_report["claim_id"],
         source_request_texts={
@@ -606,7 +684,7 @@ def route_initial_reviewer_blockers_to_update_inbox(
         origin_artifact="llm_agent_run.yaml",
         event_id_prefix="upd_reviewer_objection_initial",
         verifier_reviews=verifier_reviews,
-        open_blocker_texts=set(blockers[:12]),
+        open_blocker_texts=set(blockers),
     )
     if created:
         write_time_allocation_from_update_inbox(run_dir)

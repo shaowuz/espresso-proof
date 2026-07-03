@@ -102,6 +102,19 @@ class ProverLoopReviewPointer(StrictBaseModel):
         return self
 
 
+class ProverLoopBlocker(StrictBaseModel):
+    """One open reviewer blocker with its priority provenance (additive; the
+    canonical list stays ``ProverLoopAttempt.blockers`` — details may never
+    disagree with it, enforced below). Display/ordering metadata only; carries
+    no evidence or status semantics."""
+
+    text: str
+    severity: Literal["P0", "P1", "P2", "P3"] = "P2"
+    kind: str = "other"
+    source_field: Literal["objections", "missing_hypotheses", "source_requests"]
+    verifier_id: str
+
+
 class ProverLoopAttempt(StrictBaseModel):
     attempt_id: str
     round_index: int = Field(ge=1)
@@ -115,6 +128,8 @@ class ProverLoopAttempt(StrictBaseModel):
     time_allocation: Literal["expand", "repair", "cheap_check", "pause", "ask_human", "stop"]
     status: Literal["candidate", "needs_repair", "blocked", "waiting_human", "stopped"]
     blockers: list[str] = Field(default_factory=list)
+    # Additive priority/provenance sidecar for blockers (old artifacts: []).
+    blocker_details: list[ProverLoopBlocker] = Field(default_factory=list)
     next_action: str
     # Goal 39: which named subgoal this round targeted (the scheduler's pick at
     # round time). Optional/additive: rounds appended before a graph exists (or
@@ -136,6 +151,11 @@ class ProverLoopAttempt(StrictBaseModel):
             raise ValueError("reviewer_objections must match reviewer_ids")
         if self.status in {"needs_repair", "blocked"} and not self.blockers:
             raise ValueError("blocked/repair attempts require blockers")
+        if self.blocker_details and [b.text for b in self.blocker_details] != list(self.blockers):
+            raise ValueError(
+                "blocker_details must match blockers exactly (same texts, same order); "
+                "details can never disagree with the canonical blocker list"
+            )
         return self
 
 
@@ -849,6 +869,7 @@ __all__ = [
     'LLMAgentRunReport',
     'ProofGoalGraph',
     'ProverLoopAttempt',
+    'ProverLoopBlocker',
     'ProverLoopBudget',
     'ProverLoopReport',
     'ProverLoopReviewPointer',

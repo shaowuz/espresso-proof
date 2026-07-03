@@ -161,7 +161,7 @@ def render_route_step_table_lines(rows: list[dict], *, cell_limit: int = 48) -> 
         return text if len(text) <= cell_limit else text[: cell_limit - 1].rstrip() + "…"
 
     lines = [
-        "Proof-route step table (local step evidence only; not a proof of the whole claim or route):"
+        "Proof-route step table (source-grounding plan; local step evidence only; not a proof of the whole claim or route):"
     ]
     for row in rows:
         # Long free text (claim / citation / locator) is truncated for the terminal;

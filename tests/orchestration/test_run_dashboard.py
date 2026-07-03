@@ -187,3 +187,52 @@ def test_dashboard_unclear_counterexample_never_admissible(tmp_path: Path) -> No
     assert "hypothesis match unclear" in html
     # the route-card pressure line must not claim a refutation either
     assert "A checked counterexample refutes the claim" not in html
+
+
+# ---------------------------------------------------------------------------
+# PR2: headline priority + route-table provenance + advisory attempt section
+# ---------------------------------------------------------------------------
+
+from espresso_proof.orchestration.run_dashboard import _headline_blocker
+
+
+def test_main_blocker_headline_never_context_note() -> None:
+    p3 = {"text": "Global evidence note (non-blocking context)", "severity": "P3"}
+    p1 = {"text": "S6 induction gap must be closed", "severity": "P1"}
+    # [hard-negative] a P3 context note can never headline
+    latest = {"blocker_details": [p3, p1], "blockers": [p3["text"], p1["text"]]}
+    assert "S6 induction gap" in _headline_blocker(latest, latest["blockers"])
+    # all-P3: honest 'no blocking repair' wording, never a P3 text
+    all_p3 = {"blocker_details": [p3], "blockers": [p3["text"]]}
+    headline = _headline_blocker(all_p3, all_p3["blockers"])
+    assert "No blocking reviewer repair recorded" in headline
+    assert "non-blocking context" not in headline
+    # legacy attempt without details falls back to blockers[0]
+    legacy = {"blockers": ["legacy first blocker"]}
+    assert "legacy first blocker" in _headline_blocker(legacy, legacy["blockers"])
+    assert _headline_blocker({}, []) == "No blocking reviewer repair recorded."
+
+
+def test_route_table_provenance_and_advisory_attempt(tmp_path: Path) -> None:
+    claim = tmp_path / "claim.md"
+    claim.write_text("Every group of order p^2, where p is prime, is abelian.", encoding="utf-8")
+    result = orchestrate_run(
+        project="dashboard_advisory",
+        input_path=claim,
+        output_root=tmp_path,
+        provider="stub",
+        front_half="mock",
+        auto_continue=True,
+    )
+    run_dir = Path(result["run_dir"])
+    html = render_run_dashboard(run_dir)
+    assert "source-grounding plan" in html
+    if (run_dir / "advisory_proof_sketch.yaml").exists():
+        assert "Latest prover attempt (advisory, unvalidated)" in html
+        assert "may deviate from the" in html
+    # [hard-negative] removing the sidecar removes the advisory section
+    sketch_path = run_dir / "advisory_proof_sketch.yaml"
+    if sketch_path.exists():
+        sketch_path.unlink()
+    html_without = render_run_dashboard(run_dir)
+    assert "Latest prover attempt (advisory, unvalidated)" not in html_without

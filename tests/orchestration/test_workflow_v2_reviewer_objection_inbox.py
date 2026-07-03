@@ -459,3 +459,76 @@ def test_concurrent_reviewer_objection_continuation_cannot_duplicate_round_id(
     assert len(keys) == len(set(keys)), keys
     loop = read_yaml(run_dir / "prover_loop.yaml")
     assert len(keys) == len(loop["attempts"])
+
+
+# ---------------------------------------------------------------------------
+# PR2 [hard-negative]: routing is lossless — no [:12] cap on inbox events
+# ---------------------------------------------------------------------------
+
+
+def test_all_open_blocker_slots_routed(tmp_path: Path) -> None:
+    from espresso_proof.agents.agent_pass import (
+        route_initial_reviewer_blockers_to_update_inbox,
+    )
+    from espresso_proof.orchestration.genesis import run_mock_critique
+
+    run_dir = run_mock_critique(
+        "hodge_atoms",
+        Path("tests/fixtures") / "hodge_all_cubic_fourfolds" / "input.md",
+        tmp_path,
+    )
+    claim_id = read_yaml(run_dir / "locked_claim.yaml")["id"]
+    # 16 slots across 3 reviewers — the shape whose last reviewer's four slots
+    # (objections 1-3 + source request) the old set(blockers[:12]) dropped.
+    reviews = [
+        {
+            "verifier_id": "reviewer_001",
+            "verdict": "needs_revision",
+            "objections": [f"r1 objection {i}" for i in range(4)],
+            "missing_hypotheses": ["r1 missing hypothesis"],
+            "source_requests": ["r1 source request"],
+            "scoped_objections": [],
+        },
+        {
+            "verifier_id": "reviewer_002",
+            "verdict": "needs_sources",
+            "objections": [f"r2 objection {i}" for i in range(3)],
+            "missing_hypotheses": [],
+            "source_requests": [f"r2 source request {i}" for i in range(3)],
+            "scoped_objections": [],
+        },
+        {
+            "verifier_id": "line_proof_reviewer_003",
+            "verdict": "blocked",
+            "objections": [f"zz line-proof objection {i}" for i in range(3)],
+            "missing_hypotheses": [],
+            "source_requests": ["zz Sylow source request"],
+            "scoped_objections": [],
+        },
+    ]
+    agent_report = {"claim_id": claim_id, "verifier_reviews": reviews}
+    # the inbox service requires the origin artifact to be declared on the run
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    manifest.setdefault("optional_artifacts", {})["llm_agent_run"] = "llm_agent_run.yaml"
+    write_yaml(run_dir / "llm_agent_run.yaml", agent_report)
+    write_yaml(run_dir / "run_manifest.yaml", manifest)
+    created = route_initial_reviewer_blockers_to_update_inbox(
+        run_dir=run_dir,
+        agent_report=agent_report,
+        selected_strategy_id="strategy_route_001",
+    )
+    assert created is True
+    inbox = read_yaml(run_dir / "update_inbox.yaml")
+    events = [
+        e for e in inbox.get("entries", []) if "reviewer_objection" in str(e.get("id"))
+    ]
+    assert len(events) == 16
+    pointers = {str(e.get("origin_artifact_id_or_path")) for e in events}
+    # the last reviewer's four slots are exactly the class the old cap dropped
+    for must_route in (
+        "line_proof_reviewer_003:objections:001",
+        "line_proof_reviewer_003:objections:002",
+        "line_proof_reviewer_003:objections:003",
+        "line_proof_reviewer_003:source_requests:001",
+    ):
+        assert must_route in pointers
