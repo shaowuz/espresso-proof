@@ -3,34 +3,89 @@
 
 from __future__ import annotations
 
-import re
-from datetime import datetime
 from enum import Enum
-from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
-from espresso_proof.kernel.models._part1 import *  # noqa: F401,F403
-
-
-from espresso_proof.kernel.models._part2 import *  # noqa: F401,F403
-
-
-from espresso_proof.kernel.models._part3 import *  # noqa: F401,F403
-
-
-from espresso_proof.kernel.models._part4 import *  # noqa: F401,F403
-
-
-from espresso_proof.kernel.models._part5 import *  # noqa: F401,F403
-
-
-from espresso_proof.kernel.models._part6 import *  # noqa: F401,F403
-
-
-from espresso_proof.kernel.models._part7 import *  # noqa: F401,F403
+from espresso_proof.kernel.models._part1 import (
+    Claim,
+    HypothesisLedger,
+    SourceRef,
+    StrictBaseModel,
+)
+from espresso_proof.kernel.models._part2 import (
+    ComputationChecks,
+    ComputationVerificationReport,
+    ComputationVerificationResult,
+    ExampleBank,
+    ExampleComputationCheck,
+    ExampleSelection,
+    FailureClassificationReport,
+    FailurePatternAudit,
+    FailurePatternBank,
+    MachineCheckSpec,
+    MathematicalJudgmentReport,
+)
+from espresso_proof.kernel.models._part3 import (
+    AutonomousLiteratureRetrievalReport,
+    ExternalToolCandidatesReport,
+    ExternalToolRunsReport,
+    ExtractedTheorem,
+    FiniteObjectWitnessReport,
+    LiteratureCandidate,
+    LiteratureCandidates,
+    LiteratureRetrievalReport,
+    LiteratureReviewReport,
+    LiteratureSearchPlan,
+    ProofVerificationReport,
+    RetrievalResolutionReport,
+    ScopedVerificationRequest,
+    ScopedVerificationRequests,
+)
+from espresso_proof.kernel.models._part4 import (
+    CounterexampleReport,
+    LiteratureReviewAgentReport,
+    SourceGroundingReport,
+    TestReport,
+    TheoremApplicabilityReport,
+    TheoremApplicabilityReviewArtifact,
+    TheoremExtractionReport,
+)
+from espresso_proof.kernel.models._part5 import (
+    AdmissionCheck,
+    AgentContracts,
+    ExampleFeedbackSummary,
+    HumanChoice,
+    HumanExampleFeedback,
+    IdeaGrade,
+    LoopControl,
+    Review,
+    StrategyBrief,
+    StrategySynthesis,
+    TimeAllocationPlan,
+    UpdateInboxReport,
+)
+from espresso_proof.kernel.models._part6 import (
+    LLMAgentRunReport,
+    ProofGoalGraph,
+    ProverLoopReport,
+    ProverRoundIndex,
+    ProverRoundReport,
+)
+from espresso_proof.kernel.models._part7 import (
+    AgentRunStatusReport,
+    FrontHalfRunReport,
+    MemoryContext,
+    MemoryEntry,
+    MemoryIndex,
+    PressureLaneBarrierReport,
+    PressureState,
+    RunManifest,
+    StageStatusReport,
+    WorkflowSpec,
+)
 
 
 class PressureLateMarker(StrictBaseModel):

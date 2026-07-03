@@ -6,7 +6,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from pydantic import BaseModel, ValidationError
 
 from espresso_proof.kernel.io import path_exists, path_is_file, read_text, read_yaml
 from espresso_proof.kernel.research_bank import (
@@ -15,98 +14,35 @@ from espresso_proof.kernel.research_bank import (
     load_strategy_synthesis_artifact,
 )
 from espresso_proof.kernel.models import (
-    AgentConsensusReview,
-    AgentConsensusVerdict,
     AgentContracts,
-    AgentRunStatusReport,
-    AIReviewAssessment,
-    AttemptStatus,
-    AutonomousLiteratureRetrievalReport,
     Claim,
     ComputationChecks,
-    ComputationVerificationReport,
     CounterexampleReport,
-    ExternalToolCandidatesReport,
-    ExternalToolRunsReport,
-    FailureClassificationReport,
-    FailurePatternAudit,
-    FiniteObjectWitnessReport,
-    LiteratureCandidates,
-    MemoryContext,
-    RetrievalResolutionReport,
-    LiteratureRetrievalReport,
-    LiteratureSearchPlan,
-    MathematicalJudgmentReport,
-    ProofGoalGraph,
-    _has_run_artifact_provenance,
-    ProofVerificationReport,
-    ProofVerificationStatus,
-    PressureLaneBarrierReport,
-    ProofGapResolutionReport,
-    SubgoalState,
-    ContinueDecision,
     ExampleSelection,
-    ExampleFeedbackSummary,
     HypothesisLedger,
     HumanChoice,
-    HumanExampleFeedback,
-    HumanChoiceStatus,
     ExampleStatus,
     IdeaGrade,
-    IdeaStatus,
-    LineNumberedProof,
     LLMAgentRunReport,
-    LiteratureReviewAgentReport,
     LiteratureReviewReport,
     LoopControl,
     ProofLanguageStatus,
     ProverLoopReport,
     ProverRoundIndex,
     ProverRoundReport,
-    PressureStatusReport,
     Review,
-    VerificationVerdict,
     ReviewerVerdict,
     RunManifest,
     SourceGroundingReport,
     SourceStatus,
-    StageStatusReport,
     StrategyBrief,
-    StrategySynthesis,
     TestReport,
     TheoremApplicabilityReport,
-    TheoremApplicabilityReviewArtifact,
-    TheoremConditionLedger,
-    TheoremExtractionReport,
-    TimeAllocationPlan,
     UpdateInboxReport,
 )
-from espresso_proof.kernel.pressure_status import (
-    artifact_revision_hash,
-    derive_counterexamples_pressure_state,
-    derive_examples_pressure_state,
-    is_admissible_refutation,
-    is_inadmissible_counterexample_pressure,
-    needs_counterexample_admissibility,
-)
-from espresso_proof.kernel.proof_language import contains_proof_language
-from espresso_proof.kernel.strategy_rules import validate_strategy_rules
 from espresso_proof.kernel.surface_warnings import (
     collect_surface_warnings,
     final_report_missing_disclosures,
-)
-from espresso_proof.kernel.agent_flow_spec import (
-    get_stage,
-    ordered_stage_ids,
-    stages_blocked_by_unclear_claim,
-)
-from espresso_proof.kernel.agent_flow_legacy_map import get_legacy_mapping
-from espresso_proof.kernel.pressure_lane_barrier import (
-    PRESSURE_LANE_BARRIER_AGENT_ROLES,
-    PRESSURE_LANE_BARRIER_AGENT_STAGE_IDS,
-    PRESSURE_LANE_BARRIER_FILENAME,
-    PRESSURE_LANE_BARRIER_MODE,
-    order_for_pressure_lane_barrier,
 )
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.validation.front_half import validate_front_half_run
@@ -117,22 +53,89 @@ from espresso_proof.validation.evidence import (
 )
 from espresso_proof.validation.manifest import ManifestPathValidationError
 from espresso_proof.validation.manifest import validate_relative_artifact_path
-from espresso_proof.validation.manifest import validate_manifest_paths
 
 
-from espresso_proof.kernel.validators._part1 import *  # noqa: F401,F403
-
-
-from espresso_proof.kernel.validators._part2 import *  # noqa: F401,F403
-
-
-from espresso_proof.kernel.validators._part3 import *  # noqa: F401,F403
-
-
-from espresso_proof.kernel.validators._part4 import *  # noqa: F401,F403
-
-
-from espresso_proof.kernel.validators._part5 import *  # noqa: F401,F403
+from espresso_proof.kernel.validators._part1 import (
+    _load_optional_agent_run_status,
+    _load_optional_pressure_lane_barrier,
+    _load_optional_pressure_status,
+    _load_optional_stage_status,
+    _load_optional_time_allocation,
+    _load_optional_update_inbox,
+    _validate_agent_run_status,
+    _validate_pressure_lane_barrier,
+    _validate_pressure_status,
+    _validate_stage_status,
+    validate_yaml_model,
+)
+from espresso_proof.kernel.validators._part2 import (
+    _first_forbidden_proof_language,
+    _load_optional_computation_verification,
+    _load_optional_failure_classification,
+    _load_optional_failure_pattern_audit,
+    _load_optional_human_feedback,
+    _load_optional_literature_retrieval,
+    _load_optional_mathematical_judgment,
+    _validate_failure_classification,
+    _validate_failure_pattern_audit,
+    _validate_mathematical_judgment,
+    _validate_refuted_grade_admissible,
+    _validate_time_allocation,
+    _validate_update_inbox,
+)
+from espresso_proof.kernel.validators._part3 import (
+    _load_optional_autonomous_literature_retrieval,
+    _load_optional_external_tool_candidates,
+    _load_optional_external_tool_runs,
+    _load_optional_finite_object_witness,
+    _load_optional_literature_candidates,
+    _load_optional_literature_search_plan,
+    _load_optional_memory_context,
+    _load_optional_proof_gap_resolution,
+    _load_optional_proof_verification,
+    _load_optional_retrieval_resolution,
+    _validate_autonomous_literature_retrieval,
+    _validate_external_tool_artifacts,
+    _validate_grade_10_requires_global_proof_status,
+    _validate_grade_proof_language_backed,
+    _validate_literature_retrieval,
+    _validate_memory_context,
+    _validate_proof_gap_resolution,
+    _validate_proof_verification,
+)
+from espresso_proof.kernel.validators._part4 import (
+    _load_optional_agent_consensus_review,
+    _load_optional_ai_review,
+    _load_optional_line_numbered_proof,
+    _load_optional_literature_review_agent,
+    _load_optional_llm_agent_run,
+    _load_optional_proof_goal_graph,
+    _load_optional_prover_loop,
+    _load_optional_prover_round_index,
+    _load_optional_theorem_applicability,
+    _load_optional_theorem_applicability_review,
+    _load_optional_theorem_condition_ledger,
+    _load_optional_theorem_extraction,
+    _prover_assertion_clauses,
+    _prover_status_smuggling_field,
+    _validate_agent_consensus_review,
+    _validate_manifest_paths,
+    _validate_subgoal_graph,
+)
+from espresso_proof.kernel.validators._part5 import (
+    _validate_agent_contracts,
+    _validate_claim_id_consistency,
+    _validate_human_choice,
+    _validate_human_feedback,
+    _validate_literature_review_separation,
+    _validate_loop_control,
+    _validate_review_outcome,
+    _validate_source_backing,
+    _validate_source_discipline_bindings,
+    _validate_strategy_brief,
+    _validate_strategy_synthesis,
+    _validate_theorem_applicability,
+)
 
 
 def _prover_clause_is_support_disclaimer(clause: str) -> bool:
