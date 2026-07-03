@@ -27,9 +27,13 @@ from espresso_proof.claim.claim_clear import (
 )
 from espresso_proof.claim.persisted_claim_normalization import normalize_persisted_claim_ledger
 from espresso_proof.front_half import run_front_half_agent_pass, write_front_half_run
+from espresso_proof.front_half.runner import front_half_stage_ok
 from espresso_proof.validation.front_half import validate_front_half_run
 from espresso_proof.kernel.io import read_text, read_yaml, write_yaml
-from espresso_proof.literature.literature_discovery import discover_literature as run_literature_discovery
+from espresso_proof.literature.literature_discovery import (
+    discover_literature as run_literature_discovery,
+    merge_agent_and_local_literature,
+)
 from espresso_proof.agents.llm_agents import (
     build_client,
     build_prover_loop_report,
@@ -526,6 +530,16 @@ def collect_candidate_literature(
                 providers=literature_providers,
             )
             LiteratureReviewReport.model_validate(literature)
+            # Merge-not-clobber: a full live run's S2 agent literature output is
+            # a validated producer artifact; the deterministic local scan merges
+            # BESIDE it instead of overwriting it (fast/mock runs never record
+            # the stage ok, so their scaffold-replace semantics are unchanged).
+            if front_half_stage_ok(run_dir, "literature_review"):
+                literature = merge_agent_and_local_literature(
+                    read_yaml(run_dir / artifacts["literature_review"]),
+                    literature,
+                    max_references=max_references,
+                )
             write_yaml(run_dir / artifacts["literature_review"], literature)
 
         runner.run(

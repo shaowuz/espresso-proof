@@ -30,7 +30,7 @@ from espresso_proof.kernel.io import read_yaml
 from espresso_proof.kernel.llm_client import LLMClient
 from espresso_proof.kernel.models import LLMAgentRunReport
 from espresso_proof.kernel.pressure_status import artifact_revision_hash
-from espresso_proof.kernel.proof_language import safe_list
+from espresso_proof.kernel.proof_language import NO_AGENT_TEXT, safe_list
 from espresso_proof.kernel.time_allocation import (
     TimeAllocationPlan,
     ensure_prover_time_allocation_plan,
@@ -621,6 +621,10 @@ def make_prover_attempt(
     input_artifacts: list[str] | None = None,
 ) -> dict:
     output_summary, summary_neutralized = safe_prover_text(raw.get("summary", ""))
+    # The prover attempt's summary is the ONE sanctioned home for the
+    # no-output placeholder (safe_text itself no longer manufactures it, so
+    # optional fields elsewhere honestly stay empty/None).
+    output_summary = output_summary or NO_AGENT_TEXT
     proposed_steps, steps_neutralized = safe_prover_list(raw.get("steps", []))
     risks, risks_neutralized = safe_prover_list(raw.get("risks", []))
     if summary_neutralized or steps_neutralized or risks_neutralized:

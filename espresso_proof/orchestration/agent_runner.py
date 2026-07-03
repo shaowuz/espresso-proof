@@ -54,7 +54,11 @@ from espresso_proof.front_half.stages.counterexamples import (
 )
 from espresso_proof.kernel.io import read_text, read_yaml, write_yaml
 from espresso_proof.kernel.models import LiteratureReviewReport
-from espresso_proof.literature.literature_discovery import discover_literature as run_literature_discovery
+from espresso_proof.front_half.runner import front_half_stage_ok
+from espresso_proof.literature.literature_discovery import (
+    discover_literature as run_literature_discovery,
+    merge_agent_and_local_literature,
+)
 from espresso_proof.agents.llm_agents import build_client, load_agent_context
 from espresso_proof.kernel.pressure_status import PRESSURE_STATUS_FILENAME, build_pressure_status
 from espresso_proof.orchestration.agent_flow_driver import record_agent_flow_stage_status
@@ -115,6 +119,15 @@ def _compute_literature(run_dir: Path) -> dict:
         providers=None,
     )
     LiteratureReviewReport.model_validate(literature)
+    # Merge-not-clobber (same mechanism as the orchestrator literature stage):
+    # re-running `run-agent --agent literature` on a full live run must not
+    # overwrite the S2 agent output with the local scan. Compute runs off-lock;
+    # a stale merge is caught by the in-transaction validate_run and rolled
+    # back per the documented compute/commit contract.
+    if front_half_stage_ok(run_dir, "literature_review"):
+        literature = merge_agent_and_local_literature(
+            read_yaml(run_dir / artifacts["literature_review"]), literature
+        )
     return literature
 
 

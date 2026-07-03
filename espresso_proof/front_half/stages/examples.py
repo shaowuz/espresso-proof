@@ -175,7 +175,12 @@ def _normalize_computation_checks(
         computed = safe_text(raw.get("computed_quantity", "")).strip()
         if not computed or computed == "No usable agent text returned.":
             continue
-        example_id = by_name.get(safe_text(raw.get("example_name", "")).strip(), default_example_id)
+        # A named-but-unmatched example self-describes with its name; only a
+        # check with NO example_name at all keeps the first-example attachment
+        # (a computation check must attach somewhere, and an unnamed one has
+        # no better anchor).
+        name_text = safe_text(raw.get("example_name", "")).strip()
+        example_id = by_name.get(name_text, name_text or default_example_id)
         checks.append(
             {
                 "id": f"comp_{index:03d}",

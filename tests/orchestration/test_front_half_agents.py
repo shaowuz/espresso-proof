@@ -1275,3 +1275,103 @@ def test_reconcile_strategy_clamps_scores_to_lift_limit(tmp_path: Path) -> None:
     synthesis = read_yaml(run_dir / artifacts["strategy_synthesis"])
     for route in synthesis["routes"]:
         assert route["score"] <= idea_score + score_lift_limit(route)
+
+
+# ---------------------------------------------------------------------------
+# PR4a: merge-not-clobber regression + honest example_id cross-refs
+# ---------------------------------------------------------------------------
+
+from espresso_proof.front_half.runner import write_front_half_run
+from espresso_proof.orchestration.agent_runner import _compute_literature
+
+
+def test_local_discovery_merges_beside_agent_literature(tmp_path: Path) -> None:
+    # Regression for the exact order-15 clobber: after a live S2 literature
+    # stage recorded ok, the deterministic local lane must MERGE beside the
+    # agent output, never overwrite it.
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(ARBITRARY_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    agent_payload = _FakeClient(
+        {
+            "query_summary": "M23 inverse Galois candidates.",
+            "candidate_references": [
+                {
+                    "title": "Topics in Galois Theory (Serre)",
+                    "authors": ["J.-P. Serre"],
+                    "locator": {"kind": "theorem", "value": "Thm 3.2.1"},
+                    "relevance": "core",
+                    "status": "candidate",
+                    "why_relevant": "rigidity method overview",
+                }
+            ],
+            "known_examples": [],
+            "known_counterexample_families": [],
+            "notes": [],
+        }
+    )
+    pass_report = run_front_half_agent_pass(
+        run_dir=run_dir, client=agent_payload, stages=["literature_review"]
+    )
+    # the orchestrator persists this durable audit after a live pass; it is
+    # the provenance-true merge trigger
+    write_front_half_run(
+        run_dir, pass_report=pass_report, provider="external", model="external-agent"
+    )
+    validate_run(run_dir)
+
+    # the run-agent compute path (the second historical overwrite surface)
+    merged = _compute_literature(run_dir)
+    titles = [item["title"] for item in merged["candidate_references"]]
+    assert "Topics in Galois Theory (Serre)" in titles
+    assert all(item["id"] != "local_ref_not_found" for item in merged["candidate_references"])
+
+
+def test_counterexample_example_id_not_fabricated(tmp_path: Path) -> None:
+    # [hard-negative] counterexamples about objects that are NOT one of the
+    # run's examples must not carry a fabricated pointer at examples[0].
+    claim_path = tmp_path / "claim.md"
+    claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("hodge_atoms", claim_path, tmp_path)
+    _mark_claim_clear(run_dir)
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    examples = read_yaml(run_dir / artifacts["examples"])["examples"]
+    first_example = examples[0]
+    matching_name = first_example["name"]
+
+    payload = _FakeClient(
+        {
+            "counterexamples": [
+                {
+                    "name": "The symmetric group S_3",
+                    "satisfies_all_claim_hypotheses": True,
+                    "target": "theorem",
+                    "support": "non-abelian candidate pressure",
+                    "explanation": "unrelated object",
+                },
+                {
+                    "name": matching_name,
+                    "satisfies_all_claim_hypotheses": True,
+                    "target": "theorem",
+                    "support": "pressure on the run's own example",
+                    "explanation": "matches a real example",
+                },
+            ]
+        }
+    )
+    run_front_half_agent_pass(
+        run_dir=run_dir, client=payload, stages=["counterexamples"]
+    )
+    validate_run(run_dir)
+
+    tests_by_name = {
+        t["counterexample_description"] if "counterexample_description" in t else t["id"]: t
+        for t in read_yaml(run_dir / artifacts["counterexamples"])["tests"]
+    }
+    rows = read_yaml(run_dir / artifacts["counterexamples"])["tests"]
+    unmatched = next(t for t in rows if "S_3" in str(t))
+    matched = next(t for t in rows if t is not unmatched)
+    assert unmatched["example_id"] == "The symmetric group S_3"
+    assert matched["example_id"] == first_example["id"]

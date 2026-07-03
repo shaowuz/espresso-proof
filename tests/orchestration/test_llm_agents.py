@@ -1912,3 +1912,62 @@ def test_forbidden_language_redaction_covers_validator() -> None:
         # After redaction the validator finds nothing forbidden.
         redacted = safe_text(sentence).lower()
         assert _first_forbidden_proof_language(redacted) is None, (sentence, redacted)
+
+
+# ---------------------------------------------------------------------------
+# PR4a: safe_text honesty — empty-in/empty-out + visible truncation
+# ---------------------------------------------------------------------------
+
+from espresso_proof.kernel.proof_language import NO_AGENT_TEXT
+
+
+def test_safe_text_empty_in_empty_out_and_visible_truncation() -> None:
+    # empty stays empty: callers own their fallbacks ('... or None' works again)
+    assert safe_text("") == ""
+    assert safe_text("   ") == ""
+    # long input: visible marker, total length still <= 1200
+    long_text = "word " * 500
+    out = safe_text(long_text)
+    assert len(out) <= 1200
+    assert out.endswith(" …[truncated]")
+    # exactly-at-cap input: unchanged, no marker
+    exact = "x" * 1200
+    assert safe_text(exact) == exact
+
+
+def test_no_placeholder_leak_into_optional_fields() -> None:
+    # [hard-negative] a silent agent must yield None/fallbacks in optional
+    # fields — never the manufactured placeholder prose.
+    from espresso_proof.front_half.stages.counterexamples import _normalize_counterexamples
+
+    tests = _normalize_counterexamples(
+        [
+            {
+                "name": "An object with silent optional fields",
+                "satisfies_all_claim_hypotheses": True,
+                "target": "theorem",
+                "support": "",
+                "missing_hypothesis": "",
+                "repaired_claim_suggestion": "",
+            }
+        ],
+        examples=[],
+    )
+    assert len(tests) == 1
+    dumped = str(tests[0])
+    assert NO_AGENT_TEXT not in dumped
+
+
+def test_prover_output_summary_is_the_one_sanctioned_placeholder_home() -> None:
+    from espresso_proof.agents.agent_pass import make_prover_attempt
+
+    class _SilentClient:
+        provider = "external"
+        model = "fake"
+
+    attempt = make_prover_attempt(
+        {"summary": "", "steps": [], "risks": []},
+        client=_SilentClient(),
+        created_at="2026-07-02T00:00:00+00:00",
+    )
+    assert attempt["output_summary"] == NO_AGENT_TEXT

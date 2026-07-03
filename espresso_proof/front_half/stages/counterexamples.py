@@ -88,7 +88,6 @@ _COUNTEREXAMPLES_OUTPUT_SCHEMA = {
 
 
 def _normalize_counterexamples(raw_items: object, *, examples: list[dict]) -> list[dict]:
-    default_example_id = examples[0]["id"] if examples else "cex_seed_example"
     by_name = {ex["name"]: ex["id"] for ex in examples}
     tests: list[dict] = []
     if not isinstance(raw_items, list):
@@ -112,7 +111,10 @@ def _normalize_counterexamples(raw_items: object, *, examples: list[dict]) -> li
             {
                 "id": f"cex_{index:03d}",
                 "operator_id": "agent_counterexample_op",
-                "example_id": by_name.get(name, default_example_id),
+                # A counterexample naming a real example cross-refs it; anything
+                # else self-describes with its own name (probe precedent) —
+                # never a fabricated pointer at examples[0].
+                "example_id": by_name.get(name, name),
                 "satisfies_all_claim_hypotheses": satisfies,
                 "target": target,
                 # SAFETY: a proposed counterexample is unverified -> not_tested.
