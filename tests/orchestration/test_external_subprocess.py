@@ -49,7 +49,9 @@ def test_external_timeout_kills_whole_process_group(tmp_path: Path, monkeypatch)
     )
     _set_cmd(monkeypatch, script)
 
-    client = ExternalCommandClient(model="x", timeout=1)
+    # max_retries=0 pins the ORIGINAL single-attempt process-group semantics
+    # (the bounded-retry layer is tested separately below).
+    client = ExternalCommandClient(model="x", timeout=1, max_retries=0)
     with pytest.raises(ExternalAgentTimeoutError) as ei:
         client.complete_json(system="s", prompt="p")
     assert ei.value.timeout_seconds == 1
@@ -98,3 +100,116 @@ def test_external_nonzero_exit_raises_runtimeerror(tmp_path: Path, monkeypatch):
         client.complete_json(system="s", prompt="p")
     assert "boom" in str(ei.value)
     assert not isinstance(ei.value, ExternalAgentTimeoutError)
+
+
+# ---------------------------------------------------------------------------
+# PR1b: bounded retry + timeout_seconds request envelope
+# ---------------------------------------------------------------------------
+
+import json
+import textwrap as _tw
+
+
+def test_external_retry_absorbs_one_transient_failure(tmp_path: Path, monkeypatch):
+    counter = tmp_path / "attempts.txt"
+    script = tmp_path / "agent.py"
+    script.write_text(
+        _tw.dedent(
+            f"""
+            import json, os, sys
+            path = {str(counter)!r}
+            n = int(open(path).read()) if os.path.exists(path) else 0
+            open(path, "w").write(str(n + 1))
+            if n == 0:
+                sys.exit(1)  # first attempt: transient death
+            json.load(sys.stdin)
+            print(json.dumps({{"ok": True}}))
+            """
+        ),
+        encoding="utf-8",
+    )
+    _set_cmd(monkeypatch, script)
+    client = ExternalCommandClient(model="x", timeout=30, max_retries=1)
+    out = client.complete_json(system="s", prompt="p")
+    assert out == {"ok": True}
+    assert client.last_attempts == 2
+    assert counter.read_text() == "2"
+
+
+def test_external_retry_is_bounded_and_fails_closed(tmp_path: Path, monkeypatch):
+    # [hard-negative] a permanently dying agent is retried EXACTLY max_retries
+    # times, then the last error propagates — no infinite retry.
+    counter = tmp_path / "attempts.txt"
+    script = tmp_path / "agent.py"
+    script.write_text(
+        _tw.dedent(
+            f"""
+            import os, sys
+            path = {str(counter)!r}
+            n = int(open(path).read()) if os.path.exists(path) else 0
+            open(path, "w").write(str(n + 1))
+            sys.stderr.write("permadeath")
+            sys.exit(1)
+            """
+        ),
+        encoding="utf-8",
+    )
+    _set_cmd(monkeypatch, script)
+    client = ExternalCommandClient(model="x", timeout=30, max_retries=1)
+    with pytest.raises(RuntimeError, match="permadeath"):
+        client.complete_json(system="s", prompt="p")
+    assert counter.read_text() == "2"
+    assert client.last_attempts == 2
+
+
+def test_external_retry_env_and_validation(tmp_path: Path, monkeypatch):
+    script = tmp_path / "agent.py"
+    script.write_text("import sys; sys.exit(1)\n", encoding="utf-8")
+    _set_cmd(monkeypatch, script)
+    monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_RETRIES", "0")
+    client = ExternalCommandClient(model="x", timeout=30)
+    with pytest.raises(RuntimeError):
+        client.complete_json(system="s", prompt="p")
+    assert client.last_attempts == 1
+    # clamp to the ceiling
+    monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_RETRIES", "99")
+    assert ExternalCommandClient(model="x", timeout=30).max_retries == 3
+    # [hard-negative] bad configuration fails at construction, not mid-run
+    monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_RETRIES", "soon")
+    with pytest.raises(RuntimeError, match="must be an integer"):
+        ExternalCommandClient(model="x", timeout=30)
+    monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_RETRIES", "-1")
+    with pytest.raises(RuntimeError, match=">= 0"):
+        ExternalCommandClient(model="x", timeout=30)
+
+
+def test_external_timeout_type_survives_retries(tmp_path: Path, monkeypatch):
+    script = tmp_path / "agent.py"
+    script.write_text("import time; time.sleep(120)\n", encoding="utf-8")
+    _set_cmd(monkeypatch, script)
+    client = ExternalCommandClient(model="x", timeout=1, max_retries=1)
+    with pytest.raises(ExternalAgentTimeoutError) as ei:
+        client.complete_json(system="s", prompt="p")
+    assert ei.value.timeout_seconds == 1
+    assert client.last_attempts == 2
+
+
+def test_request_envelope_carries_timeout_seconds(tmp_path: Path, monkeypatch):
+    seen = tmp_path / "request.json"
+    script = tmp_path / "agent.py"
+    script.write_text(
+        _tw.dedent(
+            f"""
+            import json, sys
+            request = json.load(sys.stdin)
+            open({str(seen)!r}, "w").write(json.dumps(request))
+            print(json.dumps({{"ok": True}}))
+            """
+        ),
+        encoding="utf-8",
+    )
+    _set_cmd(monkeypatch, script)
+    client = ExternalCommandClient(model="x", timeout=42)
+    client.complete_json(system="s", prompt="p")
+    request = json.loads(seen.read_text())
+    assert request["timeout_seconds"] == 42
