@@ -27,6 +27,7 @@ from espresso_proof.kernel.observability import (
     monotonic_ms,
     now_iso,
     write_timings,
+    usage_sink_for_run,
 )
 from espresso_proof.kernel.run_lock import (
     DEFAULT_TIMEOUT_SECONDS,
@@ -254,15 +255,17 @@ def run_evidence_batch_parallel(
 
     precompute = [a for a in ordered if a in _PARALLEL_COMPUTE_LANES]
 
-    # One shared client across all compute threads: the stub client is stateless
-    # and the real clients are immutable after construction (provider preflight
-    # happens once here, honoring the existing build_client contract).
+    # One shared client across all compute threads. The stub client is
+    # stateless; real clients now UPDATE self.model per call from the executor
+    # envelope (same executor -> benign) and keep usage attribution in
+    # thread-local context, with the usage sink itself lock-serialized.
     if client is None and any(a in ("examples", "counterexamples") for a in precompute):
         client = build_client(
             provider=provider,
             model=model,
             api_key_env=api_key_env,
             external_agent_command_env=external_agent_command_env,
+            usage_sink=usage_sink_for_run(run_dir),
         )
 
     run_id = (read_yaml(run_dir / "run_manifest.yaml") or {}).get("run_id")

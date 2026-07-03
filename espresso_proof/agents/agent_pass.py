@@ -10,7 +10,20 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from espresso_proof.agents.clients import CODEX_ADAPTER_DIAGNOSTIC_KEY, build_client
+from espresso_proof.agents.clients import (
+    CODEX_ADAPTER_DIAGNOSTIC_KEY,
+    _adapter_meta,
+    build_client,
+)
+
+# Shipped adapters that self-report identity through the reply envelope; only
+# these may earn verified_real_provider (an arbitrary wrapper cannot
+# self-declare as verified).
+_SELF_REPORTING_ADAPTERS = {
+    "espresso_codex_agent",
+    "espresso_claude_agent",
+    "espresso_core_adapter",
+}
 from espresso_proof.agents.prompts import (
     _reviewer_roles,
     agent_prompt,
@@ -29,6 +42,7 @@ from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.kernel.io import read_yaml
 from espresso_proof.kernel.llm_client import LLMClient
 from espresso_proof.kernel.models import LLMAgentRunReport
+from espresso_proof.kernel.observability import usage_sink_for_run
 from espresso_proof.kernel.pressure_status import artifact_revision_hash
 from espresso_proof.kernel.proof_language import NO_AGENT_TEXT, safe_list
 from espresso_proof.kernel.time_allocation import (
@@ -103,6 +117,8 @@ def _complete_agent_json(
     system: str,
     prompt: str,
 ) -> dict:
+    if hasattr(client, "set_usage_context"):
+        client.set_usage_context(role=role, call_index=len(call_diagnostics) + 1)
     raw = client.complete_json(system=system, prompt=prompt)
     diagnostic = _agent_call_diagnostic(
         raw,
@@ -142,15 +158,18 @@ def _agent_call_diagnostic(
     if provider != "external":
         return None
 
-    meta = raw.get(CODEX_ADAPTER_DIAGNOSTIC_KEY) if isinstance(raw, dict) else None
+    command_basename = str(getattr(client, "command_basename", "") or "")
+    meta = _adapter_meta(raw)
     if isinstance(meta, dict):
         adapter = str(meta.get("adapter") or "")
         parse_status = str(meta.get("parse_status") or "")
         fallback_used = meta.get("fallback_used") is True
         fallback_reason = str(meta.get("fallback_reason") or "")
         request_id = str(meta.get("request_id") or "")
+        # Same evidence standard as the historical codex-only rule, extended
+        # to every SHIPPED self-reporting adapter (no self-declared wrappers).
         verified = (
-            adapter == "espresso_codex_agent"
+            adapter in _SELF_REPORTING_ADAPTERS
             and parse_status == "ok"
             and not fallback_used
         )
@@ -158,13 +177,14 @@ def _agent_call_diagnostic(
             "call_index": call_index,
             "role": role,
             "provider": "external",
-            "model": model,
+            "model": str(meta.get("model") or "") or model,
             "adapter": adapter,
             "parse_status": parse_status,
             "fallback_used": fallback_used,
             "fallback_reason": fallback_reason,
             "request_id": request_id,
             "verified_real_provider": verified,
+            "command_basename": command_basename,
         }
     return {
         "call_index": call_index,
@@ -177,6 +197,7 @@ def _agent_call_diagnostic(
         "fallback_reason": "",
         "request_id": "",
         "verified_real_provider": False,
+        "command_basename": command_basename,
     }
 
 
@@ -265,6 +286,7 @@ def run_llm_agent_pass(
         model=model,
         api_key_env=api_key_env,
         external_agent_command_env=external_agent_command_env,
+        usage_sink=usage_sink_for_run(run_dir),
     )
     context, input_artifacts = load_context_artifacts_for_initial_agent_pass(
         run_dir, allocation_plan

@@ -125,6 +125,7 @@ def _clear_prover_blockers(run_dir: Path) -> None:
     pl = read_yaml(path)
     for attempt in pl.get("attempts") or []:
         attempt["blockers"] = []
+        attempt["blocker_details"] = []
     write_yaml(path, pl)
     # Keep the round artifacts consistent with the loop (validate_run cross-checks
     # report.reviewer_blockers == attempt.blockers).

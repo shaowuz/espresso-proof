@@ -397,3 +397,73 @@ def test_observed_agent_call_drops_forbidden_extra_fail_closed(tmp_path: Path) -
         ):
             raise RuntimeError("boom")
     assert read_agent_events(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# PR3: token_usage.jsonl — cost provenance sidecar (never evidence)
+# ---------------------------------------------------------------------------
+
+import threading as _threading
+
+from espresso_proof.kernel.observability import (
+    append_usage_record,
+    read_usage_records,
+    usage_sink_for_run,
+)
+
+
+def test_append_usage_record_preserves_null_tokens(tmp_path: Path) -> None:
+    append_usage_record(
+        tmp_path,
+        provider="external",
+        adapter="espresso_claude_agent",
+        executor_model=None,
+        usage_source="unreported",
+        input_tokens=None,
+        output_tokens=None,
+        total_cost_usd=None,
+        outcome="ok",
+    )
+    records = read_usage_records(tmp_path)
+    assert len(records) == 1
+    rec = records[0]
+    # null means unknown — a 0 may only appear if the executor reported 0
+    assert rec["input_tokens"] is None
+    assert rec["output_tokens"] is None
+    assert rec["total_cost_usd"] is None
+    assert rec["schema_version"] == 1
+
+
+def test_append_usage_record_float_cost_roundtrips(tmp_path: Path) -> None:
+    append_usage_record(tmp_path, provider="external", total_cost_usd=0.0123, outcome="ok")
+    assert read_usage_records(tmp_path)[0]["total_cost_usd"] == 0.0123
+
+
+def test_usage_record_with_forbidden_status_key_is_dropped(tmp_path: Path) -> None:
+    # [hard-negative] logs are never evidence: a status-upgrade key drops the line
+    append_usage_record(
+        tmp_path, provider="external", outcome="ok", source_backed=True
+    )
+    assert read_usage_records(tmp_path) == []
+
+
+def test_usage_sink_is_thread_safe(tmp_path: Path) -> None:
+    sink = usage_sink_for_run(tmp_path)
+
+    def worker(n: int) -> None:
+        for i in range(25):
+            sink({"provider": "external", "outcome": "ok", "call_index": n * 100 + i})
+
+    threads = [_threading.Thread(target=worker, args=(n,)) for n in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    records = read_usage_records(tmp_path)
+    assert len(records) == 50  # no torn/interleaved lines
+
+
+def test_token_usage_survives_stage_rollback(tmp_path: Path) -> None:
+    from espresso_proof.kernel.stage_runner import _SNAPSHOT_EXCLUDED_NAMES
+
+    assert "token_usage.jsonl" in _SNAPSHOT_EXCLUDED_NAMES

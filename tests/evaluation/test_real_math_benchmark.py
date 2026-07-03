@@ -470,7 +470,7 @@ def test_real_math_benchmark_counts_real_external_run_without_solution_claim(
     row = _row(report)
 
     assert row["provider"] == "external"
-    assert row["model_fingerprint"] == "json-agent-test"
+    assert row["model_fingerprint"] == "external:external_agent.py"
     assert row["valid_run"] is True
     assert row["provider_ready"] is True
     assert row["adapter_fallback_used"] is False
@@ -542,7 +542,7 @@ def test_real_agent_smoke_cli_runs_flow_and_writes_capability_report(
     payload = json.loads(out.read_text(encoding="utf-8"))
     row = payload["cases"][0]
     assert row["provider"] == "external"
-    assert row["model_fingerprint"] == "gpt-5.5-medium"
+    assert row["model_fingerprint"] == "gpt-5.5"
     assert row["real_agent_valid_run"] is True
     assert row["agent_call_verified_real_provider"] is True
     assert row["agent_call_diagnostics_count"] == 4

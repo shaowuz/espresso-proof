@@ -213,3 +213,95 @@ def test_request_envelope_carries_timeout_seconds(tmp_path: Path, monkeypatch):
     client.complete_json(system="s", prompt="p")
     request = json.loads(seen.read_text())
     assert request["timeout_seconds"] == 42
+
+
+# ---------------------------------------------------------------------------
+# PR3: executor identity + usage recording
+# ---------------------------------------------------------------------------
+
+from espresso_proof.agents.clients import _external_command_basename
+
+
+def test_external_command_basename_prefers_espresso_token() -> None:
+    # wrapper launchers must record the agent, not the launcher (REQ: 'uv')
+    assert _external_command_basename(["uv", "run", "espresso-claude-agent"]) == "espresso-claude-agent"
+    assert (
+        _external_command_basename(["python3", "-m", "espresso_proof.agents.claude_adapter"])
+        == "espresso_proof.agents.claude_adapter"
+    )
+    assert _external_command_basename(["/usr/bin/python3", "/tmp/x/agent.py"]) == "agent.py"
+
+
+def test_external_identity_is_executor_derived_and_upgraded(tmp_path: Path, monkeypatch):
+    script = tmp_path / "external_agent.py"
+    script.write_text(
+        _tw.dedent(
+            """
+            import json, sys
+            json.load(sys.stdin)
+            print(json.dumps({
+                "ok": True,
+                "_espresso_adapter": {
+                    "adapter": "espresso_claude_agent",
+                    "model": "claude-sonnet-4-x",
+                    "request_id": "sess-1",
+                    "parse_status": "ok",
+                    "fallback_used": False,
+                    "usage": {"input_tokens": 120, "output_tokens": 34},
+                    "usage_source": "claude_cli_json",
+                    "total_cost_usd": 0.0123,
+                },
+            }))
+            """
+        ),
+        encoding="utf-8",
+    )
+    _set_cmd(monkeypatch, script)
+    records: list[dict] = []
+    client = ExternalCommandClient(
+        model="gpt-4.1", timeout=30, usage_sink=records.append
+    )
+    # [hard-negative] the CLI --model is never the external identity
+    assert client.model == "external:external_agent.py"
+    assert "gpt-4.1" not in client.model
+    client.set_usage_context(role="prover", call_index=1)
+    out = client.complete_json(system="s", prompt="p")
+    assert out["ok"] is True
+    # per-call honest upgrade from the executor's own envelope
+    assert client.model == "claude-sonnet-4-x"
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["executor_model"] == "claude-sonnet-4-x"
+    assert rec["input_tokens"] == 120 and rec["output_tokens"] == 34
+    assert rec["total_cost_usd"] == 0.0123
+    assert rec["usage_source"] == "claude_cli_json"
+    assert rec["role"] == "prover" and rec["call_index"] == 1
+    assert rec["command_basename"] == "external_agent.py"
+
+
+def test_usage_unreported_stays_null_never_zero(tmp_path: Path, monkeypatch):
+    script = tmp_path / "external_agent.py"
+    script.write_text(
+        'import json, sys\njson.load(sys.stdin)\nprint(json.dumps({"ok": True}))\n',
+        encoding="utf-8",
+    )
+    _set_cmd(monkeypatch, script)
+    records: list[dict] = []
+    client = ExternalCommandClient(model="x", timeout=30, usage_sink=records.append)
+    client.complete_json(system="s", prompt="p")
+    rec = records[0]
+    assert rec["usage_source"] == "unreported"
+    assert rec["input_tokens"] is None and rec["output_tokens"] is None
+    assert rec["total_cost_usd"] is None
+    assert rec["outcome"] == "ok"
+
+
+def test_failed_and_timed_out_calls_still_record_usage(tmp_path: Path, monkeypatch):
+    script = tmp_path / "external_agent.py"
+    script.write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
+    _set_cmd(monkeypatch, script)
+    records: list[dict] = []
+    client = ExternalCommandClient(model="x", timeout=30, max_retries=1, usage_sink=records.append)
+    with pytest.raises(RuntimeError):
+        client.complete_json(system="s", prompt="p")
+    assert [r["outcome"] for r in records] == ["error", "error"]  # one per attempt

@@ -35,6 +35,7 @@ from espresso_proof.literature.literature_discovery import (
     merge_agent_and_local_literature,
 )
 from espresso_proof.agents.llm_agents import (
+    recorded_model_for_events,
     build_client,
     build_prover_loop_report,
     external_agent_diagnostic,
@@ -52,6 +53,7 @@ from espresso_proof.kernel.observability import (
     now_iso,
     register_observability_artifacts,
     write_timings,
+    usage_sink_for_run,
 )
 from espresso_proof.kernel.pressure_status import build_pressure_status
 from espresso_proof.kernel.run_events import append_event
@@ -476,6 +478,7 @@ def build_front_half_context_artifacts(
                     model=model,
                     api_key_env=api_key_env,
                     external_agent_command_env=external_agent_command_env,
+                    usage_sink=usage_sink_for_run(run_dir),
                 )
                 pass_report = run_front_half_agent_pass(
                     run_dir=run_dir, client=client, stages=front_half_stages
@@ -600,6 +603,7 @@ def run_initial_prover_reviewer_round_to_human_gate(
         )
     if not _sbp["stop"] and not _reached(run_dir, "WAITING_LLM_AGENT_HUMAN_GATE"):
         llm_agent_event_summary: dict[str, object] = {}
+        event_model = recorded_model_for_events(provider=provider, model=model, client=None)
 
         def _llm_prover_reviewers() -> None:
             # Goal 54A: bracket the deep Prover+Reviewers model pass with provenance
@@ -615,14 +619,14 @@ def run_initial_prover_reviewer_round_to_human_gate(
             # run died, recoverable via observability.latest_unfinished_agent_call.
             append_agent_event(
                 run_dir, agent_name="llm_prover_reviewers", provider=provider,
-                adapter=provider, model=model, stage="llm_prover_reviewers",
+                adapter=provider, model=event_model, stage="llm_prover_reviewers",
                 agent_status="started", run_id=run_id, started_at=_started,
             )
             try:
                 agent_report = run_llm_agent_pass(
                     run_dir=run_dir,
                     provider=provider,
-                    model=model,
+                    model=event_model,
                     api_key_env=api_key_env,
                     external_agent_command_env=external_agent_command_env,
                     reviewer_set=reviewer_set,
@@ -636,7 +640,7 @@ def run_initial_prover_reviewer_round_to_human_gate(
                 _timeout_ms = exc.timeout_seconds * 1000 if _timed_out else None
                 append_agent_event(
                     run_dir, agent_name="llm_prover_reviewers", provider=provider,
-                    adapter=provider, model=model, stage="llm_prover_reviewers",
+                    adapter=provider, model=event_model, stage="llm_prover_reviewers",
                     agent_status="timed_out" if _timed_out else "failed",
                     run_id=run_id, started_at=_started, finished_at=now_iso(),
                     duration_ms=monotonic_ms() - _t0, error_summary=str(exc),
@@ -674,7 +678,7 @@ def run_initial_prover_reviewer_round_to_human_gate(
                     agent_name="llm_prover_reviewers",
                     provider=provider,
                     adapter=provider,
-                    model=model,
+                    model=event_model,
                     stage="llm_prover_reviewers",
                     agent_status="failed",
                     run_id=str(llm_agent_event_summary["run_id"]),
@@ -698,7 +702,7 @@ def run_initial_prover_reviewer_round_to_human_gate(
                 agent_name="llm_prover_reviewers",
                 provider=provider,
                 adapter=provider,
-                model=model,
+                model=event_model,
                 stage="llm_prover_reviewers",
                 agent_status="finished",
                 run_id=str(llm_agent_event_summary["run_id"]),

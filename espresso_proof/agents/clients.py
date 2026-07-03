@@ -11,6 +11,8 @@ import os
 import shlex
 import signal
 import subprocess
+import threading
+import time
 import sys
 import urllib.error
 import urllib.request
@@ -35,6 +37,45 @@ from espresso_proof.kernel.llm_client import LLMClient
 
 CODEX_EXTERNAL_MODEL = "gpt-5.5-medium"
 CODEX_ADAPTER_DIAGNOSTIC_KEY = "_espresso_codex_adapter"
+# Canonical, adapter-agnostic identity/usage envelope key. Adapters attach
+# {adapter, model, request_id, parse_status, fallback_used, fallback_reason,
+# usage?, usage_source?} under it; the legacy per-adapter keys stay honored.
+# Provenance only — no consumer may treat envelope content as a trusted-status
+# input.
+ADAPTER_META_KEY = "_espresso_adapter"
+LEGACY_ADAPTER_META_KEYS = (CODEX_ADAPTER_DIAGNOSTIC_KEY, "_espresso_core_adapter")
+
+
+def _adapter_meta(raw: object) -> dict | None:
+    """The first dict-valued identity envelope under canonical-then-legacy keys."""
+    if not isinstance(raw, dict):
+        return None
+    for key in (ADAPTER_META_KEY, *LEGACY_ADAPTER_META_KEYS):
+        meta = raw.get(key)
+        if isinstance(meta, dict):
+            return meta
+    return None
+
+
+def _external_command_basename(command: list[str]) -> str:
+    """A positive, secret-free record of WHICH executor was resolved.
+
+    All-token scan (the same policy _is_codex_external_command uses): wrapper
+    launchers like ``uv run espresso-claude-agent`` must record the espresso
+    agent token, not ``uv``. Falls back to the last token's basename (the
+    script), then the first token.
+    """
+
+    normalized = [part.strip("\"'") for part in command]
+    for part in normalized:
+        name = Path(part).name
+        if "espresso" in name:
+            return name
+    for part in reversed(normalized):
+        name = Path(part).name
+        if not name.startswith("-"):
+            return name
+    return Path(normalized[0]).name if normalized else ""
 # Bounded retry for external agent calls: a single transient death/timeout no
 # longer wastes the whole round; persistent failure still fails closed.
 EXTERNAL_AGENT_RETRIES_ENV = "ESPRESSO_EXTERNAL_AGENT_RETRIES"
@@ -188,6 +229,7 @@ class OpenAIResponsesClient:
         model: str,
         api_key_env: str = "OPENAI_API_KEY",
         timeout: int = 60,
+        usage_sink=None,
     ) -> None:
         self.model = model
         self.api_key_env = api_key_env
@@ -195,6 +237,11 @@ class OpenAIResponsesClient:
         self.api_key = os.environ.get(api_key_env, "")
         if not self.api_key:
             raise RuntimeError(f"{api_key_env} is not set")
+        self.usage_sink = usage_sink
+        self._usage_context = threading.local()
+
+    def set_usage_context(self, **context) -> None:
+        self._usage_context.value = dict(context)
 
     def complete_json(self, *, system: str, prompt: str) -> dict:
         payload = {
@@ -227,6 +274,29 @@ class OpenAIResponsesClient:
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"OpenAI Responses API failed: {exc.code} {body}") from exc
+        if self.usage_sink is not None:
+            try:
+                usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+
+                def _int_or_none(key: str):
+                    value = usage.get(key)
+                    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+                self.usage_sink(
+                    {
+                        "provider": self.provider,
+                        "adapter": "openai_responses",
+                        "executor_model": str(data.get("model") or self.model),
+                        "usage_source": "openai_responses" if usage else "unreported",
+                        "input_tokens": _int_or_none("input_tokens"),
+                        "output_tokens": _int_or_none("output_tokens"),
+                        "total_cost_usd": None,
+                        "outcome": "ok",
+                        **getattr(self._usage_context, "value", {}),
+                    }
+                )
+            except Exception:  # noqa: BLE001 - cost observability never breaks a run
+                pass
         text = extract_response_text(data)
         try:
             return json.loads(strip_code_fence(text))
@@ -267,6 +337,7 @@ class ExternalCommandClient:
         command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
         timeout: int | None = None,
         max_retries: int | None = None,
+        usage_sink=None,
     ) -> None:
         self.model = model or "external-json-agent"
         self.command_env = command_env
@@ -276,10 +347,19 @@ class ExternalCommandClient:
         self.command = _normalize_external_command(_split_external_command(raw_command))
         if not self.command:
             raise RuntimeError(f"{command_env} is empty")
+        self.command_basename = _external_command_basename(self.command)
+        # Honest executor identity: for provider=external the caller's --model
+        # is an OpenAI-facing knob, never the executor's identity. Start from
+        # the resolved command; upgrade per call from the executor's own
+        # envelope. (The codex pin stays: that adapter really passes -m.)
+        self.model = f"external:{self.command_basename}"
         if _is_codex_external_command(self.command):
             self.model = CODEX_EXTERNAL_MODEL
         self.timeout = _resolve_external_timeout(self.command, requested_timeout=timeout)
         self.max_retries = _resolve_external_retries(requested=max_retries)
+        self.usage_sink = usage_sink
+        self.last_call_meta: dict | None = None
+        self._usage_context = threading.local()
         # Diagnostic only (surfaced as agent_events 'attempts'); per-instance
         # mutable state, unsynchronized — do not share one client across
         # parallel fan-out threads and expect a coherent value.
@@ -303,7 +383,45 @@ class ExternalCommandClient:
         assert last_error is not None  # loop ran at least once
         raise last_error
 
+    def set_usage_context(self, **context) -> None:
+        """Thread-local attribution (role/stage/call_index) for the next usage
+        record on THIS thread. Diagnostic only."""
+        self._usage_context.value = dict(context)
+
+    def _record_usage(self, meta: dict | None, *, duration_ms: int, outcome: str) -> None:
+        if self.usage_sink is None:
+            return
+        try:
+            usage = (meta or {}).get("usage") if isinstance(meta, dict) else None
+            usage = usage if isinstance(usage, dict) else {}
+
+            def _int_or_none(key: str):
+                value = usage.get(key)
+                return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+            cost = (meta or {}).get("total_cost_usd") if isinstance(meta, dict) else None
+            record = {
+                "provider": self.provider,
+                "adapter": str((meta or {}).get("adapter") or "") or None,
+                "executor_model": str((meta or {}).get("model") or "") or None,
+                "command_basename": self.command_basename,
+                "request_id": str((meta or {}).get("request_id") or "") or None,
+                "usage_source": str((meta or {}).get("usage_source") or "") or "unreported",
+                "input_tokens": _int_or_none("input_tokens"),
+                "output_tokens": _int_or_none("output_tokens"),
+                "cache_read_input_tokens": _int_or_none("cache_read_input_tokens"),
+                "cache_creation_input_tokens": _int_or_none("cache_creation_input_tokens"),
+                "total_cost_usd": cost if isinstance(cost, (int, float)) and not isinstance(cost, bool) else None,
+                "duration_ms": duration_ms,
+                "outcome": outcome,
+                **getattr(self._usage_context, "value", {}),
+            }
+            self.usage_sink(record)
+        except Exception:  # noqa: BLE001 - cost observability never breaks a run
+            return
+
     def _complete_json_once(self, *, system: str, prompt: str) -> dict:
+        _t0 = time.monotonic()
         request = {
             "system": system,
             "prompt": prompt,
@@ -336,13 +454,16 @@ class ExternalCommandClient:
                 proc.communicate(timeout=5)  # reap; no zombie / dangling pipe
             except Exception:  # noqa: BLE001 - best-effort reap
                 pass
+            self._record_usage(None, duration_ms=int((time.monotonic() - _t0) * 1000), outcome="timeout")
             raise ExternalAgentTimeoutError(self.timeout) from exc
         if proc.returncode != 0:
             detail = (stderr or "").strip() or (stdout or "").strip()
+            self._record_usage(None, duration_ms=int((time.monotonic() - _t0) * 1000), outcome="error")
             raise RuntimeError(f"external agent command failed: {detail}")
         try:
             data = json.loads(stdout)
         except json.JSONDecodeError as exc:
+            self._record_usage(None, duration_ms=int((time.monotonic() - _t0) * 1000), outcome="error")
             raise RuntimeError(
                 f"external agent command did not return JSON: {(stdout or '')[:500]}"
             ) from exc
@@ -351,9 +472,16 @@ class ExternalCommandClient:
         # way as the other adapter errors instead of an opaque AttributeError on
         # .get below.
         if not isinstance(data, dict):
+            self._record_usage(None, duration_ms=int((time.monotonic() - _t0) * 1000), outcome="error")
             raise RuntimeError(
                 f"external agent command did not return a JSON object: {(stdout or '')[:500]}"
             )
+        meta = _adapter_meta(data)
+        self.last_call_meta = meta
+        # Per-call honest identity upgrade from the executor's own envelope.
+        if meta and str(meta.get("model") or "").strip():
+            self.model = str(meta["model"]).strip()
+        self._record_usage(meta, duration_ms=int((time.monotonic() - _t0) * 1000), outcome="ok")
         if isinstance(data.get("output"), dict):
             return data["output"]
         return data
@@ -510,10 +638,13 @@ def external_agent_diagnostic(
         if raw_command
         else []
     )
+    # Positive executor record: never fall back to the CLI --model default
+    # (an OpenAI-facing knob) as the identity of an external executor.
     effective_model = CODEX_EXTERNAL_MODEL if _is_codex_external_command(command) else (
-        model or "external-json-agent"
+        f"external:{_external_command_basename(command)}" if command else "external:unconfigured"
     )
     report = {
+        "command_basename": _external_command_basename(command) if command else None,
         "provider": "external",
         "model": effective_model,
         "command_env": command_env,
@@ -606,11 +737,28 @@ def build_client(
     model: str,
     api_key_env: str,
     external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+    usage_sink=None,
 ) -> LLMClient:
     if provider == "stub":
         return StubLLMClient(model=model or "stub-espresso-agent")
     if provider == "openai":
-        return OpenAIResponsesClient(model=model, api_key_env=api_key_env)
+        return OpenAIResponsesClient(model=model, api_key_env=api_key_env, usage_sink=usage_sink)
     if provider == "external":
-        return ExternalCommandClient(model=model, command_env=external_agent_command_env)
+        return ExternalCommandClient(
+            model=model, command_env=external_agent_command_env, usage_sink=usage_sink
+        )
     raise RuntimeError(f"unsupported LLM provider: {provider}")
+
+
+def recorded_model_for_events(*, provider: str, model: str, client=None) -> str | None:
+    """The model identity an observability stamp may honestly record.
+
+    A live client knows its (executor-derived) identity; without one, an
+    external provider's identity is UNKNOWN — record null, never the OpenAI
+    CLI default."""
+
+    if client is not None:
+        return getattr(client, "model", None)
+    if provider == "external":
+        return None
+    return model

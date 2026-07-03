@@ -1068,12 +1068,15 @@ def _route_table_section(state: dict[str, Any]) -> str:
     advisory_html = ""
     sketch = read_advisory_proof_sketch(Path(state["run_dir"])) if state.get("run_dir") else None
     if isinstance(sketch, dict) and sketch.get("steps"):
-        steps_html = "".join(f"<li>{_h(str(step))}</li>" for step in sketch.get("steps") or [])
-        sketch_note = _h(str(sketch.get("note") or ""))
+        # Count + pointer only: raw prover prose is NOT rendered here (the
+        # dashboard display-language pins forbid internal enum-shaped words
+        # anywhere in the page, and model prose can contain them).
+        step_count = len(sketch.get("steps") or [])
         advisory_html = (
             "<h3>Latest prover attempt (advisory, unvalidated)</h3>"
-            f"<ol class=\"muted\">{steps_html}</ol>"
-            f"<div class=\"note\">{sketch_note}</div>"
+            f"<div class=\"note\">{step_count} step(s) captured in the advisory "
+            "proof sketch sidecar. Advisory only: nothing there is checked, "
+            "reference-supported, refuted, or proved.</div>"
             "<div class=\"note\">The latest prover attempt may deviate from the "
             "plan rows above; advisory only &mdash; it carries no evidence status.</div>"
         )

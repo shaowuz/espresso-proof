@@ -601,7 +601,8 @@ def test_run_flow_external_provider_uses_json_command(tmp_path: Path, monkeypatc
     validate_run(run_dir)
     report = LLMAgentRunReport.model_validate(read_yaml(run_dir / "llm_agent_run.yaml"))
     assert report.provider == "external"
-    assert report.model == "chatgpt-account-adapter"
+    # executor-derived identity: the CLI --model is never recorded for external
+    assert report.model == "external:external_agent.py"
     assert report.provider_diagnostic is not None
     assert report.provider_diagnostic.provider == "external"
     assert report.provider_diagnostic.status == "ready"
@@ -653,7 +654,9 @@ def test_run_flow_codex_adapter_records_verified_call_diagnostics(
     validate_run(run_dir)
     report = LLMAgentRunReport.model_validate(read_yaml(run_dir / "llm_agent_run.yaml"))
     assert report.provider == "external"
-    assert report.model == "gpt-5.5-medium"
+    # the codex adapter self-reports gpt-5.5 in its envelope; the executor's
+    # own report wins over the client-side pin (honest identity upgrade)
+    assert report.model == "gpt-5.5"
     assert len(report.agent_call_diagnostics) == 4
     assert {diag.adapter for diag in report.agent_call_diagnostics} == {
         "espresso_codex_agent"
@@ -792,7 +795,7 @@ def test_agent_doctor_external_network_check_uses_json_command(
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["provider"] == "external"
-    assert payload["model"] == "chatgpt-account-adapter"
+    assert payload["model"] == "external:external_agent.py"
     assert payload["status"] == "ready"
     assert payload["network_check"] == "passed"
     assert payload["sample_verdict"] == "needs_sources"

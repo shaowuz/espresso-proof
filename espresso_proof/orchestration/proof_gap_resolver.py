@@ -21,7 +21,7 @@ from espresso_proof.agents.llm_agents import (
 )
 from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.kernel.models import LineNumberedProof, ProofGapResolutionReport
-from espresso_proof.kernel.observability import observed_agent_call
+from espresso_proof.kernel.observability import observed_agent_call, usage_sink_for_run
 from espresso_proof.kernel.pressure_status import artifact_revision_hash
 from espresso_proof.kernel.validators import validate_run
 
@@ -694,6 +694,7 @@ def resolve_proof_gaps(
         model=model,
         api_key_env=api_key_env,
         external_agent_command_env=external_agent_command_env,
+        usage_sink=usage_sink_for_run(run_dir),
     )
     manifest_path = run_dir / "run_manifest.yaml"
     manifest = read_yaml(manifest_path)

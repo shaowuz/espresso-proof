@@ -396,3 +396,77 @@ def test_claude_adapter_prover_fallback_unchanged_on_cli_failure(tmp_path: Path)
     payload = json.loads(completed.stdout)
     assert "could not produce usable JSON" in payload["summary"]
     assert payload["verdict"] == "needs_revision"
+
+
+# ---------------------------------------------------------------------------
+# PR3: identity/usage envelope from the claude CLI's --output-format json
+# ---------------------------------------------------------------------------
+
+
+def _run_adapter_with_envelope(tmp_path: Path, envelope: object) -> subprocess.CompletedProcess[str]:
+    fake_claude = _write_fake_claude(
+        tmp_path,
+        message=json.dumps(envelope) if not isinstance(envelope, str) else envelope,
+    )
+    return _run_adapter(
+        tmp_path=tmp_path,
+        system="You are the Espresso prover.",
+        prompt="attempt",
+        fake_claude=fake_claude,
+        schema={},
+    )
+
+
+def test_claude_adapter_reports_identity_and_usage_from_cli_envelope(tmp_path: Path) -> None:
+    envelope = {
+        "result": json.dumps({"summary": "candidate only", "verdict": "needs_sources"}),
+        "session_id": "sess-42",
+        "modelUsage": {"claude-sonnet-4-5": {"inputTokens": 100}},
+        "usage": {"input_tokens": 100, "output_tokens": 25},
+        "total_cost_usd": 0.05,
+        "duration_ms": 1234,
+    }
+    completed = _run_adapter_with_envelope(tmp_path, envelope)
+    assert completed.returncode == 0
+    payload = json.loads(completed.stdout)
+    meta = payload["_espresso_adapter"]
+    assert meta["adapter"] == "espresso_claude_agent"
+    assert meta["model"] == "claude-sonnet-4-5"
+    assert meta["request_id"] == "sess-42"
+    assert meta["usage"] == {"input_tokens": 100, "output_tokens": 25}
+    assert meta["total_cost_usd"] == 0.05
+    assert meta["usage_source"] == "claude_cli_json"
+    # the CLI was invoked in json envelope mode
+    argv = json.loads((tmp_path / "claude_argv.json").read_text())
+    assert "--output-format" in argv and "json" in argv
+
+
+def test_claude_adapter_envelope_without_usage_stays_unreported(tmp_path: Path) -> None:
+    # [hard-negative] zeros-as-unknown: no usage dict => usage None, source
+    # 'unreported', and NO token key fabricated as 0.
+    envelope = {
+        "result": json.dumps({"summary": "candidate only", "verdict": "needs_sources"}),
+        "session_id": "sess-43",
+    }
+    completed = _run_adapter_with_envelope(tmp_path, envelope)
+    payload = json.loads(completed.stdout)
+    meta = payload["_espresso_adapter"]
+    assert meta["usage"] is None
+    assert meta["usage_source"] == "unreported"
+    assert "0" not in json.dumps(meta.get("usage"))
+
+
+def test_claude_adapter_old_cli_plain_text_degrades_to_unknown(tmp_path: Path) -> None:
+    # [hard-negative] an old CLI printing the reply as plain text keeps
+    # working: JSON extracted from the text, identity/usage unknown — never
+    # fabricated, never a crash.
+    plain = json.dumps({"summary": "candidate only", "verdict": "needs_sources"})
+    completed = _run_adapter_with_envelope(tmp_path, plain)
+    assert completed.returncode == 0
+    payload = json.loads(completed.stdout)
+    assert payload["summary"] == "candidate only"
+    meta = payload["_espresso_adapter"]
+    assert meta["parse_status"] == "ok"
+    assert meta["model"] is None
+    assert meta["request_id"] is None
+    assert meta["usage_source"] == "unreported"

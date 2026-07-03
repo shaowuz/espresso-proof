@@ -105,16 +105,20 @@ def main() -> int:
         request=request, default_outer=DEFAULT_EXTERNAL_TIMEOUT_SECONDS
     )
 
+    envelope_meta: dict | None = None
     try:
         selection = _select_skills(system=system, prompt=prompt)
         _emit_status(selection=selection)
         full_prompt = _build_full_prompt(
             system=system, prompt=prompt, selection=selection, output_schema=output_schema
         )
-        data = _extract_json(_run_claude(full_prompt, timeout=inner_timeout))
+        text, envelope_meta = _run_claude(full_prompt, timeout=inner_timeout)
+        data = _extract_json(text)
         if not isinstance(data, dict):
             raise ValueError("claude output was not a JSON object")
         result = _scrub_candidate(data)  # neutralize any status smuggle in prose
+        parse_status = "ok"
+        fallback_reason = ""
     except Exception as exc:  # noqa: BLE001 - fallback where safe, else fail closed
         reason = f"claude adapter could not produce usable JSON: {exc}"[:300]
         if not fallback_is_schema_valid(request, _FALLBACK):
@@ -125,22 +129,69 @@ def main() -> int:
             return 1
         result = dict(_FALLBACK)
         result["summary"] = reason
+        parse_status = "fallback"
+        fallback_reason = reason
+
+    # Canonical identity/usage envelope (provenance only, never evidence):
+    # identity and usage come from the claude CLI's own --output-format json
+    # reply; an old CLI that prints plain text degrades to unknown, never to a
+    # fabricated value.
+    meta = envelope_meta or {}
+    result["_espresso_adapter"] = {
+        "adapter": "espresso_claude_agent",
+        "model": meta.get("model"),
+        "request_id": meta.get("request_id"),
+        "parse_status": parse_status,
+        "fallback_used": parse_status != "ok",
+        "fallback_reason": fallback_reason,
+        "usage": meta.get("usage"),
+        "total_cost_usd": meta.get("total_cost_usd"),
+        "usage_source": "claude_cli_json" if isinstance(meta.get("usage"), dict) else "unreported",
+    }
 
     json.dump(result, sys.stdout)
     return 0
 
 
-def _run_claude(prompt: str, *, timeout: int) -> str:
+def _run_claude(prompt: str, *, timeout: int) -> tuple[str, dict | None]:
+    """Run the claude CLI and return (reply_text, envelope_meta|None).
+
+    ``--output-format json`` wraps the reply in an envelope carrying identity
+    (session_id, modelUsage keys) and usage/cost. Every field is optional; an
+    old CLI printing plain text falls back to (stdout, None) — identity and
+    usage become UNKNOWN, never fabricated.
+    """
+
     claude_cli = os.environ.get("ESPRESSO_CLAUDE_CLI", "claude")
     proc = subprocess.run(
-        [claude_cli, "-p", prompt],
+        [claude_cli, "-p", prompt, "--output-format", "json"],
         text=True,
         capture_output=True,
         timeout=timeout,
     )
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or "claude CLI returned non-zero")
-    return proc.stdout
+    stdout = proc.stdout
+    try:
+        envelope = json.loads(stdout)
+    except json.JSONDecodeError:
+        return stdout, None
+    if not isinstance(envelope, dict) or not isinstance(envelope.get("result"), str):
+        return stdout, None
+    model_usage = envelope.get("modelUsage")
+    model = None
+    if isinstance(model_usage, dict) and len(model_usage) == 1:
+        model = next(iter(model_usage))
+    usage = envelope.get("usage") if isinstance(envelope.get("usage"), dict) else None
+    cost = envelope.get("total_cost_usd")
+    meta = {
+        "model": model,
+        "request_id": envelope.get("session_id"),
+        "usage": usage,
+        "total_cost_usd": cost if isinstance(cost, (int, float)) and not isinstance(cost, bool) else None,
+        "duration_ms": envelope.get("duration_ms") if isinstance(envelope.get("duration_ms"), int) else None,
+    }
+    return envelope["result"], meta
 
 
 def _extract_json(text: str) -> dict:
