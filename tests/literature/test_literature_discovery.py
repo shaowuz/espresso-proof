@@ -1096,3 +1096,183 @@ def test_extra_theorem_hypothesis_blocks_applicability() -> None:
         "definition_locator": None,
     }
     assert _applicability_status([condition], "compatible", "candidate") == "blocked"
+
+
+# ---------------------------------------------------------------------------
+# PR4a: merge-not-clobber — local discovery merges BESIDE agent output
+# ---------------------------------------------------------------------------
+
+from espresso_proof.front_half.runner import (
+    FRONT_HALF_RUN_FILENAME,
+    front_half_stage_ok,
+)
+from espresso_proof.literature.literature_discovery import (
+    merge_agent_and_local_literature,
+    prioritized_query_terms,
+)
+
+
+def _agent_report(**overrides) -> dict:
+    report = {
+        "claim_id": "claim_test",
+        "query_summary": "Agent literature pass over Sylow structure for |G|=15.",
+        "candidate_references": [
+            {
+                "id": "lit_001",
+                "title": "Abstract Algebra (Dummit-Foote)",
+                "authors": ["Dummit", "Foote"],
+                "locator": {"kind": "section", "value": "Section 4.5"},
+                "relevance": "core",
+                "status": "candidate",
+                "why_relevant": "Sylow theorems in the form used.",
+                "found_by": "literature_review",
+            },
+            {
+                "id": "lit_002",
+                "title": "Finite Group Theory (Isaacs)",
+                "authors": ["Isaacs"],
+                "locator": {"kind": "section", "value": "Chapter 1"},
+                "relevance": "core",
+                "status": "candidate",
+                "why_relevant": "Groups of order pq.",
+                "found_by": "literature_review",
+            },
+        ],
+        "known_examples": ["Z/15Z"],
+        "known_counterexample_families": [],
+        "notes": ["Agent literature stage output."],
+    }
+    report.update(overrides)
+    return report
+
+
+def _local_report(*, found: bool) -> dict:
+    if found:
+        candidates = [
+            {
+                "id": "local_ref_001",
+                "title": "Local notes on cyclic groups",
+                "authors": [],
+                "locator": {"kind": "page", "value": "notes/cyclic.md"},
+                "relevance": "background",
+                "status": "candidate",
+                "why_relevant": "Local note bucket.",
+                "found_by": "local_notes",
+            }
+        ]
+    else:
+        candidates = [
+            {
+                "id": "local_ref_not_found",
+                "title": "No matching local literature candidate found",
+                "authors": [],
+                "locator": {"kind": "unknown", "value": "to_be_filled"},
+                "relevance": "background",
+                "status": "not_found",
+                "why_relevant": "Local notes did not match query terms: group, order.",
+                "found_by": "local_notes",
+            }
+        ]
+    return {
+        "claim_id": "claim_test",
+        "query_summary": "Local literature discovery ran.",
+        "candidate_references": candidates,
+        "known_examples": ["Z/15Z", "Z/3Z x Z/5Z"],
+        "known_counterexample_families": [],
+        "notes": ["Local Literature Discovery reads project notes and example banks only."],
+    }
+
+
+def test_merge_preserves_agent_candidates_beside_local() -> None:
+    merged = merge_agent_and_local_literature(_agent_report(), _local_report(found=True))
+    titles = [item["title"] for item in merged["candidate_references"]]
+    assert titles[:2] == ["Abstract Algebra (Dummit-Foote)", "Finite Group Theory (Isaacs)"]
+    assert "Local notes on cyclic groups" in titles
+    assert LiteratureReviewReport.model_validate(merged)
+    # union'd side lists and the attribution note
+    assert "Z/3Z x Z/5Z" in merged["known_examples"]
+    assert any("agent candidates preserved" in note for note in merged["notes"])
+    assert merged["query_summary"].startswith("Agent literature pass")
+
+
+def test_merge_drops_local_not_found_when_agent_items_exist() -> None:
+    # [hard-negative] the sentinel must never sit beside real candidates
+    merged = merge_agent_and_local_literature(_agent_report(), _local_report(found=False))
+    ids = [item["id"] for item in merged["candidate_references"]]
+    titles = [item["title"] for item in merged["candidate_references"]]
+    assert "local_ref_not_found" not in ids
+    assert "No matching local literature candidate found" not in titles
+    assert len(merged["candidate_references"]) == 2
+
+
+def test_merge_is_replace_when_no_agent_output() -> None:
+    # [hard-negative] scaffold/local-only artifacts keep today's replace
+    # semantics — merging must never invent agent provenance.
+    local = _local_report(found=True)
+    assert merge_agent_and_local_literature(None, local) is local
+    assert merge_agent_and_local_literature({}, local) is local
+    scaffold = _local_report(found=False)  # prior artifact is itself local-only
+    assert merge_agent_and_local_literature(scaffold, local) is local
+
+
+def test_merge_never_upgrades_status() -> None:
+    # [hard-negative] a hand-edited source_backed item must be rejected by the
+    # model layer, and nothing merged.
+    poisoned = _agent_report()
+    poisoned["candidate_references"][0]["status"] = "source_backed"
+    with pytest.raises(Exception):
+        merge_agent_and_local_literature(poisoned, _local_report(found=True))
+
+
+def test_merge_is_idempotent() -> None:
+    once = merge_agent_and_local_literature(_agent_report(), _local_report(found=True))
+    twice = merge_agent_and_local_literature(once, _local_report(found=True))
+    assert [i["title"] for i in twice["candidate_references"]] == [
+        i["title"] for i in once["candidate_references"]
+    ]
+    assert twice["notes"] == once["notes"]
+    assert twice["query_summary"] == once["query_summary"]
+
+
+def test_front_half_stage_ok_fails_closed(tmp_path: Path) -> None:
+    # [hard-negative] absent file / skipped stage / error stage / garbage file
+    # are all False — the merge trigger never invents agent provenance.
+    assert front_half_stage_ok(tmp_path, "literature_review") is False
+    report = {
+        "stages": [
+            {"stage": "literature_review", "status": "skipped", "validation": "not_run"},
+        ]
+    }
+    write_yaml(tmp_path / FRONT_HALF_RUN_FILENAME, report)
+    assert front_half_stage_ok(tmp_path, "literature_review") is False
+    report["stages"][0].update(status="error", validation="failed")
+    write_yaml(tmp_path / FRONT_HALF_RUN_FILENAME, report)
+    assert front_half_stage_ok(tmp_path, "literature_review") is False
+    (tmp_path / FRONT_HALF_RUN_FILENAME).write_text(":\ngarbage", encoding="utf-8")
+    assert front_half_stage_ok(tmp_path, "literature_review") is False
+    write_yaml(
+        tmp_path / FRONT_HALF_RUN_FILENAME,
+        {"stages": [{"stage": "literature_review", "status": "ok", "validation": "ok"}]},
+    )
+    assert front_half_stage_ok(tmp_path, "literature_review") is True
+
+
+def test_query_summary_prioritizes_claim_terms() -> None:
+    claim = {
+        "objects": ["finite group of order 15"],
+        "conclusion": "G is cyclic",
+        "hypotheses": [{"name": "G is a group"}],
+        "normalized_statement": "For every group G with |G| = 15, G is cyclic.",
+        "raw_text": (
+            "alone any appeal arithmetic assumed both checked claim context "
+            "please verify this carefully for me"
+        ),
+    }
+    ordered = prioritized_query_terms(claim=claim, ledger={}, query=None)
+    # structured mathematical terms lead; prose junk strictly trails
+    assert ordered[0] == "finite"
+    lead = ordered[:6]
+    assert "group" in lead and "order" in lead and "cyclic" in lead
+    last_math = max(ordered.index(t) for t in ("finite", "group", "order", "cyclic"))
+    first_junk = min(ordered.index(t) for t in ("alone", "appeal", "arithmetic"))
+    assert last_math < first_junk

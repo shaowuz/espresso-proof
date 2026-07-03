@@ -212,8 +212,37 @@ def write_front_half_run(
     return report
 
 
+def front_half_stage_ok(run_dir: Path, stage: str) -> bool:
+    """True iff the durable front-half audit recorded this stage ok+validated.
+
+    The provenance-true trigger for merge-beside-agent-output behavior: a full
+    live run records the stage ok; fast runs omit the stage, mock runs record
+    ``skipped``, an aborted pass leaves no file at all. ANY read/parse problem
+    is False (fail closed to today's replace semantics — never invents agent
+    provenance).
+    """
+
+    try:
+        path = Path(run_dir) / FRONT_HALF_RUN_FILENAME
+        if not path.exists():
+            return False
+        report = read_yaml(path) or {}
+        for item in report.get("stages", []):
+            if isinstance(item, dict) and item.get("stage") == stage:
+                return item.get("status") == "ok" and item.get("validation") == "ok"
+        return False
+    except Exception:  # noqa: BLE001 - provenance probe must fail closed
+        return False
+
+
 # ---------------------------------------------------------------------------
 # S1 — 01 Understanding Claim
 # ---------------------------------------------------------------------------
 
-__all__ = ["run_front_half_agent_pass", "build_front_half_run_report", "write_front_half_run", "FRONT_HALF_RUN_FILENAME"]
+__all__ = [
+    "run_front_half_agent_pass",
+    "build_front_half_run_report",
+    "write_front_half_run",
+    "front_half_stage_ok",
+    "FRONT_HALF_RUN_FILENAME",
+]

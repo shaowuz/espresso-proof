@@ -40,20 +40,11 @@ def discover_local_literature(
 
     claim = read_yaml(locked_claim_path)
     ledger = read_yaml(hypothesis_ledger_path) if hypothesis_ledger_path and hypothesis_ledger_path.exists() else {}
-    claim_text = " ".join(
-        str(part)
-        for part in [
-            query or "",
-            claim.get("raw_text", ""),
-            claim.get("normalized_statement", ""),
-            claim.get("conclusion", ""),
-            " ".join(claim.get("objects", [])),
-            " ".join(item.get("name", "") for item in claim.get("hypotheses", [])),
-            " ".join(ledger.get("missing_or_unclear", [])),
-        ]
-        if part
-    )
-    terms = query_terms(claim_text)
+    ordered_terms = prioritized_query_terms(claim=claim, ledger=ledger, query=query)
+    # Ranking uses the same term SET as before (tokens + domain aliases); only
+    # the DISPLAY order changes, from alphabetical (which surfaced stopword-
+    # leaky prose junk first) to structured-field priority.
+    terms = set(ordered_terms) | _domain_aliases(set(ordered_terms))
     references = collect_local_references(project_dir)
     ranked = rank_references(references, terms)
     selected = ranked[:max_references]
@@ -62,7 +53,7 @@ def discover_local_literature(
         for index, reference in enumerate(selected, start=1)
     ]
     if not candidate_references:
-        candidate_references = [not_found_item(terms)]
+        candidate_references = [not_found_item(ordered_terms)]
 
     known_examples = discover_known_examples(project_dir, terms)
     known_counterexamples = discover_counterexample_families(project_dir, terms)
@@ -79,7 +70,7 @@ def discover_local_literature(
 
     report = {
         "claim_id": claim["id"],
-        "query_summary": query_summary(terms, selected),
+        "query_summary": query_summary(ordered_terms, selected),
         "candidate_references": candidate_references,
         "known_examples": known_examples,
         "known_counterexample_families": known_counterexamples,
@@ -181,6 +172,75 @@ def merge_literature_items(items: list[dict], limit: int) -> list[dict]:
     return deduped
 
 
+_MERGE_ATTRIBUTION_NOTE = (
+    "Local discovery merged beside agent literature output; agent candidates preserved."
+)
+
+
+def merge_agent_and_local_literature(
+    existing: dict | None, discovered: dict, *, max_references: int = 8
+) -> dict:
+    """Merge deterministic local discovery BESIDE a prior producer's validated
+    literature report, never over it.
+
+    Mechanism rule: a deterministic local producer must not clobber another
+    producer's validated artifact (the order-15 run lost a real 39.6s agent
+    literature stage to a 69ms local not_found scan). Agent items rank first;
+    the local not_found sentinel never appears beside real candidates; ids are
+    normalized by the same merge_literature_items policy the live-search mode
+    already uses. Ends with model validation so a merge can never smuggle a
+    trusted status. Idempotent: local items and the attribution note do not
+    duplicate on re-merge.
+    """
+
+    if not isinstance(existing, dict) or not existing:
+        return discovered
+
+    agent_items = [
+        item
+        for item in (existing.get("candidate_references") or [])
+        if isinstance(item, dict)
+        and item.get("found_by") != "local_notes"
+        and item.get("id") != "local_ref_not_found"
+    ]
+    if not agent_items:
+        return discovered
+
+    local_items = [
+        item
+        for item in (discovered.get("candidate_references") or [])
+        if isinstance(item, dict) and item.get("id") != "local_ref_not_found"
+    ]
+    merged_references = merge_literature_items(agent_items + local_items, max_references)
+
+    def _union(key: str) -> list[str]:
+        return list(
+            dict.fromkeys([*(existing.get(key) or []), *(discovered.get(key) or [])])
+        )[:8]
+
+    notes = list(
+        dict.fromkeys(
+            [*(existing.get("notes") or []), *(discovered.get("notes") or []), _MERGE_ATTRIBUTION_NOTE]
+        )
+    )
+    base_summary = str(existing.get("query_summary") or "").strip() or str(
+        discovered.get("query_summary") or ""
+    )
+    # idempotent suffix: strip any prior local-discovery tally before appending
+    base_summary = re.sub(r"\s*Local discovery added \d+ local candidate\(s\)\.$", "", base_summary)
+    local_count = sum(1 for item in merged_references if item.get("found_by") == "local_notes")
+    merged = {
+        "claim_id": existing.get("claim_id") or discovered.get("claim_id"),
+        "query_summary": f"{base_summary} Local discovery added {local_count} local candidate(s).".strip(),
+        "candidate_references": merged_references,
+        "known_examples": _union("known_examples"),
+        "known_counterexample_families": _union("known_counterexample_families"),
+        "notes": notes,
+    }
+    LiteratureReviewReport.model_validate(merged)
+    return merged
+
+
 def live_response_notes(responses: list[LiveSearchResponse]) -> list[str]:
     notes = ["Live Literature Discovery queried network providers; returned records remain candidates."]
     for response in responses:
@@ -189,12 +249,15 @@ def live_response_notes(responses: list[LiveSearchResponse]) -> list[str]:
     return notes
 
 
-def query_terms(text: str) -> set[str]:
-    terms = {
+def _tokenize(text: str) -> list[str]:
+    return [
         token
-        for token in re.findall(r"[a-zA-Z][a-zA-Z0-9_+-]{2,}", text.lower())
+        for token in re.findall(r"[a-zA-Z][a-zA-Z0-9_+-]{2,}", str(text).lower())
         if token not in STOPWORDS
-    }
+    ]
+
+
+def _domain_aliases(terms: set[str]) -> set[str]:
     aliases = set()
     if {"cubic", "fourfold", "fourfolds"} & terms:
         aliases.update({"hodge", "period", "torelli", "rationality", "special"})
@@ -204,7 +267,39 @@ def query_terms(text: str) -> set[str]:
         aliases.update({"coherent", "proper", "semicontinuity", "stacks"})
     if "poincare" in terms or "fourier" in terms:
         aliases.update({"pic", "semicontinuity", "cohomology"})
-    return terms | aliases
+    return aliases
+
+
+def query_terms(text: str) -> set[str]:
+    terms = set(_tokenize(text))
+    return terms | _domain_aliases(terms)
+
+
+def prioritized_query_terms(*, claim: dict, ledger: dict, query: str | None) -> list[str]:
+    """Query terms in structured-field priority order, for display surfaces.
+
+    The claim's mathematical fields (objects, conclusion, hypothesis names,
+    normalized statement) come first; free prose (raw_text, user query) comes
+    LAST, so query_summary / not_found hints lead with mathematical terms
+    instead of alphabetized prose junk. Dedup preserves first occurrence.
+    """
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for part in [
+        " ".join(claim.get("objects", []) or []),
+        claim.get("conclusion", ""),
+        " ".join(item.get("name", "") for item in (claim.get("hypotheses", []) or [])),
+        claim.get("normalized_statement", ""),
+        " ".join(ledger.get("missing_or_unclear", []) or []),
+        claim.get("raw_text", ""),
+        query or "",
+    ]:
+        for token in _tokenize(part):
+            if token not in seen:
+                seen.add(token)
+                ordered.append(token)
+    return ordered
 
 
 def collect_local_references(project_dir: Path) -> list[LocalReference]:
@@ -374,8 +469,8 @@ def why_relevant(reference: LocalReference) -> str:
     )[:MAX_NOTE_CHARS]
 
 
-def not_found_item(terms: set[str]) -> dict:
-    hint = ", ".join(sorted(terms)[:8]) or "no usable query terms"
+def not_found_item(ordered_terms: list[str]) -> dict:
+    hint = ", ".join(ordered_terms[:8]) or "no usable query terms"
     return {
         "id": "local_ref_not_found",
         "title": "No matching local literature candidate found",
@@ -428,8 +523,8 @@ def discover_counterexample_families(project_dir: Path, terms: set[str]) -> list
     return sorted(dict.fromkeys(families))[:8]
 
 
-def query_summary(terms: set[str], selected: list[LocalReference]) -> str:
-    term_text = ", ".join(sorted(terms)[:12]) or "no query terms"
+def query_summary(ordered_terms: list[str], selected: list[LocalReference]) -> str:
+    term_text = ", ".join(ordered_terms[:12]) or "no query terms"
     if selected:
         return f"Local literature discovery matched {len(selected)} candidate reference(s) for: {term_text}."
     return f"Local literature discovery found no matching local reference for: {term_text}."

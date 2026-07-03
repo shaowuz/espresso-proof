@@ -259,6 +259,13 @@ def forbidden_pattern(phrase: str) -> str:
     return rf"(?<![A-Za-z0-9_]){escaped}(?![A-Za-z0-9_])"
 
 
+# The one sanctioned home for this phrase is a caller that explicitly opts in
+# (a prover attempt's output_summary); safe_text itself never manufactures it.
+NO_AGENT_TEXT = "No usable agent text returned."
+_SAFE_TEXT_MAX = 1200
+_TRUNCATION_MARKER = " …[truncated]"
+
+
 def safe_text(value: object) -> str:
     text = re.sub(r"\s+", " ", str(value)).strip()
     for phrase in sorted(RESERVED_STATUS_LANGUAGE, key=len, reverse=True):
@@ -275,7 +282,14 @@ def safe_text(value: object) -> str:
             text,
             flags=re.IGNORECASE,
         )
-    return text[:1200] or "No usable agent text returned."
+    # Empty in, empty out: callers own their fallbacks (`... or None` etc.).
+    # Manufacturing placeholder prose here defeated every such fallback and
+    # leaked "No usable agent text returned." into optional artifact fields.
+    # Truncation is visible, never a silent mid-sentence cliff; total length
+    # stays <= _SAFE_TEXT_MAX.
+    if len(text) > _SAFE_TEXT_MAX:
+        text = text[: _SAFE_TEXT_MAX - len(_TRUNCATION_MARKER)].rstrip() + _TRUNCATION_MARKER
+    return text
 
 
 def safe_list(value: object) -> list[str]:
