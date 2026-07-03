@@ -3,19 +3,17 @@
 
 from __future__ import annotations
 
-import re
-from datetime import datetime
 from enum import Enum
-from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 
-from espresso_proof.kernel.models._part1 import *  # noqa: F401,F403
-
-
-from espresso_proof.kernel.models._part2 import *  # noqa: F401,F403
+from espresso_proof.kernel.models._part1 import (
+    Locator,
+    SourceStatus,
+    StrictBaseModel,
+)
 
 
 class RetrievedSourceStatus(str, Enum):
