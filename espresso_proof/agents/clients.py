@@ -25,14 +25,21 @@ from espresso_proof.agents.sanitize import (
     normalize_verdict,
     strip_code_fence,
 )
+from espresso_proof.agents.adapter_runtime import (
+    DEFAULT_CODEX_EXTERNAL_TIMEOUT_SECONDS,
+    DEFAULT_EXTERNAL_TIMEOUT_SECONDS,
+    EXTERNAL_AGENT_TIMEOUT_ENV,
+)
 from espresso_proof.kernel.llm_client import LLMClient
 
 
 CODEX_EXTERNAL_MODEL = "gpt-5.5-medium"
-DEFAULT_EXTERNAL_TIMEOUT_SECONDS = 120
-DEFAULT_CODEX_EXTERNAL_TIMEOUT_SECONDS = 360
-EXTERNAL_AGENT_TIMEOUT_ENV = "ESPRESSO_EXTERNAL_AGENT_TIMEOUT_SECONDS"
 CODEX_ADAPTER_DIAGNOSTIC_KEY = "_espresso_codex_adapter"
+# Bounded retry for external agent calls: a single transient death/timeout no
+# longer wastes the whole round; persistent failure still fails closed.
+EXTERNAL_AGENT_RETRIES_ENV = "ESPRESSO_EXTERNAL_AGENT_RETRIES"
+DEFAULT_EXTERNAL_AGENT_RETRIES = 1
+MAX_EXTERNAL_AGENT_RETRIES = 3
 
 
 class StubLLMClient:
@@ -259,6 +266,7 @@ class ExternalCommandClient:
         model: str,
         command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
         timeout: int | None = None,
+        max_retries: int | None = None,
     ) -> None:
         self.model = model or "external-json-agent"
         self.command_env = command_env
@@ -271,14 +279,41 @@ class ExternalCommandClient:
         if _is_codex_external_command(self.command):
             self.model = CODEX_EXTERNAL_MODEL
         self.timeout = _resolve_external_timeout(self.command, requested_timeout=timeout)
+        self.max_retries = _resolve_external_retries(requested=max_retries)
+        # Diagnostic only (surfaced as agent_events 'attempts'); per-instance
+        # mutable state, unsynchronized — do not share one client across
+        # parallel fan-out threads and expect a coherent value.
+        self.last_attempts = 0
 
     def complete_json(self, *, system: str, prompt: str) -> dict:
+        """Bounded-retry wrapper: timeout / non-zero exit / non-JSON / non-dict
+        replies all retry the same way (at most ``max_retries`` extra attempts),
+        then fail closed with the LAST error, its type preserved (an
+        ``ExternalAgentTimeoutError`` keeps its timeout metadata)."""
+
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                result = self._complete_json_once(system=system, prompt=prompt)
+                self.last_attempts = attempt + 1
+                return result
+            except (ExternalAgentTimeoutError, RuntimeError) as exc:
+                last_error = exc
+        self.last_attempts = self.max_retries + 1
+        assert last_error is not None  # loop ran at least once
+        raise last_error
+
+    def _complete_json_once(self, *, system: str, prompt: str) -> dict:
         request = {
             "system": system,
             "prompt": prompt,
             "provider": self.provider,
             "model": self.model,
             "required_json_schema": _required_json_schema_for_system(system),
+            # Additive contract field: the outer timeout this client actually
+            # enforces, so adapters derive their inner CLI timeout from the
+            # same number instead of guessing (see agents/adapter_runtime.py).
+            "timeout_seconds": self.timeout,
         }
         # Goal 65C: run the external agent in its OWN process group
         # (start_new_session=True) so a timeout can reclaim the WHOLE group via
@@ -366,6 +401,26 @@ def _resolve_external_timeout(command: list[str], *, requested_timeout: int | No
     if _is_codex_external_command(command):
         return DEFAULT_CODEX_EXTERNAL_TIMEOUT_SECONDS
     return DEFAULT_EXTERNAL_TIMEOUT_SECONDS
+
+
+def _resolve_external_retries(*, requested: int | None) -> int:
+    """Same fail-closed shape as _resolve_external_timeout: bad configuration
+    raises at construction time instead of silently misbehaving mid-run."""
+
+    if requested is not None:
+        if requested < 0:
+            raise RuntimeError("max_retries must be >= 0")
+        return min(requested, MAX_EXTERNAL_AGENT_RETRIES)
+    raw_env = os.environ.get(EXTERNAL_AGENT_RETRIES_ENV)
+    if raw_env:
+        try:
+            value = int(raw_env)
+        except ValueError as exc:
+            raise RuntimeError(f"{EXTERNAL_AGENT_RETRIES_ENV} must be an integer") from exc
+        if value < 0:
+            raise RuntimeError(f"{EXTERNAL_AGENT_RETRIES_ENV} must be >= 0")
+        return min(value, MAX_EXTERNAL_AGENT_RETRIES)
+    return DEFAULT_EXTERNAL_AGENT_RETRIES
 
 
 def openai_agent_diagnostic(
