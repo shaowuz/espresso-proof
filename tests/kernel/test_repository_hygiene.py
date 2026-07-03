@@ -10,7 +10,10 @@ def test_runtime_dataflow_is_expressed_in_python_entrypoints() -> None:
     orchestrator = (
         REPO / "espresso_proof" / "orchestration" / "orchestrator.py"
     ).read_text(encoding="utf-8")
-    llm_agents = (REPO / "espresso_proof" / "agents" / "llm_agents.py").read_text(
+    agent_pass = (REPO / "espresso_proof" / "agents" / "agent_pass.py").read_text(
+        encoding="utf-8"
+    )
+    prover_loop = (REPO / "espresso_proof" / "agents" / "prover_loop.py").read_text(
         encoding="utf-8"
     )
     for name in (
@@ -26,9 +29,10 @@ def test_runtime_dataflow_is_expressed_in_python_entrypoints() -> None:
         "ask_prover_for_candidate_route",
         "ask_reviewers_to_attack_candidate_route",
         "assemble_llm_agent_run_report",
-        "build_next_prover_input_from_reviewer_feedback",
     ):
-        assert f"def {name}" in llm_agents
+        assert f"def {name}" in agent_pass
+    for name in ("build_next_prover_input_from_reviewer_feedback",):
+        assert f"def {name}" in prover_loop
 
 
 def test_removed_map_docs_do_not_replace_runtime_code_structure() -> None:
