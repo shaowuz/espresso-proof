@@ -72,3 +72,31 @@ def test_local_artifact_outputs_are_ignored() -> None:
         "espresso-proof-artifacts/",
     ):
         assert pattern in ignore
+
+
+SKILL_CENTRIC_SOURCE_COMMIT = "32462abccc40d4aa0e78105cf2cd1f345c456c5e"
+
+
+def test_claude_skill_comparison_is_inert_reference_material() -> None:
+    readme = (comparison / "README.md").read_text(encoding="utf-8")
+    assert SKILL_CENTRIC_SOURCE_COMMIT in readme
+    for phrase in (
+        "not the current product runtime",
+        "not an installed Claude skill or Codex skill",
+        "must not import",
+        "Do not merge this directory wholesale",
+    ):
+        assert phrase in readme, f"comparison README lost its boundary claim: {phrase}"
+    assert not (REPO / ".claude" / "skills" / "espresso-proof").exists()
+
+
+def test_product_code_does_not_reference_the_comparison_directory() -> None:
+    sources = list((REPO / "espresso_proof").rglob("*.py"))
+    for suffix in ("*.ts", "*.tsx", "*.js", "*.jsx"):
+        sources.extend((REPO / "web" / "src").rglob(suffix))
+    assert sources, "no product sources found to scan"
+    for source in sources:
+        text = source.read_text(encoding="utf-8")
+        assert COMPARISON_DIR not in text, (
+            f"{source.relative_to(REPO)} references the inert comparison directory"
+        )
