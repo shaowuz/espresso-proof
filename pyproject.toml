@@ -8,6 +8,25 @@ version = "0.1.0"
 description = "Local schema-checked proof-sketch critique kernel for Espresso Proof."
 readme = "README.md"
 requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Espresso Proof contributors" },
+]
+keywords = [
+  "mathematics",
+  "proof-assistant",
+  "research-workflow",
+  "llm-agents",
+  "artifact-kernel",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Mathematics",
+]
 dependencies = [
   "pydantic>=2.7",
   "PyYAML>=6.0",
@@ -18,6 +37,11 @@ dependencies = [
 dev = [
   "pytest>=8.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/shaowuz/espresso-proof"
+Repository = "https://github.com/shaowuz/espresso-proof"
+Issues = "https://github.com/shaowuz/espresso-proof/issues"
 
 [project.scripts]
 espresso = "espresso_proof.cli:app"
