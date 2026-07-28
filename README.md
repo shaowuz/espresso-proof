@@ -82,6 +82,14 @@ npm --prefix web run build
 
 `schemas/` is a local generated directory and is intentionally ignored by git.
 
+## Branches and reference material
+
+| Location | Role | Stability |
+| --- | --- | --- |
+| `main` | Current product runtime | Supported public target |
+| `v2` | Future architecture experiment | Unstable, not release-ready |
+
+
 ## Reference
 
 - [docs/engineering/EXECUTION_TRUNK.md](docs/engineering/EXECUTION_TRUNK.md) - end-to-end execution map and trust boundary summary.
