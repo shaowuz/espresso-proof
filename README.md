@@ -181,6 +181,12 @@ until you have a reason not to:
 - [AGENTS.md](AGENTS.md) - rules for AI agents working in this repository.
 - [SECURITY.md](SECURITY.md) - how to report a vulnerability, and what this project does not claim to protect.
 
+## Acknowledgements
+
+The literature subsystem — discovery, review agent, live search, and PDF
+ingestion — was started with @w-ruizhe. @yangjunjie0320 contributed to the product
+philosophy and the Claude-centric comparison route.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
