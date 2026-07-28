@@ -168,7 +168,7 @@ _STOP_BEFORE_PROVER_ACTIONS = frozenset({"stop"})
 
 
 def _stop_before_prover(run_dir: Path) -> dict:
-    """Control-flow fix (order-3 postmortem): decide whether to SKIP the
+    """Control-flow fix: decide whether to SKIP the
     expensive, crash-prone Prover+Reviewers pass because the front half issued a
     hard terminal stop (``loop_control.should_stop`` with ``next_action`` ==
     ``stop``). Returns ``{"stop": bool, "next_action": str | None}``. Fails closed
@@ -582,7 +582,7 @@ def run_initial_prover_reviewer_round_to_human_gate(
     artifacts: dict,
 ) -> None:
     # Stage 3 — live Prover + Reviewers; stop at the human gate.
-    # Control-flow fix (from the order-3 postmortem): if the front half
+    # Control-flow fix: if the front half
     # already concluded the claim needs a human BEFORE proof search
     # (loop_control.should_stop with next_action ask_human/stop), do NOT spend an
     # expensive, crash-prone Prover+Reviewers external pass. Halt at the current
@@ -614,7 +614,7 @@ def run_initial_prover_reviewer_round_to_human_gate(
             _t0 = monotonic_ms()
             append_event(run_dir, "agent_call_started", stage="llm_prover_reviewers")
             # Record a "started" agent_event BEFORE the heavy external
-            # call so a mid-call PROCESS death (the order-3 postmortem failure)
+            # call so a mid-call PROCESS death
             # leaves a dangling started record — the only evidence of where the
             # run died, recoverable via observability.latest_unfinished_agent_call.
             append_agent_event(

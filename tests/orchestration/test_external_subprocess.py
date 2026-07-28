@@ -1,6 +1,6 @@
 """External agent subprocess process-group cleanup + typed timeout.
 
-The order-3 postmortem's prime suspect for the unbounded hang was that
+The prime suspect for an unbounded hang was that
 ``subprocess.run(timeout=)`` kills only the direct child — a forking/hung
 external CLI survives as an orphan and blocks the worker thread. The client now
 runs the agent in its own process group (``start_new_session=True``) and kills

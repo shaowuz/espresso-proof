@@ -435,7 +435,7 @@ class ExternalCommandClient:
         }
         # Run the external agent in its OWN process group
         # (start_new_session=True) so a timeout can reclaim the WHOLE group via
-        # os.killpg. The order-3 postmortem's prime suspect was a forking/hung
+        # os.killpg. The prime suspect in a past investigation was a forking/hung
         # external CLI that subprocess.run(timeout=) could not reclaim (it kills
         # only the direct child), leaving an orphan that blocks the worker thread.
         proc = subprocess.Popen(
