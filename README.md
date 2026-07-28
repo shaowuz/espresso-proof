@@ -101,9 +101,14 @@ source grounding, and special-example tests that could break the argument.
 
 ## Run tests
 
+**CI is currently switched off** while this is a single-maintainer project, so
+nothing runs these for you — run the full suite yourself before merging into
+`main`. The workflows are still in `.github/workflows/` and are re-enabled
+before the repository goes public.
+
 Fast-iteration policy: while developing, run only the scoped checks you need
-(e.g. `pytest tests/<subsystem> -q`). The full suite is required only when a PR
-merges into main, and GitHub runs it for you — see
+(e.g. `pytest tests/<subsystem> -q`). When CI is on, the full suite is required
+only when a PR merges into main and GitHub runs it for you — see
 [`.github/workflows/full-ci.yml`](.github/workflows/full-ci.yml), which is the
 authority on when the gate fires. A change that touches only documentation gets
 a fast hygiene check instead of the full suite.
