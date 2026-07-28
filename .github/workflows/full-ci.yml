@@ -3,11 +3,33 @@ name: Full CI (merge gate)
 # Full-suite policy: the full gate runs ONLY here, when a change is merging
 # into main on GitHub (PR into main + the merge commit itself). Local
 # iteration uses quick/scoped checks only — never run the full suite locally.
+#
+# The paths-ignore list below is what keeps a README edit from costing 34
+# minutes of hosted runner time.
+#
+# Ignoring all of docs/ is safe only because of a specific arrangement:
+# tests/kernel/test_repository_hygiene.py is the one test that reads real files
+# under docs/, and ci.yml now runs it on EVERY pull request in about a second.
+# So a documentation-only change is still checked by the test that can fail on
+# it — just without the 34-minute suite behind it. If another test ever starts
+# reading docs/, either add it to that hygiene job or narrow this list.
+#
+# full-ci-skip.yml reports these same job names as success for the ignored
+# paths, so these can safely be required checks in branch protection without
+# path-filtered PRs blocking forever.
 on:
   pull_request:
     branches: [main]
+    paths-ignore: &docs-only
+      - '*.md'
+      - 'LICENSE'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/pull_request_template.md'
+      - '.github/dependabot.yml'
   push:
     branches: [main]
+    paths-ignore: *docs-only
   workflow_dispatch:
     inputs:
       ref:
@@ -16,8 +38,13 @@ on:
         default: ''
 
 concurrency:
-  group: full-ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Keyed by SHA on push, by ref on pull_request. On push to main every ref is
+  # refs/heads/main, so a ref-keyed group made each merge cancel the previous
+  # merge's gate — that happened on 2026-07-28 and silently discarded a merge
+  # commit's verification. A merge gate is an audit record; it is not
+  # superseded by the next one.
+  group: full-ci-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 permissions:
   contents: read
@@ -35,7 +62,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          # inputs.ref is empty except on workflow_dispatch, and an empty ref
+          # makes checkout use github.sha — a concrete commit. Falling back to
+          # github.ref instead resolved to refs/pull/N/merge on pull_request,
+          # which GitHub deletes the moment the PR merges; twelve runs died on
+          # "couldn't find remote ref refs/pull/N/merge" before reaching a step.
+          ref: ${{ inputs.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -85,7 +117,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          # inputs.ref is empty except on workflow_dispatch, and an empty ref
+          # makes checkout use github.sha — a concrete commit. Falling back to
+          # github.ref instead resolved to refs/pull/N/merge on pull_request,
+          # which GitHub deletes the moment the PR merges; twelve runs died on
+          # "couldn't find remote ref refs/pull/N/merge" before reaching a step.
+          ref: ${{ inputs.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

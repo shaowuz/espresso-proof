@@ -44,16 +44,30 @@ jobs:
       - name: Run schema-only eval
         run: uv run espresso eval --schemas-only
 
-  merge-policy:
-    name: Merge policy
+  # Runs on EVERY pull request, including documentation-only ones. The full
+  # gate skips those (see full-ci.yml), but the hygiene test reads files under
+  # docs/ and asserts on their content, so it still has to run. It takes about
+  # a second.
+  repository-hygiene:
+    name: Repository hygiene
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    # Only meaningful for pull requests (uses the PR head ref).
-    if: ${{ github.event_name == 'pull_request' }}
+    timeout-minutes: 10
     steps:
-        run: |
-          exit 1
+      - name: Check out repository
+        uses: actions/checkout@v4
 
-      - name: Merge policy passed
-        run: |
-          echo "Merge policy passed for branch ${{ github.event.pull_request.head.ref }}."
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install package
+        run: uv sync --extra dev
+
+      - name: Run repository hygiene tests
+        run: uv run python -m pytest tests/kernel/test_repository_hygiene.py -q
