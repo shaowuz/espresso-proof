@@ -17,7 +17,8 @@ Check every statement that applies:
 
 ## Tests run
 
-Scoped checks are enough for most changes — the full suite runs on merge.
+Scoped checks are enough for most changes — the full suite runs on merge for
+anything that touches code. Documentation-only PRs get a fast hygiene check.
 Say what you actually ran, and what you skipped.
 
 - [ ] `uv run python -m pytest tests/<subsystem> -q`

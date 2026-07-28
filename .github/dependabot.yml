@@ -1,7 +1,8 @@
 version: 2
 
 # Grouped on purpose. Enabling Dependabot on this repository opened eleven
-# separate pull requests in one go, each of which triggers the full merge gate.
+# separate pull requests in one go. A lockfile change is a code change, so each
+# one triggers the full merge gate.
 # Grouping collapses a round of updates into one PR per ecosystem, and splitting
 # major bumps into their own group keeps the risky ones visible instead of
 # hidden inside a batch.

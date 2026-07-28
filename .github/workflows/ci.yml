@@ -1,7 +1,8 @@
 name: CI (light)
 
-# Light CI: quick schema checks on every PR. The full suite lives in
-# full-ci.yml and runs only when merging into main.
+# Light CI: runs on EVERY pull request, including documentation-only ones.
+# The full suite lives in full-ci.yml and runs only for changes that touch
+# code, on the PR into main and again on the merge commit.
 on:
   pull_request:
   workflow_dispatch:
