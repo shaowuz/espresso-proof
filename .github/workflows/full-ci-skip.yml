@@ -1,0 +1,45 @@
+name: Full CI (merge gate)
+
+# Companion to full-ci.yml. It declares the SAME workflow name and the SAME job
+# names, and triggers on exactly the paths full-ci.yml ignores.
+#
+# Why this file exists: a required status check that is skipped by a path filter
+# never reports at all, and a pull request waiting on a check that will never
+# arrive stays blocked forever. Reporting success here means the merge gate can
+# be a required check in branch protection without deadlocking a documentation
+# change. Neither file's paths list should be edited without the other.
+on:
+  pull_request:
+    branches: [main]
+    paths: &docs-only
+      - '*.md'
+      - 'LICENSE'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/pull_request_template.md'
+      - '.github/dependabot.yml'
+  push:
+    branches: [main]
+    paths: *docs-only
+
+permissions:
+  contents: read
+
+jobs:
+  python-suite:
+    name: Python suite (tests + eval + benchmark + scorecard)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Skipped — documentation-only change
+        run: |
+          echo "No runtime or test file changed, so the full Python suite is skipped."
+          echo "Repository hygiene still ran on this PR via ci.yml."
+
+  web-build:
+    name: Web build + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Skipped — documentation-only change
+        run: echo "No file under web/ changed, so the cockpit build is skipped."

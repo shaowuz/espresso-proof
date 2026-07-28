@@ -30,9 +30,12 @@ uv run python -m pytest tests/<subsystem> -q
 ```
 
 The full suite takes roughly 14 minutes locally. You do not need to run it —
-GitHub runs it automatically via `.github/workflows/full-ci.yml` when a PR
-targets `main` and again on the merge commit. Do not weaken a test to make that
-gate pass.
+GitHub runs it when a PR targets `main` and again on the merge commit. A
+documentation-only change skips it and gets a fast hygiene check instead.
+
+`.github/workflows/full-ci.yml` is the authority on when the gate fires; if this
+paragraph and that file disagree, the file is right. Do not weaken a test to
+make the gate pass.
 
 Before pushing, these are usually enough:
 

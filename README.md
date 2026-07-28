@@ -102,9 +102,11 @@ source grounding, and special-example tests that could break the argument.
 ## Run tests
 
 Fast-iteration policy: while developing, run only the scoped checks you need
-(e.g. `pytest tests/<subsystem> -q`). The full suite is required only when a
-PR merges into main — GitHub runs it automatically via
-`.github/workflows/full-ci.yml`.
+(e.g. `pytest tests/<subsystem> -q`). The full suite is required only when a PR
+merges into main, and GitHub runs it for you — see
+[`.github/workflows/full-ci.yml`](.github/workflows/full-ci.yml), which is the
+authority on when the gate fires. A change that touches only documentation gets
+a fast hygiene check instead of the full suite.
 
 Run these directly; there is no wrapper script.
 
