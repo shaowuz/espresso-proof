@@ -125,6 +125,29 @@ npm --prefix web run build
 | `docs/` | Engineering and product documentation |
 | `docs/reference/` | Reference material — never executed, never imported |
 
+## The CLI, and which parts of it you need
+
+`espresso --help` lists 61 commands. Almost all of them are maintainer tooling.
+You need two:
+
+| Command | What it is for |
+| --- | --- |
+| `espresso serve` | Start the local server and use the cockpit. This is the product. |
+| `espresso orchestrate` | Run the same workflow headless, without the UI. |
+
+Everything else falls into one of these groups, and you can ignore all of it
+until you have a reason not to:
+
+| Group | Examples | What it is |
+| --- | --- | --- |
+| Human gates | `choose-strategy`, `resolve-agent-gate` | Answering a run that stopped for a decision |
+| Proof pass | `write-proof`, `seal-consensus` | The line-by-line proof and its review |
+| Agent plumbing | `run-agent`, `run-agents`, `agent-doctor` | Driving or diagnosing external agents |
+| Dev | `export-schemas`, `new-run`, `inspect`, `memo` | Working on Espresso itself |
+| Eval | `eval`, `benchmark`, `calibration`, `scorecard` | Measuring behaviour; used by the merge gate |
+| Verify | `verify-*` | Scoped machine checks against a run |
+| Legacy | `run-flow` | Kept for old runs; not the current path |
+
 ## Branches and reference material
 
 | Location | Role | Stability |
@@ -140,6 +163,7 @@ npm --prefix web run build
 - [docs/engineering/product-path-boundaries.md](docs/engineering/product-path-boundaries.md) - supported product surface.
 - [docs/engineering/ESPRESSO_CORE_INTEGRATION.md](docs/engineering/ESPRESSO_CORE_INTEGRATION.md) - espresso-core external-agent contract.
 - [CONTRIBUTING.md](CONTRIBUTING.md) - setup, tests, PR expectations, and the boundaries a change may not weaken.
+- [AGENTS.md](AGENTS.md) - rules for AI agents working in this repository.
 - [SECURITY.md](SECURITY.md) - how to report a vulnerability, and what this project does not claim to protect.
 
 ## License
