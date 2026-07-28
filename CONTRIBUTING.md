@@ -109,6 +109,10 @@ comparison. It is never executed and product code must not import from it. Do
 not merge it into `espresso_proof/`. Porting a narrow piece of it is fine as its
 own PR, with an owner, a contract, and tests.
 
+## Conduct
+
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies to everything here.
+
 ## Security
 
 Do not open a public issue for a vulnerability. See [SECURITY.md](SECURITY.md).

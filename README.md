@@ -187,6 +187,7 @@ until you have a reason not to:
 - [CONTRIBUTING.md](CONTRIBUTING.md) - setup, tests, PR expectations, and the boundaries a change may not weaken.
 - [AGENTS.md](AGENTS.md) - rules for AI agents working in this repository.
 - [SECURITY.md](SECURITY.md) - how to report a vulnerability, and what this project does not claim to protect.
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) - expected conduct and how to report a problem.
 
 ## Acknowledgements
 
