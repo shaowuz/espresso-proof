@@ -71,9 +71,13 @@ Run scoped tests while working:
 uv run python -m pytest tests/<subsystem> -q
 ```
 
-The full suite runs on GitHub when a PR targets `main`. Do not weaken a test to
-make that gate pass, and do not mark a task complete on the strength of a gate
-you did not see finish.
+The full suite runs on GitHub when a PR targets `main` and touches code; a
+documentation-only change gets a fast hygiene check instead.
+`.github/workflows/full-ci.yml` is the authority on when the gate fires — do not
+restate its rules elsewhere, link to it.
+
+Do not weaken a test to make that gate pass, and do not mark a task complete on
+the strength of a gate you did not see finish.
 
 ## What this project is not
 
