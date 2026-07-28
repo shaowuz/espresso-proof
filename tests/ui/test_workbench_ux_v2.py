@@ -1,4 +1,4 @@
-"""Goal 28 Workbench UX V2: product entry page, mode labels, trust colours,
+"""Workbench UX V2: product entry page, mode labels, trust colours,
 research timeline. All display-only; no UI element upgrades kernel status."""
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def test_mode_maps_to_provider(tmp_path: Path) -> None:
     # Backend mapping remains for smoke tests and explicit API callers.
     assert wb._provider_for_mode("fast") == "stub"
     assert wb._provider_for_mode("codex") == "external"
-    # Goal 32: "demo" is not a mode; unknown modes fall back to the server default
+    # "demo" is not a mode; unknown modes fall back to the server default
     assert wb._provider_for_mode("demo") == "stub"  # fallback, not a mode mapping
     assert wb._provider_for_mode(None) == "stub"  # falls back to server default
 

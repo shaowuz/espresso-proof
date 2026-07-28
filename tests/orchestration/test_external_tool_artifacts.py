@@ -1,4 +1,4 @@
-"""Goal 25 (slice 1): external tool candidate/run artifacts.
+"""External tool candidate/run artifacts.
 
 External-tool discovery + run records are RAW, audited evidence. They carry no
 source/evidence/proof/grade status field (StrictBaseModel forbids extras), so a
@@ -105,7 +105,7 @@ def test_claim_id_mismatch_rejected(tmp_path: Path) -> None:
 def test_external_tool_run_does_not_upgrade_grade_and_renders_scoped(tmp_path: Path) -> None:
     run, _, _ = _run(tmp_path)
     grade_before = read_yaml(run / read_yaml(run / "run_manifest.yaml")["artifacts"]["idea_grade"])
-    # Goal 38 tightened the gate: an interpretive conclusion carrying proof
+    # Tightened the gate: an interpretive conclusion carrying proof
     # prose is now REJECTED at parse time (see the gate tests below), so the
     # smuggling vector moved to the RAW stdout excerpt, which stays auditable
     # and must still be sanitized in display.
@@ -131,7 +131,7 @@ def test_failed_or_timed_out_run_is_fail_closed_in_display(tmp_path: Path) -> No
     assert contains_proof_language(memo) is None
 
 
-# --- Goal 38: proof-complete language gate on interpretive fields ------------
+# --- Proof-complete language gate on interpretive fields ------------
 def test_tool_run_model_rejects_proof_complete_interpretation() -> None:
     import pytest as _pytest
 

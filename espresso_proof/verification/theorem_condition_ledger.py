@@ -1,4 +1,4 @@
-"""Theorem Condition Ledger Builder (Goal 57A, slice 1).
+"""Theorem Condition Ledger Builder (slice 1).
 
 Reads a run's already-validated artifacts and assembles a conservative, advisory
 ledger (``theorem_condition_ledger.yaml``) of the theorems a reviewer asked for

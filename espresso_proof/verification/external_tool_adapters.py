@@ -1,4 +1,4 @@
-"""Goal 25 (slice 3): one allowlisted deterministic adapter.
+"""One allowlisted deterministic adapter.
 
 An adapter wraps an allowlisted deterministic external tool, records its audited
 run (slice 1/2), and -- ONLY on a confirmed deterministic result -- earns a
@@ -115,7 +115,7 @@ def run_exact_modexp_adapter(
                 f"{authoritative}. This single arithmetic computation only; NOT a "
                 "universal proof of any claim."
             ),
-            # Goal 38 reproducibility provenance (never earns/upgrades status):
+            # Reproducibility provenance (never earns/upgrades status):
             "adapter_id": "exact_modexp",
             "code_version": f"espresso-proof {_package_version()}",
             "dependency_version": f"python {platform.python_version()} pow()",

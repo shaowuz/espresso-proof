@@ -208,7 +208,7 @@ export interface JobInfo {
 }
 
 /**
- * Goal 43B: per-panel slices (each panel refreshes independently).
+ * Per-panel slices (each panel refreshes independently).
  *
  * ``agent_state`` is honest PROCESS state only — "ready" once the artifact is
  * present, "not_run" when neither artifact nor agent exist, and

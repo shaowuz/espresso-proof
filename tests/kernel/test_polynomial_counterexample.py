@@ -1,4 +1,4 @@
-"""Goal 57C: durable rational-witness counterexample for a FALSE polynomial identity.
+"""Durable rational-witness counterexample for a FALSE polynomial identity.
 
 The polynomial_identity backend already verifies confirmed/refuted over Q. These
 tests cover the genuinely-missing piece: when the identity is FALSE, an explicit

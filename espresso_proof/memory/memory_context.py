@@ -1,4 +1,4 @@
-"""Active memory influence (Goal 09).
+"""Active memory influence.
 
 Turn prior-run project memory into a deterministic, ADVISORY ``memory_context``
 for the current run: which remembered lessons are relevant to this claim and how

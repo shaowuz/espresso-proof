@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { renderTeX, splitMath } from "../lib/math";
 
 /**
- * Goal 43D: render mixed text + TeX. Display-only — never changes status.
+ * Render mixed text + TeX. Display-only — never changes status.
  *
  * Text segments render as escaped React text nodes (no innerHTML). Only KaTeX
  * output (trust: false) is injected, and only for a segment KaTeX could render

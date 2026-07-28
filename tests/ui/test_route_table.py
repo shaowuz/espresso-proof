@@ -1,7 +1,7 @@
-"""Goal 24: proof-route step table.
+"""Proof-route step table.
 
 A route is shown as research notes: one row per local step with its intended
-support, evidence status (Goal 20-23 vocabulary), locator/scope, gaps, and next
+Support, evidence status (display vocabulary), locator/scope, gaps, and next
 check. A row is LOCAL evidence -- a reference-supported or scoped-checked step
 never asserts the whole claim/route is proved.
 """

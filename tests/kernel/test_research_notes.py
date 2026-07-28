@@ -1,4 +1,4 @@
-"""Goal 43F: research/chat notes bind with provenance but are advisory only.
+"""Research/chat notes bind with provenance but are advisory only.
 
 A note can bind to a strategy, source, example, counterexample, or subgoal
 without changing any proof/source/evidence/grade/claim status; status/evidence

@@ -35,9 +35,9 @@ GRAPH_FILENAME = "proof_goal_graph.yaml"
 # subgoals (earned source / scoped checks) are added on top of this cap because
 # they reflect real earned support, not candidate search work.
 _MAX_CANDIDATE_SUBGOALS = 4
-# How many blocked external-tool obligations to surface (Goal 57B).
+# How many blocked external-tool obligations to surface.
 _MAX_EXTERNAL_TOOL_SUBGOALS = 4
-# How many theorem-condition ledger repair subgoals to surface (Goal 57A).
+# How many theorem-condition ledger repair subgoals to surface.
 _MAX_LEDGER_SUBGOALS = 4
 # How many reviewer-named route/global objection blocked nodes to surface (56E).
 _MAX_OBJECTION_SUBGOALS = 4
@@ -74,7 +74,7 @@ _SCRUB_REPLACEMENTS = [
 
 _SOURCE_KEYWORDS = ("source", "locator", "theorem", "reference", "cite", "citation", "literature")
 _HYPOTHESIS_KEYWORDS = ("hypothes", "condition", "genericity", "assumption", "smooth", "scope")
-# Goal 57B: typed route-death classification. Phrases are deliberately specific
+# Typed route-death classification. Phrases are deliberately specific
 # so a math word (e.g. "singular variety") does not match a tool blocker.
 _EXTERNAL_TOOL_KEYWORDS = (
     "external tool",
@@ -116,7 +116,7 @@ _BLOCKED_STATE_VALUES = (
     "blocked_external_tool",
     "conditional",
 )
-# Plain-language next action per block_reason (Goal 57B; never proof language).
+# Plain-language next action per block_reason (never proof language).
 _NEXT_ACTION_BY_REASON = {
     "false_key_lemma": (
         "Reject the key lemma; add a hypothesis that excludes the obstruction or "
@@ -150,7 +150,7 @@ def _scrub(text: Any) -> str:
 
 
 def _objection_tag(so: dict) -> str:
-    """Goal 54B: render one scoped objection as a single advisory free-text tag for
+    """Render one scoped objection as a single advisory free-text tag for
     a subgoal node. Surfaces the reviewer's repairable instruction
     (``suggested_next_action``) and honestly marks an attribution that was INFERRED
     from the round's attacked subgoal (not explicitly scoped). All text is scrubbed
@@ -199,7 +199,7 @@ def _classify_blocker(
 
     Conservative and advisory: a route-death blocker is typed into a search
     state plus an optional ``block_reason``. None of this earns or refutes any
-    status -- it only makes the dead route visible and actionable (Goal 57B).
+    Status -- it only makes the dead route visible and actionable.
     """
 
     low = blocker.lower()
@@ -251,7 +251,7 @@ def _scoped_objection_reviews(run_dir: Path, llm_agent_run: dict | None) -> list
 
 
 def _step_only_counterexample_pressure(run_dir: Path, artifacts: dict) -> list[str]:
-    """Goal 57C residual: advisory pressure text for each TRUSTED step-only CHECKED
+    """Residual: advisory pressure text for each TRUSTED step-only CHECKED
     counterexample in the counterexamples artifact (e.g. the 57C polynomial
     witness).
 
@@ -319,9 +319,9 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
     prover_loop = optional_artifact("prover_loop")
     proof_verification = optional_artifact("proof_verification")
     computation_verification = optional_artifact("computation_verification")
-    llm_agent_run = optional_artifact("llm_agent_run")  # Goal 54B: scoped reviewer objections
-    external_tool_runs = optional_artifact("external_tool_runs")  # Goal 57B: blocked tool obligations
-    theorem_condition_ledger = optional_artifact("theorem_condition_ledger")  # Goal 57A: named repair subgoals
+    llm_agent_run = optional_artifact("llm_agent_run")  # Scoped reviewer objections
+    external_tool_runs = optional_artifact("external_tool_runs")  # Blocked tool obligations
+    theorem_condition_ledger = optional_artifact("theorem_condition_ledger")  # Named repair subgoals
 
     strategies = {
         str(strategy.get("id")): strategy
@@ -356,7 +356,7 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
         "remaining_risk": "",
     }
 
-    # --- Goal 57C residual: surface step-only checked counterexamples ---------
+    # --- Residual: surface step-only checked counterexamples ---------
     # In ADDITION to idea_grade.counterexample_candidates, read the counterexamples
     # artifact (e.g. the 57C polynomial witness) and surface each TRUSTED step-only
     # CHECKED counterexample as advisory pressure text on the main node, clearly
@@ -380,7 +380,7 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
         main["remaining_risk"] = (
             "The kernel's refutation logic rejected the claim under the current hypotheses."
         )
-        # Goal 26: explain why no "next subgoal" is offered on a refuted claim, so a
+        # Explain why no "next subgoal" is offered on a refuted claim, so a
         # reader is not left with leftover subgoal lists and no next action.
         notes.append(
             "The claim is refuted by an admissible checked counterexample, so there is "
@@ -517,7 +517,7 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
                 }
             )
 
-    # --- Goal 57B: blocked external-tool obligations -------------------------
+    # --- Blocked external-tool obligations -------------------------
     # A tool run that did not complete cleanly (unavailable / refused / errored /
     # timed out) becomes a durable blocked node so the dead route is visible on a
     # re-inspect. A tool run is raw evidence: a non-clean run NEVER earns status,
@@ -562,7 +562,7 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
             )
             tool_budget -= 1
 
-    # --- Goal 57A: theorem-condition ledger repair subgoals ------------------
+    # --- Theorem-condition ledger repair subgoals ------------------
     # The ledger is the SINGLE WRITER of theorem-condition repair nodes: their ids
     # come from the ledger's ``repair_subgoal_id`` (``subgoal_tcl_*``), disjoint
     # from 57B's ``subgoal_block_*`` blocker nodes, so the two paths never create a
@@ -615,7 +615,7 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
             add_child(ledger_node)
             ledger_budget -= 1
 
-    # --- Goal 54B: attach subgoal-scoped reviewer objections to matching nodes ---
+    # --- Attach subgoal-scoped reviewer objections to matching nodes ---
     # Attach-if-matches: an objection naming a node that exists gets placed on it;
     # one naming a stale/unknown subgoal_id is simply not placed (never a fabricated
     # node, never a state change). Dedup keeps rebuilds idempotent. An objection can
@@ -804,7 +804,7 @@ STATE_WORDING: dict[str, str] = {
     "contradicted": "Contradicted under the current hypotheses",
 }
 
-# Plain-language wording for each block_reason (Goal 57B). Raw enum values must
+# Plain-language wording for each block_reason. Raw enum values must
 # never reach a user-facing surface; renderers translate through this map.
 BLOCK_REASON_WORDING: dict[str, str] = {
     "false_key_lemma": "A key step looks false",
@@ -836,7 +836,7 @@ def state_words(state: str) -> str:
 
 
 def block_reason_words(reason: str | None) -> str:
-    """Plain wording for a block_reason (Goal 57B; fail-safe default).
+    """Plain wording for a block_reason (fail-safe default).
 
     Raw enum values must never reach a user-facing surface; renderers translate
     every block_reason through this map.
@@ -858,7 +858,7 @@ def graph_notes(graph: dict | None) -> list[str]:
 
 def select_next_subgoal(graph: dict | None) -> dict[str, Any] | None:
     """Deterministically pick the single highest-value OPEN subgoal to work on next
-    (Goal 26: the graph is the scheduling center). Pure, read-only scheduling: it
+    (the graph is the scheduling center). Pure, read-only scheduling: it
     NEVER sets or upgrades any status -- it only chooses where to spend effort.
 
     Priority is the fixed ``NEXT_SUBGOAL_PRIORITY`` order (open > blocked-missing-
@@ -925,7 +925,7 @@ def render_proof_search_lines(graph: dict | None, *, statement_limit: int = 200)
             return text[: statement_limit - 1].rstrip() + "…"
         return text
 
-    # Goal 54B: a node may carry scoped reviewer objections attached at build time.
+    # A node may carry scoped reviewer objections attached at build time.
     # Echo them (advisory free text only) under the node they name, so the memo
     # shows *which* subgoal a reviewer objected to — never a status change.
     def objection_lines(node: dict, indent: str) -> list[str]:
@@ -936,7 +936,7 @@ def render_proof_search_lines(graph: dict | None, *, statement_limit: int = 200)
                 out.append(f"{indent}· reviewer objection: {text}")
         return out
 
-    # Goal 57B: a blocked/conditional node may carry a typed reason and a plain
+    # A blocked/conditional node may carry a typed reason and a plain
     # suggested next step. Both are translated to human wording (never the raw
     # enum) so the memo reads as a next-action row, not a status change.
     def block_lines(node: dict, indent: str) -> list[str]:
@@ -949,7 +949,7 @@ def render_proof_search_lines(graph: dict | None, *, statement_limit: int = 200)
             out.append(f"{indent}· suggested next step: {action}")
         return out
 
-    # Goal 57C residual: a node may carry advisory counterexample pressure (e.g. a
+    # Residual: a node may carry advisory counterexample pressure (e.g. a
     # step-only checked witness). Echo it scoped, never as a refutation — pressure
     # text is advisory free text and never a status. Each line already states its
     # own scope (e.g. "refutes a proof step, not the claim").

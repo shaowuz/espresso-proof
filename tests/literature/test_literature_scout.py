@@ -1,4 +1,4 @@
-"""Goal 02: LLM Literature Scout tests.
+"""LLM Literature Scout tests.
 
 The scout proposes CANDIDATE sources tied to proof steps and can never grant
 trusted source status. Positive: it runs in stub mode and ties candidates to
@@ -25,7 +25,7 @@ from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 # Claim text that triggers the hodge_atoms mock scenario, whose scaffold seeds a
 # source_grounding with one proof step (step_001) — a real step to scout against.
-# (Phrased WITHOUT "irrational": since Goal 42E cycle 5, universal
+# (Phrased WITHOUT "irrational": since universal
 # irrationality claims route to the source-misapplication scenario instead.)
 HODGE_CLAIM = (
     "For all cubic fourfolds, the Hodge atom obstruction controls the rationality "

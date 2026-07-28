@@ -1,4 +1,4 @@
-"""Deterministic matrix rank / determinant verifier (Goal 06).
+"""Deterministic matrix rank / determinant verifier.
 
 A trusted, dependency-free backend that checks the rank and/or determinant of ONE
 explicit integer matrix using exact rational (Fraction) Gaussian elimination. A

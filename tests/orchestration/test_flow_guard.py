@@ -1,4 +1,4 @@
-"""Goal 65 control-flow fix (from the order-3-cyclic postmortem).
+"""Control-flow fix (from the order-3-cyclic postmortem).
 
 The failed run's ``loop_control.yaml`` said ``should_stop=true`` /
 ``next_action=ask_human`` ("claim too vague for productive looping"), yet

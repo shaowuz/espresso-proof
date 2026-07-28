@@ -195,7 +195,7 @@ class PressureStatusReport(StrictBaseModel):
 
 
 class RouteAllocationEntry(StrictBaseModel):
-    """Goal 54C: one candidate route's advisory scheduling line.
+    """One candidate route's advisory scheduling line.
 
     Pure scheduling arithmetic derived from the human's strategy feedback +
     choice + the brief's score. ``advisory_score`` orders attention/budget; it is
@@ -212,7 +212,7 @@ class RouteAllocationEntry(StrictBaseModel):
 
 
 class HumanTimeAllocationContext(StrictBaseModel):
-    """Goal 54C: deterministic, advisory-only time-allocation context derived from
+    """Deterministic, advisory-only time-allocation context derived from
     human strategy feedback.
 
     It can reorder candidate routes, recommend a per-route allocation mode, and
@@ -247,7 +247,7 @@ class HumanTimeAllocationContext(StrictBaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Goal 57A: Theorem Condition Ledger (slice 1 — model only).
+# Theorem Condition Ledger (slice 1 — model only).
 #
 # A durable, advisory ledger of the theorems a reviewer asked for (the verbatim
 # ``source_requests``) together with the conditions/hypotheses that still have to
@@ -407,7 +407,7 @@ class ProofLineDependency(StrictBaseModel):
 
 
 class ProofLine(StrictBaseModel):
-    """One line of a structured, line-numbered proof (Goal 69). It is a CANDIDATE
+    """One line of a structured, line-numbered proof. It is a CANDIDATE
     proof line: ``justification`` says WHY the line follows (a rule of inference, an
     algebraic step, a cited lemma); ``dependencies`` is the structured proof graph.
     Legacy ``depends_on`` / ``source_refs`` / ``gaps`` are preserved for compatibility
@@ -518,7 +518,7 @@ class ProofLine(StrictBaseModel):
 
 
 class LineNumberedProof(StrictBaseModel):
-    """Goal 69: a structured, line-numbered proof artifact — the ONLY thing the
+    """A structured, line-numbered proof artifact — the ONLY thing the
     agent-consensus mock-check may seal.
 
     A strategy / route / proposed_steps list / advisory_proof_sketch is a PLAN, not a
@@ -655,7 +655,7 @@ PROOF_CONSENSUS_REVIEWERS = (
 
 
 class AgentConsensusEntry(StrictBaseModel):
-    # Goal 69: the three reviewers review the LINE-NUMBERED PROOF (not route text).
+    # The three reviewers review the LINE-NUMBERED PROOF (not route text).
     reviewer_id: Literal[
         "line_proof_reviewer",
         "theorem_lemma_applicability_reviewer",
@@ -664,7 +664,7 @@ class AgentConsensusEntry(StrictBaseModel):
     verdict: AgentConsensusVerdict
     looked_for: str = Field(min_length=1)  # which fatal-flaw classes this reviewer actively hunted
     finding: str = Field(min_length=1)  # the active "no fatal flaw because ..." / "fatal flaw: ..." statement
-    # Goal 69: a reviewer's verdict must cite the proof line_id(s) it rests on; a PASS
+    # A reviewer's verdict must cite the proof line_id(s) it rests on; a PASS
     # that references no line is not a real review of the line-numbered proof.
     cited_line_ids: list[str]
     residual_objections: list[str] = Field(default_factory=list)  # non-fatal, surfaced
@@ -695,7 +695,7 @@ class AgentConsensusReview(StrictBaseModel):
     run_id: str
     generated_at: str
     bound_claim_hash: str
-    # Goal 69: the consensus binds the LINE-NUMBERED PROOF it reviewed (not route
+    # The consensus binds the LINE-NUMBERED PROOF it reviewed (not route
     # text). Any edit to the proof after review changes this hash -> seal fails closed.
     bound_line_numbered_proof_hash: str
     bound_source_grounding_hash: str

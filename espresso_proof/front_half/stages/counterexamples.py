@@ -209,7 +209,7 @@ def compute_counterexamples(*, run_dir: Path, client: LLMClient, context: dict) 
         raw.get("tests"), counterexamples=counterexamples
     )
 
-    # Goal 42E cycle 1: deterministic machine probes. Agent TEXT stays
+    # Deterministic machine probes. Agent TEXT stays
     # candidate-only (refutes_claim forced False above); a Cayley-table
     # verified non-abelian group of the claimed order is a MACHINE result and
     # may carry result=failed — with refutes_claim=True only when the probe's

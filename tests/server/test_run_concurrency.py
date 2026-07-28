@@ -1,4 +1,4 @@
-"""Goal 35B: cross-process run writer lock, events.jsonl timeline, and atomic
+"""Cross-process run writer lock, events.jsonl timeline, and atomic
 YAML writes. Concurrency must never duplicate prover rounds or leave partial
 artifacts; the timeline is diagnostic only and never leaks the environment."""
 
@@ -237,10 +237,10 @@ def test_events_timeline_valid_jsonl_and_no_env_leak(tmp_path: Path, monkeypatch
         record = json.loads(line)
         assert isinstance(record, dict)
         # Reference EVENT_KINDS directly so the allowlist never drifts when new
-        # additive kinds (Goal 54A: agent_call_*, server_job, replay, note) are added.
+        # Additive kinds (agent_call_*, server_job, replay, note) are added.
         assert record["kind"] in set(EVENT_KINDS)
         assert "ts" in record
-        assert "monotonic_ms" in record  # Goal 54A: every event carries a monotonic stamp
+        assert "monotonic_ms" in record  # Every event carries a monotonic stamp
     kinds = [json.loads(line)["kind"] for line in lines]
     assert "stage_started" in kinds and "stage_ok" in kinds
     # Redaction: no API key / environment dump in the timeline.

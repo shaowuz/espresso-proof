@@ -143,7 +143,7 @@ def live_responses_to_literature_items(responses: list[LiveSearchResponse]) -> l
                     },
                     "relevance": result.relevance,
                     "status": result.status,
-                    # Goal 37: record the provider WITHOUT violating the
+                    # Record the provider WITHOUT violating the
                     # LiteratureItem.found_by Literal (live_<provider> is not an
                     # allowed value and made every positive live hit fail
                     # validation). All live providers are web searches; the

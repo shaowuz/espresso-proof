@@ -193,7 +193,7 @@ def test_lean_bridge_must_stay_unverified(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Goal 23: a scoped computation cannot upgrade the grade to a global checked proof
+# A scoped computation cannot upgrade the grade to a global checked proof
 # ---------------------------------------------------------------------------
 def _set_grade_proof_status(run_dir: Path, value: str) -> None:
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]

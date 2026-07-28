@@ -1,4 +1,4 @@
-"""Goal 66: simple math claim normalization + fast lock.
+"""Simple math claim normalization + fast lock.
 
 The claim-understanding layer used to mark standard elementary theorems (a
 prime-order group is cyclic) as "unclear", tripping the claim-clear gate before

@@ -13,8 +13,8 @@ import typer
 from espresso_proof.kernel.io import read_yaml
 # NOTE: literature_retrieval.retrieve_and_ground (corpus_dir/query, older
 # retrieve-sources --ground path) is a DIFFERENT function from
-# retrieval_grounding.retrieve_and_ground (Goal 03, candidate/local_corpus). Alias
-# this one so it does not shadow the Goal 03 import above (which the
+# Retrieval_grounding.retrieve_and_ground (candidate/local_corpus). Alias
+# This one so it does not shadow the import above (which the
 # `retrieve-and-ground` command depends on).
 from espresso_proof.verification.finite_group_verifier import verify_identity_on_table
 from espresso_proof.verification.proof_verification import (

@@ -1,4 +1,4 @@
-"""Goal 67A: shared claim-clarity rules — the single source of truth for what
+"""Shared claim-clarity rules — the single source of truth for what
 counts as a BLOCKING missing/unclear item vs an advisory clarification note.
 
 The claim-clear gate must block genuine gaps (missing object / hypothesis /

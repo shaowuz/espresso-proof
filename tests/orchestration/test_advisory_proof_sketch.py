@@ -1,4 +1,4 @@
-"""Goal 67B — non-discarding capture of a prover attempt's reasoning.
+"""Non-discarding capture of a prover attempt's reasoning.
 
 A prover step may do the mathematics correctly yet smuggle a status field
 (``proof_status: ...`` / ``source_backed: true``) that ``safe_text`` does not

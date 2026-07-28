@@ -983,7 +983,7 @@ def test_source_backed_step_applicability_usage_must_match_step_source_ref(tmp_p
         raise AssertionError("validate_run should reject applicability usage for a different source ref")
 
 
-# --- Goal 37: live positive hits must validate (found_by schema fix) ---------
+# --- Live positive hits must validate (found_by schema fix) ---------
 def test_live_positive_hits_validate_in_literature_report() -> None:
     from espresso_proof.literature.literature_discovery import live_responses_to_literature_items
     from espresso_proof.literature.live_search import LiveSearchResponse, LiveSearchResult
@@ -1035,7 +1035,7 @@ def test_live_positive_hits_validate_in_literature_report() -> None:
     assert items[1]["id"].startswith("live_crossref_")
 
 
-# --- Goal 37: typed near-miss source discipline ------------------------------
+# --- Typed near-miss source discipline ------------------------------
 def test_smooth_hypothesis_not_covered_by_singular_statement() -> None:
     from espresso_proof.verification.source_verification import check_hypothesis_applicability
 

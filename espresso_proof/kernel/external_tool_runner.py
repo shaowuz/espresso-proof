@@ -1,4 +1,4 @@
-"""Goal 25 (slice 2): fake sandbox executor for external tools.
+"""Fake sandbox executor for external tools.
 
 A minimal, safe executor that runs ONLY allowlisted DETERMINISTIC FAKE tools and
 records an audited :class:`ExternalToolRun`. It never runs arbitrary tools, never
@@ -184,7 +184,7 @@ def run_external_tool(
         try:
             parsed_result = parse(stdout)
             kind = "deterministic check" if spec.get("real") else "deterministic fake check"
-            # Goal 38: the conclusion embeds tool output; scrub it so a tool
+            # The conclusion embeds tool output; scrub it so a tool
             # printing "proof-close" / "we proved the theorem" cannot smuggle proof-
             # complete language into the interpretive field (the model validator
             # rejects unscrubbed text; raw stdout stays auditable in

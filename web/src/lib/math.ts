@@ -1,7 +1,7 @@
 import katex from "katex";
 
 /**
- * Goal 43D: KaTeX is a DISPLAY layer only. It renders math; it never validates,
+ * KaTeX is a DISPLAY layer only. It renders math; it never validates,
  * interprets, or upgrades any mathematical status, and it never introduces an
  * HTML-injection path:
  *

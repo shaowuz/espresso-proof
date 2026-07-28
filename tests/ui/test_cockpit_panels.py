@@ -1,4 +1,4 @@
-"""Goal 43B: per-panel slice endpoints for independent artifact loading.
+"""Per-panel slice endpoints for independent artifact loading.
 
 Each cockpit panel reads its own validated artifact slice so panels refresh
 independently and show honest not_run/running/failed states. A cached or

@@ -88,7 +88,7 @@ def provenance_is_human_gated(kinds: set[str]) -> bool:
 def classify_blocker(text: str, *, provenance: set[str] | None = None) -> str:
     """Deterministic blocking_evidence_type for a prover blocker text.
 
-    Goal 42E cycle 4: provenance decides first. A blocker that originated
+    Provenance decides first. A blocker that originated
     ONLY as a reviewer OBJECTION (a standing risk like "a sketch-only
     argument cannot become proof-complete evidence") or as a MISSING
     HYPOTHESIS (claim scoping / hypothesis work) is human-gated by nature —
@@ -109,7 +109,7 @@ def classify_blocker(text: str, *, provenance: set[str] | None = None) -> str:
             return "human_judgment_needed"
         return "reviewer_objection"
     lowered = str(text).lower()
-    # Goal 42E cycle 3: theorem/locator REQUESTS are source gaps — they
+    # Theorem/locator REQUESTS are source gaps — they
     # need a verified citation, not a proof step. The theorem keyword
     # is phrase-scoped (review nit): "the theorem's step 3 is invalid"
     # is a proof problem, not a citation request.

@@ -314,7 +314,7 @@ def test_p2_demo_runs_without_manual_source(tmp_path: Path) -> None:
 
 
 def test_retrieval_with_empty_corpus_is_a_validated_no_op(tmp_path: Path) -> None:
-    # Goal 37: retrieval that finds nothing (empty/absent corpus) must be a
+    # Retrieval that finds nothing (empty/absent corpus) must be a
     # no-op that fails closed — no candidates, no grounding attempt, no status
     # change anywhere, and the run still validates.
     from espresso_proof.literature.autonomous_retrieval import run_autonomous_retrieval

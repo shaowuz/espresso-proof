@@ -1,4 +1,4 @@
-"""Goal 69: agent-consensus runner + seal action over a LINE-NUMBERED PROOF.
+"""Agent-consensus runner + seal action over a LINE-NUMBERED PROOF.
 
 The three proof reviewers (line_proof / theorem_lemma_applicability / adversarial_gap)
 review the structured ``line_numbered_proof.yaml`` ADVERSARIALLY -- NOT a route /
@@ -150,8 +150,7 @@ def _require_line_numbered_proof(run_dir: Path, manifest: dict) -> dict:
 
 
 def _proof_review_context(run_dir: Path, proof: dict) -> dict:
-    """The agent context + the LINE-NUMBERED PROOF the reviewers must review (Goal 69:
-    reviewers review the proof, not route text)."""
+    """The agent context + the LINE-NUMBERED PROOF the reviewers must review (    reviewers review the proof, not route text)."""
     return {**load_agent_context(run_dir), "line_numbered_proof": proof}
 
 
@@ -378,7 +377,7 @@ def seal_agent_consensus(
     )
     manifest_path = run_dir / "run_manifest.yaml"
     manifest = read_yaml(manifest_path)
-    # Goal 69: the mock check may ONLY seal a line-numbered proof (fail closed).
+    # The mock check may ONLY seal a line-numbered proof (fail closed).
     proof = _require_line_numbered_proof(run_dir, manifest)
     proof_artifact = (manifest.get("optional_artifacts") or {}).get(
         "line_numbered_proof", "line_numbered_proof.yaml"

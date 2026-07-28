@@ -126,11 +126,11 @@ def status_summary(run_dir: Path) -> dict[str, Any]:
         # past the prover human gate). The UI uses this to disable its Continue
         # affordance instead of offering a click the kernel will reject.
         "continue_available": _continue_available(state["current_state"]),
-        # Goal 67C: honest provenance — a stub/template run is flagged so the UI
+        # Honest provenance — a stub/template run is flagged so the UI
         # never presents it as a real prover/reviewer loop. Fail-closed.
         "template_fallback": state["template_fallback"],
         "template_fallback_note": state["template_fallback_note"],
-        # Goal 67B: surface a captured advisory prover sketch (a prover attempt's
+        # Surface a captured advisory prover sketch (a prover attempt's
         # scrubbed reasoning that survived a validation rollback). Pure
         # presence/count + advisory note — NOT a mathematical-status field; it
         # never upgrades proof/source/evidence/grade status.
@@ -162,7 +162,7 @@ def status_summary(run_dir: Path) -> dict[str, Any]:
 
 
 def _advisory_sketch_summary(run_dir: Path) -> dict[str, Any]:
-    """Goal 67B: status-neutral summary of any captured advisory prover sketch.
+    """Status-neutral summary of any captured advisory prover sketch.
 
     Returns ``present: False`` when there is no sidecar. When present, exposes the
     advisory note + a step count only — never a proof/source/evidence status, and
@@ -221,7 +221,7 @@ def _load_run_state(run_dir: Path) -> dict[str, Any]:
     llm_agent_run = optional_artifact("llm_agent_run")
 
     current_state = str(manifest.get("current_state", ""))
-    template_fallback = not _real_prover_ran(run_dir)  # Goal 67C (fail-closed)
+    template_fallback = not _real_prover_ran(run_dir)  # fail-closed
     latest_attempt = _latest_attempt(loop, human_choice.get("selected_strategy"))
     completed = current_state == "COMPLETED_MEMO"
     repair_needed = completed and (
@@ -284,7 +284,7 @@ def _load_run_state(run_dir: Path) -> dict[str, Any]:
         "machine_checks": machine_checks,
         "state_label": _state_label(current_state, repair_needed, template_fallback),
         "proof_label": _proof_label(grade, repair_needed, template_fallback),
-        # Goal 54C: advisory human steering per route (score/priority/allocation).
+        # Advisory human steering per route (score/priority/allocation).
         # Display only — it orders attention, never evidence.
         "time_allocation": _time_allocation_by_route(run_dir),
     }
@@ -304,7 +304,7 @@ _ALLOCATION_WORDS = {
 
 
 def _time_allocation_by_route(run_dir: Path) -> dict[str, dict[str, Any]]:
-    """Advisory steering per strategy id, derived live (Goal 54C). Fail-closed to
+    """Advisory steering per strategy id, derived live. Fail-closed to
     empty so a feedback fault never breaks the dashboard."""
     try:
         from espresso_proof.strategy.human_time_allocation import build_time_allocation_context
@@ -458,7 +458,7 @@ def _counterexample_pressure(state: dict[str, Any], agent_rows: list[dict]) -> s
 # --------------------------------------------------------------------------- #
 
 
-# Goal 67C: a run is a "real prover run" only if a real (non-stub) model drove
+# A run is a "real prover run" only if a real (non-stub) model drove
 # the prover/reviewer stage. Otherwise it is a deterministic template fallback and
 # must NOT be shown as a real prover/reviewer loop.
 _REAL_PROVIDERS = frozenset({"external", "openai"})
@@ -467,7 +467,7 @@ TEMPLATE_FALLBACK_NOTE = "Template fallback only — no real prover ran."
 
 
 def _real_prover_ran(run_dir: Path) -> bool:
-    """Goal 67C: True iff a REAL (non-stub) model drove the prover/reviewer stage,
+    """True iff a REAL (non-stub) model drove the prover/reviewer stage,
     read from the recorded ``provider`` on a prover-stage agent event. Fail-closed:
     stub, absent, or unrecognized provenance -> False (template fallback), so a
     stub/template run is never presented as a real prover loop. Never raises."""
@@ -497,7 +497,7 @@ def _continue_available(current_state: str) -> bool:
 
 
 def _state_label(current_state: str, repair_needed: bool, template_fallback: bool = False) -> str:
-    # Goal 67C: never label a template/stub run as a reviewed/ready real run.
+    # Never label a template/stub run as a reviewed/ready real run.
     if template_fallback and current_state == "COMPLETED_MEMO":
         return "Template draft — no real prover ran"
     if current_state == "WAITING_LLM_AGENT_HUMAN_GATE":
@@ -513,7 +513,7 @@ def _proof_label(grade: dict[str, Any], repair_needed: bool, template_fallback: 
     proof_status = str(grade.get("proof_language_status") or "")
     # A scoped/checked status is earned by a machine verifier or a human gate, NOT
     # by the prover, so it is honest even in a template/stub run (no prover) — show
-    # it before the template-fallback note (Goal 67C/67A interaction fix).
+    # It before the template-fallback note (interaction fix).
     if proof_status == "computation_checked":
         return "Scoped check"
     if proof_status in {"lean_checked", "human_confirmed"}:
@@ -522,7 +522,7 @@ def _proof_label(grade: dict[str, Any], repair_needed: bool, template_fallback: 
     # action, honest even in a stub run) -- show it, but never as "Checked"/green.
     if proof_status == "agent_consensus_mock_checked":
         return "Mock-checked (agent consensus, not a machine check)"
-    # Goal 67C: otherwise a template/stub run made no real prover attempt — say so
+    # Otherwise a template/stub run made no real prover attempt — say so
     # instead of a prover-loop-derived "Needs repair"/"Sketched".
     if template_fallback:
         return "Template only — not a real attempt"
@@ -734,7 +734,7 @@ def _now_strip(
     routes_preliminary: bool,
     has_routes: bool,
 ) -> str:
-    """Goal 30: the 5-second comprehension strip under the claim.
+    """The 5-second comprehension strip under the claim.
 
     One line of trust-grouped evidence counts (single canonical summary; colour
     discipline: green only when something is genuinely earned) plus one derived
@@ -761,7 +761,7 @@ def _now_strip(
         title = f' title="{_h(tip)}"' if tip else ""
         return f'<span class="now-chip {tone}"{title}><b>{count}</b> {label}</span>'
 
-    # Tooltips (Goal 31): one plain sentence per trust level — explain, never
+    # Tooltips: one plain sentence per trust level — explain, never
     # upgrade. Same framing as the shared copy inventory.
     chips = (
         chip(
@@ -860,7 +860,7 @@ def _plan_section(
 ) -> str:
     completed = state["completed"]
     selected_items = "".join(f"<li>{_h(item)}</li>" for item in initial["details"])
-    # Goal 30: the canonical evidence summary lives in the Now strip directly
+    # The canonical evidence summary lives in the Now strip directly
     # under the claim (single source — no duplicated/contradictory summaries).
     gaps = state["grade"].get("source_gaps") or []
     gaps_html = ""
@@ -942,7 +942,7 @@ def _proof_state_section(state: dict[str, Any], *, route_shown: bool = False) ->
     rows: list[str] = []
 
     def _objections_html(node: dict[str, Any]) -> str:
-        # Goal 54B: echo scoped reviewer objections under the subgoal they name
+        # Echo scoped reviewer objections under the subgoal they name
         # (advisory free text only; never a status). Limited + escaped.
         objections = node.get("reviewer_objections") or []
         if not objections:
@@ -955,7 +955,7 @@ def _proof_state_section(state: dict[str, Any], *, route_shown: bool = False) ->
         return f"<ul class=\"sg-obj\"><li class=\"sg-obj-head\">Reviewer objections (advisory):</li>{items}</ul>"
 
     def _block_html(node: dict[str, Any]) -> str:
-        # Goal 57B parity with the memo: a blocked/conditional node may carry a
+        # Parity with the memo: a blocked/conditional node may carry a
         # typed reason ("why blocked") and a plain suggested next step. The reason
         # is TRANSLATED through block_reason_words (never the raw enum); both are
         # advisory next-action rows, never a status. Escaped.
@@ -1002,7 +1002,7 @@ def _proof_state_section(state: dict[str, Any], *, route_shown: bool = False) ->
     next_node = grouped["next"]
     next_html = ""
     if next_node is not None:
-        # Goal 30: connect the next target to the route action the user has.
+        # Connect the next target to the route action the user has.
         link = (
             " <span class=\"muted\">&mdash; continuing the selected route works toward this.</span>"
             if route_shown
@@ -1101,7 +1101,7 @@ def _review_section(review: dict[str, Any]) -> str:
 
 
 def _timeline_section(run_dir: Path) -> str:
-    """Goal 28: a display-only research timeline derived from validated artifacts
+    """A display-only research timeline derived from validated artifacts
     and the per-agent status board. Never sets or upgrades any status; a skipped/
     failed/running agent is shown as skipped/failed/running, never as done."""
 
@@ -1418,7 +1418,7 @@ def _evidence_panel(run_dir: Path, state: dict[str, Any]) -> str:
         )
         attempts = row.get("attempts") or 0
         attempts_html = f'<span class="aruns">{int(attempts)} run(s)</span>' if attempts > 1 else ""
-        # Goal 33: last-updated time (and duration once finished) — process
+        # Last-updated time (and duration once finished) — process
         # timing only; a timing can never imply proof progress. Shown ONLY for
         # agents that actually did something (never on not-run/skipped cards),
         # and rendered in the viewer's LOCAL time by the page JS (data-utc);

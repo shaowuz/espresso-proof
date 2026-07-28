@@ -1,4 +1,4 @@
-"""Goal 54A: per-run runtime observability.
+"""Per-run runtime observability.
 
 Append-only, path-confined, diagnostic-only per-run provenance so a developer can
 answer "which stage/agent stalled, for how long, what did it last write, did
@@ -358,7 +358,7 @@ _TERMINAL_AGENT_STATUSES = frozenset({"finished", "failed", "timed_out"})
 
 
 def latest_unfinished_agent_call(run_dir: Path) -> dict | None:
-    """Goal 65B: return the most recent agent call that recorded ``started`` but
+    """Return the most recent agent call that recorded ``started`` but
     no matching terminal (``finished``/``failed``/``timed_out``) record, or None.
 
     This is the reconstruction primitive for a mid-call PROCESS death: when the

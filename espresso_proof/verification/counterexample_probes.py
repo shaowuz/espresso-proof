@@ -1,10 +1,10 @@
-"""Deterministic counterexample probes (Goal 42E, cycle 1).
+"""Deterministic counterexample probes (cycle 1).
 
 When a locked claim states EXACTLY "every group of order N is abelian" for a
 concrete integer N, the counterexamples pipeline can do better than asking a
 model: if a non-abelian group of order N exists, this module CONSTRUCTS one
 (the dihedral group D_{N/2} for even N >= 6; for odd N = q*p with primes
-q < p and q | p-1, the semidirect product Z_p x| Z_q — Goal 42E cycle 10)
+Q < p and q | p-1, the semidirect product Z_p x| Z_q — cycle 10)
 and machine-verifies its Cayley table with the trusted deterministic
 ``verify_group_abelian`` backend.
 
@@ -161,7 +161,7 @@ def _semidirect_cayley(p: int, q: int, r: int) -> list[list[int]]:
 def _nonabelian_group_of_order(order: int) -> tuple[str, list[list[int]]] | None:
     """A concrete non-abelian group of the given order, or None when this
     probe cannot construct one. Even orders >= 6 use the dihedral family;
-    odd orders q*p with q | p-1 (Goal 42E cycle 10, smallest case 21 =
+    Odd orders q*p with q | p-1 (smallest case 21 =
     Z_7 x| Z_3) use the semidirect-product family. Every other order fails
     closed regardless of whether a non-abelian group exists."""
 
@@ -182,7 +182,7 @@ def _nonabelian_group_of_order(order: int) -> tuple[str, list[list[int]]] | None
     return f"dihedral_group_D{n}", _dihedral_cayley(n)
 
 
-# Anchored claim form (Goal 42E cycle 8): the WHOLE normalized statement must
+# Anchored claim form : the WHOLE normalized statement must
 # be exactly "every continuous function f: R -> R attains a maximum (value)."
 # — no free modifiers, so negations ("no continuous function ..."), weakened
 # domains ("on [a, b]"), "bounded", "supremum", and "minimum" phrasings can

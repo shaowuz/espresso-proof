@@ -220,7 +220,7 @@ def judgment_tier_phrase(tier: str | None) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Goal 31 — product copy inventory (single language map for user-facing labels)
+# Product copy inventory (single language map for user-facing labels)
 # --------------------------------------------------------------------------- #
 
 # Prover-loop stop reason -> plain product wording (never the raw token).
@@ -249,7 +249,7 @@ def effort_phrase(effort: str | None) -> str:
     return str(effort or "").replace("_", " ")
 
 
-# The Goal 31 copy inventory: one consistent product sentence per state. These
+# The copy inventory: one consistent product sentence per state. These
 # are DISPLAY phrases (never statuses); each pairs what-happened wording with
 # the safety framing the workbench repeats: process state is not evidence, and
 # nothing here upgrades a proof/source/evidence/grade/claim status.

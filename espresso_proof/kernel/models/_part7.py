@@ -691,7 +691,7 @@ class PressureLaneBarrierReport(StrictBaseModel):
 
 
 class AgentRunStatusEntry(StrictBaseModel):
-    """Process status for ONE evidence / understanding agent (Goal 27).
+    """Process status for ONE evidence / understanding agent.
 
     This record tracks ONLY process state for the on-demand / parallel evidence
     runner and the dashboard. ``extra="forbid"`` (StrictBaseModel) rejects any
@@ -741,7 +741,7 @@ class AgentRunStatusEntry(StrictBaseModel):
 
 
 class AgentRunStatusReport(StrictBaseModel):
-    """Per-agent run-status board for a run (``agent_run_status.yaml``, Goal 27).
+    """Per-agent run-status board for a run (``agent_run_status.yaml``).
 
     Advisory process audit only. It must never affect grades, proof/source/
     evidence status, or lifecycle state, and (via StrictBaseModel) cannot carry a

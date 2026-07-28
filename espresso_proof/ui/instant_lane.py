@@ -1,11 +1,11 @@
-"""Goal 55: Instant Mathematical Conversation Lane — a fast DRAFT, never evidence.
+"""Instant Mathematical Conversation Lane — a fast DRAFT, never evidence.
 
 The instant lane answers a freshly-submitted claim like a good mathematical
 assistant FIRST (intuition, a likely direction, one to three candidate routes,
 and the obvious caveats), so the user sees useful text in seconds while the
 slower artifact/kernel pipeline runs in the background.
 
-It is bounded hard, exactly like the chat preview (Goal 43F) but stricter:
+It is bounded hard, exactly like the chat preview but stricter:
 
 - the draft is conversation, NOT proof. It earns no source-backed / checked /
   refuted / human-confirmed status and never says proved / proof-close / proof complete;
@@ -57,7 +57,7 @@ def _scrub_text(text: object, limit: int = 600) -> str:
     """Scrub proof-language, source-support vocabulary, and earned-status verdicts,
     then bound length. Every stored/streamed field passes here, so neither a
     proof-complete overclaim nor a 'source-backed'/'checked'/'refuted' verdict
-    (Goal 65E) can reach the user from an advisory draft."""
+ Can reach the user from an advisory draft."""
 
     cleaned = scrub_source_support_language(str(text or ""))  # also runs scrub_proof_language
     cleaned = scrub_draft_status_claims(cleaned)
@@ -306,7 +306,7 @@ def instant_lane_metrics(
     background_run_started: bool,
     first_artifact_update_ms: int | None = None,
 ) -> dict:
-    """The latency contract record (Goal 55). Display/telemetry only — it carries
+    """The latency contract record. Display/telemetry only — it carries
     no evidence and is never read by the kernel."""
 
     return {

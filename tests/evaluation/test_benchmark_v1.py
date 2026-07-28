@@ -126,7 +126,7 @@ def test_benchmark_v1_covers_required_categories() -> None:
 
 
 def test_benchmark_cli_fails_on_planted_regression(tmp_path: Path, monkeypatch) -> None:
-    # Goal 40A: the CI-gated command must EXIT NON-ZERO when a benchmark case
+    # The CI-gated command must EXIT NON-ZERO when a benchmark case
     # regresses. Plant one failing case through the real reporting path.
     # The `benchmark` command lives in espresso_proof.cli_eval (the eval command
     # group split out of cli.py), so patch run_benchmark where the command

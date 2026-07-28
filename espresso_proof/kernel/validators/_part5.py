@@ -133,7 +133,7 @@ def _validate_source_discipline_bindings(
     theorem_extraction: TheoremExtractionReport | None,
     theorem_applicability: TheoremApplicabilityReport | None,
 ) -> None:
-    """Goal 41 provenance bindings (optional/additive — both fields default "").
+    """Provenance bindings (optional/additive — both fields default "").
 
     1. A source ref carrying ``statement_sha256`` must quote EXACTLY the bytes it
        hashed (self-hash), and when ``theorem_extraction.yaml`` is present the

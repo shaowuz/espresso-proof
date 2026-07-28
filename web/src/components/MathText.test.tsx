@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { MathText } from "./MathText";
 
 /**
- * Component-level guard (Goal 43D): the security-critical decision lives in
+ * Component-level guard: the security-critical decision lives in
  * MathText — text segments must render as ESCAPED React text nodes and only
  * KaTeX output may be injected. renderToStaticMarkup gives us the emitted HTML
  * with no DOM dependency.

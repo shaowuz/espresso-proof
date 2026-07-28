@@ -1,5 +1,5 @@
 /**
- * Goal 43F: chat-stream client. The stream is a conversational PREVIEW —
+ * Chat-stream client. The stream is a conversational PREVIEW —
  * never evidence. It is read over a POST + Server-Sent-Events body; every line
  * was already proof-language-scrubbed server-side. If streaming fails for any
  * reason the caller falls back to polling/artifacts, so the cockpit always

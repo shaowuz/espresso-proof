@@ -1,4 +1,4 @@
-"""Retrieval -> Source Grounding (Goal 03).
+"""Retrieval -> Source Grounding.
 
 Close the loop: candidate source -> resolve source text/bytes -> theorem
 extraction (reused) -> existing source grounding (reused) -> validate run. The

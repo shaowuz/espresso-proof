@@ -1,4 +1,4 @@
-"""Unified per-run event timeline ``events.jsonl`` (Goal 35B).
+"""Unified per-run event timeline ``events.jsonl``.
 
 One append-only JSONL file per run recording what the runtime DID — stage
 starts, validation results, rollbacks, job completion — so a developer can open
@@ -39,7 +39,7 @@ EVENT_KINDS = (
     "job_done",
     "job_failed",
     "lock_denied",
-    # Goal 54A additive kinds (backward-compatible; consumers reading only the
+    # Additive kinds (backward-compatible; consumers reading only the
     # original stage_*/validation_* kinds are unaffected).
     "agent_call_started",
     "agent_call_finished",
@@ -47,7 +47,7 @@ EVENT_KINDS = (
     "server_job",
     "replay",
     "note",
-    # Goal 65 control-flow: the Prover pass was intentionally not run because the
+    # Control-flow: the Prover pass was intentionally not run because the
     # front half asked to stop before proof search (loop_control stop/ask_human).
     "prover_pass_skipped",
     # Pivot PR2: machinery (not a human) selected the strategy at the prover
@@ -60,7 +60,7 @@ EVENT_KINDS = (
 def append_event(run_dir: Path, kind: str, *, stage: str = "", detail: str = "") -> None:
     """Append one event line. Diagnostic only; never raises into the runtime.
 
-    Goal 54A: every record also carries a monotonic_ms stamp (integer ms from a
+    Every record also carries a monotonic_ms stamp (integer ms from a
     monotonic clock) so stage-duration / silent-gap math does not depend on
     wall-clock skew. Additive field; consumers reading kind/stage/detail are
     unaffected.

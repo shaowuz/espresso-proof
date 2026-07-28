@@ -291,7 +291,7 @@ def test_resume_runs_multiple_rounds_and_memo_is_honest(tmp_path: Path) -> None:
     assert loop["budget"]["rounds_used"] >= 2  # ran >1 round
     assert "Prover loop: ran" in memo
     assert "stopped because" in memo
-    assert "budget_rounds" not in memo  # stop reason renders as words (Goal 31)
+    assert "budget_rounds" not in memo  # Stop reason renders as words
     lower = memo.lower()
     for phrase in _FORBIDDEN + ("progress", "improved", "closer"):
         assert phrase not in lower
@@ -313,7 +313,7 @@ def _to_resolved_loop_via_resume(tmp_path: Path) -> tuple[Path, str]:
     return run_dir, selected
 
 
-# --- Goal 44-53 autofix #2: the strategy human_choice and the LLM-agent human gate
+# --- Autofix #2: the strategy human_choice and the LLM-agent human gate
 #     are DISTINCT gates. A 'selected'+'continue' human_choice (which model-requires
 #     human_confirmed=true) may legitimately coexist with a pending prover-pass gate
 #     (the human picked a route; the prover output still awaits review). The kernel
@@ -356,7 +356,7 @@ def test_selected_continue_with_pending_prover_gate_is_valid(tmp_path: Path) -> 
         assert attempt["status"] in {"waiting_human", "stopped"}
 
 
-# --- Goal 44-53 escalation, now gated by Phase 4's STRICT blocker classification:
+# --- Escalation, now gated by the STRICT blocker classification:
 #     the one-extra-round grant fires ONLY when the whole latest blocker set is
 #     bounded-repairable (proof-step / computation). Human-gated blockers (reviewer
 #     objections, missing hypotheses, source requests) WITHHOLD it (route to human).

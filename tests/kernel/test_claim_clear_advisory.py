@@ -1,4 +1,4 @@
-"""Goal 67A: claim-clear must pass a precise claim whose only missing_or_unclear
+"""Claim-clear must pass a precise claim whose only missing_or_unclear
 entries are advisory clarifications (the external-mode failure), while still
 blocking genuine gaps. Default-deny: unknown / core-gap items always block.
 """

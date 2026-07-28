@@ -89,7 +89,7 @@ def verifier_system_prompt(index: int, *, reviewer_role: str = "verifier") -> st
 
 
 def line_numbered_proof_writer_system_prompt() -> str:
-    """Goal 69: write a STRUCTURED, line-numbered proof (not a route / plan). Each
+    """Write a STRUCTURED, line-numbered proof (not a route / plan). Each
     line has a statement AND a justification AND its line dependencies. This is a
     CANDIDATE proof: it never claims to be machine-verified, source-backed, or proved;
     the kernel re-validates and the only seal it can earn is the explicitly-amber
@@ -142,7 +142,7 @@ def line_numbered_proof_writer_system_prompt() -> str:
 
 
 def proof_consensus_system_prompt(reviewer_id: str) -> str:
-    """Goal 69: the three reviewers review the LINE-NUMBERED PROOF (not route text)
+    """The three reviewers review the LINE-NUMBERED PROOF (not route text)
     adversarially, and MUST cite the proof line_id(s) they examined. Each hunts for an
     argument-BREAKING flaw and returns {no_fatal_flaw_found, fatal_flaw_found,
     unclear}. A residual gap (a fixable missing citation, a definition to pin) is NOT

@@ -381,7 +381,7 @@ def test_claim_card_has_no_foreign_domain_hypotheses(tmp_path: Path) -> None:
     assert "Unclear conclusion" not in html or "concl" in html  # conclusion chip allowed, AG terms not
 
 
-# --- Goal 65C-2: lost-job / stalled detection (mid-call process death) -------
+# --- Lost-job / stalled detection (mid-call process death) -------
 
 def test_status_reports_stalled_after_mid_call_death(client) -> None:
     """A run with an agent call that started but never finished, and no live job
@@ -443,7 +443,7 @@ def test_status_endpoint_exposes_stalled(client) -> None:
     assert st["stalled"] and st["stalled"]["stage"] == "llm_prover_reviewers"
 
 
-# --- Goal 65F: browser/server troubleshooting gates --------------------------
+# --- Browser/server troubleshooting gates --------------------------
 
 def test_g65f_stalled_signal_exposes_failure_state_fields(client) -> None:
     """The UI must be able to show last active stage, elapsed time, and the last
@@ -503,7 +503,7 @@ def test_g65f_failed_agent_keeps_server_alive(client) -> None:
     assert code == 200 and "agents" in st
 
 
-# --- Goal 66: simple prime-order group claim is not blocked via the API ------
+# --- Simple prime-order group claim is not blocked via the API ------
 
 def test_g66_prime_order_group_claim_clears_via_api(client) -> None:
     from espresso_proof.claim.claim_clear import evaluate_claim_clear

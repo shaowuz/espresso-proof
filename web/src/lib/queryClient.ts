@@ -1,7 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 
 /**
- * Display-only cache (Goal 43B): TanStack Query mirrors Espresso's
+ * Display-only cache: TanStack Query mirrors Espresso's
  * artifact model — each panel is its own query. The cache is never a source
  * of truth; every served slice was validated server-side, and a query error
  * surfaces the backend's friendly copy. Conservative polling; failed queries

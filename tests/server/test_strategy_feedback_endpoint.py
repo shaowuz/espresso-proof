@@ -1,4 +1,4 @@
-"""Goal 43C: the strategy-feedback endpoint is advisory, CSRF-guarded, and
+"""The strategy-feedback endpoint is advisory, CSRF-guarded, and
 fail-closed.
 
 A score is not proof, source, refutation, or human confirmation: it is written

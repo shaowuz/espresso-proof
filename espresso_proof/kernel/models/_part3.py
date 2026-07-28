@@ -207,7 +207,7 @@ class ProofVerificationEntry(StrictBaseModel):
     trusted backend with a confirming result may earn a checked status (enforced by
     the validator). ``scope_note`` must state exactly what was (and was not) shown.
 
-    The reproducibility fields (Goal 38) are provenance only — they record HOW to
+    The reproducibility fields are provenance only — they record HOW to
     replay a checked computation (adapter, versions, input/output hashes, exact
     replay command). They are optional/additive and never earn or upgrade status.
     """
@@ -290,7 +290,7 @@ class FiniteObjectWitnessReport(StrictBaseModel):
 
 
 class ExternalToolCandidate(StrictBaseModel):
-    """A discovered external tool proposed for a scoped check (Goal 25, slice 1).
+    """A discovered external tool proposed for a scoped check (slice 1).
 
     Discovery is candidate-only: ``status`` is an allowlisting decision, NOT an
     evidence status. The model carries no source/evidence/proof status field (and
@@ -316,7 +316,7 @@ class ExternalToolCandidatesReport(StrictBaseModel):
 
 
 class ExternalToolRun(StrictBaseModel):
-    """One audited external-tool execution record (Goal 25, slice 1).
+    """One audited external-tool execution record (slice 1).
 
     This is RAW evidence with full provenance, NOT an earned status: the model has
     no proof/source/evidence/grade field, so an external tool can never write a
@@ -354,7 +354,7 @@ class ExternalToolRun(StrictBaseModel):
 
     @model_validator(mode="after")
     def validate_no_proof_complete_interpretation(self) -> ExternalToolRun:
-        # Goal 38: stdout/stderr excerpts stay RAW audited evidence (the display
+        # Stdout/stderr excerpts stay RAW audited evidence (the display
         # layer scrubs them), but the INTERPRETIVE fields are adapter/agent-
         # authored and must never assert global proof completion. Fail closed at
         # parse time so "the tool proved the theorem" can never persist as an

@@ -206,7 +206,7 @@ def test_builder_writes_empty_ledger_without_requests(tmp_path: Path) -> None:
     ledger = build_theorem_condition_ledger(run_dir)
     assert ledger["entries"] == []
     # The orchestrator always rebuilds the subgoal graph right after the ledger, so
-    # the two stay consistent (Goal 57A cap-aware id check). Mirror that here: with
+    # The two stay consistent (cap-aware id check). Mirror that here: with
     # an empty ledger the rebuilt graph carries no subgoal_tcl_* nodes.
     from espresso_proof.kernel.subgoal_graph import build_subgoal_graph
 
@@ -263,7 +263,7 @@ def test_entry_requires_at_least_one_condition() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Goal 57A slice-2: theorem applicability audit is default-deny against the ledger
+# Slice-2: theorem applicability audit is default-deny against the ledger
 # (fixes the 56C dogfood bug: an empty grounding-derived audit defaulted
 # all_applicable, hiding an inapplicable theorem).
 # ---------------------------------------------------------------------------

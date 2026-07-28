@@ -14,8 +14,8 @@ from espresso_proof.kernel.io import read_yaml
 from espresso_proof.orchestration.orchestrator import orchestrate_run
 # NOTE: literature_retrieval.retrieve_and_ground (corpus_dir/query, older
 # retrieve-sources --ground path) is a DIFFERENT function from
-# retrieval_grounding.retrieve_and_ground (Goal 03, candidate/local_corpus). Alias
-# this one so it does not shadow the Goal 03 import above (which the
+# Retrieval_grounding.retrieve_and_ground (candidate/local_corpus). Alias
+# This one so it does not shadow the import above (which the
 # `retrieve-and-ground` command depends on).
 from espresso_proof.verification.mathematical_judgment import judge_run
 from espresso_proof.evaluation.benchmark import run_benchmark
@@ -292,7 +292,7 @@ def scorecard(
         None, "--markdown-out", help="Write the trend-friendly Markdown summary."
     ),
 ) -> None:
-    """Autoprover Behavior Scorecard (Goal 40B): deterministic safety AND
+    """Autoprover Behavior Scorecard: deterministic safety AND
     capability metrics over the mock fixtures — baseline regressions, earning-
     pipeline wiring, seeded-gold-flaw reviewer recall, and a sanitized dogfood
     replay. Exits non-zero on any regression. Metrics never earn or upgrade any

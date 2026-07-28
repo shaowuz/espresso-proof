@@ -272,7 +272,7 @@ def test_semantic_match_with_locator_and_attribution_is_accepted() -> None:
 
 
 def test_matched_reasons_surface_as_satisfied_conditions() -> None:
-    # Goal 37 de-circularization: the audit recomputes coverage from the claim
+    # De-circularization: the audit recomputes coverage from the claim
     # hypotheses and the CITED STATEMENT (it no longer echoes the grounding's
     # stored matched reasons), so satisfied conditions require a statement that
     # genuinely covers the hypotheses.

@@ -1,4 +1,4 @@
-"""Goal 54C: human feedback drives deterministic, advisory time allocation.
+"""Human feedback drives deterministic, advisory time allocation.
 
 These tests pin the contract: a human's strategy score/priority/note deterministically
 re-orders routes, sets the next-round allocation mode, and reaches prompt context —
@@ -65,7 +65,7 @@ def _add_second_strategy_route(run_dir: Path) -> None:
     validate_run(run_dir)
 
 
-# -- deterministic scheduling score (exact Goal 54C formula) -------------------
+# -- Deterministic scheduling score (exact formula) -------------------
 
 
 def test_score_weights_match_spec() -> None:

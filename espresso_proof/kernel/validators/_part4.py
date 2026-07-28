@@ -382,7 +382,7 @@ def _load_optional_line_numbered_proof(
     manifest: RunManifest,
     claim: Claim,
 ) -> LineNumberedProof | None:
-    """Goal 69: the structured line-numbered proof. Fails closed. Malformed / route-
+    """The structured line-numbered proof. Fails closed. Malformed / route-
     shaped YAML is rejected by ``LineNumberedProof`` (StrictBaseModel + the
     per-line validator). Light binding: claim_id must match the run."""
     optional = manifest.optional_artifacts
@@ -409,7 +409,7 @@ def _validate_agent_consensus_review(
 ) -> None:
     """Provenance gate for the agent-consensus mock-check (fail-closed).
 
-    Goal 69: the mock check may ONLY seal a structured line-numbered proof. A route /
+    The mock check may ONLY seal a structured line-numbered proof. A route /
     proposed_steps list / advisory_proof_sketch is NOT sealable. The gate enforces:
 
     - a ``line_numbered_proof.yaml`` exists when the status is sealed (missing /
@@ -437,7 +437,7 @@ def _validate_agent_consensus_review(
             )
         return
 
-    # 1. A line-numbered proof MUST exist for a consensus to mean anything (Goal 69).
+    # 1. A line-numbered proof MUST exist for a consensus to mean anything.
     #    A route / proposed_steps / advisory sketch is not a proof and is not sealable.
     #    The seal helper also checks this upfront (fail-fast); THIS validator gate is
     #    the authoritative BACKSTOP that blocks a hand-forged consensus bypassing the
@@ -448,7 +448,7 @@ def _validate_agent_consensus_review(
             "proposed_steps / advisory_proof_sketch is not a sealable proof"
         )
 
-    # 2. Every PASS must cite real proof line_id(s) (Goal 69 rule 4): a no-fatal-flaw
+    # 2. Every PASS must cite real proof line_id(s) (rule 4): a no-fatal-flaw
     #    verdict that references no line is not a review of the line-numbered proof.
     proof_line_ids = {line.line_id for line in line_numbered_proof.lines}
     for entry in consensus.entries:
@@ -640,7 +640,7 @@ def _validate_subgoal_graph(
                 "counterexample cannot close a subgoal as refuted"
             )
 
-    # Goal 57A cap-aware ledger/graph id consistency. The theorem-condition ledger
+    # Cap-aware ledger/graph id consistency. The theorem-condition ledger
     # is the SINGLE WRITER of ``subgoal_tcl_*`` repair nodes (their ids come from a
     # ledger entry's ``repair_subgoal_id``). When BOTH artifacts exist, every such
     # node in the graph MUST correspond to a real ledger entry — this catches a
@@ -650,7 +650,7 @@ def _validate_subgoal_graph(
     # many ledger entries become graph nodes, so the graph only ever holds a SUBSET
     # of the ledger's repair ids — never an extra one. We therefore check
     # "every graph tcl node ⊆ ledger ids", NOT "every ledger entry has a node"
-    # (the latter would falsely fail a capped graph). Goal 54B's advisory
+    # (the latter would falsely fail a capped graph). The advisory
     # ``target_subgoal_id`` is a different, unverified field and is untouched here.
     if theorem_condition_ledger is not None:
         ledger_repair_ids = {

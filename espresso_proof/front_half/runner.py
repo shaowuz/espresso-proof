@@ -34,7 +34,7 @@ def run_front_half_agent_pass(
     stage_list = list(stages) if stages is not None else list(FRONT_HALF_STAGES)
     generated_at = datetime.now(UTC).isoformat()
     results: list[dict] = []
-    # Goal 54A: best-effort run_id for agent_event correlation (None when absent;
+    # Best-effort run_id for agent_event correlation (None when absent;
     # the artifacts are co-located in the run dir, so this is a convenience).
     try:
         _run_id = (read_yaml(run_dir / "run_manifest.yaml") or {}).get("run_id")
@@ -69,13 +69,13 @@ def run_front_half_agent_pass(
                 }
             )
             continue
-        # Goal 54A: bracket each front-half agent call with provenance (events.jsonl
+        # Bracket each front-half agent call with provenance (events.jsonl
         # + agent_events.jsonl). Diagnostic only — never gates or upgrades status.
         provider = getattr(client, "provider", "unknown")
         started_at = now_iso()
         _t0 = monotonic_ms()
         append_event(run_dir, "agent_call_started", stage=stage)
-        # Goal 65B: record a "started" agent_event before the call so a mid-call
+        # Record a "started" agent_event before the call so a mid-call
         # process death leaves a dangling started record (see
         # observability.latest_unfinished_agent_call).
         append_agent_event(

@@ -404,7 +404,7 @@ def append_verification_entries(run_dir: Path, entries: list[dict]) -> dict:
 
     Holds the cross-process run writer lock for the whole read-modify-write, so
     two concurrent appends (CLI verifier commands, tool adapters) cannot lose
-    each other's entries (Goal 35B)."""
+    Each other's entries."""
 
     run_dir = Path(run_dir)
     ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)

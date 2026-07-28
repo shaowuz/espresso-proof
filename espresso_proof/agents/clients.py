@@ -92,7 +92,7 @@ class StubLLMClient:
     def complete_json(self, *, system: str, prompt: str) -> dict:
         lowered = system.lower()
         if "line-numbered proof writer" in lowered:
-            # Goal 69: a real structured parity proof of n^2 - n even (consecutive
+            # A real structured parity proof of n^2 - n even (consecutive
             # integers route), each line with a concrete justification + dependencies.
             return {
                 "proof_kind": "consecutive_integers",
@@ -305,7 +305,7 @@ class OpenAIResponsesClient:
 
 
 class ExternalAgentTimeoutError(RuntimeError):
-    """Goal 65C: the external agent subprocess exceeded its timeout and its whole
+    """The external agent subprocess exceeded its timeout and its whole
     process group was killed. Carries the timeout (seconds) so callers can record
     timeout metadata (timed_out / timeout_ms) on the agent event."""
 
@@ -315,7 +315,7 @@ class ExternalAgentTimeoutError(RuntimeError):
 
 
 def _kill_process_group(proc: subprocess.Popen) -> None:
-    """Goal 65C: kill the external agent's ENTIRE process group so a forking or
+    """Kill the external agent's ENTIRE process group so a forking or
     hung child cannot survive a timeout as an orphan that blocks the worker
     thread. Best-effort; never raises. Falls back to killing the direct child."""
     try:
@@ -433,7 +433,7 @@ class ExternalCommandClient:
             # same number instead of guessing (see agents/adapter_runtime.py).
             "timeout_seconds": self.timeout,
         }
-        # Goal 65C: run the external agent in its OWN process group
+        # Run the external agent in its OWN process group
         # (start_new_session=True) so a timeout can reclaim the WHOLE group via
         # os.killpg. The order-3 postmortem's prime suspect was a forking/hung
         # external CLI that subprocess.run(timeout=) could not reclaim (it kills

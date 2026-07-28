@@ -18,7 +18,7 @@ import type { ChatMessage } from "./components/ChatPanel";
 type Pane = "evidence" | "workspace" | "literature";
 
 /**
- * One-page cockpit shell. Goal 43B: every panel is its own TanStack Query, so
+ * One-page cockpit shell. every panel is its own TanStack Query, so
  * the workspace opens on fast-core (claim/strategies/status) before the
  * evidence agents finish, and examples/counterexamples/literature refresh
  * independently. A Continue/Run pass invalidates only the affected queries.
@@ -32,7 +32,7 @@ export default function App() {
   const [chatLastNote, setChatLastNote] = useState("");
   const [chatStreaming, setChatStreaming] = useState(false);
   const [activeObject, setActiveObject] = useState<ActiveObject>(null);
-  // Goal 55: the claim the user just submitted, captured the instant they hit
+  // The claim the user just submitted, captured the instant they hit
   // send so the instant draft streams immediately — before (and decoupled from)
   // run creation, so a slow workflow never blanks the page.
   const [pendingClaim, setPendingClaim] = useState("");

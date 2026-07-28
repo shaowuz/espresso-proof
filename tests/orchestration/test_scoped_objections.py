@@ -1,4 +1,4 @@
-"""Goal 54B: structured reviewer-to-subgoal objections.
+"""Structured reviewer-to-subgoal objections.
 
 A reviewer objection becomes repairable *state* bound to a named proof-search
 target, not just prose. These tests pin the three layers and their kernel-safety

@@ -1,4 +1,4 @@
-"""Goal 11: calibration report over the mock fixtures.
+"""Calibration report over the mock fixtures.
 
 The calibration aggregates the product's core safety metrics; on the clean
 fixture suite every safety metric must be 0 (no source-support false positives,
@@ -84,7 +84,7 @@ def test_calibration_cli(tmp_path: Path) -> None:
 
 
 def test_calibration_cli_fails_on_planted_regression(tmp_path: Path, monkeypatch) -> None:
-    # Goal 40A: the CI-gated command must EXIT NON-ZERO when any safety metric
+    # The CI-gated command must EXIT NON-ZERO when any safety metric
     # regresses. Simulate one planted source-support false positive flowing
     # through the real aggregation (the detector itself is proven against a
     # real planted run by test_source_support_false_positive_detector_flags_

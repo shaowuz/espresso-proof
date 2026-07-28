@@ -1,4 +1,4 @@
-"""Goal 41: source-discipline hardening.
+"""Source-discipline hardening.
 
 1. Excerpt-hash binding: a cited statement edited after grounding fails closed
    (self-hash + membership in theorem_extraction).
@@ -51,7 +51,7 @@ def _grounded_run(tmp_path: Path) -> Path:
         claim_id=claim["id"],
         source=str(src),
         source_id="g41_src",
-        title="Goal 41 source",
+        title="Source discipline fixture",
         authors=["A. Author"],
         source_type="paper",
     )

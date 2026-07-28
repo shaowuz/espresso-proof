@@ -1,4 +1,4 @@
-"""Goal 09: active, advisory memory influence.
+"""Active, advisory memory influence.
 
 build_memory_context matches prior project memory to the current claim and
 records advisory recommended uses. It must never upgrade a trusted status,

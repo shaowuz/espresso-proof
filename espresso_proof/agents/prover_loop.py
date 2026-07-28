@@ -558,7 +558,7 @@ def append_prover_loop_round(
             created_at=datetime.now(UTC).isoformat(),
             index=index,
             reviewer_role=reviewer_role,
-            target_subgoal_id=target_subgoal.get("id"),  # Goal 54B: bind objections to the attacked subgoal
+            target_subgoal_id=target_subgoal.get("id"),  # Bind objections to the attacked subgoal
         )
         review["verifier_id"] = f"round_{next_round:03d}_{review['verifier_id']}"
         verifier_reviews.append(review)
@@ -580,7 +580,7 @@ def append_prover_loop_round(
     blocker_details = [detail for detail in blocker_details if detail["text"] in open_texts]
     reviewer_pointers = [_review_pointer(review) for review in verifier_reviews]
     selected_strategy_id = parent_attempt["strategy_id"]
-    # Goal 54C: the selected route's human priority deterministically sets the
+    # The selected route's human priority deterministically sets the
     # allocation. Reviewer blockers always force 'repair' (objections outrank
     # taste); otherwise focus/normal -> expand, repair -> repair, reduce ->
     # cheap_check unless it is the only valid route. Scheduling only — it never
@@ -612,7 +612,7 @@ def append_prover_loop_round(
             else "Expand this candidate with source matching and checked examples."
         )
         + (_machine_answer_note(machine_answered) if machine_answered else ""),
-        # Goal 39: persist the scheduler's pick so the round is durably bound to
+        # Persist the scheduler's pick so the round is durably bound to
         # a named subgoal (prompt context alone is not auditable). None when no
         # subgoal was selectable. Never earns or upgrades any status.
         "target_subgoal_id": target_subgoal.get("id"),
@@ -685,7 +685,7 @@ def build_next_prover_input_from_reviewer_feedback(
     -> ``agent_prompt(..., role="prover_loop_round")``.
     """
 
-    # Goal 26: the subgoal graph is the scheduling center. Pick the highest-value
+    # The subgoal graph is the scheduling center. Pick the highest-value
     # OPEN subgoal and NAME it to the prover so the round works on that specific
     # subgoal id + local claim (not the whole claim). This is scheduling only: it
     # never sets/upgrades any status, and a contradicted (refuted) main goal
@@ -751,12 +751,12 @@ def build_next_prover_input_from_reviewer_feedback(
         ),
         "prover_missing_context_to_record": time_context["missing_context"],
         "target_subgoal": target_subgoal,
-        # Goal 43C: the human's advisory ranking/time-allocation note for this
+        # The human's advisory ranking/time-allocation note for this
         # continuation (from human_choice.taste_judgment). It is prompt context
         # ONLY — the round's outputs are re-validated by the kernel, so this can
         # never upgrade proof/source/evidence/grade/claim status.
         "human_feedback_advisory": _human_feedback_advisory(run_dir),
-        # Goal 54C: structured human strategy feedback (score/priority/note) +
+        # Structured human strategy feedback (score/priority/note) +
         # the derived advisory allocation hint, as prompt context. Advisory only.
         "human_time_allocation": time_allocation_prompt_context(run_dir, selected_strategy_id),
     }
@@ -775,7 +775,7 @@ def _select_parent_attempt(attempts: list[dict], selected_strategy_id: str | Non
 
 
 def _pointer_scope_from_review(review: dict) -> tuple[str, str | None]:
-    """Goal 54B: derive a ProverLoopReviewPointer's (scope, subgoal_id) from the
+    """Derive a ProverLoopReviewPointer's (scope, subgoal_id) from the
     review's scoped objections. Only when every subgoal-scoped objection names the
     SAME subgoal does the pointer claim that subgoal; otherwise it stays 'route'
     (honest default — provenance only, never reconciled against the renumbering graph)."""
@@ -790,7 +790,7 @@ def _pointer_scope_from_review(review: dict) -> tuple[str, str | None]:
 
 
 def _review_pointer(review: dict) -> dict:
-    """Goal 54B: build one ProverLoopReviewPointer dict, carrying the scope/subgoal_id
+    """Build one ProverLoopReviewPointer dict, carrying the scope/subgoal_id
     derived from the review's scoped objections (advisory provenance)."""
     scope, subgoal_id = _pointer_scope_from_review(review)
     return {

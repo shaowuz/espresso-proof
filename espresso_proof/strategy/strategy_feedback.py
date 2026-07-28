@@ -1,4 +1,4 @@
-"""Goal 43C: human strategy feedback — advisory ranking/time-allocation input.
+"""Human strategy feedback — advisory ranking/time-allocation input.
 
 This is the human-in-the-loop channel: the maintainer can score a route, add a note, and
 ask to focus / de-prioritize / repair it. It is **strictly advisory**:

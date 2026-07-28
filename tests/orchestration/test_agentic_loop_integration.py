@@ -1,4 +1,4 @@
-"""Goal 08: agentic loop integration.
+"""Agentic loop integration.
 
 The single `orchestrate` command runs the bounded workflow (front-half -> prover
 loop -> mathematical judgment -> failure-pattern audit -> memo) and can now also
@@ -54,7 +54,7 @@ def _mark_claim_clear(run_dir: Path) -> None:
 
 
 def test_retrieve_and_ground_cli_command_resolves_goal03_function(tmp_path: Path) -> None:
-    """Regression: the retrieve-and-ground command must call the Goal 03 function
+    """Regression: the retrieve-and-ground command must call the function
     (run_dir/local_corpus kwargs), not the shadowing literature_retrieval one."""
     run_dir = run_mock_critique("ag", FIXTURES / "vague_claim_unclear" / "input.md", tmp_path)
     corpus = tmp_path / "corpus"

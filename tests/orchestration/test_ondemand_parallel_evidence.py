@@ -1,4 +1,4 @@
-"""Goal 27: On-Demand + Parallel Evidence Agents V1.
+"""On-Demand + Parallel Evidence Agents V1.
 
 These tests pin the fast core pass, the per-agent status board, the single-agent
 on-demand runner, parallel/independent execution, and the honest dashboard/memo

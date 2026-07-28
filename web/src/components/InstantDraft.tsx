@@ -11,7 +11,7 @@ const LABEL = "Draft only — not checked";
 type Phase = "working" | "streaming" | "done";
 
 /**
- * Goal 55: the instant conversation lane panel. It fires the moment a claim is
+ * The instant conversation lane panel. It fires the moment a claim is
  * submitted — DECOUPLED from run creation — so a slow workflow can never delay
  * or blank the draft. It shows a fast, labeled DRAFT while the evidence pipeline
  * runs in the background. The draft is conversation, NOT evidence:

@@ -1,4 +1,4 @@
-"""On-demand / parallel single-agent runner (Goal 27).
+"""On-demand / parallel single-agent runner.
 
 ``run_single_agent`` runs ONE evidence agent (examples / counterexamples /
 literature / failure-pattern audit) against an existing run, writing only that
@@ -270,7 +270,7 @@ def run_single_agent(
     Fails closed: a mutation/validation error rolls the run back to its previous
     valid state and records the agent as ``failed`` (the previous valid artifact
     is preserved). Never upgrades any mathematical status -- ``validate_run`` is
-    the gate. Holds the cross-process run writer lock while mutating (Goal 35B).
+    The gate. Holds the cross-process run writer lock while mutating.
 
     ``candidate`` (compute/commit split): if a precomputed
     ``AgentCandidate`` from ``compute_agent`` is supplied, this call is the COMMIT

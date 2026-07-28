@@ -1,4 +1,4 @@
-"""Goal 43F: conversational chat stream — a PREVIEW, never evidence.
+"""Conversational chat stream — a PREVIEW, never evidence.
 
 The chat stream narrates what Espresso is doing from the run's CURRENT validated
 artifact state, in calm conversational language. It is a spike on top of the

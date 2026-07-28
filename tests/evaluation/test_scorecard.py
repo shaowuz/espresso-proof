@@ -1,4 +1,4 @@
-"""Goal 40B: Autoprover Behavior Scorecard.
+"""Autoprover Behavior Scorecard.
 
 The scorecard reports safety AND capability metrics deterministically, fails
 on planted regressions (including reviewer gold-flaw misses and dishonest
@@ -39,13 +39,13 @@ def test_scorecard_is_clean_and_complete(tmp_path: Path) -> None:
     assert cap["reviewer_objection_recall"] == 1.0
     assert cap["repair_round_non_regression"] is True
     assert cap["dogfood_replay_honest"] is True
-    # Goal 40C: each family measures a real (if small) case set.
+    # Each family measures a real (if small) case set.
     probes = report["probes"]
     assert probes["source_grounding"]["total"] == 3
     assert probes["applicability_block"]["total"] == 3
     assert probes["scoped_verifier"]["total"] == 2
     assert probes["matcher_discipline"]["total"] == 3
-    # Goal 42E cycle 11: the loop-earned counterexample disciplines stay pinned.
+    # The loop-earned counterexample disciplines stay pinned.
     assert probes["counterexample_discipline"]["total"] == 6
     for family in (
         "source_grounding", "applicability_block", "scoped_verifier",

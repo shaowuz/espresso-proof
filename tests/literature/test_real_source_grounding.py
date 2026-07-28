@@ -212,7 +212,7 @@ def test_grounding_run_stays_kernel_valid_and_registers_audit(tmp_path: Path) ->
 
 
 def test_ground_source_failure_rolls_back_run(tmp_path: Path, monkeypatch) -> None:
-    # Goal 35A regression: prepare_source_grounding runs inside StageRunner with
+    # Regression: prepare_source_grounding runs inside StageRunner with
     # a whole-run snapshot. If grounding fails AFTER partial writes (theorem
     # extraction registered, a partial source_grounding.yaml on disk), the run
     # directory must be restored byte-for-byte and stay kernel-valid.
@@ -225,7 +225,7 @@ def test_ground_source_failure_rolls_back_run(tmp_path: Path, monkeypatch) -> No
     src = tmp_path / "outside_src.txt"  # outside run_dir: not part of the snapshot
     src.write_text(THM, encoding="utf-8")
 
-    # The diagnostic events.jsonl timeline is append-only BY DESIGN (Goal 35B):
+    # The diagnostic events.jsonl timeline is append-only BY DESIGN:
     # it records the failed stage and is intentionally never rolled back, so it
     # is excluded from the byte-identity comparison.
     def _files(root: Path) -> dict:
@@ -308,7 +308,7 @@ def test_orchestrate_ground_source_cli_earns_source_backed(tmp_path: Path) -> No
 
 
 def test_tampered_hypothesis_match_blocked_by_independent_audit(tmp_path: Path) -> None:
-    # Goal 37 de-circularization: the applicability audit recomputes hypothesis
+    # De-circularization: the applicability audit recomputes hypothesis
     # coverage from the claim hypotheses and the CITED STATEMENT itself. A
     # hand-edited hypothesis_match=True over a statement that does not cover
     # the claim hypotheses must fail closed: the audit blocks and the run no

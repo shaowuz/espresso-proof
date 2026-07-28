@@ -1,4 +1,4 @@
-"""Deterministic scoped-verification request probes (Goal 42E, cycle 2).
+"""Deterministic scoped-verification request probes (cycle 2).
 
 The proof-search loop stalls on dogfood cases because no machine evidence
 ever enters a smoke run: reviewer requests like "source or exact computation"

@@ -1,4 +1,4 @@
-"""Calibration report (Goal 11).
+"""Calibration report.
 
 A deterministic, gate-friendly meta-eval over the EXISTING mock fixtures that
 aggregates the product's core SAFETY metrics, so we can tell whether Espresso is

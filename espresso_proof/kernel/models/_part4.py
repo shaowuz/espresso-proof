@@ -411,7 +411,7 @@ class TheoremApplicabilityReport(StrictBaseModel):
     source_grounding_artifact: str
     literature_review_agent_artifact: str | None = None
     usages: list[TheoremApplicabilityUsage]
-    # Goal 57A slice-2: default-deny usages derived from the advisory theorem
+    # Slice-2: default-deny usages derived from the advisory theorem
     # condition ledger (reviewer source_requests). These are NOT source-grounding
     # usages: they never map to a proof step, never earn source_backed, and (being
     # default-deny) are NEVER ``applicable`` unless a condition is explicitly
@@ -428,7 +428,7 @@ class TheoremApplicabilityReport(StrictBaseModel):
         "wrong_source",
     ]
     notes: list[str] = Field(default_factory=list)
-    # Goal 41: sha256 of source_grounding.yaml's bytes AT AUDIT TIME. Optional/
+    # Sha256 of source_grounding.yaml's bytes AT AUDIT TIME. Optional/
     # additive: when set, the run validator requires the current file to match —
     # editing the grounding after the audit (without re-running it) fails
     # closed instead of leaving a stale "applicable" verdict standing.
@@ -442,7 +442,7 @@ class TheoremApplicabilityReport(StrictBaseModel):
         if self.overall_status == "all_applicable":
             if any(usage.applicability_status != "applicable" for usage in self.usages):
                 raise ValueError("all_applicable requires every theorem usage applicable")
-            # Goal 57A: a ledger obligation that is not fully resolved (non-exact
+            # A ledger obligation that is not fully resolved (non-exact
             # locator or any non-satisfied condition surfaces as a non-applicable
             # ledger usage) must forbid all_applicable. Default-deny, fail closed.
             if any(usage.applicability_status != "applicable" for usage in self.ledger_usages):

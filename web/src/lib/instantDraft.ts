@@ -1,5 +1,5 @@
 /**
- * Goal 55: instant-draft client. The instant lane answers a claim FAST with a
+ * Instant-draft client. The instant lane answers a claim FAST with a
  * labeled DRAFT ("Draft only — not checked") while the slow artifact/kernel
  * pipeline runs in the background. Like the chat stream, it is a PREVIEW —
  * never evidence; every line was already proof-language-scrubbed server-side.
@@ -36,7 +36,7 @@ export async function streamInstantDraft(
 }
 
 /**
- * Goal 55: the PRE-RUN instant lane. Answers the submitted claim text the moment
+ * The PRE-RUN instant lane. Answers the submitted claim text the moment
  * it is sent, decoupled from run creation, so a slow workflow can never blank the
  * page. Same contract as {@link streamInstantDraft} but with no run id.
  */

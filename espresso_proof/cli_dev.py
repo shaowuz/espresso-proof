@@ -45,8 +45,8 @@ from espresso_proof.kernel.research_bank import (
 )
 # NOTE: literature_retrieval.retrieve_and_ground (corpus_dir/query, older
 # retrieve-sources --ground path) is a DIFFERENT function from
-# retrieval_grounding.retrieve_and_ground (Goal 03, candidate/local_corpus). Alias
-# this one so it does not shadow the Goal 03 import above (which the
+# Retrieval_grounding.retrieve_and_ground (candidate/local_corpus). Alias
+# This one so it does not shadow the import above (which the
 # `retrieve-and-ground` command depends on).
 from espresso_proof.literature.literature_retrieval import retrieve_and_ground as retrieve_and_ground_from_corpus
 from espresso_proof.literature.literature_retrieval import retrieve_sources
@@ -228,7 +228,7 @@ def build_subgoal_graph_command(
     """
     from espresso_proof.verification.theorem_condition_ledger import build_theorem_condition_ledger
 
-    # Goal 57A: ensure the advisory theorem-condition ledger exists before the
+    # Ensure the advisory theorem-condition ledger exists before the
     # graph reads it (idempotent; empty ledger when there is no llm_agent_run).
     build_theorem_condition_ledger(run)
     graph = build_subgoal_graph(run)

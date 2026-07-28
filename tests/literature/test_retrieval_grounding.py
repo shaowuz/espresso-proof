@@ -1,4 +1,4 @@
-"""Goal 03: Retrieval -> Source Grounding tests.
+"""Retrieval -> Source Grounding tests.
 
 Positive: a local source (corpus or explicit file) is resolved, extracted,
 grounded, and a step earns source support. Negative/fail-closed: an unresolved

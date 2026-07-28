@@ -1,4 +1,4 @@
-"""Goal 43F: the chat stream is a conversational PREVIEW — never evidence.
+"""The chat stream is a conversational PREVIEW — never evidence.
 
 It reads the run's validated state and writes nothing; every emitted line is
 proof-language-scrubbed; it cannot mark a route checked/source-backed/refuted;

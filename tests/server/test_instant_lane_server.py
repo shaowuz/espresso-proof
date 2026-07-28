@@ -1,4 +1,4 @@
-"""Goal 55: the instant-draft SSE endpoint is fast, scrubbed, and advisory.
+"""The instant-draft SSE endpoint is fast, scrubbed, and advisory.
 
 It acks immediately, streams a labeled DRAFT, persists only an advisory sidecar
 (never a kernel artifact), upgrades no status, is CSRF-guarded, and validate_run
