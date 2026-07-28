@@ -40,7 +40,7 @@ from espresso_proof.kernel.run_events import append_event
 from espresso_proof.orchestration.run_dashboard import status_summary
 from espresso_proof.kernel.validators import validate_run
 
-# Goal 43A: the built React cockpit (web/dist), served at "/". The build is
+# The built React cockpit (web/dist), served at "/". The build is
 # the ONLY UI — no fallback (the old built-in page kept being mistaken for the
 # product). serve() refuses to start without it; a request that finds it gone
 # mid-flight gets an explicit 503 build-instructions page. Static assets are

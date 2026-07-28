@@ -91,7 +91,7 @@ def _now() -> str:
 @dataclass(frozen=True)
 class AgentCandidate:
     """A precomputed, in-memory result of an evidence lane's pure ``compute()``
-    (subgoal 04 compute/commit split). It is produced OFF the run writer lock,
+    (compute/commit split). It is produced OFF the run writer lock,
     writes NOTHING under ``run_dir``, and is later committed by
     ``run_single_agent(run_dir, agent, candidate=<this>)`` through the unchanged
     lock + StageRunner transaction + ``validate_run`` machinery.
@@ -143,10 +143,11 @@ def compute_agent(
     external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
     client=None,
 ) -> AgentCandidate:
-    """Pure COMPUTE half (subgoal 04): build an ``AgentCandidate`` writing NOTHING
+    """Pure COMPUTE half: build an ``AgentCandidate`` writing NOTHING
     under ``run_dir``. Reads are unrestricted (they take no lock). Commit it via
     ``run_single_agent(run_dir, agent, candidate=<result>)``. This is the unit
-    subgoal 05 runs in parallel on a bounded pool before serial commit.
+    the fan-out coordinator runs these in parallel on a bounded pool before
+    committing serially.
     """
     run_dir = Path(run_dir)
     if agent not in ON_DEMAND_AGENTS:
@@ -209,7 +210,7 @@ def _commit_candidate(run_dir: Path, agent: str, candidate: AgentCandidate) -> N
 def _run_agent_body(run_dir: Path, agent: str, *, client, candidate: AgentCandidate | None = None) -> None:
     """Run the agent's actual work, writing only its owned artifact(s).
 
-    If ``candidate`` is supplied (subgoal 04 compute/commit split), persist it
+    If ``candidate`` is supplied (compute/commit split), persist it
     instead of recomputing -- the writes are identical, just sourced from the
     off-lock ``compute_agent``. Otherwise the existing inline path computes AND
     writes in one step (full back-compat).
@@ -271,7 +272,7 @@ def run_single_agent(
     is preserved). Never upgrades any mathematical status -- ``validate_run`` is
     the gate. Holds the cross-process run writer lock while mutating (Goal 35B).
 
-    ``candidate`` (subgoal 04 compute/commit split): if a precomputed
+    ``candidate`` (compute/commit split): if a precomputed
     ``AgentCandidate`` from ``compute_agent`` is supplied, this call is the COMMIT
     half -- it persists the candidate's artifacts under the lock instead of
     recomputing. ``validate_run`` still runs in-transaction, so a candidate

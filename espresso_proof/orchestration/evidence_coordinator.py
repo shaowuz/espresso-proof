@@ -6,10 +6,10 @@ The fast-core orchestrate pass still defers the evidence agents (they stay
 ``not_run`` at the human gate; the memo/dashboard say PRELIMINARY). A caller (CLI /
 server / a future orchestrator step) invokes this to actually run a set of lanes.
 
-Subgoal 03 (this version): SERIAL — each requested lane is run via the proven
+Serial path: each requested lane is run via the proven
 ``run_single_agent`` (each writes disjoint artifacts, commits under the
 ``run_writer_lock``, re-validates the whole run, and converges regardless of order).
-Subgoal 05 parallelizes the COMPUTE while keeping the COMMIT serial on the
+The fan-out path parallelizes the COMPUTE while keeping the COMMIT serial on the
 coordinator thread. Nothing here touches ``current_state``; lane progress lives on
 the ``agent_run_status`` board.
 """
@@ -55,7 +55,7 @@ from espresso_proof.kernel.pressure_lane_barrier import (
 # Deterministic commit order. ``examples`` reconciles ``tests.yaml`` from the
 # ``counterexamples`` report and both own ``tests.yaml``, so counterexamples MUST
 # commit before examples; literature and failure_patterns own disjoint files and may
-# go in any order. This order is what subgoal 05's parallel-compute / serial-commit
+# go in any order. This order is what the parallel-compute / serial-commit
 # coordinator must also honor for byte-identical convergence.
 _COMMIT_ORDER = list(PRESSURE_LANE_BARRIER_COMMIT_ORDER)
 
@@ -125,7 +125,7 @@ def run_evidence_batch(
     return {"agents": results}
 
 
-# --- Subgoal 05: parallel COMPUTE, serial COMMIT -------------------------------
+# --- Fan-out: parallel COMPUTE, serial COMMIT -------------------------------
 
 # Hard cap on concurrent lane compute()s. There are only four context lanes, and
 # a real provider charges per call, so the pool is bounded small by default.
@@ -232,7 +232,8 @@ def run_evidence_batch_parallel(
     """Run a set of on-demand evidence agents with PARALLEL compute + SERIAL commit.
 
     The four context lanes' ``compute_agent`` (pure, off-lock, writes nothing under
-    ``run_dir`` -- proven in subgoal 04) run concurrently on a bounded pool; then
+    ``run_dir`` -- proven by the compute/commit split tests) run concurrently on a
+    bounded pool; then
     each candidate is committed SERIALLY on THIS (the coordinator) thread via the
     unchanged ``run_single_agent`` -- because ``run_writer_lock`` re-entrancy is
     ``threading.local``, a worker-thread commit would self-contend the flock. The
@@ -412,7 +413,7 @@ def run_evidence_batch_parallel(
 
 # Default-on feature flag: the batch entrypoints use the parallel coordinator by
 # default and fall back to the serial path when this is turned off. Both paths
-# produce a byte-identical run (proven in subgoal 05), so the flag is purely an
+# produce a byte-identical run (proven by the fan-out tests), so the flag is purely an
 # operational escape hatch.
 PARALLEL_ENV = "ESPRESSO_EVIDENCE_PARALLEL"
 _FLAG_OFF = {"false", "0", "no", "off"}

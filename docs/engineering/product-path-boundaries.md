@@ -21,7 +21,7 @@ Canonical files:
 
 ## removed surfaces
 
-The VS Code prototype, browser validation scripts, root scripts directory, old goal/campaign gates, old goal queues, archived planning folders, checked-in seed projects, and checked-in example run artifacts are not part of the current product surface. (`examples/quickstart.sh` is the one checked-in example script and stays — EXECUTION_TRUNK points at it.)
+The VS Code prototype, browser validation scripts, a root scripts directory, archived planning folders, checked-in seed projects, and checked-in example run artifacts were all removed and are not part of the current product surface. (`examples/quickstart.sh` is the one checked-in example script and stays — EXECUTION_TRUNK points at it.)
 
 ## cleanup rule
 

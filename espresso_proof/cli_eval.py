@@ -58,7 +58,7 @@ def judge_command(
 def benchmark_command(
     output_root: Path = typer.Option(Path(".benchmark_runs"), "--out-root", help="Where benchmark runs are written."),
     json_out: Path | None = typer.Option(
-        None, "--json-out", help="Also write the full report as machine-readable JSON (Goal 40A)."
+        None, "--json-out", help="Also write the full report as machine-readable JSON."
     ),
 ) -> None:
     """Run the regression benchmark (curated conservative-behaviour cases over the
@@ -247,7 +247,7 @@ def real_agent_smoke_command(
 def calibration(
     output_root: Path = typer.Option(Path(".benchmark_runs"), "--out-root", help="Where calibration runs are written."),
     json_out: Path | None = typer.Option(
-        None, "--json-out", help="Also write the full report as machine-readable JSON (Goal 40A)."
+        None, "--json-out", help="Also write the full report as machine-readable JSON."
     ),
 ) -> None:
     """Aggregate the product's core SAFETY metrics over the mock fixtures.

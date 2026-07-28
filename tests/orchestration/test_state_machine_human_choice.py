@@ -5,7 +5,6 @@ reject a re-resume of a run interrupted between recording the choice and the mem
 Also locks in the (correct) FRONT_HALF_DONE-before-CLAIM_CLEAR order so a future
 "fix" cannot reorder it and silently stop CLAIM_CLEAR from ever being set.
 
-Subgoal 01 of the Claude-reconstructs-Espresso-Proof plan.
 """
 from __future__ import annotations
 

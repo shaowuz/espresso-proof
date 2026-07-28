@@ -1,9 +1,9 @@
-"""Subgoal 04: compute/commit split acceptance.
+"""Compute/commit split acceptance.
 
 Proves the two load-bearing invariants of the split:
 
 1. ``compute_agent`` is observationally PURE w.r.t. ``run_dir`` — it creates,
-   deletes, or modifies NO file (content + mtime). This is what lets subgoal 05
+   deletes, or modifies NO file (content + mtime). This is what lets the fan-out
    run the four lanes' ``compute()`` in parallel OFF the writer lock.
 2. ``compute_agent`` + ``run_single_agent(candidate=...)`` (the split path)
    reproduces the inline ``run_single_agent`` evidence artifacts BYTE-FOR-BYTE.

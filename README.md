@@ -1,16 +1,31 @@
 # Espresso Proof
 
-Start here for architecture: [docs/engineering/EXECUTION_TRUNK.md](docs/engineering/EXECUTION_TRUNK.md) — the end-to-end call tree from problem text to output files.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
 
-Espresso Proof is a local AI workspace for mathematical research. It helps a mathematician turn a claim or proof sketch into auditable project artifacts: claim state, source gaps, examples, counterexamples, strategy notes, reviewer objections, and a visible run trace.
+A local workspace that pressure-tests a mathematical idea and writes down what
+it actually established.
+
+You paste in a claim or a proof sketch. LLM agents attack it from several
+directions — routes, examples, counterexamples, literature, reviewer objections
+— and everything they produce lands in files you can audit, each labelled with
+how much evidence is behind it.
+
+![The Espresso Proof cockpit](docs/assets/cockpit.png)
+
+Look at the labels in that screenshot: *Draft only — not checked*, *Needs a
+source*, *No step is reference-supported yet*. That is the whole idea. An agent
+can write anything; only the kernel decides what it may be **called**.
+
+Espresso is not a theorem prover, not a Lean formalization product, and not a
+chatbox. It keeps the important reasoning in files instead of in a conversation
+you will never re-read.
 
 The supported product path is intentionally narrow:
 
 ```text
 React cockpit -> espresso serve -> external Codex agent -> artifact kernel
 ```
-
-Espresso is not a theorem prover, not a Lean formalization product, and not a chatbox. It is a Codex-backed research workflow that keeps important reasoning in files instead of only in conversation.
 
 ## What it does not guarantee
 
@@ -158,7 +173,7 @@ until you have a reason not to:
 
 ## Reference
 
-- [docs/engineering/EXECUTION_TRUNK.md](docs/engineering/EXECUTION_TRUNK.md) - end-to-end execution map and trust boundary summary.
+- [docs/engineering/EXECUTION_TRUNK.md](docs/engineering/EXECUTION_TRUNK.md) - start here for architecture: the end-to-end call tree from problem text to output files.
 - [docs/product-philosophy.md](docs/product-philosophy.md) - product principles and trust boundary.
 - [docs/engineering/product-path-boundaries.md](docs/engineering/product-path-boundaries.md) - supported product surface.
 - [docs/engineering/ESPRESSO_CORE_INTEGRATION.md](docs/engineering/ESPRESSO_CORE_INTEGRATION.md) - espresso-core external-agent contract.

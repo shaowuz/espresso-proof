@@ -1,4 +1,4 @@
-"""Subgoal 03: the explicit on-demand evidence BATCH coordinator (serial).
+"""The explicit on-demand evidence BATCH coordinator (serial).
 
 Proves the coordinator runs a set of lanes via the proven run_single_agent path and
 converges, AND that it does NOT change current_state / does NOT make the fast-core

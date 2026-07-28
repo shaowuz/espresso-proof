@@ -1,4 +1,4 @@
-"""Subgoal 05: parallel-COMPUTE / serial-COMMIT evidence fan-out coordinator.
+"""Parallel-COMPUTE / serial-COMMIT evidence fan-out coordinator.
 
 Proves the coordinator's invariants:
 - Convergence: the run is BYTE-IDENTICAL to the serial batch regardless of which

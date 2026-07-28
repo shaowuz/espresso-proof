@@ -172,7 +172,7 @@ def _normalize_admissibility_tests(
 
 
 def compute_counterexamples(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
-    """Pure compute for the counterexamples lane (subgoal 04 compute/commit split).
+    """Pure compute for the counterexamples lane (compute/commit split).
 
     Builds and validates the candidate artifacts in memory (including the
     deterministic machine probes, which read only the claim dict) and writes
