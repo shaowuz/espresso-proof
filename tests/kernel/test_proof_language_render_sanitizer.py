@@ -1,4 +1,4 @@
-"""Goal 20: renderer proof-language sanitizer + display vocabulary.
+"""Renderer proof-language sanitizer + display vocabulary.
 
 User-visible output (memo / inspect / dashboard / memory summary) must never
 render global proof-complete language ("proof-close", "Espresso proved the theorem",
@@ -164,7 +164,7 @@ def test_memo_verdict_uses_human_phrase_not_raw_enum(tmp_path: Path) -> None:
         assert raw not in verdict_line
 
 
-# --- Goal 36: Chinese proof-complete coverage --------------------------------
+# --- Chinese proof-complete coverage --------------------------------
 def test_scrub_redacts_chinese_global_overclaims() -> None:
     overclaims = [
         "证毕",
@@ -204,7 +204,7 @@ def test_scrub_preserves_scoped_chinese_prose() -> None:
 
 
 def test_reviewer_chinese_overclaim_never_reaches_memo(tmp_path: Path) -> None:
-    # Negative test from the Goal 36 spec: reviewer/model text saying 已证明该
+    # Negative test from the spec: reviewer/model text saying 已证明该
     # 定理 / 证毕 is scrubbed from every user-facing render.
     run = run_mock_critique("g36zh", FIXTURES / "promising_but_unproved" / "input.md", tmp_path)
     artifacts = read_yaml(run / "run_manifest.yaml")["artifacts"]

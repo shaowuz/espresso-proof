@@ -1,4 +1,4 @@
-"""Goal 39: prover rounds are durably bound to a named subgoal.
+"""Prover rounds are durably bound to a named subgoal.
 
 The scheduler's pick was already threaded into the round PROMPT; these tests pin
 that it is now also PERSISTED on the round record (``target_subgoal_id`` /

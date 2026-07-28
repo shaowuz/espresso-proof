@@ -1,4 +1,4 @@
-"""Goal 43F: user research/chat notes with provenance — advisory only.
+"""User research/chat notes with provenance — advisory only.
 
 A note may bind to a strategy, source, example, counterexample, or subgoal so a
 human observation has a home. Like strategy feedback it lives in a SIDECAR the

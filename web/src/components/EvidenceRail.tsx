@@ -81,7 +81,7 @@ function ItemHeader({ title, children }: { title: string; children?: ReactNode }
 
 /**
  * LEFT rail: Examples / Counterexamples / Computations — three independent
- * queries (Goal 43B). Each section loads, refreshes, and fails on its own;
+ * Queries. Each section loads, refreshes, and fails on its own;
  * a slow examples fetch never blocks counterexamples or computations, and
  * expanded state is keyed by item id so it survives polling.
  */

@@ -1,4 +1,4 @@
-"""Goal 42E cycle 2: deterministic scoped-verification request probes."""
+"""Deterministic scoped-verification request probes."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def test_requests_auto_wire_to_instance_checked_in_full_run(tmp_path: Path) -> N
         effort="normal_pass",
         prover_provider="stub",
     )
-    # Goal 42E cycle 3: orchestrate_run wires the requests BEFORE the prover
+    # Orchestrate_run wires the requests BEFORE the prover
     # pass, so a later manual call is a pure no-op (idempotent).
     summary = auto_wire_scoped_verifications(run_dir)
     assert not summary["appended"]

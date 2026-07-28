@@ -184,7 +184,7 @@ def test_unknown_pattern_id_and_id_mismatch_rejected(tmp_path: Path) -> None:
         validate_run(run_dir)
 
 
-# --- Goal 05: additional named patterns + audited ranking/time-allocation hint ---
+# --- Additional named patterns + audited ranking/time-allocation hint ---
 
 def test_new_named_seed_patterns_present_as_candidate() -> None:
     bank = seed_failure_pattern_bank()

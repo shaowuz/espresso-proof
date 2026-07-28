@@ -1,4 +1,4 @@
-"""Goal 54A: per-run runtime observability (events.jsonl / agent_events.jsonl /
+"""Per-run runtime observability (events.jsonl / agent_events.jsonl /
 timings.yaml).
 
 Observability is provenance, never evidence: records cannot carry a status-upgrade
@@ -142,7 +142,7 @@ def test_run_produces_observability_and_still_validates(tmp_path: Path):
 
     assert events and all("monotonic_ms" in e for e in events)
     assert {"agent_call_started", "agent_call_finished"} <= {e.get("kind") for e in events}
-    # Goal 65B: each call now emits a "started" record (so a mid-call death is
+    # Each call now emits a "started" record (so a mid-call death is
     # visible) plus a terminal record. Every started call here completed, so
     # every started has a matching finished and there is no dangling call.
     terminal = [a for a in agent_events if a.get("agent_status") != "started"]
@@ -257,7 +257,7 @@ def test_resume_prover_rounds_emit_agent_events(tmp_path: Path):
     validate_run(run_dir)
     rounds = [a for a in obs.read_agent_events(run_dir) if a.get("stage") == "prover_loop_round"]
     assert rounds, "prover-loop rounds must emit agent_events for stall diagnosis"
-    # Goal 65B: a round emits a "started" record (duration None) then a terminal
+    # A round emits a "started" record (duration None) then a terminal
     # record (duration int); assert on the terminal records.
     terminal_rounds = [a for a in rounds if a.get("agent_status") != "started"]
     assert terminal_rounds
@@ -265,7 +265,7 @@ def test_resume_prover_rounds_emit_agent_events(tmp_path: Path):
     assert all(isinstance(a.get("round_index"), int) for a in rounds)
 
 
-# --- Goal 65B: mid-call death reconstruction ---------------------------------
+# --- Mid-call death reconstruction ---------------------------------
 
 def test_latest_unfinished_agent_call_detects_mid_call_death(tmp_path: Path):
     """A call that records 'started' but no terminal record (the order-3

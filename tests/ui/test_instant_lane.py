@@ -1,4 +1,4 @@
-"""Goal 55: Instant Mathematical Conversation Lane — fast DRAFT, never evidence.
+"""Instant Mathematical Conversation Lane — fast DRAFT, never evidence.
 
 These tests pin the safety/latency contract of the instant lane:
 

@@ -332,7 +332,7 @@ export function errorText(err: unknown): string {
 
 /**
  * POST /api/runs/{id}/research-note — bind one advisory note to a run object
- * (Goal 43F). Returns the binding; the note never changes any status.
+ *. Returns the binding; the note never changes any status.
  */
 export function postResearchNote(
   runId: string,

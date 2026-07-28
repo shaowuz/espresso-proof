@@ -240,7 +240,7 @@ def continue_prover_loop(
 
     Holds the cross-process run writer lock (re-entrant under ``resume_run``),
     so two concurrent loop continuations cannot interleave or duplicate prover
-    rounds (Goal 35B).
+    Rounds.
     """
 
     run_dir = Path(run_dir)
@@ -404,7 +404,7 @@ def _continue_prover_loop_locked(
             )
 
         # --- append exactly one round; fail closed AND roll back on error ---
-        # Goal 54A: bracket each prover-loop round with provenance so a stall in a
+        # Bracket each prover-loop round with provenance so a stall in a
         # deep proof-search round (model call vs validation) is visible. _snapshot_run
         # does not capture agent_events.jsonl, so a failed round's record survives.
         snapshot = _snapshot_run(run_dir)
@@ -412,7 +412,7 @@ def _continue_prover_loop_locked(
         _round_t0 = monotonic_ms()
         round_index = rounds_run + 1
         append_event(run_dir, "agent_call_started", stage="prover_loop_round", detail=f"round {round_index}")
-        # Goal 65B: record a "started" agent_event before the round so a mid-round
+        # Record a "started" agent_event before the round so a mid-round
         # process death leaves a dangling started record (see
         # observability.latest_unfinished_agent_call).
         append_agent_event(
@@ -430,7 +430,7 @@ def _continue_prover_loop_locked(
                 reviewer_set=reviewer_set,
                 client=client,
             )
-            # Goal 67B (deep-round path): preserve this round's (scrubbed,
+            # Deep-round path: preserve this round's (scrubbed,
             # advisory-only) reasoning in the snapshot-surviving sidecar BEFORE
             # validate_run. If the round is rejected (e.g. a step smuggled a
             # status field) and _restore_run rolls it back, the round artifact is

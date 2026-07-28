@@ -1,4 +1,4 @@
-"""Goal 25 (slice 2): fake sandbox executor.
+"""Fake sandbox executor.
 
 A minimal, safe executor runs ONLY allowlisted deterministic fake tools, records
 an audited run, and fails closed on timeout / nonzero exit / malformed output. It
@@ -118,7 +118,7 @@ def test_failed_run_renders_fail_closed_no_proof_language(tmp_path: Path) -> Non
 
 
 def test_overclaiming_tool_output_is_scrubbed_from_conclusion(tmp_path: Path, monkeypatch) -> None:
-    # Goal 38: a tool that PRINTS proof-complete language still gets recorded
+    # A tool that PRINTS proof-complete language still gets recorded
     # (raw stdout preserved as audited evidence), but the interpretive
     # conclusion is scrubbed so the artifact passes the model's proof-language
     # gate instead of crashing or persisting an overclaim.

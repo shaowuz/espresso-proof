@@ -13,7 +13,7 @@ export type ChatMessage = {
 };
 
 /**
- * Goal 43F: a conversational PREVIEW panel. The streamed text is advisory — it
+ * A conversational PREVIEW panel. The streamed text is advisory — it
  * is not evidence, not proof, not source support, and it never updates the
  * evidence panels (those come only from validated artifacts via TanStack
  * Query). The only command entry point is the bottom composer; this panel is

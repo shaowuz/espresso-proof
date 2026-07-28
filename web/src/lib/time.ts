@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 /**
- * Goal 43E: human-feeling progress. Pure, testable duration formatting plus a
+ * Human-feeling progress. Pure, testable duration formatting plus a
  * live ticking hook so a running job shows elapsed time and never feels frozen.
  * Display only — never changes status.
  */

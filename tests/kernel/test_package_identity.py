@@ -1,4 +1,4 @@
-"""Canonical mainline identity (Goal 35A).
+"""Canonical mainline identity.
 
 The authoritative ``espresso_proof`` package is the ``espresso_proof/``
 directory that sits next to this ``tests/`` directory. CI installs the package

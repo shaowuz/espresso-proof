@@ -1,4 +1,4 @@
-"""Cross-process per-run writer lock (Goal 35B).
+"""Cross-process per-run writer lock.
 
 The Product Workbench server already serializes mutating actions on one run
 with in-process ``threading.Lock``s, but nothing stops a second PROCESS (a CLI

@@ -1,4 +1,4 @@
-"""Single display vocabulary layer for proof-language safety (Goal 20).
+"""Single display vocabulary layer for proof-language safety.
 
 Espresso Proof may show heuristic critique, a reference-supported step, or a
 checked computation with explicit scope -- but user-visible output must NEVER
@@ -50,7 +50,7 @@ _FIRST_PERSON_ASSERTIONS = tuple(
     f"{s} {v} {o}" for s in _SUBJECTS for v in _VERBS for o in _OBJECTS
 )
 
-# Chinese global proof-completion phrases (Goal 36), curated by the SAME two
+# Chinese global proof-completion phrases, curated by the SAME two
 # safe families. Self-contained completion markers: 证毕 (= proof-close), 证明完毕 /
 # 证明完成 (proof finished). Global assertions: 定理/命题/猜想 + 得证/已证明,
 # and first-person 我们证明了 + a definite global object. Because the boundary
@@ -133,7 +133,7 @@ def scrub_source_support_language(text: object) -> str:
     )
 
 
-# Goal 65E: bare earned-status VERDICTS an advisory instant draft must never
+# Bare earned-status VERDICTS an advisory instant draft must never
 # assert. scrub_proof_language only blocks proof-COMPLETE overclaims and lets
 # "checked"/"verified"/"refuted" through, so the instant lane needs this extra
 # filter. It targets verdict FORMS only ("source-backed", "refuted", and
@@ -152,7 +152,7 @@ _DRAFT_STATUS_CLAIM_PATTERN = re.compile(
 def contains_draft_status_claim(text: object) -> str | None:
     """Return the first earned-status VERDICT phrase in ``text``, or None.
 
-    Used by the instant conversation lane (Goal 65E): an advisory pre-pipeline
+    Used by the instant conversation lane: an advisory pre-pipeline
     draft references no validated artifact, so it must not assert source-backed /
     refuted / checked-style verdicts. Advisory phrasing ("needs a check", "to be
     verified") is deliberately not matched."""
@@ -163,8 +163,9 @@ def contains_draft_status_claim(text: object) -> str | None:
 
 
 def scrub_draft_status_claims(text: object) -> str:
-    """Redact earned-status verdict forms from advisory instant-draft text
-    (Goal 65E). Verdict phrasing like "is checked" / "refuted" / "source-backed"
+    """Redact earned-status verdict forms from advisory instant-draft text.
+
+    Verdict phrasing like "is checked" / "refuted" / "source-backed"
     becomes a neutral '[unverified]' marker; advisory phrasing is left intact.
     Pure/never raises."""
     if text is None:
@@ -210,7 +211,7 @@ FORBIDDEN_LANGUAGE = [
     "the claim is true",
     "the theorem is established",
     "proof-close",
-    # Goal 41: Chinese global completion markers (FORBIDDEN_LANGUAGE must stay
+    # Chinese global completion markers (FORBIDDEN_LANGUAGE must stay
     # a superset of the validator's parse-time gate; the ASCII lookarounds in
     # forbidden_pattern() are satisfied around CJK characters).
     "证毕",

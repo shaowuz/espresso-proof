@@ -30,7 +30,7 @@ from espresso_proof.kernel.run_lock import LOCK_FILENAME
 
 MANIFEST_NAME = "run_manifest.yaml"
 
-# Goal 67B: the advisory prover-sketch sidecar. Defined here (next to the
+# The advisory prover-sketch sidecar. Defined here (next to the
 # exclusion set that must list it) so the capture module can import the name
 # without stage_runner importing the heavier capture module (which would pull
 # validators into this low-level plumbing). Pure diagnostic sink — never a kernel
@@ -47,8 +47,8 @@ REPAIR_TARGET_FILENAME = "repair_target.yaml"
 # back would erase the record of the failed stage they exist to explain — in
 # particular a failed agent call's record) and the writer lock file (unlinking
 # it would silently break a concurrently-held flock by splitting it across
-# inodes). Goal 54A: agent_events.jsonl / timings.yaml join events.jsonl here.
-# Goal 67B: advisory_proof_sketch.yaml joins them so a rolled-back prover attempt
+# Inodes). agent_events.jsonl / timings.yaml join events.jsonl here.
+# Advisory_proof_sketch.yaml joins them so a rolled-back prover attempt
 # does not erase its (scrubbed, advisory-only) mathematical reasoning. Phase 5:
 # repair_target.yaml joins them so a rolled-back repair round still records which
 # objections it was asked to address.

@@ -1,4 +1,4 @@
-"""Goal 31 Language System: one product vocabulary across entry page, run page,
+"""Language System: one product vocabulary across entry page, run page,
 memo, and errors — no implementation words on the main user path."""
 
 from __future__ import annotations

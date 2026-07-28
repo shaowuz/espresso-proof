@@ -70,7 +70,7 @@ def _detect_scenario(input_path: Path, text: str) -> str:
     }:
         return name
     lowered = text.lower()
-    # Goal 42E cycle 5: a universal irrationality claim over ALL cubic
+    # A universal irrationality claim over ALL cubic
     # fourfolds is the canonical very-general-vs-all discipline test — the
     # smoke run must exercise the source-misapplication machinery (recorded
     # hypothesis-mismatch refusal), not the generic hodge sketch. Fixture
@@ -93,7 +93,7 @@ def _detect_scenario(input_path: Path, text: str) -> str:
         return "likely_false_multiple_pressures"
     if "very general" in lowered and "locked claim for all" in lowered:
         return "source_misapplication_very_general_to_all"
-    # Goal 42E cycle 6: the true classical p^2-abelian claim must engage the
+    # The true classical p^2-abelian claim must engage the
     # source-grounding machinery instead of falling through to the vague
     # scenario (which records no theorem use at all). Anchored fullmatch
     # (Kernel Safety review): the favorable scaffold must never catch
@@ -1539,7 +1539,7 @@ def _source_misapplication(text: str, run_id: str) -> dict[str, object]:
 
 
 def _true_theorem_classical_source(text: str, run_id: str) -> dict[str, object]:
-    # Goal 42E cycle 6: a true classical theorem (groups of order p^2 are
+    # A true classical theorem (groups of order p^2 are
     # abelian) must ENGAGE source grounding in smoke mode: one classical
     # citation with an exact locator, attribution, and a recorded
     # all-hypotheses match — held honestly at candidate. Smoke mode runs no

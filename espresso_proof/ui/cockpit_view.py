@@ -1,4 +1,4 @@
-"""Goal 43A: typed, display-safe snapshot view model for the React cockpit.
+"""Typed, display-safe snapshot view model for the React cockpit.
 
 ``build_snapshot`` derives ONE bounded JSON view model per run from the
 validated artifacts. This module is the thin-client boundary:
@@ -108,7 +108,7 @@ def _clip_status_text(text: object, limit: int = 280) -> str:
 
 
 def _my_feedback_map(run_dir: Path) -> dict:
-    """Latest advisory feedback per strategy (Goal 43C). Display-only; a score
+    """Latest advisory feedback per strategy. Display-only; a score
     is never evidence and never changes a tone."""
 
     from espresso_proof.strategy.strategy_feedback import latest_by_strategy
@@ -442,7 +442,7 @@ def _compact_memo(run_dir: Path) -> str:
         return ""
 
 
-# Goal 43B: each cockpit panel reads its own validated slice so panels refresh
+# Each cockpit panel reads its own validated slice so panels refresh
 # independently. The panel agent_state is honest process state, never evidence:
 # it is read from the matching agent's process row (done/running/failed/
 # skipped), falls back to "not_run" when no artifact and no row exist, and is

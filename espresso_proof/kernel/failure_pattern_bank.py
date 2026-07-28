@@ -109,7 +109,7 @@ _SEED: list[dict] = [
     {"id": "compact_proper_complete_assumption", "family": "topology",
      "summary": "A result assuming compactness / properness / completeness need not hold without it.",
      "tier": "candidate", "action": "warn", "enforced_by": ""},
-    # Additional named seed families (Goal 05): scope, geometry, coefficient, local/global.
+    # Additional named seed families: scope, geometry, coefficient, local/global.
     {"id": "generic_to_special", "family": "generality",
      "summary": "A property of the generic object need not hold for a special / specific one.",
      "tier": "candidate", "action": "warn", "enforced_by": ""},

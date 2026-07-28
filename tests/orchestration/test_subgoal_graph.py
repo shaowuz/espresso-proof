@@ -288,7 +288,7 @@ def test_selected_route_creates_route_specific_subgoal(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Goal 57B: typed route-death blockers (first slice)
+# Typed route-death blockers (first slice)
 # ---------------------------------------------------------------------------
 def _prover_loop_path(run_dir: Path) -> Path:
     manifest = read_yaml(run_dir / "run_manifest.yaml")
@@ -507,7 +507,7 @@ def _write_ledger(run_dir: Path, n_entries: int) -> None:
 
 
 def test_normal_ledger_built_graph_passes_validation(tmp_path: Path) -> None:
-    # Goal 57A residual (item 5): a graph built from a real ledger (every tcl node
+    # Residual (item 5): a graph built from a real ledger (every tcl node
     # backed by a ledger entry) passes validate_run.
     run_dir = _resumed_run(tmp_path)
     _write_ledger(run_dir, 2)
@@ -519,7 +519,7 @@ def test_normal_ledger_built_graph_passes_validation(tmp_path: Path) -> None:
 
 
 def test_hallucinated_tcl_node_without_ledger_entry_fails(tmp_path: Path) -> None:
-    # Goal 57A residual (item 5): a subgoal_tcl_X node with NO matching ledger
+    # Residual (item 5): a subgoal_tcl_X node with NO matching ledger
     # entry is fail-closed rejected (stale/hallucinated repair node).
     run_dir = _resumed_run(tmp_path)
     _write_ledger(run_dir, 1)
@@ -543,7 +543,7 @@ def test_hallucinated_tcl_node_without_ledger_entry_fails(tmp_path: Path) -> Non
 
 
 def test_capped_ledger_graph_still_passes(tmp_path: Path) -> None:
-    # Goal 57A residual (item 5): a >5-entry ledger produces a CAPPED graph (fewer
+    # Residual (item 5): a >5-entry ledger produces a CAPPED graph (fewer
     # tcl nodes than ledger entries). The id-consistency check must not falsely
     # fail — the graph holds a strict subset of the ledger's repair ids.
     run_dir = _resumed_run(tmp_path)
@@ -636,7 +636,7 @@ def test_dashboard_renders_proof_state_section(tmp_path: Path) -> None:
         "scoped_checked",
         "source_supported",
         "main_goal",
-        # Goal 57 residual: new state/reason enum strings must also never leak.
+        # Residual: new state/reason enum strings must also never leak.
         "blocked_external_tool",
         "conditional",
         "false_key_lemma",
@@ -648,7 +648,7 @@ def test_dashboard_renders_proof_state_section(tmp_path: Path) -> None:
 
 
 def test_dashboard_blocked_row_shows_translated_reason_and_next_step(tmp_path: Path) -> None:
-    # Goal 57 residual (item 3): the dashboard's blocked rows reach memo parity —
+    # Residual (item 3): the dashboard's blocked rows reach memo parity —
     # they render "why blocked" (translated, never the raw enum) and the suggested
     # next step. Inject a typed external-tool blocker, rebuild, and render.
     from espresso_proof.orchestration.run_dashboard import render_run_dashboard
@@ -879,7 +879,7 @@ def _add_step_only_counterexample(run_dir: Path, *, explanation: str) -> None:
 
 
 def test_step_only_counterexample_is_pressure_not_a_refutation(tmp_path: Path) -> None:
-    # Goal 57C residual (item 4): a TRUSTED step-only checked counterexample
+    # Residual (item 4): a TRUSTED step-only checked counterexample
     # surfaces as advisory pressure on the main node, but it can NEVER refute the
     # claim and NEVER set any node to "contradicted".
     run_dir = _resumed_run(tmp_path)
@@ -902,7 +902,7 @@ def test_step_only_counterexample_is_pressure_not_a_refutation(tmp_path: Path) -
 
 
 def test_step_only_counterexample_render_is_scoped(tmp_path: Path) -> None:
-    # Goal 57C residual (item 4): the render shows the step-only witness scoped to
+    # Residual (item 4): the render shows the step-only witness scoped to
     # a proof step, never as a claim refutation.
     run_dir = _resumed_run(tmp_path)
     _add_step_only_counterexample(
@@ -1022,7 +1022,7 @@ def test_dashboard_and_memo_share_one_wording_source() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Goal 15: surface proof_goal_graph.notes in memo + dashboard (display only)
+# Surface proof_goal_graph.notes in memo + dashboard (display only)
 # ---------------------------------------------------------------------------
 def test_graph_notes_helper_filters_blank_and_strips() -> None:
     from espresso_proof.kernel.subgoal_graph import graph_notes
@@ -1119,7 +1119,7 @@ def test_rendering_notes_does_not_mutate_graph_artifact(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Goal 57A: theorem-condition ledger -> named repair subgoals
+# Theorem-condition ledger -> named repair subgoals
 # ---------------------------------------------------------------------------
 _TCL_SOURCE_REQUESTS = ["Cauchy theorem for finite groups", "Class equation argument"]
 _TCL_MISSING_HYPOTHESES = ["G is finite", "p is prime"]

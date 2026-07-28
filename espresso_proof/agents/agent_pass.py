@@ -457,7 +457,7 @@ def _split_machine_answered_blockers(
 ) -> tuple[list[str], list[dict]]:
     """Split reviewer blockers into (open, machine_answered).
 
-    Goal 42E cycle 3: a blocker is machine-answered ONLY when ALL hold:
+    A blocker is machine-answered ONLY when ALL hold:
     (a) it originated as a reviewer SOURCE REQUEST (provenance by text-set
         membership against the round's ``source_requests``; objections and
         missing hypotheses are never answerable regardless of phrasing);
@@ -763,7 +763,7 @@ _OBJECTION_SEVERITIES = {"P0", "P1", "P2", "P3"}
 def _normalize_scoped_objections(
     raw: dict, *, verifier_id: str, target_subgoal_id: str | None
 ) -> list[dict]:
-    """Goal 54B: structured scoped objections for one reviewer review (advisory only).
+    """Structured scoped objections for one reviewer review (advisory only).
 
     1. Explicit well-formed reviewer ``scoped_objections`` (a subgoal/proof_step scope
        must name its target or it is downgraded to ``route`` — never falsely specific).

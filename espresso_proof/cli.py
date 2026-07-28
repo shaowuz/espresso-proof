@@ -30,8 +30,8 @@ from espresso_proof.agents.llm_agents import write_initial_prover_round_artifact
 from espresso_proof.orchestration.run_dashboard import write_run_dashboard
 # NOTE: literature_retrieval.retrieve_and_ground (corpus_dir/query, older
 # retrieve-sources --ground path) is a DIFFERENT function from
-# retrieval_grounding.retrieve_and_ground (Goal 03, candidate/local_corpus). Alias
-# this one so it does not shadow the Goal 03 import above (which the
+# Retrieval_grounding.retrieve_and_ground (candidate/local_corpus). Alias
+# This one so it does not shadow the import above (which the
 # `retrieve-and-ground` command depends on).
 from espresso_proof.verification.proof_verification import (
     auto_wire_scoped_verifications,
@@ -469,7 +469,7 @@ def choose_strategy(
     if not reason.strip():
         raise typer.BadParameter("reason cannot be empty")
     validate_run(run)
-    # Cross-process writer lock (Goal 35B): the human-choice + manifest-state
+    # Cross-process writer lock: the human-choice + manifest-state
     # write pair must not race a concurrent server resume on the same run.
     with run_writer_lock(run, action="strategy choice"):
         manifest_path = run / "run_manifest.yaml"
@@ -569,7 +569,7 @@ def resolve_agent_gate(
         raise typer.BadParameter("decision must be continue, revise, or stop")
     validate_run(run)
     _require_claim_clear_for_cli(run)
-    # Cross-process writer lock (Goal 35B): gate resolution writes the loop +
+    # Cross-process writer lock: gate resolution writes the loop +
     # initial round artifacts and must not race a concurrent resume.
     with run_writer_lock(run, action="gate resolution"):
         manifest = read_yaml(run / "run_manifest.yaml")
@@ -626,7 +626,7 @@ def write_proof(
         "ESPRESSO_EXTERNAL_AGENT_COMMAND", "--external-agent-command-env"
     ),
 ) -> None:
-    """Goal 69: write a structured line_numbered_proof.yaml (each line has a statement
+    """Write a structured line_numbered_proof.yaml (each line has a statement
     + justification + dependencies) -- a real proof object, NOT a route. Advisory only;
     it is the ONLY artifact the agent-consensus mock check may seal."""
     from espresso_proof.orchestration.proof_writer import write_line_numbered_proof

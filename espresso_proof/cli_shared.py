@@ -155,7 +155,7 @@ def _refresh_derived_views(run: Path) -> None:
 
     if (run / "proof_goal_graph.yaml").exists():
         try:
-            # Goal 57A: refresh the advisory ledger before the graph reads it.
+            # Refresh the advisory ledger before the graph reads it.
             build_theorem_condition_ledger(run)
             build_subgoal_graph(run)
             validate_run(run)

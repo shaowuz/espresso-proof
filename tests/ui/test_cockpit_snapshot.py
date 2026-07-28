@@ -1,4 +1,4 @@
-"""Goal 43A: typed cockpit snapshot view model + built-frontend serving.
+"""Typed cockpit snapshot view model + built-frontend serving.
 
 The snapshot endpoint is the thin-client boundary: every trust label and tone
 is computed server-side from validated artifacts via the safe display

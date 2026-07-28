@@ -53,7 +53,7 @@ def _normalize_request_type(request_type: str | None) -> str:
 
 
 _SKILLS: tuple[AgentSkill, ...] = (
-    # Back-half proof roles (Goal 69/70) are listed FIRST on purpose:
+    # Back-half proof roles are listed FIRST on purpose:
     # ``selection.stage`` takes the first hit in this tuple, and these calls also
     # match broad companion triggers further down (e.g. "counterexample" appears
     # in the proof-writer system prompt and in agent_prompt protocol_rules), so
@@ -164,7 +164,7 @@ def select_agent_skills(
 ) -> SkillSelection:
     """Choose role skills and active goal text for a single agent call.
 
-    Goal 65D: ``request_type`` is caller-declared. A ``product_math`` run (the
+    ``request_type`` is caller-declared. A ``product_math`` run (the
     default, and the fail-closed value for any unknown type) does NOT auto-inject
     the repo's maintenance goal queue; only ``maintenance_goal`` does. An explicit
     ``active_goal_file`` is always honored."""

@@ -1,4 +1,4 @@
-"""Per-agent run-status board for a run (Goal 27).
+"""Per-agent run-status board for a run.
 
 The board (``agent_run_status.yaml``) records the PROCESS state of the evidence /
 understanding agents so the fast core pass, the on-demand single-agent runner,
@@ -65,7 +65,7 @@ AGENT_ARTIFACTS: dict[str, str] = {
 # Skipped / Needs check and contributes no evidence.
 EVIDENCE_READY_STATUS = "done"
 
-# Human-readable status words (Goal 27: missing/running/skipped/failed render as
+# Human-readable status words (missing/running/skipped/failed render as
 # Not run / Running / Skipped / Needs check -- never as an empty successful
 # result). ``done`` is the only word that signals usable evidence.
 STATUS_DISPLAY: dict[str, str] = {

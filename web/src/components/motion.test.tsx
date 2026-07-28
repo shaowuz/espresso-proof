@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { AnimatedList, Collapse, FadeIn, PulseDot } from "./motion";
 
 /**
- * Goal 43E safety: motion is polish only. It must never gate information —
+ * Safety: motion is polish only. It must never gate information —
  * open content always renders, and under reduced motion the content is still
  * present (just without the transition).
  */

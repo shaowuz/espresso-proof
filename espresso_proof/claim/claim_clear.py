@@ -68,7 +68,7 @@ def _sha256(path: Path) -> str:
 def _blocking_items(raw: Any) -> list[str]:
     if not isinstance(raw, list):
         return ["hypothesis_ledger.missing_or_unclear is not a list"]
-    # Goal 67A: default-deny — every non-empty entry blocks UNLESS it is a
+    # Default-deny — every non-empty entry blocks UNLESS it is a
     # conservative advisory clarification (and never if it names a core gap).
     return [str(item).strip() for item in raw if is_blocking_missing_item(str(item))]
 

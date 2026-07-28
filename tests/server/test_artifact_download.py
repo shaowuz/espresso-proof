@@ -1,4 +1,4 @@
-"""Goal 43 polish: per-panel artifact download.
+"""Polish: per-panel artifact download.
 
 A read-only export of a VALIDATED artifact — path-confined, allowlisted by
 panel, and it changes no status. An unknown panel or an unproduced artifact is

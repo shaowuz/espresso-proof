@@ -1,4 +1,4 @@
-"""Goal 33 Performance Perception: display-only fragment cache with honest
+"""Performance Perception: display-only fragment cache with honest
 invalidation, timing display, and the confined technical-log endpoint. Nothing
 here may bypass validation or make stale/missing evidence look checked."""
 

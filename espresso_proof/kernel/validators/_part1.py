@@ -206,7 +206,7 @@ def _validate_agent_run_status(
     manifest: RunManifest,
     run_dir: Path,
 ) -> None:
-    """The per-agent run-status board (Goal 27) is advisory process state.
+    """The per-agent run-status board is advisory process state.
 
     Only runs when the optional artifact is present. The report model carries no
     source/evidence/proof/grade status field and StrictBaseModel forbids extras,

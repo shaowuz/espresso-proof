@@ -36,7 +36,7 @@ def read_yaml(path: Path) -> Any:
 def write_yaml(path: Path, data: Any) -> None:
     """Write YAML atomically: dump to a sibling temp file, then rename over the
     target. A process crash mid-dump can no longer leave a truncated artifact —
-    readers see either the old bytes or the complete new bytes (Goal 35B).
+    Readers see either the old bytes or the complete new bytes.
 
     Scope note: atomic against process crash and concurrent readers, not
     against power loss (no fsync of the file or directory). After power loss a

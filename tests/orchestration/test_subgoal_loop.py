@@ -1,4 +1,4 @@
-"""Goal 26: the subgoal graph drives scheduling (Proof-Search V2).
+"""The subgoal graph drives scheduling (Proof-Search V2).
 
 `select_next_subgoal` deterministically chooses the highest-value OPEN subgoal to
 work on next; the prover round names that subgoal id + local claim. Selection is

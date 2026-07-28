@@ -129,7 +129,7 @@ _IMPRECISE_CONCLUSION_MARKERS = (
     "to be determined",
 )
 _IMPRECISE_OBJECT_MARKERS = ("unspecified", "does something", "nice", "mirror")
-# Goal 67A: _CORE_GAP_TERMS is imported from claim_clarity (single source of truth
+# _CORE_GAP_TERMS is imported from claim_clarity (single source of truth
 # shared with the claim-clear gate) — see the import at the top of this module.
 
 
@@ -218,7 +218,7 @@ def _understanding_claim(*, run_dir: Path, client: LLMClient, context: dict) -> 
     ):
         claim_precision = "imprecise"
 
-    # Goal 66: conservative fast-lock for recognized simple elementary claims.
+    # Conservative fast-lock for recognized simple elementary claims.
     # If the (stub/weak) understanding left the claim imprecise but the raw text
     # is a high-confidence recognized pattern (a prime/concrete-order group is
     # cyclic), lock a precise claim so the claim-clear gate is not brittle for

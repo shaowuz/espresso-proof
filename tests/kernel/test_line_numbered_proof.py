@@ -1,4 +1,4 @@
-"""Goal 69: Line-Numbered Proof Writer V1 — the sealable proof artifact.
+"""Line-Numbered Proof Writer V1 — the sealable proof artifact.
 
 The agent-consensus mock check may ONLY seal a structured line_numbered_proof.yaml
 (each line has a statement + justification + dependencies), reviewed line-by-line by

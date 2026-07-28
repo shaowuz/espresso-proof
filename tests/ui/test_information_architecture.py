@@ -1,4 +1,4 @@
-"""Goal 30 Information Architecture: the Now strip (trust-grouped evidence
+"""Information Architecture: the Now strip (trust-grouped evidence
 summary + derived next action) and first-screen comprehension. Display-only —
 nothing here may overclaim, hide missing evidence, or change kernel status."""
 

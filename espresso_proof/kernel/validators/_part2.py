@@ -67,7 +67,7 @@ def _first_forbidden_proof_language(text: str) -> str | None:
         r"\bestablishes\s+the\s+theorem\b": "establishes the theorem",
         r"\bestablishes\s+the\s+claim\b": "establishes the claim",
         r"\bproof\s+establishes\b": "proof establishes",
-        # Goal 41: Chinese global proof-completion markers (no \b — Python's
+        # Chinese global proof-completion markers (no \b — Python's
         # word boundary treats CJK as word chars, so \b would never fire inside
         # Chinese prose). Same curation as the display lexicon.
         r"证毕": "证毕",

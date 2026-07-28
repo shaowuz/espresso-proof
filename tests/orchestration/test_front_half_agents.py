@@ -775,7 +775,7 @@ def test_full_front_half_pass_on_seeded_hodge_scenario_stays_valid(tmp_path: Pat
 
 
 # ---------------------------------------------------------------------------
-# Goal 19: stale "Too vague to test" placeholder objection is scrubbed for a
+# Stale "Too vague to test" placeholder objection is scrubbed for a
 # precise claim (display hygiene; never upgrades any status).
 # ---------------------------------------------------------------------------
 from espresso_proof.ui.memo import build_concise_memo  # noqa: E402

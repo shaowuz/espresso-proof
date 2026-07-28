@@ -1,7 +1,7 @@
-"""Goal 04: source locator + theorem extraction reliability.
+"""Source locator + theorem extraction reliability.
 
 Covers >=5 locator shapes, explicit exact-locator predicate tests, multi-block
-splitting (the Goal 01 concatenation bug), and the required negatives: an
+Splitting (the concatenation bug), and the required negatives: an
 abstract-only / unlabeled / malformed header cannot earn source support, the
 extracted statement is the source text (not a fabricated summary), and a long
 source statement is capped (not copied wholesale).

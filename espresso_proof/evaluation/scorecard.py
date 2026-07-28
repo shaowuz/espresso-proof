@@ -1,10 +1,10 @@
-"""Autoprover Behavior Scorecard (Goal 40B).
+"""Autoprover Behavior Scorecard.
 
 One deterministic command that reports BOTH safety and capability metrics over
 the mock fixtures, so a PR that makes Espresso more overconfident — or less
 capable at the behaviors it already earned — fails a single visible gate.
 
-Composition, not reinvention: the safety half reuses the Goal 40A baseline
+Composition, not reinvention: the safety half reuses the baseline
 (``run_benchmark`` + ``run_calibration``); the capability half adds small
 deterministic probes built from the SAME earning pipelines the product uses
 (ground_run, audit_theorem_applicability, the exact_modexp adapter, the
@@ -95,7 +95,7 @@ def _earned_steps(run_dir: Path) -> int:
 
 
 def _probe_source_grounding(root: Path) -> dict:
-    """Grounding family (Goal 40C, n=3): the honest pipeline EARNS a reference-
+    """Grounding family (n=3): the honest pipeline EARNS a reference-
     supported step, and the two classic near-misses stay candidate."""
 
     cases = []
@@ -117,10 +117,10 @@ def _probe_source_grounding(root: Path) -> dict:
 
 
 def _probe_applicability_block(root: Path) -> dict:
-    """Applicability family (Goal 40C, n=3): honest grounding audits applicable;
-    a tampered cited statement is detected (Goal 41 excerpt-hash binding); a
+    """Applicability family (n=3): honest grounding audits applicable;
+    A tampered cited statement is detected (excerpt-hash binding); a
     legacy-style tamper without hashes is still blocked by the independent
-    audit recheck (Goal 37 de-circularization)."""
+    Audit recheck (de-circularization)."""
 
     from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
     from espresso_proof.validation.errors import KernelValidationError
@@ -174,7 +174,7 @@ def _probe_applicability_block(root: Path) -> dict:
 
 
 def _probe_scoped_verifier(root: Path) -> dict:
-    """Verifier family (Goal 40C, n=2): a confirming run of the allowlisted
+    """Verifier family (n=2): a confirming run of the allowlisted
     adapter earns ONE scoped entry through the kernel bridge; a non-confirming
     run earns nothing (fail closed)."""
 
@@ -206,8 +206,8 @@ def _probe_scoped_verifier(root: Path) -> dict:
 
 
 def _probe_matcher_discipline() -> dict:
-    """Matcher family (Goal 40C, n=3): negated terms and substring aliases must
-    not fake hypothesis coverage; honest coverage must still match (Goal 41)."""
+    """Matcher family (n=3): negated terms and substring aliases must
+    Not fake hypothesis coverage; honest coverage must still match."""
 
     from espresso_proof.verification.source_verification import check_hypothesis_applicability, term_present
 
@@ -235,7 +235,7 @@ def _probe_matcher_discipline() -> dict:
 
 
 def _probe_counterexample_discipline() -> dict:
-    """Counterexample family (Goal 42E cycle 11, n=6): the deterministic
+    """Counterexample family (n=6): the deterministic
     probes from loop cycles 1/8/10 must keep their earned outcomes — an
     admissible checked refutation exactly where a non-abelian construction
     exists, silence on every true claim, and a non-refuting exposing record

@@ -1,4 +1,4 @@
-"""Goal 29 Interaction Polish: state-preserving refresh, skeletons, button/job
+"""Interaction Polish: state-preserving refresh, skeletons, button/job
 states, calm errors. Display-only — no UI state may predict or upgrade evidence."""
 
 from __future__ import annotations

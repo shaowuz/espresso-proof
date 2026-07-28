@@ -1,4 +1,4 @@
-"""Goal 43C: human strategy feedback is advisory — model + sidecar discipline.
+"""Human strategy feedback is advisory — model + sidecar discipline.
 
 Feedback can carry a score, a priority, and a note; it can NEVER carry a
 status/evidence field, can never claim to be anything but advisory, and lives

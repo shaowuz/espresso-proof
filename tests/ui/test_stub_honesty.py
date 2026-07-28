@@ -1,4 +1,4 @@
-"""Goal 67C: a stub / deterministic-template run must never be presented as a
+"""A stub / deterministic-template run must never be presented as a
 real prover/reviewer loop. The view-model carries a fail-closed template-fallback
 signal derived from the recorded provider, and the labels do not lie.
 """

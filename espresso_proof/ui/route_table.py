@@ -1,4 +1,4 @@
-"""Goal 24: proof-route step table (shared by memo + dashboard).
+"""Proof-route step table (shared by memo + dashboard).
 
 Renders a route as research notes: one row per local step, separating what each
 step LOCALLY needs/has from the whole-claim/route status. Rows are derived purely

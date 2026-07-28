@@ -1,4 +1,4 @@
-"""LLM Literature Scout (Goal 02).
+"""LLM Literature Scout.
 
 LLM = scout, kernel = judge. The scout proposes CANDIDATE sources / locator hints
 tied to specific proof steps and writes them to ``literature_candidates.yaml``. It

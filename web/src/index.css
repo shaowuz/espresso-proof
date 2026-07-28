@@ -32,7 +32,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Goal 43D: math containers must not break the three-column layout. Inline math
+/* Math containers must not break the three-column layout. Inline math
    stays on the line; block math scrolls horizontally if a formula is too wide. */
 .math-inline {
   display: inline;

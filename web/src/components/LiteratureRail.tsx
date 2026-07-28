@@ -45,7 +45,7 @@ function RouteLiteratureNote({
 }
 
 /**
- * Right rail: literature / theorem locators / source gaps (Goal 43B: its own
+ * Right rail: literature / theorem locators / source gaps (its own
  * query). Every phrase and tone is server copy — a literature hit is metadata,
  * so its badge tone comes from the kernel-recorded source status, never from
  * relevance. Missing literature is shown as not-run, never as source-supported.

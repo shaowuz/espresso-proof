@@ -416,7 +416,7 @@ def test_rendering_does_not_mutate_persisted_artifacts(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Goal 22: a reference-supported step is step-scoped, never a global proof.
+# A reference-supported step is step-scoped, never a global proof.
 # --------------------------------------------------------------------------- #
 def _source_backed_step_grounding() -> dict:
     return {

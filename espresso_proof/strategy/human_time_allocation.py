@@ -1,4 +1,4 @@
-"""Goal 54C: human feedback drives deterministic, advisory time allocation.
+"""Human feedback drives deterministic, advisory time allocation.
 
 The human's strategy feedback (score + priority + note) must actually influence
 the NEXT reasoning round — route ordering, the per-attempt allocation mode, and
@@ -29,7 +29,7 @@ from espresso_proof.strategy.strategy_feedback import feedback_summary, latest_b
 
 CONTEXT_FILE = "human_time_allocation_context.yaml"
 
-# Exact deterministic scheduling weights (Goal 54C spec). These tune attention
+# Exact deterministic scheduling weights (spec). These tune attention
 # and compute only; they are not, and can never become, an evidence score.
 PRIORITY_BONUS: dict[str, int] = {"focus": 30, "repair": 20, "normal": 0, "reduce": -40}
 SELECTED_ROUTE_BONUS = 25
@@ -44,7 +44,7 @@ def _clamp(value: int, lo: int = 0, hi: int = 100) -> int:
 def advisory_scheduling_score(
     *, base: int, priority: str, is_selected: bool, is_recent: bool
 ) -> int:
-    """Goal 54C deterministic scheduling score:
+    """Deterministic scheduling score:
 
         advisory_score = clamp(base
                                + priority_bonus[priority]

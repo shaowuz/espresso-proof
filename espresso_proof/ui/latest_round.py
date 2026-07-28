@@ -1,4 +1,4 @@
-"""Goal 43C: the latest-round ledger — explanatory, never evidence.
+"""The latest-round ledger — explanatory, never evidence.
 
 After a continue/resume, the cockpit shows what the round actually did:
 selected strategy, target subgoal + local claim, effort, reviewer blockers,

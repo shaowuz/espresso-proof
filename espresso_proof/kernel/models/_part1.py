@@ -209,7 +209,7 @@ class SourceRef(StrictBaseModel):
     hypothesis_match: HypothesisMatch
     confidence: Literal["high", "medium", "low"]
     status: SourceStatus
-    # Goal 41: sha256 of the EXTRACTED theorem statement this citation quotes.
+    # Sha256 of the EXTRACTED theorem statement this citation quotes.
     # Optional/additive provenance binding: when set, the run validator requires
     # statement_or_summary to hash to it AND (when theorem_extraction.yaml is
     # present) the hash to name a really-extracted theorem — editing the cited

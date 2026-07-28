@@ -38,7 +38,7 @@ def run_mock_critique(project_id: str, input_path: Path, output_root: Path) -> P
     artifacts = _artifacts_for_scenario(scenario, text, run_id, project_id)
     claim_id = artifacts["locked_claim.yaml"]["id"]
 
-    # Goal 42E cycle 1: deterministic machine counterexample probes run in the
+    # Deterministic machine counterexample probes run in the
     # mock path too, so a concrete false claim ("every group of order 6 is
     # abelian") carries a Cayley-table-verified counterexample instead of an
     # empty bank. The probe fails closed (nothing for symbolic/true/modified
@@ -54,7 +54,7 @@ def run_mock_critique(project_id: str, input_path: Path, output_root: Path) -> P
         )
         artifacts["counterexamples.yaml"] = bank
 
-    # Goal 42E cycle 2: deterministic scoped-verification REQUESTS run in the
+    # Deterministic scoped-verification REQUESTS run in the
     # mock path too, so the symbolic p^2-abelian dogfood claim proposes its
     # concrete commutativity instance checks. Requests are proposals only
     # (no status); auto-wiring through the trusted backend is what can earn

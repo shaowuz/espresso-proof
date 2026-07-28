@@ -1749,7 +1749,7 @@ def test_classify_failures_emits_no_progress(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Goal 21: refuted is a kernel-earned status (admissible checked counterexample)
+# Refuted is a kernel-earned status (admissible checked counterexample)
 # ---------------------------------------------------------------------------
 def _refuted_run(tmp_path: Path) -> Path:
     return run_mock_critique(

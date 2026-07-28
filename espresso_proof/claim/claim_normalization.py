@@ -1,4 +1,4 @@
-"""Goal 66: conservative claim normalization for simple, recognized elementary
+"""Conservative claim normalization for simple, recognized elementary
 theorems.
 
 The claim-understanding layer (especially in stub/fast mode or with a weak model

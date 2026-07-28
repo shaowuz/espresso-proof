@@ -81,7 +81,7 @@ def test_resume_refreshes_dashboard_with_repair_state(tmp_path: Path) -> None:
     validate_run(run_dir)
     html = (run_dir / "research_dashboard.html").read_text(encoding="utf-8")
 
-    # Goal 67C: this is a STUB run, so the dashboard must NOT present it as a real
+    # This is a STUB run, so the dashboard must NOT present it as a real
     # reviewed prover loop — it shows the honest template-fallback label instead.
     assert "Reviewed" not in html
     assert "Needs repair" not in html

@@ -36,7 +36,7 @@ export function Composer({
   const hasRun = runId !== null;
 
   const startRun = (trimmed: string) => {
-    // Goal 55: fire the instant draft NOW, before run creation, so it is never
+    // Fire the instant draft NOW, before run creation, so it is never
     // gated on a slow workflow.
     onSubmitClaim?.(trimmed);
     job.start(

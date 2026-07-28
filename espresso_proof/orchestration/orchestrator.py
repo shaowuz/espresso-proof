@@ -105,7 +105,7 @@ ORCHESTRATION_STATES: list[str] = [
     "COMPLETED_MEMO",
 ]
 
-# Goal 27 fast core pass: the minimum front-half stages needed to show an initial
+# Fast core pass: the minimum front-half stages needed to show an initial
 # claim judgment + preliminary routes + a conservative grade, WITHOUT waiting for
 # the optional evidence agents (literature / examples / counterexamples / failure-
 # pattern audit). Those run later, on demand or in parallel, via ``run-agent``.
@@ -155,7 +155,7 @@ def _record_claim_clear_gate_transaction(
     return gate_report
 
 
-# Goal 65 control-flow: next_action values for which the front half issued a HARD
+# Control-flow: next_action values for which the front half issued a HARD
 # terminal stop, so launching an expensive external Prover+Reviewers pass is
 # clearly wrong. ``ask_human`` is deliberately NOT here: the first Prover pass
 # runs BEFORE the human gate by design (the human needs its output to decide),
@@ -168,7 +168,7 @@ _STOP_BEFORE_PROVER_ACTIONS = frozenset({"stop"})
 
 
 def _stop_before_prover(run_dir: Path) -> dict:
-    """Goal 65 control-flow fix (order-3 postmortem): decide whether to SKIP the
+    """Control-flow fix (order-3 postmortem): decide whether to SKIP the
     expensive, crash-prone Prover+Reviewers pass because the front half issued a
     hard terminal stop (``loop_control.should_stop`` with ``next_action`` ==
     ``stop``). Returns ``{"stop": bool, "next_action": str | None}``. Fails closed
@@ -306,7 +306,7 @@ def orchestrate_run(
     if early is not None:
         return early
 
-    # Goal 27 fast core pass: run only the FAST_CORE_STAGES in the front half and
+    # Fast core pass: run only the FAST_CORE_STAGES in the front half and
     # DEFER literature discovery + the evidence stages (examples / counterexamples),
     # so the user sees an initial judgment + preliminary routes quickly. The
     # deferred agents run later via ``run-agent``.
@@ -514,7 +514,7 @@ def collect_candidate_literature(
     literature_providers: list[str] | None,
 ) -> None:
     # Stage 2 — literature discovery (candidate references only; validated).
-    # Goal 27: in the fast core pass literature is a DEFERRED evidence agent --
+    # In the fast core pass literature is a DEFERRED evidence agent --
     # skip discovery here (the scaffolded candidate-only literature_review stays
     # valid) and just advance lifecycle state. It is run later via
     # ``run-agent --agent literature``; until then the board marks it not_run and
@@ -555,7 +555,7 @@ def collect_candidate_literature(
 
 
 def execute_scoped_machine_checks(*, run_dir: Path) -> None:
-    # Goal 42E cycle 3: EXECUTE any structured scoped-verification requests
+    # EXECUTE any structured scoped-verification requests
     # the front half proposed BEFORE the prover/reviewer pass, so round 1
     # already sees the trusted machine evidence and computation requests can
     # be machine-answered instead of recurring. This stage can EARN trusted
@@ -582,7 +582,7 @@ def run_initial_prover_reviewer_round_to_human_gate(
     artifacts: dict,
 ) -> None:
     # Stage 3 — live Prover + Reviewers; stop at the human gate.
-    # Goal 65 control-flow fix (from the order-3 postmortem): if the front half
+    # Control-flow fix (from the order-3 postmortem): if the front half
     # already concluded the claim needs a human BEFORE proof search
     # (loop_control.should_stop with next_action ask_human/stop), do NOT spend an
     # expensive, crash-prone Prover+Reviewers external pass. Halt at the current
@@ -606,14 +606,14 @@ def run_initial_prover_reviewer_round_to_human_gate(
         event_model = recorded_model_for_events(provider=provider, model=model, client=None)
 
         def _llm_prover_reviewers() -> None:
-            # Goal 54A: bracket the deep Prover+Reviewers model pass with provenance
+            # Bracket the deep Prover+Reviewers model pass with provenance
             # so a stall in the model call (vs validation/rendering) is visible.
             stage_manifest = read_yaml(run_dir / "run_manifest.yaml")
             run_id = str(stage_manifest["run_id"])
             _started = now_iso()
             _t0 = monotonic_ms()
             append_event(run_dir, "agent_call_started", stage="llm_prover_reviewers")
-            # Goal 65B: record a "started" agent_event BEFORE the heavy external
+            # Record a "started" agent_event BEFORE the heavy external
             # call so a mid-call PROCESS death (the order-3 postmortem failure)
             # leaves a dangling started record — the only evidence of where the
             # run died, recoverable via observability.latest_unfinished_agent_call.
@@ -633,7 +633,7 @@ def run_initial_prover_reviewer_round_to_human_gate(
                     provider_diagnostic=provider_diagnostic,
                 )
             except Exception as exc:  # noqa: BLE001 - record provenance, then re-raise
-                # Goal 65C: when the external agent timed out (and its process
+                # When the external agent timed out (and its process
                 # group was killed), record timeout metadata so a timeout is
                 # distinguishable from any other failure in agent_events.jsonl.
                 _timed_out = isinstance(exc, ExternalAgentTimeoutError)
@@ -654,7 +654,7 @@ def run_initial_prover_reviewer_round_to_human_gate(
                 agent_report=agent_report,
                 artifacts=artifacts,
             )
-            # Goal 67B: capture the prover attempt's (scrubbed, advisory-only)
+            # Capture the prover attempt's (scrubbed, advisory-only)
             # reasoning into a snapshot-EXCLUDED sidecar. If validate_run below
             # rejects this round (e.g. a step smuggled a status field), the whole
             # run rolls back and the attempt is dropped — but this sidecar
@@ -759,7 +759,7 @@ def write_initial_prover_reviewer_artifacts(
 
 
 def publish_agent_process_board(*, run_dir: Path, fast: bool, ran_front_half_agents: bool) -> None:
-    # Goal 27 — initialize the per-agent run-status board. In the fast core pass
+    # Initialize the per-agent run-status board. In the fast core pass
     # only claim_understanding has run; the evidence agents are not_run (to be run
     # on demand / in parallel). In a full pass literature + the evidence stages
     # already ran, so they are recorded done; the failure-pattern audit runs later
@@ -777,12 +777,12 @@ def publish_agent_process_board(*, run_dir: Path, fast: bool, ran_front_half_age
 
 
 def write_dashboard_and_return_run_summary(*, run_dir: Path) -> dict:
-    # Goal 54A: aggregate run timings + register the per-run observability logs as
+    # Aggregate run timings + register the per-run observability logs as
     # optional artifacts (diagnostic only; both helpers fail closed and never gate).
     write_timings(run_dir)
     register_observability_artifacts(run_dir)
     final_manifest = read_yaml(run_dir / "run_manifest.yaml")
-    # Goal 65 control-flow fix: the Prover pass is skipped when the front half
+    # Control-flow fix: the Prover pass is skipped when the front half
     # asked to stop before proof search, so llm_agent_run.yaml may not exist.
     _agent_run_path = run_dir / "llm_agent_run.yaml"
     agent_run = read_yaml(_agent_run_path) if _agent_run_path.exists() else {}
@@ -976,7 +976,7 @@ def resume_run(*, run_dir: Path, **kwargs) -> str:
 
     Holds the cross-process run writer lock for the whole resume, so a second
     concurrent resume (CLI or server) serializes or fails with a friendly
-    message instead of interleaving prover rounds (Goal 35B).
+    Message instead of interleaving prover rounds.
     """
 
     run_dir = Path(run_dir)
@@ -1060,7 +1060,7 @@ def _resume_idempotent_memo(*, run_dir: Path) -> str:
         from espresso_proof.verification.theorem_condition_ledger import build_theorem_condition_ledger
 
         try:
-            # Goal 57A: ensure the advisory theorem-condition ledger exists
+            # Ensure the advisory theorem-condition ledger exists
             # before the graph reads it (idempotent; writes an empty ledger
             # when there is no llm_agent_run).
             build_theorem_condition_ledger(run_dir)
@@ -1224,7 +1224,7 @@ def _run_resume_advisory_layers(*, run_dir: Path) -> None:
     from espresso_proof.verification.theorem_condition_ledger import build_theorem_condition_ledger
 
     try:
-        # Goal 57A: build the advisory theorem-condition ledger first so the
+        # Build the advisory theorem-condition ledger first so the
         # graph can turn its entries into named repair subgoals. Idempotent and
         # writes an empty ledger when there is no llm_agent_run.
         build_theorem_condition_ledger(run_dir)
@@ -1246,7 +1246,7 @@ def _finalize_resume_memo(*, run_dir: Path, loop_summary: tuple[int, str] | None
     write_run_dashboard(run_dir)
     if loop_summary is not None:
         # Controlled wording only (no model free text; no scrub needed). The stop
-        # reason renders as plain product copy, never the raw token (Goal 31).
+        # Reason renders as plain product copy, never the raw token.
         from espresso_proof.ui.descriptions import loop_stop_phrase
 
         rounds_run, stop_reason = loop_summary

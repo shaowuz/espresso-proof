@@ -88,7 +88,7 @@ def main() -> int:
     system = str(request.get("system", ""))
     prompt = str(request.get("prompt", ""))
     active_goal_file = os.environ.get("ESPRESSO_ACTIVE_GOAL_FILE")
-    # Goal 65D: the caller DECLARES the request type (product_math by default and
+    # The caller DECLARES the request type (product_math by default and
     # for any unknown value). Only a maintenance/goal-running request may
     # auto-inject repository maintenance context; a product mathematical
     # run must not (the order-3 postmortem injection bug).

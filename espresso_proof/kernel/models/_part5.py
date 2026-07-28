@@ -551,7 +551,7 @@ class LLMAgentAttempt(StrictBaseModel):
 
 
 class ScopedObjection(StrictBaseModel):
-    """Goal 54B: a reviewer objection bound to a named proof-search target so it
+    """A reviewer objection bound to a named proof-search target so it
     becomes repairable state, not just prose.
 
     Kernel-safety contract (advisory only):
@@ -618,7 +618,7 @@ class LLMAgentVerifierReview(StrictBaseModel):
     missing_hypotheses: list[str] = Field(default_factory=list)
     source_requests: list[str] = Field(default_factory=list)
     unsafe_language: list[str] = Field(default_factory=list)
-    # Goal 54B: additive structured objections bound to proof-search targets.
+    # Additive structured objections bound to proof-search targets.
     # Legacy free-text fields above are preserved; the normalizer also mirrors them
     # into route/global scoped_objections (scope_source='legacy_fallback') so older
     # producers stay valid and downstream has one structured surface.

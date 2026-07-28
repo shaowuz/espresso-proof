@@ -696,7 +696,7 @@ export function StrategyCard({
 }
 
 /**
- * CENTER workspace: claim card, strategy board, agent board (Goal 43B/C).
+ * CENTER workspace: claim card, strategy board, agent board.
  * The claim and strategies each read their own fast-core panel query, so the
  * workspace opens before evidence agents finish; the agent board reads the
  * shared status query. ``onChanged`` (passed from App) refreshes the affected

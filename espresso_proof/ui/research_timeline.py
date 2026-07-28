@@ -1,4 +1,4 @@
-"""Research timeline — a display-only, artifact-derived activity log (Goal 28).
+"""Research timeline — a display-only, artifact-derived activity log.
 
 It turns the run's already-validated artifacts and the per-agent status board
 into a compact human-readable timeline ("Claim locked", "3 candidate references
@@ -117,7 +117,7 @@ def build_timeline(run_dir: Path) -> list[dict[str, Any]]:
     for agent in ("literature", "examples", "counterexamples", "failure_patterns"):
         agent_events(agent)
 
-    # Route continuation (human choice). Effort renders as words (Goal 31).
+    # Route continuation (human choice). Effort renders as words.
     from espresso_proof.ui.descriptions import effort_phrase
 
     selected = human_choice.get("selected_strategy")

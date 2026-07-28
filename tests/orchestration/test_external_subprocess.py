@@ -1,4 +1,4 @@
-"""Goal 65C-1: external agent subprocess process-group cleanup + typed timeout.
+"""External agent subprocess process-group cleanup + typed timeout.
 
 The order-3 postmortem's prime suspect for the unbounded hang was that
 ``subprocess.run(timeout=)`` kills only the direct child — a forking/hung

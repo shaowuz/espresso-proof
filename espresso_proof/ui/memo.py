@@ -346,10 +346,10 @@ def build_concise_memo(run_dir: Path) -> str:
             f"  {residual_count} residual (non-fatal) gap(s) remain; "
             "see agent_consensus_review.yaml."
         )
-    # Proof-route step table (Goal 24): one row per local step, separating local
+    # Proof-route step table: one row per local step, separating local
     # step evidence from the whole-claim/route status above. Built from validated
     # artifacts (source grounding + confirmed scoped computations), using the
-    # Goal 20-23 display vocabulary; never asserts the whole claim is proved.
+    # Display vocabulary; never asserts the whole claim is proved.
     _pv_rel = optional_artifacts.get("proof_verification")
     proof_verification_doc: dict = {}
     if _pv_rel and (run_dir / _pv_rel).exists():
@@ -404,7 +404,7 @@ def build_concise_memo(run_dir: Path) -> str:
             )
         else:
             lines.append(f"  No candidate earned reference support yet: {evidence_phrase('not_found')}.")
-    # Evidence-agent status board (Goal 27): show, honestly, which evidence agents
+    # Evidence-agent status board: show, honestly, which evidence agents
     # have run / are running / were skipped / failed / not run. A running / failed
     # / skipped / not-run / missing agent contributes NO evidence; only a 'Done'
     # agent's artifact (already validated above) is real evidence. When core
@@ -523,7 +523,7 @@ def build_concise_memo(run_dir: Path) -> str:
             lines.append("")
             lines.append("Failure patterns matched (advisory; not a refutation, not a proof):")
             for m in pmatches:
-                # pattern ids are internal tokens; render as words (Goal 31).
+                # Pattern ids are internal tokens; render as words.
                 pattern = str(m.get("pattern_id") or "pattern").replace("_", " ")
                 lines.append(
                     f"  {objection_phrase(m.get('tier'))} "
@@ -581,7 +581,7 @@ def build_concise_memo(run_dir: Path) -> str:
                     lines.append(f"      Scope: {e.get('scope_note')}")
             lines.append("  (these finite/computational checks do NOT prove the universal claim)")
 
-    # External tool runs (Goal 25): raw, audited evidence records. They are NOT a
+    # External tool runs: raw, audited evidence records. They are NOT a
     # proof and NEVER an earned status by themselves -- only the kernel-gated
     # proof-verification bridge can earn a scoped status from a confirming run.
     if "external_tool_runs" in optional:

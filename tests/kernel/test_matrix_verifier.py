@@ -1,4 +1,4 @@
-"""Goal 06: matrix rank/determinant scoped verifier.
+"""Matrix rank/determinant scoped verifier.
 
 A trusted deterministic backend earns instance_checked for ONE explicit integer
 matrix (a finite/computational check, e.g. a concrete rank/dimension jump), never

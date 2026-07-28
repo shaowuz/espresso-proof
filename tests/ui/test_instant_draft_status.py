@@ -1,7 +1,7 @@
-"""Goal 65E: simple-claim instant draft + earned-status label filter.
+"""Simple-claim instant draft + earned-status label filter.
 
 The order-3 run left the user on a dead page for a long time. The instant lane
-(Goal 55) must give a simple recognized claim a fast advisory draft / explicit
+ Must give a simple recognized claim a fast advisory draft / explicit
 state, and that draft must not assert an earned-status verdict
 (source-backed / checked / refuted) — which ``scrub_proof_language`` does NOT
 catch. Reuses the existing lane; adds the verdict filter.

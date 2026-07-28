@@ -2,7 +2,7 @@ import { useRef, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
 /**
- * Goal 43E: motion primitives. Motion is interaction polish ONLY — it never
+ * Motion primitives. Motion is interaction polish ONLY — it never
  * changes artifacts, status, or tone, and it never hides missing evidence. When
  * the user prefers reduced motion, expansions become instant and fades are
  * dropped (the content still appears — motion can never gate information).

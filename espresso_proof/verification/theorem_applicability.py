@@ -20,7 +20,7 @@ def audit_theorem_applicability(run_dir: Path) -> dict:
         read_yaml(run_dir / artifacts["source_grounding"])
     )
     literature_report = _load_literature_report(run_dir, optional)
-    # Goal 37 de-circularization: the audit keeps its OWN condition ledger,
+    # De-circularization: the audit keeps its OWN condition ledger,
     # recomputed from the primary inputs (claim hypotheses vs cited statement),
     # so a stored hypothesis_match=True can never become satisfied conditions
     # by itself in the fallback path.
@@ -31,7 +31,7 @@ def audit_theorem_applicability(run_dir: Path) -> dict:
         usages.append(
             _usage_for_step(step, source_grounding, literature_report, claim_hypotheses)
         )
-    # Goal 57A slice-2: in ADDITION to the grounding-derived usages, read the
+    # Slice-2: in ADDITION to the grounding-derived usages, read the
     # optional theorem condition ledger and emit one DEFAULT-DENY usage per
     # ledger entry. These never earn source_backed and never flip overall to
     # all_applicable unless a condition is explicitly matched with an exact
@@ -44,7 +44,7 @@ def audit_theorem_applicability(run_dir: Path) -> dict:
         "run_id": manifest["run_id"],
         "generated_at": datetime.now(UTC).isoformat(),
         "source_grounding_artifact": artifacts["source_grounding"],
-        # Goal 41: bind this audit to the exact grounding bytes it audited; the
+        # Bind this audit to the exact grounding bytes it audited; the
         # validator rejects a stale audit if the grounding changes afterwards.
         "source_grounding_sha256": hashlib.sha256(
             (run_dir / artifacts["source_grounding"]).read_bytes()
@@ -63,7 +63,7 @@ def audit_theorem_applicability(run_dir: Path) -> dict:
     return report
 
 
-# Goal 57A slice-2: map a ledger condition's match_status onto the existing
+# Slice-2: map a ledger condition's match_status onto the existing
 # applicability condition status vocabulary. DEFAULT-DENY: only an explicit
 # ``matched`` is ever "satisfied"; the slice-1 default ``unknown`` is "not_checked"
 # (a bad/blocking status), and ``unmatched`` is "mismatched" (misapplied).
@@ -78,7 +78,7 @@ def _ledger_usages(run_dir: Path, optional: dict) -> list[dict]:
     """Build DEFAULT-DENY theorem-applicability usages from the optional theorem
     condition ledger (reviewer ``source_requests``).
 
-    SAFETY (Goal 57A): a ledger-derived usage NEVER earns ``source_backed`` and, in
+    SAFETY: a ledger-derived usage NEVER earns ``source_backed`` and, in
     THIS slice, is UNCONDITIONALLY non-applicable (default-deny). The reason is
     structural, not data-dependent: ``_ledger_usage_for_entry`` hardcodes
     ``conclusion_status="unclear"``, and ``_applicability_status`` returns
@@ -309,7 +309,7 @@ def _conditions_from_comparison(comparison) -> list[dict]:
 def _conditions_from_step(step, source_ref, claim_hypotheses) -> tuple[list[dict], object]:
     """Fallback condition ledger (no Literature Review Agent comparison).
 
-    Goal 37 de-circularization: when the grounding recorded ``matches is True``,
+    De-circularization: when the grounding recorded ``matches is True``,
     the audit does NOT convert that verdict into satisfied conditions. It
     recomputes hypothesis coverage from the primary inputs — the claim
     hypotheses against the cited statement (``statement_or_summary``) — using
@@ -436,7 +436,7 @@ def _conclusion_status(comparison) -> str:
 
 
 def _fallback_conclusion_status(step, independent_matches) -> str:
-    # Goal 37: "compatible" requires the audit's OWN recheck to confirm the
+    # "compatible" requires the audit's OWN recheck to confirm the
     # hypotheses — the stored source_backed status alone is not trusted.
     if step.status.value == "source_backed" and independent_matches is True:
         return "compatible"
@@ -467,7 +467,7 @@ def _usage_notes(comparison, source_status: str) -> list[str]:
 
 def _overall_status(usages: list[dict], ledger_usages: list[dict] | None = None) -> str:
     statuses = {usage["applicability_status"] for usage in usages}
-    # Goal 57A: ledger usages are default-deny; their applicability status (which
+    # Ledger usages are default-deny; their applicability status (which
     # is never "applicable" while an obligation is unresolved) participates in the
     # overall verdict so a present-but-unresolved ledger can never read
     # all_applicable.

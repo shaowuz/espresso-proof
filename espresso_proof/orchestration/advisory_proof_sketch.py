@@ -1,4 +1,4 @@
-"""Goal 67B — non-discarding capture of a prover attempt's reasoning.
+"""Non-discarding capture of a prover attempt's reasoning.
 
 The Prover stage runs under a whole-run snapshot transaction
 (``stage_runner.StageRunner`` for the initial pass). If the round artifact trips
@@ -157,7 +157,7 @@ def capture_advisory_proof_sketch(
 
 
 def capture_advisory_proof_sketch_from_latest_round(run_dir: Path) -> Path | None:
-    """Goal 67B (deep-round path): capture the most recent prover-loop ROUND's
+    """Deep-round path: capture the most recent prover-loop ROUND's
     reasoning into the advisory sidecar.
 
     The deep continuation loop (``prover_loop_driver.continue_prover_loop``) writes

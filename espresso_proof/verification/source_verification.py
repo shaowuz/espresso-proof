@@ -74,7 +74,7 @@ def verify_source_grounding_from_theorems(
             "hypothesis_match": hypothesis_match,
             "confidence": "high" if status == "source_backed" else "medium",
             "status": status,
-            # Goal 41: bind the quoted statement to the extracted theorem (the
+            # Bind the quoted statement to the extracted theorem (the
             # validator re-checks both the self-hash and membership in the
             # theorem_extraction artifact).
             "statement_sha256": hashlib.sha256(theorem.statement.encode("utf-8")).hexdigest(),
@@ -255,7 +255,7 @@ def term_present(term: str, statement: str) -> bool:
     Whole-word matching is deliberate: it keeps ``finite`` from matching inside
     ``infinite`` and ``singular`` from matching inside other words. A NEGATED
     occurrence ("non-proper", "non proper", "not proper") never counts as
-    coverage (Goal 41): a theorem about non-proper varieties cannot support a
+    Coverage: a theorem about non-proper varieties cannot support a
     properness hypothesis. Falls back to the explicit :func:`term_covered`
     notation aliases. A token that fails to match is treated as missing, which
     downgrades to a candidate — the safe direction.
@@ -289,7 +289,7 @@ def significant_terms(text: str) -> list[str]:
 
 
 def term_covered(term: str, statement: str) -> bool:
-    # Goal 41: aliases and rule tokens match as whole words, never substrings —
+    # Aliases and rule tokens match as whole words, never substrings —
     # "ample" must not fire inside "example"/"sample", and the proper+ample
     # projectivity rule must not be satisfied by negated occurrences.
     for alias in TERM_ALIASES.get(term, []):

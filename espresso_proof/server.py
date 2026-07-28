@@ -86,7 +86,7 @@ def _now() -> str:
 
 
 def _friendly_error(raw: str) -> str:
-    """Translate a kernel/runtime error into product copy (Goal 31).
+    """Translate a kernel/runtime error into product copy.
 
     Every message answers: what happened, is the math state still safe, and
     what to do next. The raw text is preserved separately as ``error_detail``
@@ -269,8 +269,9 @@ class Workbench:
             self._append_job_event(job_id, "job_failed", detail=raw)
 
     def _append_job_event(self, job_id: str, kind: str, *, detail: str = "") -> None:
-        """Record job completion on the run's diagnostic events.jsonl timeline
-        (Goal 35B). Best-effort: a job without a resolvable run, or any timeline
+        """Record job completion on the run's diagnostic events.jsonl timeline.
+
+        Best-effort: a job without a resolvable run, or any timeline
         write problem, never affects the job result."""
 
         try:
@@ -478,7 +479,7 @@ class Workbench:
         ).start()
         return {"job_id": job_id, "strategy": strategy}
 
-    # Goal 43 polish: which panel exports which validated artifact file.
+    # Polish: which panel exports which validated artifact file.
     _DOWNLOADABLE = {
         "examples": "examples",
         "counterexamples": "counterexamples",
@@ -521,7 +522,7 @@ class Workbench:
         return name, path.read_bytes(), f"{run_id}-{name}.yaml"
 
     def record_research_note(self, run_id: str, body: dict[str, Any]) -> dict[str, Any]:
-        """Goal 43F: bind one advisory research/chat note to a run object.
+        """Bind one advisory research/chat note to a run object.
 
         Path-confined, bounded body, strict-model-validated (status/evidence
         fields rejected), scrubbed and written to a sidecar the kernel never
@@ -567,7 +568,7 @@ class Workbench:
         return {"ok": True, "target_kind": note.target_kind, "target_id": note.target_id}
 
     def record_strategy_feedback(self, run_id: str, body: dict[str, Any]) -> dict[str, Any]:
-        """Goal 43C: record one advisory strategy-feedback item.
+        """Record one advisory strategy-feedback item.
 
         Path-confined, bounded body (the handler already caps it), the strategy
         id must exist in the run's brief, the item is strict-model-validated
@@ -695,7 +696,7 @@ class Workbench:
     def status(self, run_id: str) -> dict[str, Any]:
         """Validated status + rendered fragments, with a display-only cache.
 
-        Cache rules (Goal 33): keyed by the artifact-mtime digest; a hit is
+        Cache rules: keyed by the artifact-mtime digest; a hit is
         served only when the digest is unchanged since the last VALIDATED
         render; any validation failure drops the entry and raises (fail closed
         — stale HTML is never served after the run stops validating).
@@ -707,7 +708,7 @@ class Workbench:
             cached = self._status_cache.get(run_id)
             if cached is not None and cached[0] == digest:
                 summary = json.loads(cached[1])  # deep copy via JSON round-trip
-                # Goal 65C: stalled/lost is recomputed live (depends on in-memory
+                # Stalled/lost is recomputed live (depends on in-memory
                 # job state), never cached, so a process death surfaces immediately.
                 summary["stalled"] = self._run_stalled(run_id, run_dir)
                 return summary
@@ -730,13 +731,13 @@ class Workbench:
             # bound the cache (display-only; eviction is always safe)
             while len(self._status_cache) > 32:
                 self._status_cache.pop(next(iter(self._status_cache)))
-        # Goal 65C: attach the live stalled/lost signal AFTER caching, so it is
+        # Attach the live stalled/lost signal AFTER caching, so it is
         # recomputed on every poll and never frozen into the cache.
         summary["stalled"] = self._run_stalled(run_id, run_dir)
         return summary
 
     def _run_stalled(self, run_id: str, run_dir: Path) -> dict[str, Any] | None:
-        """Goal 65C: report when a run has an agent call that recorded ``started``
+        """Report when a run has an agent call that recorded ``started``
         but no terminal record (the 65B dangling-start signal) AND no in-memory
         job is progressing it — i.e. the worker/process died mid-call (the order-3
         failure: the server vanished and the in-memory job table with it). This is
@@ -763,7 +764,7 @@ class Workbench:
                 return None  # a real in-flight call, not a death
             stage = dangling.get("stage") or "an agent step"
             since = dangling.get("started_at")
-            # Goal 65F: give the UI the data to render a real failure state
+            # Give the UI the data to render a real failure state
             # (last active stage, elapsed, last completed step) instead of only a
             # dead "Could not reach the server" page. Display only — no math status.
             elapsed_seconds = None
@@ -784,7 +785,7 @@ class Workbench:
                 "since": since,
                 "elapsed_seconds": elapsed_seconds,
                 "last_successful_stage": last_successful_stage,
-                # where to look — the per-run diagnostic trail (Goal 54A/65B)
+                # Where to look — the per-run diagnostic trail
                 "diagnostics": ["events.jsonl", "agent_events.jsonl"],
                 "message": (
                     f"This run stopped responding during '{stage}'. No proof, "
@@ -796,7 +797,7 @@ class Workbench:
             return None
 
     def snapshot(self, run_id: str) -> dict[str, Any]:
-        """Goal 43A: the typed cockpit view model (display-only, fail closed).
+        """The typed cockpit view model (display-only, fail closed).
 
         Same validation + digest-cache contract as ``status``: a snapshot is
         served only for a run that currently passes safety validation, and a
@@ -829,7 +830,7 @@ class Workbench:
         return snap
 
     def panel(self, run_id: str, panel: str) -> dict[str, Any]:
-        """Goal 43B: one validated cockpit panel slice (display-only, fail
+        """One validated cockpit panel slice (display-only, fail
         closed). Each panel reads its own artifact so panels refresh
         independently; the same validate-then-digest-cache contract applies, so
         a cached slice is never served after the run stops validating, and a
@@ -925,7 +926,7 @@ def _make_handler(workbench: Workbench):
             message: str,
             active_object: dict[str, Any] | None = None,
         ) -> None:
-            """Goal 43F: stream the conversational preview as Server-Sent Events.
+            """Stream the conversational preview as Server-Sent Events.
 
             Read-only: it resolves the run (path-confined) and streams already-
             scrubbed lines built from the validated artifacts. It writes nothing
@@ -961,7 +962,7 @@ def _make_handler(workbench: Workbench):
                     pass
 
         def _emit_instant_draft(self, message: str, run_dir: Path | None) -> None:
-            """Shared SSE core for the instant lane (Goal 55): ack immediately,
+            """Shared SSE core for the instant lane: ack immediately,
             then stream an already-scrubbed labeled DRAFT built within a small
             latency budget. It never blocks on a slow model and upgrades no
             status. When ``run_dir`` is given the draft is persisted as an advisory
@@ -1034,7 +1035,7 @@ def _make_handler(workbench: Workbench):
             self._emit_instant_draft(message, run_dir)
 
         def _stream_instant_draft_transient(self, message: str) -> None:
-            """Pre-run instant draft (Goal 55): answers the claim text the instant
+            """Pre-run instant draft: answers the claim text the instant
             it is submitted — decoupled from run creation, so a slow workflow can
             never delay or blank the draft. Persists nothing (no run id yet)."""
 
@@ -1057,7 +1058,7 @@ def _make_handler(workbench: Workbench):
             return data
 
         def _require_loopback_origin(self) -> None:
-            """CSRF-style guard for new mutating endpoints (Goal 43C).
+            """CSRF-style guard for new mutating endpoints.
 
             The workbench binds to loopback only, so a legitimate browser POST
             carries a loopback Host and (for fetch) a loopback Origin. Reject a
@@ -1216,12 +1217,12 @@ def _make_handler(workbench: Workbench):
                     self._send_json(workbench.record_strategy_feedback(parts[2], body))
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "research-note":
-                    # Goal 43F: bind an advisory note to a run object (CSRF-guarded).
+                    # Bind an advisory note to a run object (CSRF-guarded).
                     self._require_loopback_origin()
                     self._send_json(workbench.record_research_note(parts[2], body))
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "chat":
-                    # Goal 43F: a conversational PREVIEW stream (SSE). It reads
+                    # A conversational PREVIEW stream (SSE). It reads
                     # the run's validated state and writes nothing; the loopback
                     # guard still applies. Every line is proof-language-scrubbed
                     # server-side before it leaves the process.
@@ -1234,14 +1235,14 @@ def _make_handler(workbench: Workbench):
                     )
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "instant-draft":
-                    # Goal 55: the instant conversation lane (SSE). Acks fast, then
+                    # The instant conversation lane (SSE). Acks fast, then
                     # streams an already-scrubbed labeled DRAFT; loopback-guarded;
                     # persists an advisory sidecar only and upgrades no status.
                     self._require_loopback_origin()
                     self._stream_instant_draft(parts[2], str(body.get("message", "")))
                     return
                 if len(parts) == 2 and parts == ["api", "instant-draft"]:
-                    # Goal 55: the PRE-RUN instant lane (SSE). Answers the submitted
+                    # The PRE-RUN instant lane (SSE). Answers the submitted
                     # claim immediately, decoupled from run creation, so a slow
                     # workflow never blanks the page. Loopback-guarded; persists
                     # nothing and upgrades no status.

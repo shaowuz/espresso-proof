@@ -108,7 +108,7 @@ statement) forces `imprecise` or blocks the claim-clear gate. Never write
   checked by the claim-clear gate before every later stage, and is injected
   into the prompt of every downstream agent.
 - If you leave a recognized simple elementary claim imprecise, a
-  deterministic fast-lock (Goal 66) may re-normalize it; that path is
+  deterministic fast-lock may re-normalize it; that path is
   advisory and can never beat the safety floor. Do not rely on it.
 - `raw_text` and the claim id are preserved verbatim; you cannot overwrite
   the user's words.

@@ -1,4 +1,4 @@
-"""Goal 25 (slice 3): one allowlisted deterministic adapter.
+"""One allowlisted deterministic adapter.
 
 The exact_modexp adapter runs a REAL deterministic tool (exact integer modular
 exponentiation) in the sandbox and, ONLY on a confirmed result, earns a SCOPED
@@ -62,7 +62,7 @@ def test_confirmed_run_earns_scoped_computation_checked(tmp_path: Path) -> None:
     # the external tool run is also recorded as raw provenance (trusted allowlisted)
     etr = read_yaml(run / "external_tool_runs.yaml")["runs"]
     assert any(r["tool_name"] == "exact_modexp" and r["trusted"] is True for r in etr)
-    # earning a SCOPED entry does NOT upgrade the idea grade (Goal 23 honored)
+    # Earning a SCOPED entry does NOT upgrade the idea grade (honored)
     assert _grade(run) == grade_before
 
 
@@ -106,7 +106,7 @@ def test_earned_entry_is_only_via_bridge_and_admissible(tmp_path: Path) -> None:
 
 
 def test_confirmed_entry_carries_reproducibility_provenance(tmp_path: Path) -> None:
-    # Goal 38: a checked computation records HOW to replay it. Provenance only;
+    # A checked computation records HOW to replay it. Provenance only;
     # the earning gate (trusted + confirmed via the kernel bridge) is unchanged.
     import hashlib
 

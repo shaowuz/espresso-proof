@@ -1,4 +1,4 @@
-"""Goal 69: Line-Numbered Proof Writer V1.
+"""Line-Numbered Proof Writer V1.
 
 Produces ``line_numbered_proof.yaml`` -- a real STRUCTURED proof object (each line has
 a statement AND a justification AND its dependencies), NOT a route / proposed_steps

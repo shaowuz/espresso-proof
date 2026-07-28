@@ -199,7 +199,7 @@ def test_judgment_run_id_mismatch_rejected(tmp_path: Path) -> None:
 
 
 def test_reviewer_approval_without_verifier_is_flagged_not_proof(tmp_path: Path) -> None:
-    """Goal 07 detector: reviewers PASS but no source/checker support -> advisory
+    """Detector: reviewers PASS but no source/checker support -> advisory
     flag (reviewer approval is not proof verification), never a status upgrade."""
     run_dir = _build(tmp_path, "vague_claim_unclear")
     # Force all reviewers to pass with no objection (positive reviewer language).

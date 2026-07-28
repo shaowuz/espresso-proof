@@ -92,7 +92,7 @@ class ProverLoopReviewPointer(StrictBaseModel):
     verdict: Literal["plausible_direction", "needs_revision", "needs_sources", "blocked"]
     objection_count: int = Field(ge=0)
     recommended_human_action: Literal["continue", "revise", "stop"]
-    # Goal 39: a reviewer pointer DECLARES its scope; "route" is the honest
+    # A reviewer pointer DECLARES its scope; "route" is the honest
     # default for unscoped reviewer output. subgoal_id is allowed only for
     # subgoal-scoped pointers. Like target_subgoal_id, it is UNVERIFIED
     # historical provenance: deliberately not reconciled against the live graph
@@ -137,7 +137,7 @@ class ProverLoopAttempt(StrictBaseModel):
     # Additive priority/provenance sidecar for blockers (old artifacts: []).
     blocker_details: list[ProverLoopBlocker] = Field(default_factory=list)
     next_action: str
-    # Goal 39: which named subgoal this round targeted (the scheduler's pick at
+    # Which named subgoal this round targeted (the scheduler's pick at
     # round time). Optional/additive: rounds appended before a graph exists (or
     # when no subgoal is selectable) record None. Search-management state only;
     # carrying a subgoal id never earns or upgrades any status.
@@ -297,9 +297,9 @@ class SubgoalState(str, Enum):
     - ``blocked_missing_source``: cannot progress without a missing source.
     - ``blocked_reviewer_objection``: held open by a reviewer objection.
     - ``blocked_external_tool``: needs an external tool/verifier that is
-      unavailable or was refused (Goal 57B). A non-evidence state.
+      Unavailable or was refused. A non-evidence state.
     - ``conditional``: progress is contingent on an unresolved gap or a research
-      blocker (Goal 57B). A non-evidence state.
+      Blocker. A non-evidence state.
     - ``contradicted``: refuted/rejected under the current hypotheses by an
       existing counterexample/refutation validator (never by prose).
     """
@@ -333,7 +333,7 @@ _SUBGOAL_BLOCKED_STATES = {
 
 
 class BlockReason(str, Enum):
-    """Why a subgoal is blocked/conditional (advisory typing only, Goal 57B).
+    """Why a subgoal is blocked/conditional (advisory typing only).
 
     Pure search-management metadata. A ``block_reason`` NEVER sets or upgrades
     any trusted status; a node carrying it is still just blocked repair state.
@@ -389,7 +389,7 @@ class SubgoalNode(StrictBaseModel):
     reviewer_objections: list[str] = Field(default_factory=list)
     counterexample_pressure: list[str] = Field(default_factory=list)
     remaining_risk: str = ""
-    # Goal 57B: advisory blocked/conditional typing. Optional + default so every
+    # Advisory blocked/conditional typing. Optional + default so every
     # pre-57B graph still validates unchanged.
     block_reason: BlockReason | None = None
     suggested_next_action: str = ""
