@@ -88,8 +88,14 @@ jobs:
       - name: Check exported schemas
         run: uv run espresso export-schemas --check
 
+      # -n auto --dist loadfile: 16m37s -> 5m47s on the full suite, all 2492
+      # tests still passing. loadfile keeps a file's tests on one worker, which
+      # is what makes it safe — several suites share a run directory or a writer
+      # lock within a file. The flags are here rather than in pyproject addopts
+      # because xdist startup dominates the scoped runs people do while
+      # developing (0.36s -> 9.1s on a 6-test file).
       - name: Run pytest
-        run: uv run python -m pytest -q
+        run: uv run python -m pytest -q -n auto --dist loadfile
 
       - name: Run mock eval fixtures
         run: uv run espresso eval --mode mock

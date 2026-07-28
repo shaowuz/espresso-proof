@@ -29,13 +29,26 @@ While developing, run only what you touched:
 uv run python -m pytest tests/<subsystem> -q
 ```
 
-The full suite takes roughly 14 minutes locally. You do not need to run it —
-GitHub runs it when a PR targets `main` and again on the merge commit. A
-documentation-only change skips it and gets a fast hygiene check instead.
+You do not need to run the full suite — GitHub runs it when a PR targets `main`
+and again on the merge commit. A documentation-only change skips it and gets a
+fast hygiene check instead. `.github/workflows/full-ci.yml` is the authority on
+when the gate fires; if this paragraph and that file disagree, the file is right.
 
-`.github/workflows/full-ci.yml` is the authority on when the gate fires; if this
-paragraph and that file disagree, the file is right. Do not weaken a test to
-make the gate pass.
+If you do want the full suite locally, run it in parallel:
+
+```bash
+uv run python -m pytest -q -n auto --dist loadfile
+```
+
+That is about 6 minutes instead of about 17. `--dist loadfile` is not optional:
+it keeps every test in a file on one worker, and several suites here share a run
+directory or a writer lock within a file.
+
+Do not add those flags to a scoped run. xdist's worker startup costs more than a
+small suite takes — one 6-test file goes from 0.36s to 9.1s. That is why they
+are not in `addopts`.
+
+Do not weaken a test to make the gate pass.
 
 Before pushing, these are usually enough:
 
