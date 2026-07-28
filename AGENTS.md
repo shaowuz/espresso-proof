@@ -71,7 +71,11 @@ Run scoped tests while working:
 uv run python -m pytest tests/<subsystem> -q
 ```
 
-The full suite runs on GitHub when a PR targets `main` and touches code; a
+**CI is currently disabled**, so nothing runs on a pull request or on merge.
+Run the full suite yourself (`-n auto --dist loadfile`, about 6 minutes) before
+calling a change done, and say what you ran. Nothing else will run it.
+
+When CI is on, the full suite runs when a PR targets `main` and touches code; a
 documentation-only change gets a fast hygiene check instead.
 `.github/workflows/full-ci.yml` is the authority on when the gate fires — do not
 restate its rules elsewhere, link to it.

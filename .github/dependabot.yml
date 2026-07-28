@@ -18,6 +18,15 @@ updates:
         update-types: ["minor", "patch"]
       npm-major:
         update-types: ["major"]
+    ignore:
+      # TypeScript 7 breaks the build: `tsc -b` rejects the side-effect CSS
+      # import in src/main.tsx with TS2882. Verified locally against the merged
+      # result of the major group — tests passed, the build did not. Without
+      # this, Dependabot re-proposes the same upgrade every week. Patch and
+      # minor updates to typescript still come through; delete these three lines
+      # when someone is ready to do the TS 7 migration properly.
+      - dependency-name: "typescript"
+        versions: [">=7"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

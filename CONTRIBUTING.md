@@ -29,12 +29,18 @@ While developing, run only what you touched:
 uv run python -m pytest tests/<subsystem> -q
 ```
 
-You do not need to run the full suite — GitHub runs it when a PR targets `main`
-and again on the merge commit. A documentation-only change skips it and gets a
-fast hygiene check instead. `.github/workflows/full-ci.yml` is the authority on
-when the gate fires; if this paragraph and that file disagree, the file is right.
+> **The CI workflows are currently disabled.** They are still in
+> `.github/workflows/`, unchanged, but switched off in the repository's Actions
+> settings while this is a single-maintainer project. **Nothing runs on a pull
+> request and nothing runs on merge — run the full suite yourself before
+> merging.** They are re-enabled before the repository goes public; see
 
-If you do want the full suite locally, run it in parallel:
+When they are on: the full suite runs when a PR targets `main` and again on the
+merge commit, and a documentation-only change skips it and gets a fast hygiene
+check instead. `.github/workflows/full-ci.yml` is the authority on when the gate
+fires; if this paragraph and that file disagree, the file is right.
+
+Run the full suite in parallel:
 
 ```bash
 uv run python -m pytest -q -n auto --dist loadfile
@@ -102,6 +108,10 @@ otherwise.
 comparison. It is never executed and product code must not import from it. Do
 not merge it into `espresso_proof/`. Porting a narrow piece of it is fine as its
 own PR, with an owner, a contract, and tests.
+
+## Conduct
+
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies to everything here.
 
 ## Security
 
