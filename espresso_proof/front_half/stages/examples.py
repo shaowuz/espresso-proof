@@ -204,7 +204,7 @@ def _normalize_computation_checks(
 
 
 def compute_examples(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
-    """Pure compute for the examples lane (subgoal 04 compute/commit split).
+    """Pure compute for the examples lane (compute/commit split).
 
     Builds and validates the candidate artifacts in memory and writes NOTHING
     under ``run_dir``. Returns ``{"artifacts": {...}, "note": str}``. The

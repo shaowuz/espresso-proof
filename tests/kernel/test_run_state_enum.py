@@ -1,4 +1,4 @@
-"""Subgoal 02: run_manifest.current_state is a kernel-enforced closed set (RunState).
+"""run_manifest.current_state is a kernel-enforced closed set (RunState).
 
 Guards that every real state validates, an out-of-alphabet state is rejected by the
 kernel (fail-closed), and the orchestrator's ordered state list and the CLI's

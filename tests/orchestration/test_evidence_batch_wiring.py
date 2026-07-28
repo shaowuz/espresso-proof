@@ -1,4 +1,4 @@
-"""Subgoal 06: wire the evidence fan-out behind a default-on flag + observability,
+"""Wire the evidence fan-out behind a default-on flag + observability,
 and the full concurrency regression that proves every invariant holds.
 
 Covers the RE-SCOPED subgoal-06 (the coordinator is exposed via an explicit CLI

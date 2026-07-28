@@ -334,7 +334,7 @@ def failure_pattern_allocation_hints(audit: dict) -> dict:
 
 def persist_failure_pattern_audit(run_dir: Path, report: dict) -> dict:
     """Write a precomputed failure-pattern audit + register it as an optional
-    artifact (subgoal 04 compute/commit split: the write half of
+    artifact (compute/commit split: the write half of
     ``audit_failure_patterns``). ``report`` comes from ``build_failure_pattern_audit``.
     """
     run_dir = Path(run_dir)
