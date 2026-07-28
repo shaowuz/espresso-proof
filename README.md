@@ -12,6 +12,22 @@ React cockpit -> espresso serve -> external Codex agent -> artifact kernel
 
 Espresso is not a theorem prover, not a Lean formalization product, and not a chatbox. It is a Codex-backed research workflow that keeps important reasoning in files instead of only in conversation.
 
+## What it does not guarantee
+
+Espresso Proof does not certify mathematical truth. Nothing it produces is a
+proof in the sense a referee would accept.
+
+The value is in the boundary: LLM agents propose freely, and a deterministic
+Python kernel decides what any of it is allowed to be *called*. An agent cannot
+mark its own work `proved`, cannot promote a source it merely cited into a
+checked one, and cannot upgrade a status by asserting it. Statuses are granted
+by kernel code against evidence the kernel can check itself, and anything
+uncertain fails closed.
+
+So a run tells you what is sourced, what is checked, what is inferred, and what
+is still speculation — and whether the idea is worth continuing. It does not
+tell you the claim is true. See [docs/product-philosophy.md](docs/product-philosophy.md).
+
 ## Requirements
 
 - `uv` for Python dependencies and the project virtual environment
@@ -28,7 +44,20 @@ npm --prefix web ci
 npm --prefix web run build
 ```
 
+## Try it without a model
+
+This runs end to end with deterministic stubs — no Codex CLI, no API key, no
+network. Use it to check the install:
+
+```bash
+uv run espresso orchestrate --input problem.md --project demo --provider stub --front-half stub
+```
+
 ## Start working
+
+Real-agent mode needs the Codex CLI installed as `codex` and reachable on your
+`PATH`. The server supports only `--provider external`: it does not call a model
+API itself, it shells out to the agent command you configure.
 
 Start the product server with the Codex-backed adapter:
 
@@ -82,6 +111,20 @@ npm --prefix web run build
 
 `schemas/` is a local generated directory and is intentionally ignored by git.
 
+## Repository map
+
+| Path | What it is |
+| --- | --- |
+| `espresso_proof/` | The product runtime |
+| `espresso_proof/kernel/` | Trust boundary: schemas, validators, status rules |
+| `espresso_proof/agents/` | LLM proposal and review paths, external adapters |
+| `espresso_proof/orchestration/` | Run control flow |
+| `espresso_proof/server.py` | Local HTTP server behind the cockpit |
+| `web/` | React cockpit (local UI) |
+| `tests/` | Contract and regression tests, including hard negatives |
+| `docs/` | Engineering and product documentation |
+| `docs/reference/` | Reference material — never executed, never imported |
+
 ## Branches and reference material
 
 | Location | Role | Stability |
@@ -96,3 +139,9 @@ npm --prefix web run build
 - [docs/product-philosophy.md](docs/product-philosophy.md) - product principles and trust boundary.
 - [docs/engineering/product-path-boundaries.md](docs/engineering/product-path-boundaries.md) - supported product surface.
 - [docs/engineering/ESPRESSO_CORE_INTEGRATION.md](docs/engineering/ESPRESSO_CORE_INTEGRATION.md) - espresso-core external-agent contract.
+- [CONTRIBUTING.md](CONTRIBUTING.md) - setup, tests, PR expectations, and the boundaries a change may not weaken.
+- [SECURITY.md](SECURITY.md) - how to report a vulnerability, and what this project does not claim to protect.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
