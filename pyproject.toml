@@ -36,6 +36,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
+  "pytest-xdist>=3.6",
 ]
 
 [project.urls]
@@ -59,3 +60,8 @@ espresso_proof = ["agent_skills/*.md"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Deliberately no `addopts = "-n auto"`. Parallelism pays for itself only on the
+# full suite; xdist's worker startup dominates a small run. Measured on one
+# 6-test file: 0.36s serial, 9.1s with `-n auto`. Scoped runs are what this
+# project asks you to do while developing, so the flags live on the full-suite
+# command instead — see CONTRIBUTING.md.
