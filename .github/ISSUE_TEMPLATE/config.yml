@@ -1,0 +1,9 @@
+blank_issues_enabled: true
+
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/shaowuz/espresso-proof/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue.
+  - name: Ask a question or propose an idea
+    url: https://github.com/shaowuz/espresso-proof/discussions
+    about: For anything that is not a specific bug or a scoped task.

@@ -1,5 +1,5 @@
-name: espresso-proof task
-description: Track an artifact-backed product, runtime, source, UI, or hygiene task.
+name: Maintainer task
+description: "Maintainers: track a scoped, artifact-backed change. Reporting a bug? Use the bug report instead."
 title: "[module] Short task title"
 labels: ["status:ready"]
 body:
@@ -14,28 +14,6 @@ body:
         - ui
         - research-source
         - github-hygiene
-    validations:
-      required: true
-  - type: dropdown
-    id: phase
-    attributes:
-      label: Phase
-      description: Choose the nearest current cleanup or product phase.
-      options:
-        - v0-local-kernel
-        - v0-proof-sketch-critique
-        - v1-ui-and-agent-runtime
-        - project-map-mvp
-    validations:
-      required: true
-  - type: dropdown
-    id: energy
-    attributes:
-      label: Energy level
-      options:
-        - high
-        - normal
-        - low
     validations:
       required: true
   - type: textarea

@@ -362,7 +362,7 @@ def latest_unfinished_agent_call(run_dir: Path) -> dict | None:
     no matching terminal (``finished``/``failed``/``timed_out``) record, or None.
 
     This is the reconstruction primitive for a mid-call PROCESS death: when the
-    worker dies *inside* an external agent call (as in the order-3 postmortem),
+    worker dies *inside* an external agent call,
     no terminal record is ever written, so the dangling ``started`` record is the
     only evidence of *where* the run died. Diagnostic only; fails closed."""
     try:

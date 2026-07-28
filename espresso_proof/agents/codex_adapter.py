@@ -91,7 +91,7 @@ def main() -> int:
     # The caller DECLARES the request type (product_math by default and
     # for any unknown value). Only a maintenance/goal-running request may
     # auto-inject repository maintenance context; a product mathematical
-    # run must not (the order-3 postmortem injection bug).
+    # run must not (a past injection bug).
     request_type = os.environ.get("ESPRESSO_REQUEST_TYPE")
     selection = select_agent_skills(
         system=system,

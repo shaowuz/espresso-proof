@@ -1,12 +1,8 @@
-## Product Rule
+## What this changes
 
-What behavior does this protect, and which module/phase does it belong to?
+<!-- What behaviour changes, and why. If it fixes an issue, link it. -->
 
-- Module:
-- Phase:
-- Protected behavior:
-
-## Affected Files
+## Affected files
 
 - 
 
@@ -19,12 +15,15 @@ Check every statement that applies:
 - [ ] Candidate, advisory, UI, or reviewer text remains clearly non-evidence.
 - [ ] Not applicable; explain why:
 
-## Tests / Evals Run
+## Tests run
 
-- [ ] `uv run python -m pytest -q`
-- [ ] `uv run espresso eval --mode mock`
-- [ ] `uv run espresso eval --schemas-only`
-- [ ] Focused command(s):
+Scoped checks are enough for most changes — the full suite runs on merge.
+Say what you actually ran, and what you skipped.
+
+- [ ] `uv run python -m pytest tests/<subsystem> -q`
+- [ ] `uv run espresso export-schemas --check` (if schemas changed)
+- [ ] `npm --prefix web test` (if the cockpit changed)
+- [ ] Other:
 
 ## Notes
 

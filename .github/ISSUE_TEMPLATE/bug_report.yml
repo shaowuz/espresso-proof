@@ -1,0 +1,64 @@
+name: Bug report
+description: Something behaved differently from what the documentation or the UI said it would.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not report security vulnerabilities here — use the Security tab
+        instead. See [SECURITY.md](../blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, and what did Espresso do instead of what you expected?
+      placeholder: |
+        I ran `espresso orchestrate --provider stub` and ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: >
+        The exact commands, and the claim text if the problem depends on it. A
+        partial report is better than no report — send what you have.
+      render: shell
+    validations:
+      required: false
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: How were you running it
+      options:
+        - Deterministic stub (--provider stub)
+        - Real agent (--provider external)
+        - The cockpit (espresso serve)
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, and the commit or version you are on.
+      placeholder: |
+        macOS 15.4, Python 3.11.9, main @ abc1234
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: trust-boundary
+    attributes:
+      label: Does this involve a status being wrong?
+      description: >
+        Optional, but it changes how urgently we look. A run that shows the wrong
+        colour is a display bug; a run that granted a trusted status without the
+        evidence for it is a trust-boundary bug and matters much more.
+      options:
+        - label: An artifact carried a trusted status it had not earned
+        - label: A status was displayed incorrectly, but the artifact itself was right
