@@ -121,7 +121,7 @@ def run_benchmark(output_root: Path, *, cases: list[dict] | None = None) -> list
     for case in sorted(selected, key=lambda c: c["category"]):
         fixture = case["fixture"]
         input_path = FIXTURES_DIR / fixture / "input.md"
-        run_dir = run_mock_critique("hodge_atoms", input_path, output_root / fixture)
+        run_dir = run_mock_critique("benchmark", input_path, output_root / fixture)
         validate_run(run_dir)  # fail-closed: each benchmark run must be kernel-valid
         problems = _check_case(case, run_dir)
         report.append(

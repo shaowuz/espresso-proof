@@ -1,5 +1,5 @@
 Claim sketch:
 
-For all cubic fourfolds, Theorem VG says that a Hodge-theoretic obstruction holds, so every smooth cubic fourfold is irrational.
+For all square matrices, Theorem VG says that a spectral obstruction holds, so every square matrix is diagonalizable.
 
-The cited theorem is only stated for very general smooth cubic fourfolds. The proof applies it to the locked claim for all smooth cubic fourfolds without adding a genericity hypothesis.
+The cited theorem is only stated for generic square matrices. The proof applies it to the locked claim for all square matrices without adding a genericity hypothesis.

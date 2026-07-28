@@ -334,7 +334,7 @@ def test_matched_reasons_surface_as_satisfied_conditions() -> None:
 
 def test_end_to_end_semantic_notation_earns_source_backed(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path
+        "linear_algebra", FIXTURES / "all_matrices_diagonalizable" / "input.md", tmp_path
     )
     # Re-target the claim hypotheses to a p^2-group statement phrased one way and
     # the cited theorem phrased in equivalent notation, so only the semantic

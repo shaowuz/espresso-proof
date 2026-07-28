@@ -30,8 +30,8 @@ SCORECARD_SCHEMA_VERSION = 2
 
 FIXTURES_DIR = Path("tests/fixtures")
 _GROUNDABLE_STATEMENT = (
-    "Theorem 1.2. Exact literature statement supporting the Hodge-theoretic step "
-    "over base field C for cubic fourfolds."
+    "Theorem 1.2. Exact literature statement supporting the spectral step "
+    "over base field C for square matrices."
 )
 
 
@@ -65,7 +65,7 @@ def _grounded_run(
     from espresso_proof.verification.source_verification import ground_run
 
     run_dir = run_mock_critique(
-        project, FIXTURES_DIR / "hodge_all_cubic_fourfolds" / "input.md", root
+        project, FIXTURES_DIR / "all_matrices_diagonalizable" / "input.md", root
     )
     _mark_probe_claim_clear(run_dir)
     src = root / "scorecard_source.txt"
@@ -106,8 +106,8 @@ def _probe_source_grounding(root: Path) -> dict:
     no_loc = _grounded_run(
         root / "no_loc",
         statement=(
-            "An informal remark supporting the Hodge-theoretic step over base "
-            "field C for cubic fourfolds, with no theorem label."
+            "An informal remark supporting the spectral step over base "
+            "field C for square matrices, with no theorem label."
         ),
         project="scorecard_noloc",
     )

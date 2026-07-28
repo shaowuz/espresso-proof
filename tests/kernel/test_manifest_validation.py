@@ -18,7 +18,7 @@ FIXTURES = Path("tests/fixtures")
 
 def _mock_run(tmp_path: Path, fixture_name: str = "promising_but_unproved") -> Path:
     return run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / fixture_name / "input.md",
         tmp_path,
     )
@@ -39,7 +39,7 @@ def test_manifest_rejects_posix_parent_traversal(tmp_path: Path) -> None:
     "fixture_name",
     [
         "promising_but_unproved",
-        "hodge_all_cubic_fourfolds",
+        "all_matrices_diagonalizable",
     ],
 )
 def test_manifest_rejects_windows_parent_traversal_on_posix(

@@ -19,7 +19,7 @@ EXPECTED_COMMANDS = {
     "audit-theorem-applicability", "auto-wire-verifications", "benchmark",
     "build-subgoal-graph", "calibration", "choose-strategy",
     "classify-failures", "discover-literature", "eval", "export-schemas",
-    "extract-locators", "feedback-example", "generate-agent",
+    "extract-locators", "feedback-example",
     "improve-workflow", "ingest-pdf", "init", "inspect", "judge",
     "literature-scout", "materialize-banks", "memo", "memory-context",
     "new-run", "orchestrate", "real-agent-smoke", "real-math-capability",

@@ -140,7 +140,7 @@ def _s3_table() -> list[list[int]]:
 
 def test_identity_check_does_not_upgrade_run_status(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path
+        "linear_algebra", FIXTURES / "all_matrices_diagonalizable" / "input.md", tmp_path
     )
     grade_before = read_yaml(run_dir / "idea_grade.yaml")
     # running the scoped check writes nothing to the run and earns no proof status.

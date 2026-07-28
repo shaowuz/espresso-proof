@@ -21,13 +21,13 @@ from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 THM = (
-    "Theorem 1.2. Exact literature statement supporting the Hodge-theoretic step "
-    "over base field C for cubic fourfolds."
+    "Theorem 1.2. Exact literature statement supporting the spectral step "
+    "over base field C for square matrices."
 )
 
 
-def _hodge_run(tmp_path: Path) -> Path:
-    run_dir = run_mock_critique("hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path)
+def _matrix_run(tmp_path: Path) -> Path:
+    run_dir = run_mock_critique("linear_algebra", FIXTURES / "all_matrices_diagonalizable" / "input.md", tmp_path)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
     ledger = read_yaml(ledger_path)
@@ -48,7 +48,7 @@ def _sg(run_dir: Path) -> dict:
 
 
 def test_stage_earns_source_backed_with_attribution(tmp_path: Path) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     prepare_source_grounding(
         run_dir=run_dir,
         ground_source=_src(run_dir, THM),
@@ -64,7 +64,7 @@ def test_stage_earns_source_backed_with_attribution(tmp_path: Path) -> None:
 
 
 def test_stage_missing_author_stays_candidate(tmp_path: Path) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     prepare_source_grounding(
         run_dir=run_dir, ground_source=_src(run_dir, THM), title="No-author", authors=[]
     )
@@ -75,7 +75,7 @@ def test_stage_missing_author_stays_candidate(tmp_path: Path) -> None:
 
 
 def test_stage_no_exact_locator_stays_candidate(tmp_path: Path) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     prepare_source_grounding(
         run_dir=run_dir,
         ground_source=_src(run_dir, "An informal remark with no theorem locator."),
@@ -87,7 +87,7 @@ def test_stage_no_exact_locator_stays_candidate(tmp_path: Path) -> None:
 
 
 def test_stage_invalid_source_path_fails_closed(tmp_path: Path) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     sg_before = (run_dir / "source_grounding.yaml").read_bytes()
     with pytest.raises((StageError, FileNotFoundError, Exception)):
         prepare_source_grounding(
@@ -103,7 +103,7 @@ def test_stage_invalid_source_path_fails_closed(tmp_path: Path) -> None:
 
 
 def test_stage_does_not_change_idea_grade(tmp_path: Path) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     grade_before = read_yaml(run_dir / "idea_grade.yaml")
     prepare_source_grounding(
         run_dir=run_dir,

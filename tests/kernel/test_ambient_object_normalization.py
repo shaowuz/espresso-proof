@@ -268,7 +268,7 @@ def test_separate_axioms_block_without_normalization_but_pass_after() -> None:
 
 def _p2_run_with_normalized_claim(tmp_path: Path) -> Path:
     run_dir = run_mock_critique(
-        "hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path
+        "linear_algebra", FIXTURES / "all_matrices_diagonalizable" / "input.md", tmp_path
     )
     claim = read_yaml(run_dir / "locked_claim.yaml")
     # The front-half would have normalized the decomposed axioms to "G is a group".

@@ -95,8 +95,8 @@ def _first_strategy_id(run_dir: Path) -> str:
 def _write_theorem_extraction(run_dir: Path) -> Path:
     source = run_dir / "source.txt"
     source.write_text(
-        "Theorem 1.2. Exact literature statement supporting the Hodge-theoretic step "
-        "over base field C for cubic fourfolds.",
+        "Theorem 1.2. Exact literature statement supporting the spectral step "
+        "over base field C for square matrices.",
         encoding="utf-8",
     )
     claim = read_yaml(run_dir / "locked_claim.yaml")

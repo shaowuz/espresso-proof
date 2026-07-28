@@ -691,12 +691,12 @@ def test_run_flow_front_half_rejects_bad_mode(tmp_path: Path) -> None:
     assert result.exit_code != 0
 
 
-# Claim text that triggers the seeded hodge_atoms mock scenario, whose scaffold
-# writes a tests.yaml referencing the seeded example id ``ex_special_cubic``.
-HODGE_ALL_CUBIC_CLAIM = (
-    "For all cubic fourfolds, the Hodge atom obstruction proves irrationality.\n\n"
+# Claim text that triggers the seeded linear_algebra mock scenario, whose scaffold
+# writes a tests.yaml referencing the seeded example id ``ex_repeated_eigenvalue``.
+ALL_MATRICES_CLAIM = (
+    "For all square matrices, the distinct-eigenvalue argument proves diagonalizability.\n\n"
     "The sketch treats the very general case as if it applied to every smooth "
-    "cubic fourfold."
+    "square matrix."
 )
 
 
@@ -705,28 +705,28 @@ def test_examples_stage_reconciles_seeded_tests_when_example_ids_change(
 ) -> None:
     """Regression (Golden Dogfood Run): the live examples stage replaces
     examples.yaml with new ids, which must not orphan a seeded tests.yaml that
-    referenced the scaffold example id (here ex_special_cubic). The examples
+    referenced the scaffold example id (here ex_repeated_eigenvalue). The examples
     stage prunes uses_examples to the ids it actually wrote, so the post-stage
     validate_run passes. Pruning only DROPS an unsupported reference; it never
     invents an example id and never upgrades any status.
     """
     claim_path = tmp_path / "claim.md"
-    claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")
-    run_dir = run_mock_critique("hodge_atoms", claim_path, tmp_path)
+    claim_path.write_text(ALL_MATRICES_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("linear_algebra", claim_path, tmp_path)
     _mark_claim_clear(run_dir)
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
 
-    # Precondition: the seeded scaffold references ex_special_cubic from tests.yaml.
+    # Precondition: the seeded scaffold references ex_repeated_eigenvalue from tests.yaml.
     seeded_tests = read_yaml(run_dir / artifacts["tests"])
     seeded_refs = {eid for t in seeded_tests["tests"] for eid in t.get("uses_examples", [])}
-    assert "ex_special_cubic" in seeded_refs
+    assert "ex_repeated_eigenvalue" in seeded_refs
 
     # The live examples agent returns examples with DIFFERENT ids (ex_001...).
     client = _FakeClient(
         {
             "examples": [
                 {
-                    "name": "Pfaffian cubic fourfold (general member)",
+                    "name": "Pfaffian square matrix (general member)",
                     "satisfies_all_claim_hypotheses": True,
                     "what_it_tests": ["rationality pressure"],
                     "expected_conclusion": "rational",
@@ -744,27 +744,27 @@ def test_examples_stage_reconciles_seeded_tests_when_example_ids_change(
 
     examples = read_yaml(run_dir / artifacts["examples"])
     example_ids = {ex["id"] for ex in examples["examples"]}
-    assert "ex_special_cubic" not in example_ids
+    assert "ex_repeated_eigenvalue" not in example_ids
 
     tests = read_yaml(run_dir / artifacts["tests"])
     for test in tests["tests"]:
         # Every retained reference points at an example we actually wrote; the
-        # orphan ex_special_cubic was dropped, not re-invented.
+        # orphan ex_repeated_eigenvalue was dropped, not re-invented.
         assert set(test.get("uses_examples", [])).issubset(example_ids)
-        assert "ex_special_cubic" not in test.get("uses_examples", [])
+        assert "ex_repeated_eigenvalue" not in test.get("uses_examples", [])
 
 
-def test_full_front_half_pass_on_seeded_hodge_scenario_stays_valid(tmp_path: Path) -> None:
+def test_full_front_half_pass_on_seeded_matrix_scenario_stays_valid(tmp_path: Path) -> None:
     """Regression (Golden Dogfood Run): a full front-half pass over the seeded
-    hodge_atoms mock scaffold stays kernel-valid at every stage. The scaffold
+    linear_algebra mock scaffold stays kernel-valid at every stage. The scaffold
     seeds scenario-specific tests.yaml and strategy artifacts; as live stages
     replace their dependencies (examples.yaml, idea_grade.yaml) the run must
     remain valid between stages (examples reconciles tests; regrade reconciles
     strategy), not just at the end.
     """
     claim_path = tmp_path / "claim.md"
-    claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")
-    run_dir = run_mock_critique("hodge_atoms", claim_path, tmp_path)
+    claim_path.write_text(ALL_MATRICES_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("linear_algebra", claim_path, tmp_path)
 
     report = run_front_half_agent_pass(run_dir=run_dir, client=StubLLMClient())
 
@@ -1099,18 +1099,18 @@ def test_reconcile_tests_drops_dangling_example_reference(tmp_path: Path) -> Non
     from espresso_proof.front_half.stages.examples import _reconcile_tests_with_examples
 
     claim_path = tmp_path / "claim.md"
-    claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")
+    claim_path.write_text(ALL_MATRICES_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("recon_tests", claim_path, tmp_path)
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
     tests = read_yaml(run_dir / artifacts["tests"])
     referenced = {eid for test in tests["tests"] for eid in test.get("uses_examples", [])}
-    assert "ex_special_cubic" in referenced
+    assert "ex_repeated_eigenvalue" in referenced
 
     dropped = _reconcile_tests_with_examples(run_dir, artifacts, tests["claim_id"], set())
 
     assert dropped >= 1
     after = read_yaml(run_dir / artifacts["tests"])
-    assert all("ex_special_cubic" not in test.get("uses_examples", []) for test in after["tests"])
+    assert all("ex_repeated_eigenvalue" not in test.get("uses_examples", []) for test in after["tests"])
 
 
 def test_reconcile_counterexamples_drops_dangling_example_reference(tmp_path: Path) -> None:
@@ -1119,12 +1119,12 @@ def test_reconcile_counterexamples_drops_dangling_example_reference(tmp_path: Pa
     )
 
     claim_path = tmp_path / "claim.md"
-    claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")
+    claim_path.write_text(ALL_MATRICES_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("recon_counterexamples", claim_path, tmp_path)
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
     counterexamples = read_yaml(run_dir / artifacts["counterexamples"])
     referenced = {test.get("example_id") for test in counterexamples["tests"]}
-    assert "ex_special_cubic" in referenced
+    assert "ex_repeated_eigenvalue" in referenced
 
     dropped = _reconcile_counterexamples_with_examples(
         run_dir, artifacts, counterexamples["claim_id"], set()
@@ -1133,7 +1133,7 @@ def test_reconcile_counterexamples_drops_dangling_example_reference(tmp_path: Pa
     assert dropped >= 1
     after = read_yaml(run_dir / artifacts["counterexamples"])
     assert all(
-        test.get("example_id") != "ex_special_cubic"
+        test.get("example_id") != "ex_repeated_eigenvalue"
         for test in after["tests"]
     )
 
@@ -1172,7 +1172,7 @@ def test_reconcile_tests_keeps_valid_bank_counterexample_reference(tmp_path: Pat
     from espresso_proof.kernel.research_bank import materialize_run_banks
 
     claim_path = tmp_path / "claim.md"
-    claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")
+    claim_path.write_text(ALL_MATRICES_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("recon_bank_tests", claim_path, tmp_path)
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
     counterexamples = read_yaml(run_dir / artifacts["counterexamples"])
@@ -1253,7 +1253,7 @@ def test_reconcile_strategy_clamps_scores_to_lift_limit(tmp_path: Path) -> None:
     from espresso_proof.kernel.strategy_rules import score_lift_limit
 
     claim_path = tmp_path / "claim.md"
-    claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")
+    claim_path.write_text(ALL_MATRICES_CLAIM, encoding="utf-8")
     run_dir = run_mock_critique("recon_clamp", claim_path, tmp_path)
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
     idea_score = 10
@@ -1333,8 +1333,8 @@ def test_counterexample_example_id_not_fabricated(tmp_path: Path) -> None:
     # [hard-negative] counterexamples about objects that are NOT one of the
     # run's examples must not carry a fabricated pointer at examples[0].
     claim_path = tmp_path / "claim.md"
-    claim_path.write_text(HODGE_ALL_CUBIC_CLAIM, encoding="utf-8")
-    run_dir = run_mock_critique("hodge_atoms", claim_path, tmp_path)
+    claim_path.write_text(ALL_MATRICES_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("linear_algebra", claim_path, tmp_path)
     _mark_claim_clear(run_dir)
     artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
     examples = read_yaml(run_dir / artifacts["examples"])["examples"]

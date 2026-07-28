@@ -59,7 +59,7 @@ def _p2_corpus(tmp_path: Path, *, text: str = _P2_THEOREM, attribution: bool = T
 
 def _p2_run(tmp_path: Path) -> Path:
     run_dir = run_mock_critique(
-        "hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path
+        "linear_algebra", FIXTURES / "all_matrices_diagonalizable" / "input.md", tmp_path
     )
     claim = read_yaml(run_dir / "locked_claim.yaml")
     claim["normalized_statement"] = "For every prime p and every group G with |G| = p^2, G is abelian."

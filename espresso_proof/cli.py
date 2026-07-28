@@ -63,7 +63,7 @@ from espresso_proof.kernel.validators import KernelValidationError, validate_run
 @app.command("orchestrate")
 def orchestrate(
     input: Path | None = typer.Option(None, "--input", "-i", dir_okay=False),
-    project: str = typer.Option("hodge_atoms", "--project", "-p"),
+    project: str = typer.Option("demo", "--project", "-p"),
     provider: str = typer.Option("stub", "--provider"),
     front_half: str = typer.Option("auto", "--front-half"),
     model: str = typer.Option("gpt-4.1", "--model"),

@@ -244,8 +244,8 @@ def test_validate_run_rejects_run_dir_with_auto_confirmed_human_choice(
     tmp_path: Path,
 ) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     strategy_brief = read_yaml(run_dir / "strategy_brief.yaml")
@@ -271,8 +271,8 @@ def test_validate_run_rejects_run_dir_with_auto_confirmed_human_choice(
 
 def test_validate_run_accepts_run_dir_with_honest_auto_choice(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     strategy_brief = read_yaml(run_dir / "strategy_brief.yaml")
@@ -385,8 +385,8 @@ def test_validate_run_rejects_auto_state_name_with_human_choice(
     # End to end: an auto-advertising state name over a human-claiming choice
     # artifact is a provenance mismatch a state-name reader would be misled by.
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     strategy_brief = read_yaml(run_dir / "strategy_brief.yaml")
@@ -462,8 +462,8 @@ def test_validator_layer_rejects_human_confirmed_gate_on_auto_choice(
 
 def test_hostile_token_usage_sidecar_changes_nothing(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     validate_run(run_dir)

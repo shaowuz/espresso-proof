@@ -1,4 +1,4 @@
-fixture: hodge_all_cubic_fourfolds
+fixture: all_matrices_diagonalizable
 required:
   idea_status:
     - fragile

@@ -25,8 +25,8 @@ from espresso_proof.verification.source_verification import ground_run
 
 FIXTURES = Path("tests/fixtures")
 THM = (
-    "Theorem 1.2. Exact literature statement supporting the Hodge-theoretic step "
-    "over base field C for cubic fourfolds."
+    "Theorem 1.2. Exact literature statement supporting the spectral step "
+    "over base field C for square matrices."
 )
 
 
@@ -127,17 +127,17 @@ def _basic_run(tmp_path: Path) -> Path:
     return run_dir
 
 
-def _hodge_run(tmp_path: Path) -> Path:
+def _matrix_run(tmp_path: Path) -> Path:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _make_claim_clear(run_dir)
     return run_dir
 
 
-def _ground_hodge_source(run_dir: Path) -> None:
+def _ground_matrix_source(run_dir: Path) -> None:
     src = run_dir / "src.txt"
     src.write_text(THM, encoding="utf-8")
     manifest = read_yaml(run_dir / "run_manifest.yaml")
@@ -262,8 +262,8 @@ def test_real_math_benchmark_counts_useful_witness_route_below_proof_threshold(
 def test_real_math_benchmark_counts_source_supported_argument_only_after_grounding(
     tmp_path: Path,
 ) -> None:
-    run_dir = _hodge_run(tmp_path)
-    _ground_hodge_source(run_dir)
+    run_dir = _matrix_run(tmp_path)
+    _ground_matrix_source(run_dir)
     report = build_real_math_capability_report([_case(run_dir, "source_supported")])
     row = _row(report)
 
@@ -280,8 +280,8 @@ def test_real_math_benchmark_counts_source_supported_argument_only_after_groundi
 def test_real_math_benchmark_blocks_source_solution_when_applicability_not_overall_clear(
     tmp_path: Path,
 ) -> None:
-    run_dir = _hodge_run(tmp_path)
-    _ground_hodge_source(run_dir)
+    run_dir = _matrix_run(tmp_path)
+    _ground_matrix_source(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     applicability_path = run_dir / manifest["optional_artifacts"]["theorem_applicability"]
     applicability = read_yaml(applicability_path)
@@ -299,7 +299,7 @@ def test_real_math_benchmark_blocks_source_solution_when_applicability_not_overa
             "conditions": [
                 {
                     "id": "cond_001",
-                    "text": "The cubic fourfold is very general.",
+                    "text": "The square matrix is very general.",
                     "condition_type": "genericity",
                     "status": "not_checked",
                     "evidence": "Benchmark trap: unresolved theorem condition ledger.",

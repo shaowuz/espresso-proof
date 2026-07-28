@@ -1,5 +1,5 @@
 Claim sketch:
 
-The idea survives the special cubic fourfold because the Hodge number computation works out.
+The idea survives the matrix with a repeated eigenvalue because the eigenvalue multiplicity computation works out.
 
 But I have not provided the computation or a precise source.

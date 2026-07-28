@@ -35,7 +35,6 @@ from espresso_proof.kernel.models import (
     WorkflowSpec,
 )
 from espresso_proof.kernel.validators import KernelValidationError, validate_run
-from espresso_proof.orchestration.workflow_generator import classify_domain, generate_workflow_spec
 
 
 FIXTURES = Path("tests/fixtures")
@@ -50,7 +49,7 @@ def test_fixture_shape_is_complete(fixture_dir: Path) -> None:
 
 @pytest.mark.parametrize("fixture_dir", sorted(p for p in FIXTURES.iterdir() if p.is_dir()))
 def test_mock_fixtures_validate(fixture_dir: Path, tmp_path: Path) -> None:
-    run_dir = run_mock_critique("hodge_atoms", fixture_dir / "input.md", tmp_path)
+    run_dir = run_mock_critique("linear_algebra", fixture_dir / "input.md", tmp_path)
     validate_run(run_dir)
 
     expected = read_yaml(fixture_dir / "expected.yaml")
@@ -75,21 +74,10 @@ def test_mock_fixtures_validate(fixture_dir: Path, tmp_path: Path) -> None:
     MemoryIndex.model_validate(read_yaml(memory_dir / "index.yaml"))
 
 
-def test_generated_workflow_specs_validate() -> None:
-    hodge = generate_workflow_spec(
-        "Hodge atom mirror symmetry", project_name="generated_hodge"
-    )
-    coherent = generate_workflow_spec(
-        "flat coherent base change", project_name="generated_base_change"
-    )
-    WorkflowSpec.model_validate(hodge)
-    WorkflowSpec.model_validate(coherent)
-    AgentContracts.model_validate(default_agent_contracts("scratch"))
-
 
 def test_cross_artifact_rejects_unchecked_evidence(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "unchecked_example_not_evidence" / "input.md",
         tmp_path,
     )
@@ -109,7 +97,7 @@ def test_cross_artifact_rejects_unchecked_evidence(tmp_path: Path) -> None:
 
 def test_cross_artifact_rejects_dropped_hypothesis_refutation(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "dropped_hypothesis_not_refutation" / "input.md",
         tmp_path,
     )
@@ -125,8 +113,8 @@ def test_cross_artifact_rejects_dropped_hypothesis_refutation(tmp_path: Path) ->
 
 def test_cross_artifact_rejects_bad_final_report_language(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     (run_dir / "final_report.md").write_text("proof complete and verified", encoding="utf-8")
@@ -137,8 +125,8 @@ def test_cross_artifact_rejects_bad_final_report_language(tmp_path: Path) -> Non
 
 def test_failed_parallel_reviewer_blocks_promising_grade(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     grade_path = run_dir / "idea_grade.yaml"
@@ -154,8 +142,8 @@ def test_failed_parallel_reviewer_blocks_promising_grade(tmp_path: Path) -> None
 
 def test_literature_review_cannot_be_source_backed(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "literature_review.yaml"
@@ -169,8 +157,8 @@ def test_literature_review_cannot_be_source_backed(tmp_path: Path) -> None:
 
 def test_loop_control_stops_after_two_no_progress_cycles(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "loop_control.yaml"
@@ -187,7 +175,7 @@ def test_loop_control_stops_after_two_no_progress_cycles(tmp_path: Path) -> None
 
 def test_manual_review_cannot_be_checked_evidence(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "unchecked_example_not_evidence" / "input.md",
         tmp_path,
     )
@@ -306,8 +294,8 @@ def test_sketch_only_applicability_cannot_be_used_by_strategy_reviewer() -> None
 
 def test_human_choice_rejects_unknown_selected_strategy(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "human_choice.yaml"
@@ -330,7 +318,7 @@ def test_human_choice_rejects_unknown_selected_strategy(tmp_path: Path) -> None:
 
 def test_choose_strategy_cli_writes_human_choice_and_memory(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -363,7 +351,7 @@ def test_choose_strategy_cli_writes_human_choice_and_memory(tmp_path: Path) -> N
     assert human_choice["human_confirmed"] is True
 
     project_dir = run_dir.parents[1]
-    memory = summarize_memory(project_dir, claim_text="pin exact Hodge theorem")
+    memory = summarize_memory(project_dir, claim_text="pin exact Spectral theorem")
     assert "User decisions" in memory
     assert "strategy_pin_reference" in memory
     index = read_yaml(project_dir / "memory" / "index.yaml")
@@ -372,7 +360,7 @@ def test_choose_strategy_cli_writes_human_choice_and_memory(tmp_path: Path) -> N
 
 def test_choose_strategy_cli_rejects_invalid_effort_without_writing(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -403,8 +391,8 @@ def test_choose_strategy_cli_rejects_invalid_effort_without_writing(tmp_path: Pa
 
 def test_agent_contracts_must_cover_required_outputs(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "agent_contracts.yaml"
@@ -429,11 +417,11 @@ def test_memory_loading_missing_index_returns_empty(tmp_path: Path) -> None:
 
 def test_memory_summary_loads_written_memory(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
-    summary = summarize_memory(run_dir.parents[1], claim_text="cubic fourfold hodge atom")
+    summary = summarize_memory(run_dir.parents[1], claim_text="square matrix spectral atom")
 
     assert "Source gaps" in summary
     assert "top strategy" in summary
@@ -477,11 +465,11 @@ def test_run_memory_produces_reviewer_and_counterexample_categories(tmp_path: Pa
     # A real mock run must PRODUCE (not just be able to render) reviewer-objection
     # and counterexample memory categories, via the unified write_run_memory.
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
-    summary = summarize_memory(run_dir.parents[1], claim_text="cubic fourfold hodge atom")
+    summary = summarize_memory(run_dir.parents[1], claim_text="square matrix spectral atom")
     assert "Source gaps" in summary  # existing grade-summary entry preserved
     assert "Reviewer objections" in summary
     assert "Counterexamples" in summary
@@ -491,8 +479,8 @@ def test_write_run_memory_emits_optional_categories(tmp_path: Path) -> None:
     # When the optional theorem_applicability / human_example_feedback artifacts
     # exist, write_run_memory produces those advisory memory categories too.
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     (run_dir / "theorem_applicability.yaml").write_text(
@@ -506,7 +494,7 @@ def test_write_run_memory_emits_optional_categories(tmp_path: Path) -> None:
     write_run_memory(
         run_dir.parents[1], run_dir, project_id=run_dir.parents[1].name, run_id=run_dir.name
     )
-    summary = summarize_memory(run_dir.parents[1], claim_text="cubic fourfold")
+    summary = summarize_memory(run_dir.parents[1], claim_text="square matrix")
     assert "Theorem applicability failures" in summary
     assert "Human example feedback" in summary
 
@@ -553,16 +541,16 @@ def test_memory_summary_is_deterministic(tmp_path: Path) -> None:
         _memory_entry(id="mem_b", type="source_gap", summary="missing exact locator for Theorem 1.2"),
     )
 
-    first = summarize_memory(project_dir, claim_text="cubic fourfold locator")
-    second = summarize_memory(project_dir, claim_text="cubic fourfold locator")
+    first = summarize_memory(project_dir, claim_text="square matrix locator")
+    second = summarize_memory(project_dir, claim_text="square matrix locator")
     assert first == second
     assert first  # non-empty
 
 
 def test_inspect_shows_claim_grade_and_evidence_sections(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     result = CliRunner().invoke(app, ["inspect", "--run", str(run_dir)])
@@ -580,7 +568,7 @@ def test_inspect_shows_claim_grade_and_evidence_sections(tmp_path: Path) -> None
 
 def test_inspect_does_not_emit_proof_complete_language(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -593,8 +581,8 @@ def test_inspect_does_not_emit_proof_complete_language(tmp_path: Path) -> None:
 
 def test_memo_renders_compact_graded_sections(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     result = CliRunner().invoke(app, ["memo", "--run", str(run_dir)])
@@ -613,7 +601,7 @@ def test_memo_renders_compact_graded_sections(tmp_path: Path) -> None:
 
 def test_memo_unclear_claim_recommends_locking(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "vague_claim_unclear" / "input.md",
         tmp_path,
     )
@@ -631,7 +619,7 @@ def test_memo_no_proof_complete_language_for_weak_artifacts(tmp_path: Path) -> N
     # and never emits memo-generated proof-complete language (Concise Answer
     # safety; AGENT_AUTOMATION_ENGINEERING_PLAN Step 1).
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -650,8 +638,8 @@ def test_memo_no_proof_complete_language_for_weak_artifacts(tmp_path: Path) -> N
 
 def test_inspect_does_not_mutate_run(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     before = {path.name: path.read_bytes() for path in sorted(run_dir.glob("*.yaml"))}
@@ -661,43 +649,27 @@ def test_inspect_does_not_mutate_run(tmp_path: Path) -> None:
     assert before == after
 
 
-def test_workflow_generator_classifies_domains() -> None:
-    hodge_spec = generate_workflow_spec(
-        "KKPY Hodge atoms and mirror symmetry for cubic fourfolds",
-        project_name="generated_hodge",
-    )
-    coherent_spec = generate_workflow_spec(
-        "coherent sheaf cohomology and base change for a flat proper morphism",
-        project_name="generated_base_change",
-    )
-    stacks_spec = generate_workflow_spec(
-        "fpqc descent and representability for an algebraic stack",
-        project_name="generated_stacks",
-    )
-    generic_spec = generate_workflow_spec(
-        "study a smooth projective morphism and divisor intersection problem",
-        project_name="generated_generic",
-    )
-
-    assert classify_domain("Hodge atom mirror symmetry") == "hodge_atoms"
-    assert hodge_spec["domain_key"] == "hodge_atoms"
-    assert coherent_spec["domain_key"] == "coherent_base_change"
-    assert stacks_spec["domain_key"] == "stacks_descent"
-    assert generic_spec["domain_key"] == "generic_ag"
-    assert hodge_spec["canonical_example_templates"] != coherent_spec["canonical_example_templates"]
-    WorkflowSpec.model_validate(hodge_spec)
-    WorkflowSpec.model_validate(coherent_spec)
-    WorkflowSpec.model_validate(stacks_spec)
-    WorkflowSpec.model_validate(generic_spec)
-
 
 def test_workflow_spec_rejects_missing_lean_non_goal() -> None:
     # Espresso is not Lean-heavy by default (KERNEL_SAFETY_RULES Mathematical
     # Status Rules): a workflow spec must keep Lean formalization an explicit
     # non-goal. Dropping that non-goal must be rejected.
-    spec = generate_workflow_spec(
-        "Hodge atom mirror symmetry", project_name="generated_hodge"
-    )
+    spec = {
+        "name": "example_workflow",
+        "mode": "v0",
+        "status": "draft",
+        "domain": "example domain",
+        "core_corpus": [],
+        "agent_flow": ["understanding"],
+        "default_critique_flow": ["understanding"],
+        "required_examples": ["one worked example"],
+        "canonical_example_templates": ["a canonical example"],
+        "pathology_templates": ["a pathological example"],
+        "test_operators": ["specialize"],
+        "non_goals": ["lean formalization is not a default goal"],
+    }
+    WorkflowSpec.model_validate(spec)
+
     spec["non_goals"] = [
         goal for goal in spec["non_goals"] if "lean formalization" not in goal.lower()
     ]
@@ -705,10 +677,11 @@ def test_workflow_spec_rejects_missing_lean_non_goal() -> None:
         WorkflowSpec.model_validate(spec)
 
 
+
 def test_strategy_rules_reject_standard_score_overreach(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "strategy_synthesis.yaml"
@@ -723,8 +696,8 @@ def test_strategy_rules_reject_standard_score_overreach(tmp_path: Path) -> None:
 
 def test_strategy_rules_reject_repair_score_overreach(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "strategy_synthesis.yaml"
@@ -739,7 +712,7 @@ def test_strategy_rules_reject_repair_score_overreach(tmp_path: Path) -> None:
 
 def test_strategy_rules_reject_high_score_with_unverified_source(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -755,8 +728,8 @@ def test_strategy_rules_reject_high_score_with_unverified_source(tmp_path: Path)
 
 def test_strategy_rules_reject_unchecked_deep_exploration(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "strategy_synthesis.yaml"
@@ -771,7 +744,7 @@ def test_strategy_rules_reject_unchecked_deep_exploration(tmp_path: Path) -> Non
 
 def test_strategy_rules_reject_unclear_claim_non_lock_route(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "vague_claim_unclear" / "input.md",
         tmp_path,
     )
@@ -787,8 +760,8 @@ def test_strategy_rules_reject_unclear_claim_non_lock_route(tmp_path: Path) -> N
 
 def test_strategy_rules_reject_failed_reviewer_promising_strategy(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "strategy_synthesis.yaml"
@@ -802,8 +775,8 @@ def test_strategy_rules_reject_failed_reviewer_promising_strategy(tmp_path: Path
 
 def test_strategy_rules_reject_failed_reviewer_proof_like_strategy(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "strategy_synthesis.yaml"
@@ -817,7 +790,7 @@ def test_strategy_rules_reject_failed_reviewer_proof_like_strategy(tmp_path: Pat
 
 def test_referencing_misapplied_requires_hypothesis_mismatch(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "source_misapplication_very_general_to_all" / "input.md",
         tmp_path,
     )
@@ -832,7 +805,7 @@ def test_referencing_misapplied_requires_hypothesis_mismatch(tmp_path: Path) -> 
 
 def test_promising_fixture_has_non_toy_checked_support(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -844,8 +817,8 @@ def test_promising_fixture_has_non_toy_checked_support(tmp_path: Path) -> None:
         for check in computations["checks"]
         if check["status"] in {"checked", "source_checked"}
     }
-    assert "check_very_general_hodge_package_source" in support
-    assert support["check_very_general_hodge_package_source"]["status"] == "source_checked"
+    assert "check_generic_matrix_source" in support
+    assert support["check_generic_matrix_source"]["status"] == "source_checked"
 
 
 def test_eval_rejects_incomplete_fixture_shape(tmp_path: Path) -> None:
@@ -862,8 +835,8 @@ def test_eval_rejects_incomplete_fixture_shape(tmp_path: Path) -> None:
 
 def test_manifest_rejects_run_id_mismatch(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "run_manifest.yaml"
@@ -877,8 +850,8 @@ def test_manifest_rejects_run_id_mismatch(tmp_path: Path) -> None:
 
 def test_manifest_rejects_absolute_artifact_path(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "run_manifest.yaml"
@@ -892,8 +865,8 @@ def test_manifest_rejects_absolute_artifact_path(tmp_path: Path) -> None:
 
 def test_manifest_rejects_parent_traversal_and_missing_artifact(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "run_manifest.yaml"
@@ -912,8 +885,8 @@ def test_manifest_rejects_parent_traversal_and_missing_artifact(tmp_path: Path) 
 
 def test_computation_checks_reject_nested_claim_mismatch(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "computation_checks.yaml"
@@ -927,8 +900,8 @@ def test_computation_checks_reject_nested_claim_mismatch(tmp_path: Path) -> None
 
 def test_test_report_requires_checked_evidence_for_survived_or_failed(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "tests.yaml"
@@ -943,8 +916,8 @@ def test_test_report_requires_checked_evidence_for_survived_or_failed(tmp_path: 
 
 def test_test_report_counterexample_evidence_must_be_audited(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "tests.yaml"
@@ -961,8 +934,8 @@ def test_test_report_counterexample_evidence_must_be_audited(tmp_path: Path) -> 
 
 def test_literature_review_cannot_mark_misapplied(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "literature_review.yaml"
@@ -1003,8 +976,8 @@ def test_source_backed_requires_exact_locator_and_hypothesis_match() -> None:
 
 def test_final_report_allows_unverified_but_rejects_proof_language(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     disclosure = (run_dir / "final_report.md").read_text(encoding="utf-8").split(
@@ -1029,8 +1002,8 @@ def test_final_report_allows_unverified_but_rejects_proof_language(tmp_path: Pat
 
 def test_loop_control_stop_requires_should_stop(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     path = run_dir / "loop_control.yaml"
@@ -1046,7 +1019,7 @@ def test_loop_control_stop_requires_should_stop(tmp_path: Path) -> None:
 
 def test_strategy_rules_reject_high_score_for_likely_false_or_refuted_idea(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "likely_false_multiple_pressures" / "input.md",
         tmp_path,
     )
@@ -1070,7 +1043,7 @@ def test_strategy_rules_reject_high_score_for_refuted_idea(tmp_path: Path) -> No
     # (KERNEL_SAFETY_RULES Strategy Rules; strategy_scoring_gate slice). The
     # sibling test exercises likely_false; this isolates the refuted status.
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "refuted_by_all_hypotheses_counterexample" / "input.md",
         tmp_path,
     )
@@ -1092,8 +1065,8 @@ def test_strategy_rules_reject_high_score_for_refuted_idea(tmp_path: Path) -> No
 
 def test_strategy_rules_reject_high_score_with_unchecked_evidence(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     grade_path = run_dir / "idea_grade.yaml"
@@ -1114,7 +1087,7 @@ def test_strategy_rules_reject_high_score_with_unchecked_evidence(tmp_path: Path
 
 def test_strategy_rules_reject_marker_based_unchecked_deep_exploration(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1130,7 +1103,7 @@ def test_strategy_rules_reject_marker_based_unchecked_deep_exploration(tmp_path:
 
 def test_strategy_brief_score_is_canonical_for_human_grading(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1143,7 +1116,7 @@ def test_strategy_brief_score_is_canonical_for_human_grading(tmp_path: Path) -> 
 
 def test_strategy_brief_non_score_fields_must_match_strategy_synthesis(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1156,7 +1129,7 @@ def test_strategy_brief_non_score_fields_must_match_strategy_synthesis(tmp_path:
         validate_run(run_dir)
 def test_strategy_brief_requires_human_choice_options_and_top_three_limit(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1187,7 +1160,7 @@ def test_strategy_brief_requires_human_choice_options_and_top_three_limit(tmp_pa
 
 def test_human_choice_effort_must_be_allowed_and_none_cannot_continue(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1234,7 +1207,7 @@ def test_human_choice_effort_must_be_allowed_and_none_cannot_continue(tmp_path: 
 
 def test_human_feedback_unknown_target_is_rejected(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "human_marks_example_interesting" / "input.md",
         tmp_path,
     )
@@ -1249,7 +1222,7 @@ def test_human_feedback_unknown_target_is_rejected(tmp_path: Path) -> None:
 
 def test_human_feedback_unconfirmed_item_is_rejected(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "human_marks_example_interesting" / "input.md",
         tmp_path,
     )
@@ -1264,7 +1237,7 @@ def test_human_feedback_unconfirmed_item_is_rejected(tmp_path: Path) -> None:
 
 def test_human_feedback_summary_rejects_unknown_feedback_id(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "human_marks_example_interesting" / "input.md",
         tmp_path,
     )
@@ -1280,7 +1253,7 @@ def test_human_feedback_summary_rejects_unknown_feedback_id(tmp_path: Path) -> N
 def test_human_feedback_schema_rejects_evidence_status_fields() -> None:
     data = {
         "schema_version": 1,
-        "project_id": "hodge_atoms",
+        "project_id": "linear_algebra",
         "claim_id": "claim_001",
         "run_id": "run_001",
         "created_at": "2026-05-28T12:00:00Z",
@@ -1320,7 +1293,7 @@ def _human_feedback_with_extra(extra: dict) -> dict:
     }
     return {
         "schema_version": 1,
-        "project_id": "hodge_atoms",
+        "project_id": "linear_algebra",
         "claim_id": "claim_001",
         "run_id": "run_001",
         "created_at": "2026-05-28T12:00:00Z",
@@ -1470,8 +1443,8 @@ def test_human_choice_schema_cannot_override_applicability() -> None:
 
 def test_feedback_example_cli_writes_valid_optional_artifact(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
 
@@ -1482,7 +1455,7 @@ def test_feedback_example_cli_writes_valid_optional_artifact(tmp_path: Path) -> 
             "--run",
             str(run_dir),
             "--target",
-            "ex_special_cubic",
+            "ex_repeated_eigenvalue",
             "--label",
             "dangerous",
             "--reason",
@@ -1495,14 +1468,14 @@ def test_feedback_example_cli_writes_valid_optional_artifact(tmp_path: Path) -> 
     assert manifest["optional_artifacts"]["human_example_feedback"] == "human_example_feedback.yaml"
     feedback = HumanExampleFeedback.model_validate(read_yaml(run_dir / "human_example_feedback.yaml"))
     assert feedback.feedback[0].feedback_id == "feedback_001"
-    assert feedback.feedback[0].target_id == "ex_special_cubic"
+    assert feedback.feedback[0].target_id == "ex_repeated_eigenvalue"
     validate_run(run_dir)
 
 
 def test_feedback_example_cli_rejects_unknown_target_without_writing(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
 
@@ -1529,8 +1502,8 @@ def test_feedback_example_cli_rejects_unknown_target_without_writing(tmp_path: P
 
 def test_summarize_feedback_cli_writes_ranking_only_summary(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     feedback_result = CliRunner().invoke(
@@ -1540,7 +1513,7 @@ def test_summarize_feedback_cli_writes_ranking_only_summary(tmp_path: Path) -> N
             "--run",
             str(run_dir),
             "--target",
-            "ex_special_cubic",
+            "ex_repeated_eigenvalue",
             "--label",
             "too_easy",
             "--reason",
@@ -1557,34 +1530,6 @@ def test_summarize_feedback_cli_writes_ranking_only_summary(tmp_path: Path) -> N
     assert summary.ranking_adjustments[0].feedback_ids == ["feedback_001"]
     validate_run(run_dir)
 
-
-def test_generate_agent_cli_writes_admission_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    prompt = tmp_path / "prompt.md"
-    prompt.write_text("Study KKPY Hodge atoms for cubic fourfold mirror symmetry.", encoding="utf-8")
-
-    result = CliRunner().invoke(
-        app,
-        ["generate-agent", "--mode", "v0", "--prompt", str(prompt), "--project", "generated_hodge"],
-    )
-
-    assert result.exit_code == 0, result.output
-    project_dir = tmp_path / "projects" / "generated_hodge"
-    for relative in [
-        "workflow_spec.yaml",
-        "playbook.md",
-        "agent_contracts.yaml",
-        "admission_check.yaml",
-        "trial_fixture/input.md",
-        "trial_fixture/expected.yaml",
-    ]:
-        assert (project_dir / relative).exists()
-    WorkflowSpec.model_validate(read_yaml(project_dir / "workflow_spec.yaml"))
-    AgentContracts.model_validate(read_yaml(project_dir / "agent_contracts.yaml"))
-    admission = AdmissionCheck.model_validate(read_yaml(project_dir / "admission_check.yaml"))
-    assert admission.admitted is False
-    assert admission.human_confirmed is False
-    assert admission.blockers
 
 
 def test_admission_check_rejects_admitted_with_blockers_or_missing_checks() -> None:
@@ -1620,8 +1565,8 @@ def test_classify_failures_routes_typed_categories(tmp_path: Path) -> None:
     # Step 5 (Failure Classifier): reviewer/source/example signals become typed,
     # advisory routing categories; an unbacked claim_refuted is never emitted.
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     result = CliRunner().invoke(app, ["classify-failures", "--run", str(run_dir)])
@@ -1643,7 +1588,7 @@ def test_classify_failures_routes_typed_categories(tmp_path: Path) -> None:
 
 def test_classify_failures_claim_refuted_requires_admissible_counterexample(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "refuted_by_all_hypotheses_counterexample" / "input.md",
         tmp_path,
     )
@@ -1659,8 +1604,8 @@ def test_classify_failures_claim_refuted_requires_admissible_counterexample(tmp_
 
 def test_failure_classification_rejects_unbacked_claim_refuted(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     manifest = read_yaml(run_dir / "run_manifest.yaml")
@@ -1706,8 +1651,8 @@ def test_failure_classification_report_rejects_status_field() -> None:
 
 def test_classify_failures_emits_budget_exhausted(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     loop_path = run_dir / "loop_control.yaml"
@@ -1727,8 +1672,8 @@ def test_classify_failures_emits_budget_exhausted(tmp_path: Path) -> None:
 
 def test_classify_failures_emits_no_progress(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     loop_path = run_dir / "loop_control.yaml"
@@ -1753,7 +1698,7 @@ def test_classify_failures_emits_no_progress(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 def _refuted_run(tmp_path: Path) -> Path:
     return run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "refuted_by_all_hypotheses_counterexample" / "input.md",
         tmp_path,
     )

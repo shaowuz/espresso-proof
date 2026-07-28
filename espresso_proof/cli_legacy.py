@@ -21,7 +21,7 @@ from espresso_proof.cli_shared import (
 @app.command("run-flow")
 def run_flow(
     input: Path = typer.Option(..., "--input", "-i", exists=True, dir_okay=False),
-    project: str = typer.Option("hodge_atoms", "--project", "-p"),
+    project: str = typer.Option("demo", "--project", "-p"),
     literature_mode: str = typer.Option("local", "--literature-mode"),
     literature_provider: list[str] | None = typer.Option(None, "--literature-provider"),
     max_references: int = typer.Option(8, "--max-references", min=1, max=25),

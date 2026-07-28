@@ -23,8 +23,8 @@ from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 THM = (
-    "Theorem 1.2. Exact literature statement supporting the Hodge-theoretic step "
-    "over base field C for cubic fourfolds."
+    "Theorem 1.2. Exact literature statement supporting the spectral step "
+    "over base field C for square matrices."
 )
 
 
@@ -41,7 +41,7 @@ def _claim_clear(run_dir: Path) -> None:
 def _grounded_run(tmp_path: Path) -> Path:
     run_dir = run_mock_critique(
         "v2_source_theorem",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _claim_clear(run_dir)
@@ -157,7 +157,7 @@ def _literature_review_agent_payload() -> dict:
                     "char_end": None,
                 },
                 "theorem_hypotheses": [],
-                "theorem_conclusion": "Supports a local Hodge-theoretic step.",
+                "theorem_conclusion": "Supports a local spectral step.",
                 "extraction_confidence": "high",
             }
         ],
@@ -314,7 +314,7 @@ def test_source_backed_without_hypothesis_match_is_rejected() -> None:
                 "statement_or_summary": THM,
                 "hypothesis_match": {
                     "matches": False,
-                    "mismatches": ["the source only handles very general cubic fourfolds"],
+                    "mismatches": ["the source only handles generic square matrices"],
                 },
                 "confidence": "high",
                 "status": "source_backed",
@@ -498,7 +498,7 @@ def test_source_checked_argument_requires_earned_source_grounding_step(
 ) -> None:
     run_dir = run_mock_critique(
         "v2_source_theorem_no_grounding",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _claim_clear(run_dir)

@@ -8,7 +8,7 @@ required:
     - proved the theorem
   human_feedback:
     target_type: example
-    target_id: ex_special_cubic
+    target_id: ex_repeated_eigenvalue
     labels:
       - misleading
     summary_required: true

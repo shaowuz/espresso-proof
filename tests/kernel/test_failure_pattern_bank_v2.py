@@ -26,7 +26,7 @@ _NEW_PATTERNS = ("finite_not_infinite", "compact_proper_complete_assumption")
 
 def _run_with_claim_text(tmp_path: Path, text: str) -> Path:
     run_dir = run_mock_critique(
-        "hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path
+        "linear_algebra", FIXTURES / "all_matrices_diagonalizable" / "input.md", tmp_path
     )
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     claim_path = run_dir / manifest["artifacts"]["locked_claim"]

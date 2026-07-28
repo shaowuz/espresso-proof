@@ -1,1 +1,1 @@
-This mirror thing should be nice for Hodge atoms and probably proves the expected statement.
+This mirror thing should be nice for distinct-eigenvalues and probably proves the expected statement.

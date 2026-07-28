@@ -10,9 +10,9 @@ required:
       - checked
       - source_checked
     required_check_ids:
-      - check_very_general_hodge_package_source
+      - check_generic_matrix_source
     exclude_check_ids:
-      - check_special_cubic_dimension
+      - check_repeated_eigenvalue_size
   required_strategy_status:
     - promising
   required_strategy_ids:

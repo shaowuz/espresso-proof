@@ -38,12 +38,12 @@ _STEP_FIXTURE = "promising_but_unproved"
 # A theorem matching the step's needed terms AND all claim hypothesis terms.
 _MATCHING_THEOREM = (
     "Theorem 1.1: For a smooth projective variety over the base field C, the exact "
-    "literature statement supporting the Hodge-theoretic step holds."
+    "literature statement supporting the spectral step holds."
 )
 # Overlaps the step's needed terms but lacks the claim hypothesis terms.
 _MISMATCHED_THEOREM = (
     "Theorem 3.1: Over a field, the exact literature statement supporting the "
-    "Hodge-theoretic step holds in general."
+    "spectral step holds in general."
 )
 
 
@@ -125,10 +125,10 @@ def test_positive_retrieve_then_ground_earns_source_backed(tmp_path: Path) -> No
     _write_source(
         corpus,
         _MATCHING_THEOREM,
-        {"title": "Hodge Theory Reference", "authors": ["A. Hodge"], "identifier": "h:1",
+        {"title": "Spectral Theory Reference", "authors": ["A. Spectral"], "identifier": "h:1",
          "locator": {"kind": "theorem", "value": "Theorem 1.1"}},
     )
-    result = retrieve_and_ground(run_dir, corpus_dir=corpus, query="hodge smooth projective")
+    result = retrieve_and_ground(run_dir, corpus_dir=corpus, query="spectral smooth projective")
     validate_run(run_dir)
     assert result["grounded"] is True
     steps = _grounding_steps(run_dir)
@@ -147,9 +147,9 @@ def test_source_without_attribution_stays_candidate(tmp_path: Path) -> None:
          "locator": {"kind": "theorem", "value": "Theorem 1.1"}},
     )
     # the retrieval hit itself is 'unverified' (attribution gap), never attributed
-    hits = retrieve_local_corpus("hodge smooth projective", corpus)
+    hits = retrieve_local_corpus("spectral smooth projective", corpus)
     assert hits and hits[0]["status"] == "unverified"
-    retrieve_and_ground(run_dir, corpus_dir=corpus, query="hodge smooth projective")
+    retrieve_and_ground(run_dir, corpus_dir=corpus, query="spectral smooth projective")
     validate_run(run_dir)
     steps = _grounding_steps(run_dir)
     assert len(steps) >= 1
@@ -162,11 +162,11 @@ def test_unknown_locator_prose_only_stays_candidate(tmp_path: Path) -> None:
     corpus = _corpus(tmp_path)
     _write_source(
         corpus,
-        "Some prose about smooth projective varieties over C and Hodge theory, no labelled theorem.",
+        "Some prose about smooth projective varieties over C and Spectral theory, no labelled theorem.",
         {"title": "Prose Note", "authors": ["C. Prose"], "identifier": "p:1",
          "locator": {"kind": "unknown", "value": "s.txt"}},
     )
-    retrieve_and_ground(run_dir, corpus_dir=corpus, query="hodge smooth projective")
+    retrieve_and_ground(run_dir, corpus_dir=corpus, query="spectral smooth projective")
     validate_run(run_dir)
     steps = _grounding_steps(run_dir)
     assert len(steps) >= 1
@@ -179,11 +179,11 @@ def test_snippet_only_source_cannot_become_source_backed(tmp_path: Path) -> None
     corpus = _corpus(tmp_path)
     _write_source(
         corpus,
-        "smooth projective base field hodge exact literature statement supporting step",
+        "smooth projective base field spectral exact literature statement supporting step",
         {"title": "Snippet", "authors": ["A. Author"], "identifier": "x",
          "locator": {"kind": "theorem", "value": "Theorem 1"}},
     )
-    retrieve_and_ground(run_dir, corpus_dir=corpus, query="hodge smooth projective")
+    retrieve_and_ground(run_dir, corpus_dir=corpus, query="spectral smooth projective")
     validate_run(run_dir)
     steps = _grounding_steps(run_dir)
     assert len(steps) >= 1
@@ -200,7 +200,7 @@ def test_mismatched_hypotheses_cannot_support_step(tmp_path: Path) -> None:
         {"title": "Vague Ref", "authors": ["B. Vague"], "identifier": "v:1",
          "locator": {"kind": "theorem", "value": "Theorem 3.1"}},
     )
-    retrieve_and_ground(run_dir, corpus_dir=corpus, query="hodge")
+    retrieve_and_ground(run_dir, corpus_dir=corpus, query="spectral")
     validate_run(run_dir)
     steps = _grounding_steps(run_dir)
     assert len(steps) >= 1

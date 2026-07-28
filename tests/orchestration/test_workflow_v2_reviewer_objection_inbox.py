@@ -473,8 +473,8 @@ def test_all_open_blocker_slots_routed(tmp_path: Path) -> None:
     from espresso_proof.orchestration.genesis import run_mock_critique
 
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        Path("tests/fixtures") / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        Path("tests/fixtures") / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     claim_id = read_yaml(run_dir / "locked_claim.yaml")["id"]

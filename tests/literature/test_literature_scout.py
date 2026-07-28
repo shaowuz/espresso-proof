@@ -23,13 +23,13 @@ from espresso_proof.agents.llm_agents import StubLLMClient
 from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
-# Claim text that triggers the hodge_atoms mock scenario, whose scaffold seeds a
+# Claim text that triggers the linear_algebra mock scenario, whose scaffold seeds a
 # source_grounding with one proof step (step_001) — a real step to scout against.
-# (Phrased WITHOUT "irrational": since universal
-# irrationality claims route to the source-misapplication scenario instead.)
-HODGE_CLAIM = (
-    "For all cubic fourfolds, the Hodge atom obstruction controls the rationality "
-    "question. The very general case is treated as all smooth cubic fourfolds."
+# (Phrased WITHOUT "diagonalizable": since universal
+# diagonalizability claims route to the source-misapplication scenario instead.)
+MATRIX_CLAIM = (
+    "For all square matrices, the distinct-eigenvalue argument controls the rationality "
+    "question. The very general case is treated as all square matrices."
 )
 
 
@@ -46,10 +46,10 @@ def _run_with_step(tmp_path: Path) -> Path:
 
 def _unclear_run_with_step(tmp_path: Path) -> Path:
     claim = tmp_path / "claim.md"
-    claim.write_text(HODGE_CLAIM, encoding="utf-8")
-    run_dir = run_mock_critique("hodge_atoms", claim, tmp_path)
+    claim.write_text(MATRIX_CLAIM, encoding="utf-8")
+    run_dir = run_mock_critique("linear_algebra", claim, tmp_path)
     sg = read_yaml(run_dir / "source_grounding.yaml")
-    assert sg.get("steps"), "expected the hodge mock to seed a proof step"
+    assert sg.get("steps"), "expected the spectral mock to seed a proof step"
     return run_dir
 
 
@@ -66,7 +66,7 @@ class _FakeClient:
 
 def _candidate_payload(step_id: str, **overrides) -> dict:
     candidate = {
-        "title": "Derived categories of cubic fourfolds",
+        "title": "Derived categories of square matrices",
         "authors": ["A. Kuznetsov"],
         "source_type": "paper",
         "locator_hint": "Section 4",
@@ -122,7 +122,7 @@ def test_scout_ties_candidates_to_known_step(tmp_path: Path) -> None:
     step = next(s for s in report["proof_step_candidates"] if s["proof_step_id"] == "step_001")
     assert len(step["candidates"]) == 1
     cand = step["candidates"][0]
-    assert cand["title"] == "Derived categories of cubic fourfolds"
+    assert cand["title"] == "Derived categories of square matrices"
     assert cand["status"] == "candidate"
     # exact locator is never supplied by the scout.
     assert "exact_locator" in cand["missing_metadata"]

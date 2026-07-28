@@ -22,7 +22,7 @@ from espresso_proof.literature.pdf_ingestion import (
 from espresso_proof.verification.source_verification import ground_run
 from espresso_proof.kernel.validators import validate_run
 
-FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "hodge_all_cubic_fourfolds" / "input.md"
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "all_matrices_diagonalizable" / "input.md"
 
 
 def _one(text: str) -> dict:
@@ -178,8 +178,8 @@ def test_long_source_statement_is_capped() -> None:
 
 # --- end-to-end: extraction feeds the UNCHANGED source-backed gate ---------
 
-def _hodge_run(tmp_path: Path) -> Path:
-    run_dir = run_mock_critique("hodge_atoms", FIXTURE, tmp_path)
+def _matrix_run(tmp_path: Path) -> Path:
+    run_dir = run_mock_critique("linear_algebra", FIXTURE, tmp_path)
     claim = read_yaml(run_dir / "locked_claim.yaml")
     claim["hypotheses"] = [
         {"name": "group of order p^2", "status": "explicit", "source": "user"},
@@ -224,7 +224,7 @@ def _step_backed(run_dir: Path) -> bool:
 
 
 def test_labeled_matching_source_earns_support(tmp_path: Path) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     _ingest_and_ground(
         run_dir,
         "Theorem 1.1. Let G be a group with |G| = p^2 where p is prime; then the "
@@ -236,7 +236,7 @@ def test_labeled_matching_source_earns_support(tmp_path: Path) -> None:
 
 
 def test_abstract_only_source_stays_candidate(tmp_path: Path) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     _ingest_and_ground(
         run_dir,
         "Abstract. We survey groups of order p^2 where p is prime and discuss "
@@ -248,7 +248,7 @@ def test_abstract_only_source_stays_candidate(tmp_path: Path) -> None:
 
 
 def test_unlabeled_paragraph_source_stays_candidate(tmp_path: Path) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     _ingest_and_ground(
         run_dir,
         "Theorem. Let G be a group with |G| = p^2 where p is prime; then G is abelian.",
