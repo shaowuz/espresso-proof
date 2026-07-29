@@ -50,24 +50,6 @@ _FIRST_PERSON_ASSERTIONS = tuple(
     f"{s} {v} {o}" for s in _SUBJECTS for v in _VERBS for o in _OBJECTS
 )
 
-# Chinese global proof-completion phrases, curated by the SAME two
-# safe families. Self-contained completion markers: 证毕 (= proof-close), 证明完毕 /
-# 证明完成 (proof finished). Global assertions: 定理/命题/猜想 + 得证/已证明,
-# and first-person 我们证明了 + a definite global object. Because the boundary
-# lookarounds only block ASCII word characters, a phrase also matches inside
-# prefixed forms ("该定理得证", "此定理已证明"). Deliberately EXCLUDED, exactly
-# like bare "proved" / third-person citations in English: bare 已证明 / 得证 /
-# 证明了 (collide with honest SCOPED prose: 该引理已证明, 引理2.1得证,
-# 我们证明了引理2.1); the literature passive 已被证明 (a citation — 庞加莱猜想
-# 已被证明 — like "the source proves the theorem"); and subject-less 证明了该
-# 定理 (文献[3]证明了该定理的一个弱形式 is an honest scoped citation).
-_CHINESE_COMPLETION_MARKERS = ("证毕", "证明完毕", "证明完成")
-_CHINESE_GLOBAL_OBJECTS = ("定理", "命题", "猜想")
-_CHINESE_GLOBAL_ASSERTIONS = tuple(
-    f"{o}{suffix}" for o in _CHINESE_GLOBAL_OBJECTS for suffix in ("得证", "已证明")
-) + tuple(
-    f"我们证明了{d}{o}" for d in ("该", "这个") for o in _CHINESE_GLOBAL_OBJECTS
-)
 
 PROOF_COMPLETE_PHRASES: tuple[str, ...] = (
     "[proof-close]",
@@ -79,8 +61,6 @@ PROOF_COMPLETE_PHRASES: tuple[str, ...] = (
     "this completes the proof",
     "no gaps remain",
     *_FIRST_PERSON_ASSERTIONS,
-    *_CHINESE_COMPLETION_MARKERS,
-    *_CHINESE_GLOBAL_ASSERTIONS,
 )
 
 # Neutral redaction marker (reuses the existing convention in llm_agents).
@@ -211,19 +191,6 @@ FORBIDDEN_LANGUAGE = [
     "the claim is true",
     "the theorem is established",
     "proof-close",
-    # Chinese global completion markers (FORBIDDEN_LANGUAGE must stay
-    # a superset of the validator's parse-time gate; the ASCII lookarounds in
-    # forbidden_pattern() are satisfied around CJK characters).
-    "证毕",
-    "证明完毕",
-    "证明完成",
-    "定理得证",
-    "命题得证",
-    "猜想得证",
-    "定理已证明",
-    "命题已证明",
-    "我们证明了该定理",
-    "我们证明了这个定理",
 ]
 FORBIDDEN_LANGUAGE = list(dict.fromkeys([*FORBIDDEN_LANGUAGE, *PROOF_COMPLETE_PHRASES]))
 

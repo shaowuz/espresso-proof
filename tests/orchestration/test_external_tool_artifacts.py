@@ -145,7 +145,7 @@ def test_tool_run_model_rejects_proof_complete_interpretation() -> None:
     for field, text in (
         ("ai_interpretation", "This shows we proved the theorem. proof-close."),
         ("conclusion", "proof-close — the proof is complete."),
-        ("statement_checked", "the theorem is settled: 证毕"),
+        ("statement_checked", "the theorem is settled: [proof-close]"),
         ("scope_note", "no gaps remain"),
     ):
         payload = {**base, field: text} if field != "scope_note" else {**base, "scope_note": text}
