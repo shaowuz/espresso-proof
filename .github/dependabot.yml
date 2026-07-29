@@ -19,14 +19,17 @@ updates:
       npm-major:
         update-types: ["major"]
     ignore:
-      # TypeScript 7 breaks the build: `tsc -b` rejects the side-effect CSS
-      # import in src/main.tsx with TS2882. Verified locally against the merged
-      # result of the major group — tests passed, the build did not. Without
-      # this, Dependabot re-proposes the same upgrade every week. Patch and
-      # minor updates to typescript still come through; delete these three lines
-      # when someone is ready to do the TS 7 migration properly.
+      # TypeScript 6 already breaks the build: `tsc -b` rejects the
+      # side-effect CSS import in src/main.tsx with TS2882. Verified twice
+      # against merged results (#279 at 7.0.2, #287 at 6.0.3) — tests passed,
+      # the build did not.
+      #
+      # This bound was `>=7` first. Dependabot then proposed 6.0.3, which slid
+      # underneath it, so the same broken upgrade came back a third time. Patch
+      # and minor updates to typescript 5.x still come through; the bound comes
+      # out when someone does the TS 6 migration deliberately.
       - dependency-name: "typescript"
-        versions: [">=7"]
+        versions: [">=6"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
