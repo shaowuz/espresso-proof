@@ -44,8 +44,6 @@ convert objections into scoped repair targets
 ask the mathematician where judgment or direction is required
         ↓
 publish an auditable research memo and complete run trace
-
-
 ```
 
 
