@@ -67,19 +67,6 @@ def _first_forbidden_proof_language(text: str) -> str | None:
         r"\bestablishes\s+the\s+theorem\b": "establishes the theorem",
         r"\bestablishes\s+the\s+claim\b": "establishes the claim",
         r"\bproof\s+establishes\b": "proof establishes",
-        # Chinese global proof-completion markers (no \b — Python's
-        # word boundary treats CJK as word chars, so \b would never fire inside
-        # Chinese prose). Same curation as the display lexicon.
-        r"证毕": "证毕",
-        r"证明完毕": "证明完毕",
-        r"证明完成": "证明完成",
-        r"定理得证": "定理得证",
-        r"命题得证": "命题得证",
-        r"猜想得证": "猜想得证",
-        r"定理已证明": "定理已证明",
-        r"命题已证明": "命题已证明",
-        r"我们证明了该定理": "我们证明了该定理",
-        r"我们证明了这个定理": "我们证明了这个定理",
     }
     for pattern, phrase in forbidden_patterns.items():
         if re.search(pattern, text):

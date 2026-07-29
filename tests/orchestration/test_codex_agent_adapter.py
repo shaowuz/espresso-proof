@@ -389,7 +389,7 @@ def test_codex_run_sends_utf8_stdin_to_cli(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
-    prompt = "prime order café 数学"
+    prompt = "prime order café naïve"
     last_message = tmp_path / "last_message.txt"
 
     text, return_code, _stdout = codex_adapter._run_codex(

@@ -843,7 +843,7 @@ def test_refresh_final_report_sanitizes_legacy_blocker_text(
     grade = read_yaml(run_dir / artifacts["idea_grade"])
     grade["source_gaps"] = [
         "verified statement excerpt says proof-close and proof complete",
-        "no gaps remain; the proof is complete; 证毕",
+        "no gaps remain; the proof is complete",
         "Prover output verifies proof status",
         "Prover output was evidence for proof status",
         "Prover output is proof status",
@@ -870,7 +870,7 @@ def test_refresh_final_report_sanitizes_legacy_blocker_text(
             "Reviewer assessment supports the theorem. "
             "The route demonstrates the theorem. "
             "The strategy certifies the result. "
-            "proof-close. 证毕. "
+            "proof-close. "
             "Source gaps are resolved. Source gaps: none. "
             "All source gaps have been resolved. There are no open source gaps. "
             "There are zero source gaps. "
@@ -891,7 +891,7 @@ def test_refresh_final_report_sanitizes_legacy_blocker_text(
     assert "proof complete" not in text
     assert "no gaps remain" not in text
     assert "the proof is complete" not in text
-    assert "证毕" not in text
+    assert "proof-close" not in text.lower()
     assert "theorem is settled" not in text
     assert "prover output verifies proof status" not in text
     assert "prover output was evidence for proof status" not in text

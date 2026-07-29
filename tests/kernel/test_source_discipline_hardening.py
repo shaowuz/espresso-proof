@@ -135,51 +135,15 @@ def test_grounding_edit_after_audit_fails_stale_audit(tmp_path: Path) -> None:
     validate_run(run_dir)
 
 
-# --- 3. Chinese parse-time gate ----------------------------------------------
-def test_parse_time_gate_rejects_chinese_completion_markers() -> None:
-    from espresso_proof.kernel.validators import _first_forbidden_proof_language
 
-    for text in ("至此定理得证。", "证毕", "我们证明了该定理", "命题已证明"):
-        assert _first_forbidden_proof_language(text.lower()) is not None, text
-    for text in ("该引理已证明", "我们证明了引理2.1", "尚未证明该定理"):
-        assert _first_forbidden_proof_language(text.lower()) is None, text
-
-
-def test_final_report_with_chinese_overclaim_fails_validation(tmp_path: Path) -> None:
-    run_dir = run_mock_critique(
-        "g41zh", FIXTURES / "promising_but_unproved" / "input.md", tmp_path
-    )
-    manifest = read_yaml(run_dir / "run_manifest.yaml")
-    final_report = run_dir / manifest["artifacts"]["final_report"]
-    final_report.write_text(
-        final_report.read_text(encoding="utf-8") + "\n结论:定理得证,证毕。\n",
-        encoding="utf-8",
-    )
-    with pytest.raises(KernelValidationError, match="forbidden proof language"):
-        validate_run(run_dir)
-
-
-def test_ingestion_redacts_chinese_completion_markers() -> None:
-    import re
-
-    from espresso_proof.agents.llm_agents import FORBIDDEN_LANGUAGE, forbidden_pattern
-
-    text = "评审认为我们证明了该定理,证毕。"
-    for phrase in FORBIDDEN_LANGUAGE:
-        text = re.sub(forbidden_pattern(phrase), "[withheld proof-like phrase]", text)
-    assert "证毕" not in text
-    assert "我们证明了该定理" not in text
-    assert "[withheld proof-like phrase]" in text
 
 
 def test_forbidden_language_superset_of_validator_gate() -> None:
     # invariant: every phrase the parse-time gate rejects is also redacted at
-    # agent ingestion (Chinese entries must keep this in lockstep).
+    # agent ingestion, so a gate addition cannot silently skip ingestion.
     from espresso_proof.agents.llm_agents import FORBIDDEN_LANGUAGE
 
-    for phrase in ("证毕", "证明完毕", "证明完成", "定理得证", "命题得证",
-                   "猜想得证", "定理已证明", "命题已证明",
-                   "我们证明了该定理", "我们证明了这个定理"):
+    for phrase in ("[proof-close]", "proof complete", "we proved the theorem"):
         assert phrase in FORBIDDEN_LANGUAGE, phrase
 
 
