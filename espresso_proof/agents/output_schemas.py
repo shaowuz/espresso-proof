@@ -18,6 +18,37 @@ AGENT_OUTPUT_SCHEMA = {
         "risks": {"type": "array", "items": {"type": "string"}},
         "verdict": {"type": "string"},
         "recommended_human_action": {"type": "string"},
+        # Optional, reviewer roles only. The system prompt has asked reviewers
+        # for ranked scoped objections since the severity rubric landed, but this
+        # schema said additionalProperties=false without listing the key — the
+        # machine-readable contract forbade what the prose requested, models
+        # correctly obeyed the schema, and every objection fell back to the
+        # kernel default P2 with no suggested action. Across five real rounds:
+        # 51 objections, 51 fallbacks, zero explicit.
+        "scoped_objections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "text": {"type": "string"},
+                    "scope": {"enum": ["subgoal", "proof_step", "route", "global"]},
+                    "subgoal_id": {"type": ["string", "null"]},
+                    "proof_step_id": {"type": ["string", "null"]},
+                    "kind": {
+                        "enum": [
+                            "missing_source", "hypothesis_gap", "definition_gap",
+                            "logical_gap", "computation_needed",
+                            "counterexample_pressure", "unclear_claim",
+                            "reviewer_disagreement", "other",
+                        ]
+                    },
+                    "severity": {"enum": ["P0", "P1", "P2", "P3"]},
+                    "suggested_next_action": {"type": "string"},
+                },
+                "required": ["text", "scope", "severity"],
+            },
+        },
     },
     "required": [
         "summary",
