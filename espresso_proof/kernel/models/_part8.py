@@ -674,7 +674,7 @@ class AgentConsensusReview(StrictBaseModel):
     """Agent-consensus mock-check (NOT machine-verified) — the kernel record that the
     three Espresso reviewers each ran ADVERSARIALLY and the consensus outcome.
 
-    the maintainer's deliberate, clearly-labelled exception to "agents never grant status":
+    A deliberate, clearly-labelled exception to "agents never grant status":
     when all three reviewers return ``no_fatal_flaw_found`` the run may carry
     ``proof_language_status = agent_consensus_mock_checked`` — an AMBER, advisory tier
     strictly weaker than ``source_checked_argument``. It is honest by construction:

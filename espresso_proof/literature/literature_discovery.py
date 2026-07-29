@@ -184,7 +184,7 @@ def merge_agent_and_local_literature(
     literature report, never over it.
 
     Mechanism rule: a deterministic local producer must not clobber another
-    producer's validated artifact (the order-15 run lost a real 39.6s agent
+    producer's validated artifact (one observed run lost a real 39.6s agent
     literature stage to a 69ms local not_found scan). Agent items rank first;
     the local not_found sentinel never appears beside real candidates; ids are
     normalized by the same merge_literature_items policy the live-search mode

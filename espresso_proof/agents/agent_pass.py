@@ -527,7 +527,7 @@ def collect_open_reviewer_blockers(verifier_reviews: list[dict]) -> list[dict]:
     """Every open reviewer blocker, deduplicated, in deterministic PRIORITY
     order — NEVER capped (house rule: no silent drops; the old alphabetical
     ``sorted(set(...))[:12]`` silently discarded whichever objections sorted
-    last, which in the order-15 evidence run was the three substantive
+    last, which in an observed evidence run was the three substantive
     line-proof math objections).
 
     Priority key, all from existing schema structure (no text pattern

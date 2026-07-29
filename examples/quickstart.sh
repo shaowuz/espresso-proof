@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Quickstart: one problem in, one validated run directory out (offline stub provider).
-# Full path explanation: docs/engineering/EXECUTION_TRUNK.md
+# Full path explanation: docs/engineering/execution-trunk.md
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

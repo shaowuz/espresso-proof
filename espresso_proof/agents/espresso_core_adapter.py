@@ -16,7 +16,7 @@ Contract (espresso_proof.agents.llm_agents.ExternalCommandClient):
 - reads ONE JSON request on stdin: {system, prompt, provider, model, required_json_schema}
 - prints ONE JSON object on stdout.
 
-Role routing (see docs/engineering/ESPRESSO_CORE_INTEGRATION.md):
+Role routing (see docs/engineering/espresso-core-integration.md):
 - prover role            -> espresso-core run  -> AGENT_OUTPUT_SCHEMA translation
 - line-numbered writer   -> espresso-core run  -> LINE_NUMBERED_PROOF_OUTPUT_SCHEMA translation
 - EVERYTHING ELSE (front-half agents, the three loop reviewers, the consensus

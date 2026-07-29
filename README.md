@@ -180,10 +180,10 @@ until you have a reason not to:
 
 ## Reference
 
-- [docs/engineering/EXECUTION_TRUNK.md](docs/engineering/EXECUTION_TRUNK.md) - start here for architecture: the end-to-end call tree from problem text to output files.
+- [docs/engineering/execution-trunk.md](docs/engineering/execution-trunk.md) - start here for architecture: the end-to-end call tree from problem text to output files.
 - [docs/product-philosophy.md](docs/product-philosophy.md) - product principles and trust boundary.
 - [docs/engineering/product-path-boundaries.md](docs/engineering/product-path-boundaries.md) - supported product surface.
-- [docs/engineering/ESPRESSO_CORE_INTEGRATION.md](docs/engineering/ESPRESSO_CORE_INTEGRATION.md) - espresso-core external-agent contract.
+- [docs/engineering/espresso-core-integration.md](docs/engineering/espresso-core-integration.md) - espresso-core external-agent contract.
 - [CONTRIBUTING.md](CONTRIBUTING.md) - setup, tests, PR expectations, and the boundaries a change may not weaken.
 - [AGENTS.md](AGENTS.md) - rules for AI agents working in this repository.
 - [SECURITY.md](SECURITY.md) - how to report a vulnerability, and what this project does not claim to protect.
