@@ -31,6 +31,8 @@ from espresso_proof.kernel.research_bank import load_bankable_dict
 from espresso_proof.ui.route_table import build_route_step_rows, render_route_step_table_lines
 from espresso_proof.kernel.subgoal_graph import render_proof_search_lines
 from espresso_proof.kernel.surface_warnings import (
+    rank_scoped_objections,
+    render_blocker_ranking,
     FRONT_HALF_REVIEW_PENDING_NOTE,
     collect_surface_warnings,
     render_warning_lines,
@@ -312,6 +314,16 @@ def build_concise_memo(run_dir: Path) -> str:
         agent_consensus_review=agent_consensus_review,
         prover_loop=prover_loop_for_warnings,
     ))
+    _lar_rel = optional_artifacts.get("llm_agent_run")
+    _llm_run = (
+        read_yaml(run_dir / _lar_rel)
+        if _lar_rel and (run_dir / _lar_rel).exists()
+        else {}
+    )
+    ranking_lines = render_blocker_ranking(rank_scoped_objections(_llm_run))
+    if ranking_lines:
+        lines.append("")
+        lines.extend(ranking_lines)
     if warning_lines:
         lines.append("")
         lines.append("Open blockers / pending checks:")

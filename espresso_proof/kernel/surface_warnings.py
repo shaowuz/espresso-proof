@@ -418,6 +418,76 @@ def _proof_theorem_ref_ids(line_numbered_proof: dict[str, Any]) -> set[str]:
     return refs
 
 
+
+# --- blocker ranking honesty -------------------------------------------------
+_SEVERITY_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+
+
+def rank_scoped_objections(llm_agent_run: dict[str, Any] | None) -> dict[str, Any]:
+    """Report whether the reviewers actually ranked their objections.
+
+    Deterministic and display-only: it reads recorded severities and never
+    assigns one. When every objection carries the same severity the reviewers
+    have ranked nothing, and saying so is more useful than presenting the
+    schema default as if it were a judgement — that is the state a real run
+    produced (19 objections, all P2, every suggested_next_action empty).
+    """
+
+    objections: list[dict[str, Any]] = []
+    for review in _items((llm_agent_run or {}).get("verifier_reviews")):
+        for obj in _items(review.get("scoped_objections")):
+            if isinstance(obj, dict):
+                objections.append(obj)
+    if not objections:
+        return {"total": 0, "differentiated": False, "levels": {}, "top": []}
+
+    levels: dict[str, int] = {}
+    for obj in objections:
+        sev = str(obj.get("severity") or "P2")
+        levels[sev] = levels.get(sev, 0) + 1
+    differentiated = len(levels) > 1
+
+    top: list[dict[str, Any]] = []
+    if differentiated:
+        blocking = [o for o in objections if str(o.get("severity")) in ("P0", "P1")]
+        blocking.sort(key=lambda o: _SEVERITY_ORDER.get(str(o.get("severity")), 9))
+        top = blocking[:3]
+    return {
+        "total": len(objections),
+        "differentiated": differentiated,
+        "levels": levels,
+        "top": top,
+        # An action the reviewer named, not one this function invented.
+        "actionable": sum(1 for o in objections if str(o.get("suggested_next_action") or "").strip()),
+    }
+
+
+def render_blocker_ranking(ranking: dict[str, Any]) -> list[str]:
+    """Lines for the memo. Says 'unranked' rather than faking an order."""
+
+    total = ranking.get("total") or 0
+    if not total:
+        return []
+    if not ranking.get("differentiated"):
+        only = next(iter(ranking.get("levels") or {"P2": 0}))
+        return [
+            f"Blocker ranking: none. All {total} reviewer objections carry the same "
+            f"severity ({only}), so no next action has been prioritised — the order "
+            "below is arbitrary."
+        ]
+    lines = ["Blocker ranking (reviewer-assigned severity):"]
+    for obj in ranking.get("top") or []:
+        sev = obj.get("severity")
+        action = str(obj.get("suggested_next_action") or "").strip()
+        text = _display_text(obj.get("text"))[:160]
+        lines.append(f"  [{sev}] {text}")
+        if action:
+            lines.append(f"        next: {action[:160]}")
+    if not ranking.get("top"):
+        lines.append("  (no P0/P1 objection: nothing is blocking the current round)")
+    return lines
+
+
 def render_warning_lines(warnings: list[dict[str, Any]]) -> list[str]:
     return [_display_text(warning.get("text")) for warning in warnings if warning.get("text")]
 

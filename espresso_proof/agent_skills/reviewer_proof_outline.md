@@ -100,7 +100,27 @@ Return ONE JSON object with exactly these fields:
 
 When context names a `target_subgoal`, you may also return `scoped_objections`
 (text, scope, subgoal_id/proof_step_id, kind, severity P0–P3,
-suggested_next_action); if the adapter's strict schema drops the extra key, the
+suggested_next_action);
+
+Severity is not a mood. Assign it by what the objection blocks, and expect to
+use more than one level in a single review — a review where every objection is
+P2 has ranked nothing and is treated as unranked by the kernel:
+
+- `P0` — the claim cannot be true as stated, or the route is refuted. Continuing
+  on this route wastes every later round.
+- `P1` — the route may survive, but this step is unsupported and nothing
+  downstream of it can be trusted until it is closed. This is the level that
+  answers "what is the cheapest next action".
+- `P2` — a real gap that does not block the current round; the route can
+  progress while it is open.
+- `P3` — hygiene, wording, or a nice-to-have check.
+
+`suggested_next_action` is required whenever severity is `P0` or `P1`: name the
+concrete next step (a theorem to pin with a locator, a finite object to check, a
+hypothesis to add), not the goal restated. "Pin an exact source" is not an
+action; "pin a statement of Shafarevich's theorem for solvable groups over Q,
+with locator" is.
+ if the adapter's strict schema drops the extra key, the
 kernel binds your `risks` to the target subgoal anyway — `risks` suffices.
 What the kernel does: risks + missing_hypotheses + source_requests from all
 three reviewers are unioned into at most 12 blockers; any blocker forces the
