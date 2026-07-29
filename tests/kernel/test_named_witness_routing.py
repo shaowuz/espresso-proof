@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from espresso_proof.kernel.models import ScopedVerificationRequests
+from espresso_proof.kernel.models import ProofVerificationEntry, ScopedVerificationRequests
 from espresso_proof.verification.proof_verification import NAMED_FINITE_WITNESSES
 from espresso_proof.verification.verification_request_probes import (
     propose_named_witness_requests,
@@ -110,7 +110,25 @@ def test_order_spectrum_separates_the_two_order_48_groups() -> None:
 def test_separation_earns_nothing_about_galois() -> None:
     entry, _ = NAMED_FINITE_WITNESSES["gl2_f3_distinct_from_s4xc2"]("claim_001", entry_id="e")
     assert entry["earned_status"] == "instance_checked"
-    blob = (entry["statement"] + entry["scope"]).lower()
-    assert "galois" in entry["scope"].lower()  # explicitly disclaims Galois content
+    blob = (entry["target"] + entry["result"] + entry["scope_note"]).lower()
+    assert "galois" in entry["scope_note"].lower()  # explicitly disclaims Galois content
     for forbidden in ("proved", "proof complete", "[proof-close]"):
         assert forbidden not in blob
+
+
+def test_every_registered_witness_builds_a_schema_valid_entry() -> None:
+    """The gap that let a broken builder ship.
+
+    The earlier tests called each builder and asserted on a few keys they
+    happened to know about, so a builder inventing its own field names passed
+    them and then failed the kernel at run time with eight validation errors.
+    Validating against ProofVerificationEntry is the check that actually
+    corresponds to what a run does.
+    """
+
+    assert NAMED_FINITE_WITNESSES, "registry must not be empty"
+    for name, builder in NAMED_FINITE_WITNESSES.items():
+        entry, _ = builder("claim_001", entry_id=name)
+        ProofVerificationEntry.model_validate(entry)
+        assert entry["earned_status"] in {"instance_checked", "unverified"}, name
+        assert entry["scope_note"], name

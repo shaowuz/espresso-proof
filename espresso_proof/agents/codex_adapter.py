@@ -52,7 +52,10 @@ from espresso_proof.agents.agent_logging import (
 from espresso_proof.agents.agent_skill_catalog import select_agent_skills
 
 
-CODEX_MODEL = "gpt-5.5"
+# Overridable so a caller can pick a cheaper model for exploratory runs
+# without editing source. The default stays the model this adapter was
+# validated against.
+CODEX_MODEL = os.environ.get("ESPRESSO_CODEX_MODEL", "gpt-5.5")
 CODEX_REASONING_EFFORT = os.environ.get("ESPRESSO_CODEX_REASONING_EFFORT", "medium")
 
 _FALLBACK = {

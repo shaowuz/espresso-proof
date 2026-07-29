@@ -60,12 +60,52 @@ from espresso_proof.kernel.validators import KernelValidationError, validate_run
 
 
 
+
+def _provider_was_explicit() -> bool:
+    """True when the caller actually typed --provider on this invocation."""
+
+    import sys
+
+    return any(a == "--provider" or a.startswith("--provider=") for a in sys.argv)
+
+
+def _recorded_run_provider(run_dir: Path) -> str | None:
+    """The provider a run was created with, as recorded in its own artifacts.
+
+    Read-only and fail-soft: a run whose artifacts do not name a provider (or
+    cannot be read) returns None and the caller keeps whatever was passed.
+    """
+
+    from espresso_proof.kernel.io import read_yaml
+
+    for name in ("llm_agent_run.yaml", "front_half_run.yaml"):
+        path = Path(run_dir) / name
+        if not path.exists():
+            continue
+        try:
+            recorded = (read_yaml(path) or {}).get("provider")
+        except Exception:
+            continue
+        if isinstance(recorded, str) and recorded in {"stub", "openai", "external"}:
+            return recorded
+    return None
+
+
 @app.command("orchestrate")
 def orchestrate(
     input: Path | None = typer.Option(None, "--input", "-i", dir_okay=False),
     project: str = typer.Option("demo", "--project", "-p"),
     provider: str = typer.Option("stub", "--provider"),
     front_half: str = typer.Option("auto", "--front-half"),
+    token_budget: int | None = typer.Option(
+        None,
+        "--token-budget",
+        help=(
+            "Total model tokens you are willing to spend on this run. Raises the "
+            "effort tiers a route may be approved for; without it each route "
+            "offers only the tier the grader estimated. Never spends on its own."
+        ),
+    ),
     model: str = typer.Option("gpt-4.1", "--model"),
     reviewer_set: str = typer.Option("espresso", "--reviewer-set"),
     api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
@@ -115,6 +155,24 @@ def orchestrate(
         if provider not in {"stub", "openai", "external"}:
             raise typer.BadParameter("provider must be stub, openai, or external")
         validate_run(resume)
+        # A run records the provider that produced it. --provider defaults to
+        # "stub", so resuming a real-agent run without repeating the flag used to
+        # silently downgrade it: the resumed round ran on deterministic stubs,
+        # recorded model gpt-4.1, made no model call, and still appended a round
+        # whose reviewer objections looked like progress. Inherit instead, and
+        # refuse an explicit conflict rather than picking a winner.
+        recorded_provider = _recorded_run_provider(resume)
+        if recorded_provider:
+            explicit = _provider_was_explicit()
+            if not explicit:
+                provider = recorded_provider
+            elif provider != recorded_provider:
+                raise typer.BadParameter(
+                    f"--provider {provider!r} conflicts with the provider this run "
+                    f"was created with ({recorded_provider!r}). Resuming a run under "
+                    "a different provider would mix real and stub evidence in one "
+                    "run; start a new run instead."
+                )
         _require_claim_clear_for_cli(resume)
         if ground_source is not None:
             # Ground steps against a HUMAN-PROVIDED source BEFORE the loop via the
@@ -214,6 +272,7 @@ def orchestrate(
         output_root=output_root,
         provider=provider,
         front_half=front_half,
+        token_budget=token_budget,
         model=model,
         api_key_env=api_key_env,
         external_agent_command_env=external_agent_command_env,

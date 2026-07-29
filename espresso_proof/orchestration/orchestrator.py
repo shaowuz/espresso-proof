@@ -246,6 +246,25 @@ def _preflight_provider(
     return report
 
 
+
+def _record_token_budget(run_dir: Path, token_budget: int | None) -> None:
+    """Persist the human's declared spend ceiling on the run.
+
+    Advisory scheduling input only: it widens which effort tiers a route may be
+    approved for and can never grant a mathematical status. A run with no
+    declared budget records nothing and behaves as before.
+    """
+
+    if token_budget is None:
+        return
+    if int(token_budget) <= 0:
+        raise KernelValidationError("--token-budget must be a positive number of tokens")
+    manifest_path = run_dir / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    manifest["token_budget"] = int(token_budget)
+    write_yaml(manifest_path, manifest)
+
+
 def orchestrate_run(
     *,
     project: str,
@@ -253,6 +272,7 @@ def orchestrate_run(
     output_root: Path = Path("."),
     provider: str = "stub",
     front_half: str = "stub",
+    token_budget: int | None = None,
     model: str = "gpt-4.1",
     api_key_env: str = "OPENAI_API_KEY",
     external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
@@ -299,7 +319,11 @@ def orchestrate_run(
         agent_network_preflight=agent_network_preflight,
     )
     run_dir, runner = create_or_attach_genesis_run(
-        run_dir=run_dir, project=project, input_path=input_path, output_root=output_root
+        run_dir=run_dir,
+        project=project,
+        input_path=input_path,
+        output_root=output_root,
+        token_budget=token_budget,
     )
 
     early = finish_if_resumed_claim_is_no_longer_clear(run_dir=run_dir, runner=runner)
@@ -402,7 +426,12 @@ def verify_agent_providers_before_run_exists(
 
 
 def create_or_attach_genesis_run(
-    *, run_dir: Path | None, project: str, input_path: Path, output_root: Path
+    *,
+    run_dir: Path | None,
+    project: str,
+    input_path: Path,
+    output_root: Path,
+    token_budget: int | None = None,
 ) -> tuple[Path, StageRunner]:
     """Stage 0 — scaffold a fresh genesis run, or attach a runner to an existing run."""
     # Stage 0 — scaffold a kernel-valid "unclear/needs_human" run for any claim.
@@ -411,6 +440,7 @@ def create_or_attach_genesis_run(
     # validate -> advance, with rollback on failure).
     if run_dir is None:
         run_dir = run_mock_critique(project, input_path, output_root)
+        _record_token_budget(run_dir, token_budget)
         runner = StageRunner(run_dir)
         runner.run(
             name="scaffold",
@@ -1259,7 +1289,41 @@ def _finalize_resume_memo(*, run_dir: Path, loop_summary: tuple[int, str] | None
                 f"\n\nProver loop: ran {rounds_run} round(s); "
                 f"stopped because {loop_stop_phrase(stop_reason)}."
             )
+    else:
+        # loop_summary is None when the resume drove no loop at all -- the human
+        # gate was already resolved and the budget was spent. Before this the
+        # command exited 0 and re-rendered the same memo, so a caller resuming
+        # repeatedly saw four "successful" runs and no indication that nothing
+        # had happened. Say it, and say what would change it.
+        budget = _resume_budget_snapshot(run_dir)
+        memo += (
+            "\n\nProver loop: no round ran. "
+            + (
+                f"The approved budget is spent ({budget}). "
+                if budget
+                else "The approved budget allows no further rounds. "
+            )
+            + "Resuming again will not change this run; approve a larger effort "
+            "on a route that permits it, or start a new run."
+        )
     return memo
+
+
+def _resume_budget_snapshot(run_dir: Path) -> str:
+    """`rounds a/b, agent calls c/d` for the memo, or "" if unreadable."""
+
+    try:
+        manifest = read_yaml(run_dir / "run_manifest.yaml")
+        rel = (manifest.get("optional_artifacts") or {}).get("prover_loop")
+        if not rel:
+            return ""
+        budget = (read_yaml(run_dir / rel) or {}).get("budget") or {}
+        return (
+            f"rounds {budget.get('rounds_used')}/{budget.get('max_rounds')}, "
+            f"agent calls {budget.get('agent_calls_used')}/{budget.get('max_agent_calls')}"
+        )
+    except Exception:
+        return ""
 
 
 def _validate_resume_choice(

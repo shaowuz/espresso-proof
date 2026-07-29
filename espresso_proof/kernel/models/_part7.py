@@ -281,6 +281,17 @@ class RunManifest(StrictBaseModel):
     optional_artifacts: dict[str, str] = Field(default_factory=dict)
     dependencies: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
     retries: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # The human's declared spend ceiling for this run, in model tokens. Advisory
+    # SCHEDULING input only: it widens which effort tiers a route may be approved
+    # for. It carries no mathematical authority and can never grant or raise a
+    # proof, source, or evidence status.
+    token_budget: int | None = None
+
+    @model_validator(mode="after")
+    def validate_token_budget(self) -> RunManifest:
+        if self.token_budget is not None and self.token_budget <= 0:
+            raise ValueError("token_budget must be a positive number of tokens")
+        return self
 
     @model_validator(mode="after")
     def validate_required_artifacts(self) -> RunManifest:

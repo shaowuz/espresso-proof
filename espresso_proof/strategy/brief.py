@@ -27,6 +27,63 @@ class StrategyArtifacts:
     brief: dict
 
 
+
+# Ordered cheapest-first; index is the tier.
+EFFORT_TIERS = ("quick_test", "normal_pass", "deep_exploration", "long_watch")
+
+# What each tier is expected to cost, in total model tokens. Deliberately coarse:
+# it exists so a declared budget can be turned into a tier ceiling, not to
+# predict spend. Measured order of magnitude from real runs: a quick_test prover
+# pass on an open problem ran ~750k input tokens across 13 calls.
+EFFORT_TOKEN_COST = {
+    "quick_test": 800_000,
+    "normal_pass": 1_600_000,
+    "deep_exploration": 3_200_000,
+    "long_watch": 6_400_000,
+}
+
+
+def _declared_effort_ceiling(context: dict) -> str | None:
+    """The highest tier a declared token budget can pay for, or None.
+
+    Reads only what the run recorded. No budget recorded means no ceiling and
+    no behaviour change.
+    """
+
+    budget = context.get("token_budget")
+    if budget is None:
+        manifest = context.get("manifest") or {}
+        budget = manifest.get("token_budget")
+    try:
+        budget = int(budget)
+    except (TypeError, ValueError):
+        return None
+    if budget <= 0:
+        return None
+    affordable = [tier for tier in EFFORT_TIERS if EFFORT_TOKEN_COST[tier] <= budget]
+    return affordable[-1] if affordable else EFFORT_TIERS[0]
+
+
+def _effort_options_for(estimated: str, ceiling: str | None) -> list[str]:
+    """Tiers the human may approve for a route: its estimate, plus any headroom
+    the declared budget pays for.
+
+    The estimate is always included even when the budget cannot afford it — the
+    grader's judgement of what the route needs is not overridden by a small
+    budget, it is simply not funded beyond that.
+    """
+
+    if estimated not in EFFORT_TIERS:
+        return [estimated]
+    if ceiling is None or ceiling not in EFFORT_TIERS:
+        return [estimated]
+    lo = EFFORT_TIERS.index(estimated)
+    hi = EFFORT_TIERS.index(ceiling)
+    if hi <= lo:
+        return [estimated]
+    return list(EFFORT_TIERS[lo : hi + 1])
+
+
 def build_strategy_artifacts(
     *,
     context: dict,
@@ -39,8 +96,21 @@ def build_strategy_artifacts(
     run_id = manifest["run_id"]
     claim_id = context["claim"]["id"]
     routes = grading.routes
+    # A route used to offer exactly the one effort tier the grader estimated, so
+    # a route graded quick_test was capped at a single prover round no matter how
+    # much the human was willing to spend. On an open problem -- one with no
+    # one-round route -- that made the loop structurally unable to iterate.
+    #
+    # The route's estimate still sets the floor: it is the grader's judgement of
+    # what the route needs, and it is always offered. What the declared budget
+    # adds is headroom above it. A run with no declared budget behaves exactly as
+    # before.
+    declared = _declared_effort_ceiling(context)
     allowed_choices = [
-        {"strategy_id": route["id"], "effort_options": [route["estimated_effort"]]}
+        {
+            "strategy_id": route["id"],
+            "effort_options": _effort_options_for(route["estimated_effort"], declared),
+        }
         for route in routes
     ]
     allowed_choices.append({"strategy_id": "none", "effort_options": ["quick_test"]})

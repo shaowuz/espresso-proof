@@ -143,21 +143,33 @@ def build_gl2_f3_order_spectrum_entry(
 
     witness = gl2_f3_order_spectrum_witness()
     confirmed = bool(witness["confirmed"])
+    sep = ", ".join(witness["separating_orders"])
     entry = {
         "id": entry_id,
         "verifier_type": "finite_group_cayley",
         "claim_id": claim_id,
-        "statement": (
-            "GL_2(F_3) is not isomorphic to S_4 x C_2: the element-order spectra "
-            f"differ at orders {', '.join(witness['separating_orders'])}."
+        "target": "GL_2(F_3) is not isomorphic to S_4 x C_2",
+        "input_summary": (
+            "Enumerated both groups of order 48 and counted element orders; "
+            f"GL_2(F_3) {witness['order_spectrum']} vs "
+            f"S_4 x C_2 {witness['rival_order_spectrum']}"
         ),
-        "result": "confirmed" if confirmed else "unverified",
+        "result": (
+            f"confirmed non-isomorphic: element-order spectra differ at orders {sep}"
+            if confirmed
+            else "spectra did not separate the two groups; nothing earned"
+        ),
+        "trusted": True,
+        "confirmed": confirmed,
         "earned_status": "instance_checked" if confirmed else "unverified",
-        "scope": (
-            "Separates these two order-48 groups only. Not a classification of "
-            "all groups of order 48, and no Galois statement is earned."
+        "scope_note": (
+            "Separates these two order-48 groups only. It is not a classification "
+            "of the groups of order 48, and it establishes nothing about whether "
+            "either group occurs as a Galois group over Q."
         ),
-        "transcript_sha256": witness["transcript_sha256"],
+        "input_hash": witness["transcript_sha256"],
+        "output_hash": witness["transcript_sha256"],
+        "adapter_id": "gl2_f3_order_spectrum_witness",
     }
     return entry, witness
 
