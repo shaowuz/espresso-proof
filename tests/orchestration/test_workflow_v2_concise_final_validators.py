@@ -529,7 +529,7 @@ def test_final_report_allows_step_scoped_source_backed_when_owned_by_source_grou
 
 
 def test_final_report_cannot_hide_smoothness_theorem_blocker(tmp_path: Path) -> None:
-    run_dir = _run(tmp_path, "hodge_all_cubic_fourfolds")
+    run_dir = _run(tmp_path, "all_matrices_diagonalizable")
     _add_blocked_theorem_applicability(run_dir)
     _write_disclosed_final(run_dir)
     validate_run(run_dir)
@@ -635,7 +635,7 @@ def test_final_report_must_disclose_each_active_core_category(
 
 
 def test_final_report_must_disclose_theorem_blocker_by_category(tmp_path: Path) -> None:
-    run_dir = _run(tmp_path, "hodge_all_cubic_fourfolds")
+    run_dir = _run(tmp_path, "all_matrices_diagonalizable")
     _add_blocked_theorem_applicability(run_dir)
     _write_disclosed_final(run_dir, omit={THEOREM_BLOCKERS})
 
@@ -701,7 +701,7 @@ def test_final_report_rejects_negated_disclosures_for_active_core_categories(
 def test_final_report_rejects_negated_theorem_blocker_disclosure(
     tmp_path: Path,
 ) -> None:
-    run_dir = _run(tmp_path, "hodge_all_cubic_fourfolds")
+    run_dir = _run(tmp_path, "all_matrices_diagonalizable")
     _add_blocked_theorem_applicability(run_dir)
     _write_disclosed_final(run_dir)
     validate_run(run_dir)

@@ -165,7 +165,7 @@ def test_explicit_proof_step_scope_without_id_downgraded_to_route() -> None:
 
 
 def test_legacy_risks_with_target_inferred() -> None:
-    raw = {"risks": ["No source for the Hodge conjecture step.", "Hypothesis on dimension unstated."]}
+    raw = {"risks": ["No source for the Spectral conjecture step.", "Hypothesis on dimension unstated."]}
     out = _normalize_scoped_objections(raw, verifier_id="v2", target_subgoal_id="subgoal_block_002")
     assert len(out) == 2
     for obj in out:
@@ -178,7 +178,7 @@ def test_legacy_risks_with_target_inferred() -> None:
 
 
 def test_legacy_risks_without_target_fallback_route() -> None:
-    raw = {"risks": ["No source for the Hodge conjecture step."]}
+    raw = {"risks": ["No source for the Spectral conjecture step."]}
     out = _normalize_scoped_objections(raw, verifier_id="v3", target_subgoal_id=None)
     assert len(out) == 1
     assert out[0]["scope"] == "route"

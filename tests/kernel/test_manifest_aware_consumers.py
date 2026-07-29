@@ -35,7 +35,7 @@ _FORBIDDEN = ("proof-close", "proof complete", "we proved", "proved the claim")
 
 def _single_run(tmp_path: Path, name: str = "single") -> Path:
     return run_mock_critique(
-        "hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path / name
+        "linear_algebra", FIXTURES / "all_matrices_diagonalizable" / "input.md", tmp_path / name
     )
 
 
@@ -111,7 +111,7 @@ def test_memory_write_consumes_counterexamples_on_both_layouts(tmp_path: Path) -
     def memory_types(run_dir: Path) -> set[str]:
         mem_dir = tmp_path / f"mem_{run_dir.parent.parent.name}_{run_dir.name}"
         written = write_run_memory(
-            mem_dir, run_dir, project_id="hodge_atoms", run_id=run_dir.name
+            mem_dir, run_dir, project_id="linear_algebra", run_id=run_dir.name
         )
         return {read_yaml(p)["type"] for p in written}
 

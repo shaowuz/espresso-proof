@@ -25,21 +25,21 @@ from espresso_proof.kernel.validators import KernelValidationError, validate_run
 FIXTURES = Path("tests/fixtures")
 
 
-def _hodge_project(tmp_path: Path) -> Path:
-    project = tmp_path / "hodge_notes"
+def _matrix_project(tmp_path: Path) -> Path:
+    project = tmp_path / "spectral_notes"
     project.mkdir()
     (project / "core_papers.md").write_text(
         """# core papers
 
 ### KKP 0806.0107
 
-- **Title:** Hodge theoretic aspects of mirror symmetry
+- **Title:** Spectral theoretic aspects of mirror symmetry
 - **Authors:** Ludmil Katzarkov, Maxim Kontsevich, Tony Pantev
 - **URL:** https://arxiv.org/abs/0806.0107
 
-### Cubic fourfolds
+### Square matrices
 
-- Claire Voisin, *Hodge Theory and Complex Algebraic Geometry*.
+- Claire Voisin, *Spectral Theory and Complex Algebraic Geometry*.
 """,
         encoding="utf-8",
     )
@@ -48,7 +48,7 @@ def _hodge_project(tmp_path: Path) -> Path:
 
 ### Examples and pathologies
 
-- Special cubic fourfolds with extra Hodge classes.
+- Special square matrices with repeated eigenvalues.
 """,
         encoding="utf-8",
     )
@@ -57,11 +57,11 @@ def _hodge_project(tmp_path: Path) -> Path:
         {
             "examples": [
                 {
-                    "id": "cubic_fourfold",
-                    "name": "Special cubic fourfold",
+                    "id": "repeated_eigenvalue_matrix",
+                    "name": "Special square matrix",
                     "role": "pathology",
-                    "what_it_tests": ["cubic", "hodge", "special"],
-                    "notes": "Tests all-versus-special cubic fourfold claims.",
+                    "what_it_tests": ["matrix", "spectral", "special"],
+                    "notes": "Tests all-versus-matrix with a repeated eigenvalue claims.",
                 }
             ]
         },
@@ -94,15 +94,15 @@ def _mark_claim_clear(run_dir: Path) -> None:
     write_yaml(ledger_path, ledger)
 
 
-def test_local_literature_discovery_finds_hodge_candidates(tmp_path: Path) -> None:
+def test_local_literature_discovery_finds_matrix_candidates(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
 
     report = discover_local_literature(
-        project_dir=_hodge_project(tmp_path),
+        project_dir=_matrix_project(tmp_path),
         locked_claim_path=run_dir / "locked_claim.yaml",
         hypothesis_ledger_path=run_dir / "hypothesis_ledger.yaml",
         max_references=5,
@@ -114,14 +114,14 @@ def test_local_literature_discovery_finds_hodge_candidates(tmp_path: Path) -> No
     assert parsed.candidate_references
     assert "source_backed" not in statuses
     assert "misapplied" not in statuses
-    assert any("cubic" in item.title.lower() or "hodge" in item.title.lower() for item in parsed.candidate_references)
+    assert any("matri" in item.title.lower() or "spectral" in item.title.lower() for item in parsed.candidate_references)
     assert parsed.known_examples
 
 
 def test_discover_literature_cli_writes_schema_valid_run_artifact(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _mark_claim_clear(run_dir)
@@ -174,8 +174,8 @@ def test_live_search_parsers_return_candidate_references() -> None:
     <feed xmlns="http://www.w3.org/2005/Atom">
       <entry>
         <id>http://arxiv.org/abs/2508.05105v1</id>
-        <title>Birational invariants from Hodge structures</title>
-        <summary>A theorem about cubic fourfold examples.</summary>
+        <title>Birational invariants from Spectral structures</title>
+        <summary>A theorem about square matrix examples.</summary>
         <author><name>Ada Example</name></author>
       </entry>
     </feed>
@@ -183,9 +183,9 @@ def test_live_search_parsers_return_candidate_references() -> None:
     ads_payload = b"""{
       "response": {"docs": [{
         "bibcode": "2026arXiv260304518G",
-        "title": ["On the irrationality of cubic fourfolds"],
+        "title": ["On the diagonalizability of square matrices"],
         "author": ["Guere, Jeremy"],
-        "abstract": "Theorem statements for cubic fourfolds."
+        "abstract": "Theorem statements for square matrices."
       }]}
     }"""
     crossref_payload = b"""{
@@ -197,8 +197,8 @@ def test_live_search_parsers_return_candidate_references() -> None:
       }]}
     }"""
 
-    arxiv = parse_arxiv_atom(arxiv_payload, "hodge atoms")
-    ads = parse_ads_json(ads_payload, "cubic fourfolds")
+    arxiv = parse_arxiv_atom(arxiv_payload, "spectral atoms")
+    ads = parse_ads_json(ads_payload, "square matrices")
     crossref = parse_crossref_json(crossref_payload, "base change")
 
     assert arxiv[0].status == "candidate"
@@ -211,8 +211,8 @@ def test_live_search_parsers_return_candidate_references() -> None:
 
 def test_live_discovery_cli_merges_fake_arxiv_and_web_results(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _mark_claim_clear(run_dir)
@@ -241,8 +241,8 @@ def test_live_discovery_cli_merges_fake_arxiv_and_web_results(tmp_path: Path) ->
 
 def test_pdf_ingestion_and_source_verification_can_source_back_exact_match(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _mark_claim_clear(run_dir)
@@ -250,8 +250,8 @@ def test_pdf_ingestion_and_source_verification_can_source_back_exact_match(tmp_p
     pdf_path.write_bytes(
         b"%PDF-1.4\n"
         b"1 0 obj <<>> stream\n"
-        b"BT (Theorem 1.2. Exact literature statement supporting the Hodge-theoretic step "
-        b"over base field C for cubic fourfolds.) Tj ET\n"
+        b"BT (Theorem 1.2. Exact literature statement supporting the spectral step "
+        b"over base field C for square matrices.) Tj ET\n"
         b"endstream\n%%EOF\n"
     )
     runner = CliRunner()
@@ -302,15 +302,15 @@ def test_pdf_fallback_decodes_hex_strings_for_theorem_extraction() -> None:
 
 def test_literature_review_agent_reads_source_and_compares_theorem(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _mark_claim_clear(run_dir)
-    source_path = tmp_path / "hodge_source.txt"
+    source_path = tmp_path / "spectral_source.txt"
     source_path.write_text(
-        "Theorem 1.2. For all cubic fourfolds over base field C, "
-        "the Hodge atom obstruction proves irrationality.\n",
+        "Theorem 1.2. For all square matrices over base field C, "
+        "the distinct-eigenvalue argument proves diagonalizability.\n",
         encoding="utf-8",
     )
 
@@ -319,8 +319,8 @@ def test_literature_review_agent_reads_source_and_compares_theorem(tmp_path: Pat
         source_specs=[
             ReviewSourceSpec(
                 source=str(source_path),
-                source_id="src_hodge_text",
-                title="Exact Hodge obstruction statement",
+                source_id="src_matrix_text",
+                title="Exact distinct-eigenvalue argument statement",
             )
         ],
     )
@@ -328,7 +328,7 @@ def test_literature_review_agent_reads_source_and_compares_theorem(tmp_path: Pat
     parsed = LiteratureReviewAgentReport.model_validate(report)
     assert parsed.input_sources[0].access.status == "full_text_read"
     assert parsed.extracted_theorems[0].statement_is_verbatim is True
-    assert "For all cubic fourfolds" in parsed.extracted_theorems[0].statement_exact
+    assert "For all square matrices" in parsed.extracted_theorems[0].statement_exact
     assert parsed.theorem_comparisons[0].comparison_status == "applicable"
     assert parsed.theorem_comparisons[0].relevance.role == "key_theorem"
     assert parsed.relevance_summary.overall_status == "supports_route"
@@ -337,15 +337,15 @@ def test_literature_review_agent_reads_source_and_compares_theorem(tmp_path: Pat
 
 def test_literature_review_agent_flags_very_general_theorem_for_universal_claim(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _mark_claim_clear(run_dir)
     source_path = tmp_path / "very_general_source.txt"
     source_path.write_text(
-        "Theorem 3.4. For a very general smooth cubic fourfold over base field C, "
-        "the Hodge atom obstruction proves irrationality.\n",
+        "Theorem 3.4. For a very general square matrix over base field C, "
+        "the distinct-eigenvalue argument proves diagonalizability.\n",
         encoding="utf-8",
     )
 
@@ -355,7 +355,7 @@ def test_literature_review_agent_flags_very_general_theorem_for_universal_claim(
             ReviewSourceSpec(
                 source=str(source_path),
                 source_id="src_very_general",
-                title="Very general cubic fourfold theorem",
+                title="Very general square matrix theorem",
             )
         ],
     )
@@ -373,15 +373,15 @@ def test_literature_review_agent_cannot_emit_source_backed_source(tmp_path: Path
     # source_backed or misapplied (KERNEL_SAFETY_RULES Literature And Source
     # Rules). Those remain Referencing / Source Grounding decisions.
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _mark_claim_clear(run_dir)
     source_path = tmp_path / "agent_source.txt"
     source_path.write_text(
-        "Theorem 1.2. For all cubic fourfolds over base field C, "
-        "the Hodge atom obstruction proves irrationality.\n",
+        "Theorem 1.2. For all square matrices over base field C, "
+        "the distinct-eigenvalue argument proves diagonalizability.\n",
         encoding="utf-8",
     )
     report = run_literature_review_agent(
@@ -402,15 +402,15 @@ def test_literature_review_agent_cannot_emit_source_backed_source(tmp_path: Path
 
 def test_literature_review_agent_cli_writes_optional_artifact(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _mark_claim_clear(run_dir)
     source_path = tmp_path / "cli_source.txt"
     source_path.write_text(
-        "Theorem 2.1. For all cubic fourfolds over base field C, "
-        "the Hodge atom obstruction proves irrationality.\n",
+        "Theorem 2.1. For all square matrices over base field C, "
+        "the distinct-eigenvalue argument proves diagonalizability.\n",
         encoding="utf-8",
     )
     runner = CliRunner()
@@ -440,8 +440,8 @@ def test_literature_review_agent_cli_writes_optional_artifact(tmp_path: Path) ->
 
 def test_literature_review_agent_blocks_unclear_claim_before_source_read(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
 
@@ -457,15 +457,15 @@ def test_literature_review_agent_blocks_unclear_claim_before_source_read(tmp_pat
 
 def test_audit_theorem_applicability_cli_writes_condition_ledger(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _mark_claim_clear(run_dir)
     source_path = tmp_path / "very_general_source.txt"
     source_path.write_text(
-        "Theorem 3.4. For a very general smooth cubic fourfold over base field C, "
-        "the Hodge atom obstruction proves irrationality.\n",
+        "Theorem 3.4. For a very general square matrix over base field C, "
+        "the distinct-eigenvalue argument proves diagonalizability.\n",
         encoding="utf-8",
     )
     runner = CliRunner()
@@ -507,7 +507,7 @@ def test_audit_theorem_applicability_cli_writes_condition_ledger(tmp_path: Path)
 
 def test_audit_theorem_applicability_cli_falls_back_without_literature_agent(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -527,7 +527,7 @@ def test_audit_theorem_applicability_cli_falls_back_without_literature_agent(tmp
 
 def test_source_backed_step_requires_theorem_applicability_artifact(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -538,7 +538,7 @@ def test_source_backed_step_requires_theorem_applicability_artifact(tmp_path: Pa
     source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
     source_grounding["source_refs"][0]["statement_or_summary"] = (
-        "For a very general smooth cubic fourfold, the obstruction applies."
+        "For a very general square matrix, the obstruction applies."
     )
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
@@ -556,7 +556,7 @@ def test_source_backed_step_requires_theorem_applicability_artifact(tmp_path: Pa
 
 def test_source_backed_step_requires_applicable_theorem_conditions(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -568,7 +568,7 @@ def test_source_backed_step_requires_applicable_theorem_conditions(tmp_path: Pat
     source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
     source_grounding["source_refs"][0]["statement_or_summary"] = (
-        "For a very general smooth cubic fourfold, the obstruction applies."
+        "For a very general square matrix, the obstruction applies."
     )
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
@@ -588,7 +588,7 @@ def test_source_backed_step_requires_applicable_theorem_conditions(tmp_path: Pat
                 "source_ref_id": ref_id,
                 "theorem_id": None,
                 "theorem_label": "Theorem 1.2",
-                "theorem_statement": "For a very general smooth cubic fourfold, the obstruction applies.",
+                "theorem_statement": "For a very general square matrix, the obstruction applies.",
                 "locator": {"kind": "theorem", "value": "Theorem 1.2"},
                 "source_status": "source_backed",
                 "conclusion_status": "compatible",
@@ -625,7 +625,7 @@ def test_source_backed_step_requires_applicable_theorem_conditions(tmp_path: Pat
 def _setup_source_backed_run(tmp_path: Path):
     """Mock run mutated so step[0] and ref[0] are source_backed with exact locator."""
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -637,7 +637,7 @@ def _setup_source_backed_run(tmp_path: Path):
     source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
     source_grounding["source_refs"][0]["statement_or_summary"] = (
-        "For a smooth cubic fourfold, the obstruction applies."
+        "For a square matrix, the obstruction applies."
     )
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
@@ -797,14 +797,14 @@ def _theorem_usage(**overrides) -> dict:
         "source_ref_id": "src_1",
         "theorem_id": None,
         "theorem_label": "Theorem 1.2",
-        "theorem_statement": "For a smooth cubic fourfold, the obstruction applies.",
+        "theorem_statement": "For a square matrix, the obstruction applies.",
         "locator": {"kind": "theorem", "value": "Theorem 1.2"},
         "source_status": "source_backed",
         "conclusion_status": "compatible",
         "conditions": [
             {
                 "id": "cond_1",
-                "text": "object is a smooth cubic fourfold",
+                "text": "object is a square matrix",
                 "condition_type": "smoothness",
                 "status": "satisfied",
                 "evidence": "claim object matches the theorem hypothesis",
@@ -850,7 +850,7 @@ def test_source_backed_step_requires_exact_applicability_locator(tmp_path: Path)
     # Even with satisfied conditions and a compatible conclusion, a source_backed
     # theorem use must carry an exact applicability locator.
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -862,7 +862,7 @@ def test_source_backed_step_requires_exact_applicability_locator(tmp_path: Path)
     source_grounding["source_refs"][0]["title"] = "Attributed exact source"
     source_grounding["source_refs"][0]["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
     source_grounding["source_refs"][0]["statement_or_summary"] = (
-        "For a smooth cubic fourfold, the obstruction applies."
+        "For a square matrix, the obstruction applies."
     )
     source_grounding["source_refs"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
     source_grounding["steps"][0]["status"] = "source_backed"
@@ -896,7 +896,7 @@ def test_source_backed_step_requires_exact_applicability_locator(tmp_path: Path)
 
 def test_theorem_applicability_rejects_duplicate_usage_for_same_step(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -917,7 +917,7 @@ def test_theorem_applicability_rejects_duplicate_usage_for_same_step(tmp_path: P
 
 def test_source_backed_step_applicability_usage_must_match_step_source_ref(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -949,7 +949,7 @@ def test_source_backed_step_applicability_usage_must_match_step_source_ref(tmp_p
                 "source_ref_id": wrong_ref["id"],
                 "theorem_id": None,
                 "theorem_label": "Theorem 1.2",
-                "theorem_statement": "For all cubic fourfolds over C, the obstruction applies.",
+                "theorem_statement": "For all square matrices over C, the obstruction applies.",
                 "locator": {"kind": "theorem", "value": "Theorem 1.2"},
                 "source_status": "source_backed",
                 "conclusion_status": "compatible",
@@ -994,13 +994,13 @@ def test_live_positive_hits_validate_in_literature_report() -> None:
             provider="arxiv",
             results=[
                 LiveSearchResult(
-                    title="Hodge atoms on cubic fourfolds",
+                    title="distinct eigenvalues on square matrices",
                     authors=["A. Author"],
                     locator_kind="arxiv_id",
                     locator_value="2401.01234",
                     relevance="possible_theorem_source",
                     status="candidate",
-                    why_relevant="Matches the claim's Hodge-theoretic terms.",
+                    why_relevant="Matches the claim's spectral terms.",
                     provider="arxiv",
                 )
             ],
@@ -1010,7 +1010,7 @@ def test_live_positive_hits_validate_in_literature_report() -> None:
             provider="crossref",
             results=[
                 LiveSearchResult(
-                    title="Irrationality of very general cubic fourfolds",
+                    title="Irrationality of generic square matrices",
                     authors=["B. Author"],
                     locator_kind="url",
                     locator_value="https://doi.org/10.1000/xyz",

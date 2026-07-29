@@ -112,7 +112,7 @@ def test_pressure_status_survives_examples_counterexamples_bank_materialization(
 
     run_dir = run_mock_critique(
         "pressure_bank",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     build_pressure_status(run_dir, late_after_strategy=False)

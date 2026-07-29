@@ -20,11 +20,11 @@ from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 # A statement that shares >=2 significant terms + the claim's hypothesis terms
-# ("cubic fourfold", "base field C") with the hodge run's source step, with an
+# ("square matrix", "base field C") with the spectral run's source step, with an
 # exact "Theorem 1.2" locator (mirrors the existing passing ingest test).
 THM = (
-    "Theorem 1.2. Exact literature statement supporting the Hodge-theoretic step "
-    "over base field C for cubic fourfolds."
+    "Theorem 1.2. Exact literature statement supporting the spectral step "
+    "over base field C for square matrices."
 )
 
 
@@ -47,8 +47,8 @@ def _ingest(run_dir: Path, text: str, *, authors, title: str = "Real Source") ->
     return run_dir / "theorem_extraction.yaml"
 
 
-def _hodge_run(tmp_path: Path) -> Path:
-    run_dir = run_mock_critique("hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path)
+def _matrix_run(tmp_path: Path) -> Path:
+    run_dir = run_mock_critique("linear_algebra", FIXTURES / "all_matrices_diagonalizable" / "input.md", tmp_path)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
     ledger = read_yaml(ledger_path)
@@ -60,7 +60,7 @@ def _hodge_run(tmp_path: Path) -> Path:
 
 
 def test_step_earns_source_backed_with_attribution(tmp_path: Path) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     grade_before = read_yaml(run_dir / read_yaml(run_dir / "run_manifest.yaml")["artifacts"]["idea_grade"])
     ext = _ingest(run_dir, THM, authors=["J.-P. Serre"], title="Topics in Galois Theory")
     ground_run(run_dir=run_dir, theorem_extraction_path=ext)
@@ -88,7 +88,7 @@ def test_step_earns_source_backed_with_attribution(tmp_path: Path) -> None:
 
 
 def test_missing_attribution_stays_candidate(tmp_path: Path) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     ext = _ingest(run_dir, THM, authors=[], title="No-author source")  # no author
     ground_run(run_dir=run_dir, theorem_extraction_path=ext)
     validate_run(run_dir)
@@ -101,17 +101,17 @@ def test_missing_attribution_stays_candidate(tmp_path: Path) -> None:
 def test_source_conclusion_mismatch_stays_candidate_and_preserves_requested_step(
     tmp_path: Path,
 ) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     source_grounding_path = run_dir / "source_grounding.yaml"
     sg_before = read_yaml(source_grounding_path)
     requested = (
-        "cubic fourfolds over base field C imply the intermediate Jacobian is trivial"
+        "square matrices over base field C imply the intermediate Jacobian is trivial"
     )
     sg_before["steps"][0]["needed_theorem"] = requested
     write_yaml(source_grounding_path, sg_before)
     text = (
-        "Theorem 1.2. Exact literature statement about Hodge structures over "
-        "base field C for cubic fourfolds."
+        "Theorem 1.2. Exact literature statement about Spectral structures over "
+        "base field C for square matrices."
     )
     ext = _ingest(run_dir, text, authors=["J.-P. Serre"], title="Topics in Galois Theory")
     ground_run(run_dir=run_dir, theorem_extraction_path=ext)
@@ -192,9 +192,9 @@ def test_source_grounding_rejects_ambiguous_duplicate_bindings() -> None:
 
 
 def test_no_exact_locator_stays_candidate(tmp_path: Path) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     # statement with NO theorem label -> no exact locator extracted.
-    text = "An informal remark about Hodge structures over base field C for cubic fourfolds."
+    text = "An informal remark about Spectral structures over base field C for square matrices."
     ext = _ingest(run_dir, text, authors=["A. Author"], title="Informal note")
     ground_run(run_dir=run_dir, theorem_extraction_path=ext)
     validate_run(run_dir)
@@ -203,7 +203,7 @@ def test_no_exact_locator_stays_candidate(tmp_path: Path) -> None:
 
 
 def test_grounding_run_stays_kernel_valid_and_registers_audit(tmp_path: Path) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     ext = _ingest(run_dir, THM, authors=["J.-P. Serre"], title="Topics in Galois Theory")
     ground_run(run_dir=run_dir, theorem_extraction_path=ext)
     validate_run(run_dir)  # fail-closed: full kernel gate after grounding
@@ -221,7 +221,7 @@ def test_ground_source_failure_rolls_back_run(tmp_path: Path, monkeypatch) -> No
 
     from espresso_proof.kernel.run_events import EVENTS_FILENAME
 
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     src = tmp_path / "outside_src.txt"  # outside run_dir: not part of the snapshot
     src.write_text(THM, encoding="utf-8")
 
@@ -266,7 +266,7 @@ def test_orchestrate_ground_source_cli_earns_source_backed(tmp_path: Path) -> No
     fresh = runner.invoke(
         app,
         [
-            "orchestrate", "--input", str(FIXTURES / "hodge_all_cubic_fourfolds" / "input.md"),
+            "orchestrate", "--input", str(FIXTURES / "all_matrices_diagonalizable" / "input.md"),
             "--project", "rsg", "--provider", "stub", "--front-half", "mock",
             "--output-root", str(tmp_path),
         ],
@@ -282,7 +282,7 @@ def test_orchestrate_ground_source_cli_earns_source_backed(tmp_path: Path) -> No
     ensure_claim_clear_for_downstream(run_dir)
     orchestrate_run(
         project="rsg",
-        input_path=FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        input_path=FIXTURES / "all_matrices_diagonalizable" / "input.md",
         output_root=tmp_path,
         provider="stub",
         front_half="mock",
@@ -316,7 +316,7 @@ def test_tampered_hypothesis_match_blocked_by_independent_audit(tmp_path: Path) 
     from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
     from espresso_proof.kernel.validators import KernelValidationError
 
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     ext = _ingest(run_dir, THM, authors=["J.-P. Serre"], title="Topics in Galois Theory")
     ground_run(run_dir=run_dir, theorem_extraction_path=ext)
     validate_run(run_dir)
@@ -350,7 +350,7 @@ def test_independent_audit_confirms_honest_grounding(tmp_path: Path) -> None:
     # coverage from the real cited statement reproduces the applicable verdict.
     from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
 
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     ext = _ingest(run_dir, THM, authors=["J.-P. Serre"], title="Topics in Galois Theory")
     ground_run(run_dir=run_dir, theorem_extraction_path=ext)
     audit_theorem_applicability(run_dir)  # re-run audit standalone

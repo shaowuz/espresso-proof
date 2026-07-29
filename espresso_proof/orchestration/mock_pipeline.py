@@ -54,7 +54,7 @@ _CENTER_QUOTIENT_CYCLIC_EXACT = re.compile(
 def _detect_scenario(input_path: Path, text: str) -> str:
     name = input_path.parent.name
     if name in {
-        "hodge_all_cubic_fourfolds",
+        "all_matrices_diagonalizable",
         "dropped_hypothesis_not_refutation",
         "fake_source_backed_rejected",
         "unchecked_example_not_evidence",
@@ -70,20 +70,20 @@ def _detect_scenario(input_path: Path, text: str) -> str:
     }:
         return name
     lowered = text.lower()
-    # A universal irrationality claim over ALL cubic
-    # fourfolds is the canonical very-general-vs-all discipline test — the
-    # smoke run must exercise the source-misapplication machinery (recorded
-    # hypothesis-mismatch refusal), not the generic hodge sketch. Fixture
-    # inputs are unaffected (matched by directory name above).
-    if "all cubic fourfold" in lowered and "irrational" in lowered:
+    # A universal diagonalizability claim over ALL square matrices is the
+    # canonical very-general-vs-all discipline test — the smoke run must
+    # exercise the source-misapplication machinery (recorded hypothesis-mismatch
+    # refusal), not the generic sketch. Fixture inputs are unaffected (matched
+    # by directory name above).
+    if "all square matrices" in lowered and "diagonalizable" in lowered:
         return "source_misapplication_very_general_to_all"
-    if "all cubic fourfold" in lowered:
-        return "hodge_all_cubic_fourfolds"
+    if "all square matrices" in lowered:
+        return "all_matrices_diagonalizable"
     if "drop smooth" in lowered or "without projective" in lowered:
         return "dropped_hypothesis_not_refutation"
     if "by voisin" in lowered or "source backed" in lowered:
         return "fake_source_backed_rejected"
-    if "hodge number" in lowered and "compute" in lowered:
+    if "eigenvalue multiplicity" in lowered and "compute" in lowered:
         return "unchecked_example_not_evidence"
     if "promising" in lowered and "not proved" in lowered:
         return "promising_but_unproved"
@@ -128,7 +128,7 @@ def _base_claim(text: str, ambiguous_terms: list[str] | None = None) -> dict:
         "id": "claim_001",
         "raw_text": text.strip(),
         "normalized_statement": text.strip()[:240] or "Unclear claim.",
-        "objects": ["cubic fourfolds"] if "cubic" in text.lower() else ["unspecified objects"],
+        "objects": ["square matrices"] if "matri" in text.lower() else ["unspecified objects"],
         "hypotheses": [
             {"name": "smooth", "status": "unclear", "source": "agent"},
             {"name": "projective", "status": "unclear", "source": "agent"},
@@ -143,8 +143,8 @@ def _base_claim(text: str, ambiguous_terms: list[str] | None = None) -> dict:
 
 
 def _artifacts_for_scenario(scenario: str, text: str, run_id: str, project_id: str) -> dict[str, object]:
-    if scenario == "hodge_all_cubic_fourfolds":
-        return _hodge_all_cubic_fourfolds(text, run_id)
+    if scenario == "all_matrices_diagonalizable":
+        return _all_matrices_diagonalizable(text, run_id)
     if scenario == "dropped_hypothesis_not_refutation":
         return _dropped_hypothesis(text, run_id)
     if scenario == "fake_source_backed_rejected":
@@ -238,7 +238,7 @@ def _common_source_grounding(claim_id: str, *, source_backed: bool = False) -> d
         "steps": [
             {
                 "proof_step_id": "step_001",
-                "needed_theorem": "Exact literature statement supporting the Hodge-theoretic step.",
+                "needed_theorem": "Exact literature statement supporting the spectral step.",
                 "status": status,
                 "source_refs": refs,
                 "hypothesis_match": match,
@@ -255,18 +255,18 @@ def _misapplied_source_grounding(claim_id: str) -> dict:
             {
                 "id": "src_very_general_only",
                 "type": "paper",
-                "title": "Very general cubic fourfold theorem",
+                "title": "Generic matrix diagonalizability theorem",
                 "authors": ["Placeholder Author"],
                 "locator": {"kind": "theorem", "value": "Theorem VG"},
                 "statement_or_summary": (
                     "A candidate theorem whose stated hypotheses apply only to very general "
-                    "smooth cubic fourfolds."
+                    "square matrices."
                 ),
                 "hypothesis_match": {
                     "matches": False,
                     "mismatches": [
-                        "source theorem applies only to very general cubic fourfolds",
-                        "locked claim says all smooth cubic fourfolds",
+                        "source theorem applies only to generic square matrices",
+                        "locked claim says all square matrices",
                     ],
                 },
                 "confidence": "medium",
@@ -276,7 +276,7 @@ def _misapplied_source_grounding(claim_id: str) -> dict:
         "steps": [
             {
                 "proof_step_id": "step_apply_vg_to_all",
-                "needed_theorem": "A theorem applying the Hodge obstruction to all smooth cubic fourfolds.",
+                "needed_theorem": "A theorem applying the distinct-eigenvalue argument to all square matrices.",
                 "status": "misapplied",
                 "source_refs": ["src_very_general_only"],
                 "hypothesis_match": {
@@ -294,30 +294,30 @@ def _misapplied_source_grounding(claim_id: str) -> dict:
 def _common_literature_review(claim_id: str) -> dict:
     return {
         "claim_id": claim_id,
-        "query_summary": "Mock literature pass for Hodge atom / cubic fourfold pressure points.",
+        "query_summary": "Mock literature pass for distinct-eigenvalue / square matrix pressure points.",
         "candidate_references": [
             {
                 "id": "lit_candidate_kkpy",
-                "title": "Candidate Hodge atom reference",
+                "title": "Candidate generic-matrix reference",
                 "authors": ["Placeholder Author"],
                 "locator": {"kind": "unknown", "value": "to_be_filled"},
                 "relevance": "possible_theorem_source",
                 "status": "candidate",
-                "why_relevant": "May contain the theorem needed by the Hodge atom obstruction step.",
+                "why_relevant": "May contain the theorem needed by the distinct-eigenvalue argument step.",
                 "found_by": "literature_review",
             },
             {
-                "id": "lit_special_cubic_examples",
-                "title": "Candidate special cubic fourfold examples",
+                "id": "lit_repeated_eigenvalue_examples",
+                "title": "Candidate repeated-eigenvalue examples",
                 "authors": [],
                 "locator": {"kind": "unknown", "value": "to_be_filled"},
                 "relevance": "counterexample_source",
                 "status": "candidate",
-                "why_relevant": "Special cubic fourfolds are natural stress tests for all versus very general claims.",
+                "why_relevant": "Special square matrices are natural stress tests for all versus very general claims.",
                 "found_by": "literature_review",
             },
         ],
-        "known_examples": ["very general cubic fourfold", "special cubic fourfold"],
+        "known_examples": ["generic square matrix", "matrix with a repeated eigenvalue"],
         "known_counterexample_families": ["special versus very general drift"],
         "notes": [
             "Literature Review only proposes candidates. Referencing must check exact locator and hypotheses."
@@ -443,7 +443,7 @@ def _common_test_report(
             {
                 "id": "test_report_001",
                 "description": "Test the claim against verified or pending example/counterexample material.",
-                "uses_examples": ["ex_special_cubic"],
+                "uses_examples": ["ex_repeated_eigenvalue"],
                 "uses_counterexamples": counterexample_ids or [],
                 "result": result,
                 "evidence_status": evidence_status,
@@ -470,7 +470,7 @@ def _strategy_brief(
         "also_considered": [
             {
                 "title": "Start Lean formalization",
-                "reason_not_top_three": "Out of scope for this AG/Hodge critique workflow.",
+                "reason_not_top_three": "Out of scope for this critique workflow.",
             }
         ],
         "question_for_mathematician": (
@@ -709,11 +709,11 @@ def _strategy_routes(*, status: str, base_score: int, source_status: str = "cand
             "main_risk": "The repaired statement may become weaker than the intended theorem.",
             "source_status": source_status,
             "estimated_effort": "normal_pass",
-            "next_loop_plan": "Rerun Counterexamples on special versus very general cubic fourfolds.",
+            "next_loop_plan": "Rerun Counterexamples on special versus generic square matrices.",
         },
         {
             "id": "strategy_pin_reference",
-            "title": "Pin the exact Hodge-theoretic reference",
+            "title": "Pin the exact spectral reference",
             "score": score(4),
             "status": status,
             "why_this_route": "Find the exact theorem and check hypotheses before using it in the sketch.",
@@ -722,11 +722,11 @@ def _strategy_routes(*, status: str, base_score: int, source_status: str = "cand
             "main_risk": "The cited theorem may not match the needed hypotheses.",
             "source_status": source_status,
             "estimated_effort": "quick_test",
-            "next_loop_plan": "Run Referencing on the key Hodge atom obstruction step.",
+            "next_loop_plan": "Run Referencing on the key distinct-eigenvalue argument step.",
         },
         {
             "id": "strategy_test_special_examples",
-            "title": "Stress-test with special cubic fourfold examples",
+            "title": "Stress-test with matrix with a repeated eigenvalue examples",
             "score": score(-3),
             "status": status,
             "why_this_route": "Use special examples as a taste check before developing a full argument.",
@@ -839,27 +839,27 @@ def _base_hypothesis_ledger(claim_id: str) -> dict:
     }
 
 
-def _hodge_examples(claim_id: str, result: str = "inconclusive") -> dict:
+def _matrix_examples(claim_id: str, result: str = "inconclusive") -> dict:
     return {
         "claim_id": claim_id,
         "examples": [
             {
-                "id": "ex_special_cubic",
-                "template_id": "special_cubic_fourfold",
-                "name": "Special cubic fourfold",
+                "id": "ex_repeated_eigenvalue",
+                "template_id": "repeated_eigenvalue_matrix",
+                "name": "Special square matrix",
                 "satisfies_all_claim_hypotheses": "unclear",
                 "hypothesis_mismatches": ["special may not satisfy very-general assumptions"],
-                "what_it_tests": ["all versus very general", "extra Hodge classes"],
-                "expected_conclusion": "Should match the stated all-cubic conclusion if the claim is really universal.",
-                "observed_or_inferred_behavior": "Extra Hodge classes create pressure on the proof step.",
+                "what_it_tests": ["all versus very general", "repeated eigenvalues"],
+                "expected_conclusion": "Should match the stated all-matrices conclusion if the claim is really universal.",
+                "observed_or_inferred_behavior": "Repeated eigenvalues create pressure on the proof step.",
                 "result_for_current_idea": result,
                 "source_or_reason": "Selected from machine example bank; exact source still candidate.",
                 "nontriviality": "research_level",
             },
             {
-                "id": "ex_very_general_cubic",
-                "template_id": "very_general_cubic_fourfold",
-                "name": "Very general cubic fourfold",
+                "id": "ex_generic_matrix",
+                "template_id": "generic_matrix",
+                "name": "Very general square matrix",
                 "satisfies_all_claim_hypotheses": "unclear",
                 "hypothesis_mismatches": [],
                 "what_it_tests": ["very general target case"],
@@ -878,11 +878,11 @@ def _basic_checks(claim_id: str, status: str = "human_needed") -> dict:
         "claim_id": claim_id,
         "checks": [
             {
-                "id": "check_special_cubic_dimension",
-                "example_id": "ex_special_cubic",
+                "id": "check_repeated_eigenvalue_size",
+                "example_id": "ex_repeated_eigenvalue",
                 "claim_id": claim_id,
                 "computed_quantity": "dimension",
-                "input_data": ["cubic hypersurface in P5"],
+                "input_data": ["2x2 Jordan block"],
                 "method": "exact_arithmetic",
                 "tool_or_source": "dimension of hypersurface in P5",
                 "result": "4",
@@ -891,13 +891,13 @@ def _basic_checks(claim_id: str, status: str = "human_needed") -> dict:
                 "notes": "Toy exact dimension check only.",
             },
             {
-                "id": "check_special_cubic_hodge",
-                "example_id": "ex_special_cubic",
+                "id": "check_repeated_eigenvalue_matrix",
+                "example_id": "ex_repeated_eigenvalue",
                 "claim_id": claim_id,
-                "computed_quantity": "extra Hodge classes",
+                "computed_quantity": "repeated eigenvalues",
                 "input_data": [],
                 "method": "manual_review_needed",
-                "tool_or_source": "cubic_fourfold_reference_placeholder",
+                "tool_or_source": "matrix_reference_placeholder",
                 "result": "Not checked in P0 mock.",
                 "cross_check": [],
                 "status": status,
@@ -907,15 +907,15 @@ def _basic_checks(claim_id: str, status: str = "human_needed") -> dict:
     }
 
 
-def _hodge_all_cubic_fourfolds(text: str, run_id: str) -> dict[str, object]:
+def _all_matrices_diagonalizable(text: str, run_id: str) -> dict[str, object]:
     claim = _base_claim(text, ["all", "very general", "special"])
-    claim["conclusion"] = "A Hodge atom obstruction proves irrationality for all cubic fourfolds."
+    claim["conclusion"] = "A distinct-eigenvalue argument proves diagonalizability for all square matrices."
     claim_id = claim["id"]
     return {
         "locked_claim.yaml": claim,
         "hypothesis_ledger.yaml": _base_hypothesis_ledger(claim_id),
         "literature_review.yaml": _common_literature_review(claim_id),
-        "examples.yaml": _hodge_examples(claim_id),
+        "examples.yaml": _matrix_examples(claim_id),
         "computation_checks.yaml": _basic_checks(claim_id),
         "counterexamples.yaml": {
             "claim_id": claim_id,
@@ -923,14 +923,14 @@ def _hodge_all_cubic_fourfolds(text: str, run_id: str) -> dict[str, object]:
                 {
                     "id": "test_special_vs_very_general",
                     "operator_id": "special_vs_general_test",
-                    "example_id": "ex_special_cubic",
+                    "example_id": "ex_repeated_eigenvalue",
                     "satisfies_all_claim_hypotheses": "unclear",
                     "target": "proof_step",
                     "result": "inconclusive",
                     "refutes_claim": False,
                     "refutes_step_only": True,
                     "exposes_missing_hypothesis": True,
-                    "explanation": "Special cubic fourfolds pressure the all versus very general jump.",
+                    "explanation": "Special square matrices pressure the all versus very general jump.",
                     "repaired_claim_suggestion": "State the claim for the precise genericity class actually used.",
                 }
             ],
@@ -938,7 +938,7 @@ def _hodge_all_cubic_fourfolds(text: str, run_id: str) -> dict[str, object]:
         "tests.yaml": _common_test_report(
             claim_id,
             counterexample_ids=["test_special_vs_very_general"],
-            summary="The all-cubic sketch remains fragile under special-versus-general pressure.",
+            summary="The all-matrices sketch remains fragile under repeated-versus-generic pressure.",
         ),
         "source_grounding.yaml": _common_source_grounding(claim_id),
         "review.yaml": _parallel_review(
@@ -949,11 +949,11 @@ def _hodge_all_cubic_fourfolds(text: str, run_id: str) -> dict[str, object]:
             evidence_verdict="unclear",
             line_verdict="unclear",
             line_applicability="sketch_only",
-            strongest_objection="The claim drifts from very general behavior to all cubic fourfolds.",
+            strongest_objection="The claim drifts from very general behavior to all square matrices.",
             theorem_drift=["very general -> all"],
-            missing_hypotheses=["genericity condition", "exact Hodge atom theorem"],
+            missing_hypotheses=["genericity condition", "exact distinct-eigenvalue theorem"],
             source_risks=["candidate source only"],
-            example_risks=["special cubic fourfold not resolved"],
+            example_risks=["matrix with a repeated eigenvalue not resolved"],
             downgrade_reasons=["No reference-supported theorem and no checked nontrivial example evidence."],
         ),
         "idea_grade.yaml": {
@@ -966,9 +966,9 @@ def _hodge_all_cubic_fourfolds(text: str, run_id: str) -> dict[str, object]:
             "failed_tests": [],
             "counterexample_candidates": ["test_special_vs_very_general"],
             "missing_hypotheses": ["genericity"],
-            "source_gaps": ["exact theorem for Hodge atom obstruction"],
-            "repair_options": ["Narrow all cubic fourfolds to the intended genericity class."],
-            "next_cheapest_test": "Pin the exact theorem statement and test special cubic fourfold assumptions.",
+            "source_gaps": ["exact theorem for distinct-eigenvalue argument"],
+            "repair_options": ["Narrow all square matrices to the intended genericity class."],
+            "next_cheapest_test": "Pin the exact theorem statement and test matrix with a repeated eigenvalue assumptions.",
             "human_review_required": True,
             "proof_language_status": "idea_sketch",
         },
@@ -994,7 +994,7 @@ def _hodge_all_cubic_fourfolds(text: str, run_id: str) -> dict[str, object]:
 def _dropped_hypothesis(text: str, run_id: str) -> dict[str, object]:
     claim = _base_claim(text, ["dropped smoothness"])
     claim_id = claim["id"]
-    artifacts = _hodge_all_cubic_fourfolds(text, run_id)
+    artifacts = _all_matrices_diagonalizable(text, run_id)
     artifacts["locked_claim.yaml"] = claim
     artifacts["hypothesis_ledger.yaml"] = _base_hypothesis_ledger(claim_id)
     artifacts["counterexamples.yaml"] = {
@@ -1003,7 +1003,7 @@ def _dropped_hypothesis(text: str, run_id: str) -> dict[str, object]:
             {
                 "id": "test_drop_smoothness",
                 "operator_id": "drop_hypothesis_test",
-                "example_id": "ex_special_cubic",
+                "example_id": "ex_repeated_eigenvalue",
                 "satisfies_all_claim_hypotheses": False,
                 "target": "hypothesis",
                 "result": "failed",
@@ -1055,7 +1055,7 @@ def _dropped_hypothesis(text: str, run_id: str) -> dict[str, object]:
 
 
 def _fake_source_backed(text: str, run_id: str) -> dict[str, object]:
-    artifacts = _hodge_all_cubic_fourfolds(text, run_id)
+    artifacts = _all_matrices_diagonalizable(text, run_id)
     artifacts["review.yaml"]["source_risks"] = ["A vague 'by Voisin' citation is only candidate, not source_backed."]
     artifacts["review.yaml"]["reviewers"][0]["objections"].append("The strategy relies on a vague source citation.")
     artifacts["final_report.md"] = "Mock critique: vague citations are downgraded to candidate source status.\n"
@@ -1063,8 +1063,8 @@ def _fake_source_backed(text: str, run_id: str) -> dict[str, object]:
 
 
 def _unchecked_example(text: str, run_id: str) -> dict[str, object]:
-    artifacts = _hodge_all_cubic_fourfolds(text, run_id)
-    artifacts["examples.yaml"] = _hodge_examples("claim_001", result="inconclusive")
+    artifacts = _all_matrices_diagonalizable(text, run_id)
+    artifacts["examples.yaml"] = _matrix_examples("claim_001", result="inconclusive")
     artifacts["idea_grade.yaml"]["reasons"] = [
         "The relevant example calculation is human_needed, so it cannot count as survived or failed evidence."
     ]
@@ -1095,7 +1095,7 @@ def _unchecked_example(text: str, run_id: str) -> dict[str, object]:
 
 
 def _promising_but_unproved(text: str, run_id: str) -> dict[str, object]:
-    artifacts = _hodge_all_cubic_fourfolds(text, run_id)
+    artifacts = _all_matrices_diagonalizable(text, run_id)
     claim_id = artifacts["locked_claim.yaml"]["id"]
     artifacts["hypothesis_ledger.yaml"] = {
         "claim_id": claim_id,
@@ -1108,18 +1108,18 @@ def _promising_but_unproved(text: str, run_id: str) -> dict[str, object]:
     }
     artifacts["computation_checks.yaml"]["checks"].append(
         {
-            "id": "check_very_general_hodge_package_source",
-            "example_id": "ex_very_general_cubic",
+            "id": "check_generic_matrix_source",
+            "example_id": "ex_generic_matrix",
             "claim_id": claim_id,
-            "computed_quantity": "very general Hodge atom package support",
-            "input_data": ["very general cubic fourfold", "candidate Hodge atom obstruction package"],
+            "computed_quantity": "very general distinct-eigenvalue package support",
+            "input_data": ["generic square matrix", "candidate distinct-eigenvalue argument package"],
             "method": "source_lookup",
             "tool_or_source": "mock exact source lookup for the very general support case",
             "result": (
                 "A pinned source-style check supports continuing the very general case, "
-                "but it does not prove the all-cubic statement."
+                "but it does not prove the all-matrices statement."
             ),
-            "cross_check": ["not used as proof completion", "special cubic pressure remains separate"],
+            "cross_check": ["not used as proof completion", "repeated-eigenvalue pressure remains separate"],
             "status": "source_checked",
             "notes": "Non-toy support for a promising direction; still below proof status.",
         }
@@ -1128,7 +1128,7 @@ def _promising_but_unproved(text: str, run_id: str) -> dict[str, object]:
         {
             "id": "test_very_general_package_support",
             "operator_id": "source_checked_support_test",
-            "example_id": "ex_very_general_cubic",
+            "example_id": "ex_generic_matrix",
             "satisfies_all_claim_hypotheses": True,
             "target": "proof_step",
             "result": "survived",
@@ -1153,19 +1153,19 @@ def _promising_but_unproved(text: str, run_id: str) -> dict[str, object]:
             {
                 "id": "test_report_very_general_support",
                 "description": "Check whether the intended very-general support package survives.",
-                "uses_examples": ["ex_very_general_cubic"],
+                "uses_examples": ["ex_generic_matrix"],
                 "uses_counterexamples": ["test_very_general_package_support"],
                 "result": "survived",
                 "evidence_status": "source_checked",
                 "main_observation": (
                     "This supports continuing the route, not claiming a completed proof."
                 ),
-                "next_action": "Pin the exact source and then retest special cubic pressure.",
+                "next_action": "Pin the exact source and then retest repeated-eigenvalue pressure.",
             },
             {
                 "id": "test_report_special_pressure",
-                "description": "Keep special cubic fourfolds as pressure tests.",
-                "uses_examples": ["ex_special_cubic"],
+                "description": "Keep matrices with a repeated eigenvalue as pressure tests.",
+                "uses_examples": ["ex_repeated_eigenvalue"],
                 "uses_counterexamples": ["test_special_vs_very_general"],
                 "result": "inconclusive",
                 "evidence_status": "human_needed",
@@ -1199,9 +1199,9 @@ def _promising_but_unproved(text: str, run_id: str) -> dict[str, object]:
         "failed_tests": [],
         "counterexample_candidates": ["test_special_vs_very_general"],
         "missing_hypotheses": [],
-        "source_gaps": ["exact theorem for Hodge atom obstruction"],
+        "source_gaps": ["exact theorem for distinct-eigenvalue argument"],
         "repair_options": ["Pin the source and stress-test harder examples before writing proof-like language."],
-        "next_cheapest_test": "Pin the exact source and rerun special cubic fourfold pressure tests.",
+        "next_cheapest_test": "Pin the exact source and rerun matrix with a repeated eigenvalue pressure tests.",
         "human_review_required": True,
         "proof_language_status": "proof_candidate",
     }
@@ -1386,13 +1386,13 @@ def _refuted_by_all_hypotheses(text: str, run_id: str) -> dict[str, object]:
 
 
 def _likely_false_multiple_pressures(text: str, run_id: str) -> dict[str, object]:
-    artifacts = _hodge_all_cubic_fourfolds(text, run_id)
+    artifacts = _all_matrices_diagonalizable(text, run_id)
     claim_id = artifacts["locked_claim.yaml"]["id"]
     artifacts["counterexamples.yaml"]["tests"].append(
         {
             "id": "test_specialization_invariance_pressure",
             "operator_id": "specialization_test",
-            "example_id": "ex_very_general_cubic",
+            "example_id": "ex_generic_matrix",
             "satisfies_all_claim_hypotheses": "unclear",
             "target": "proof_step",
             "result": "inconclusive",
@@ -1433,7 +1433,7 @@ def _likely_false_multiple_pressures(text: str, run_id: str) -> dict[str, object
         theorem_drift=["very general -> all", "specialization treated as automatic"],
         missing_hypotheses=["genericity condition", "specialization invariance theorem"],
         source_risks=["candidate source only"],
-        example_risks=["special cubic pressure remains unresolved"],
+        example_risks=["repeated-eigenvalue pressure remains unresolved"],
         downgrade_reasons=["Several structural pressures point toward falsity."],
     )
     artifacts["idea_grade.yaml"] = {
@@ -1455,9 +1455,9 @@ def _likely_false_multiple_pressures(text: str, run_id: str) -> dict[str, object
         "repair_options": [
             "Narrow the claim.",
             "Pin the specialization theorem.",
-            "Build a harder special-cubic example suite.",
+            "Build a harder repeated-eigenvalue example suite.",
         ],
-        "next_cheapest_test": "Pin the transfer theorem or test the hardest special cubic family.",
+        "next_cheapest_test": "Pin the transfer theorem or test the hardest repeated-eigenvalue family.",
         "human_review_required": True,
         "proof_language_status": "idea_sketch",
     }
@@ -1484,7 +1484,7 @@ def _likely_false_multiple_pressures(text: str, run_id: str) -> dict[str, object
 
 
 def _source_misapplication(text: str, run_id: str) -> dict[str, object]:
-    artifacts = _hodge_all_cubic_fourfolds(text, run_id)
+    artifacts = _all_matrices_diagonalizable(text, run_id)
     claim_id = artifacts["locked_claim.yaml"]["id"]
     artifacts["source_grounding.yaml"] = _misapplied_source_grounding(claim_id)
     artifacts["review.yaml"] = _parallel_review(
@@ -1878,7 +1878,7 @@ def _human_feedback_scenario(
     run_id: str,
     project_id: str,
 ) -> dict[str, object]:
-    artifacts = _hodge_all_cubic_fourfolds(text, run_id)
+    artifacts = _all_matrices_diagonalizable(text, run_id)
     claim_id = artifacts["locked_claim.yaml"]["id"]
     if scenario == "human_marks_example_interesting":
         artifacts.update(
@@ -1888,7 +1888,7 @@ def _human_feedback_scenario(
                 project_id=project_id,
                 target_type="example",
                 target_artifact="examples.yaml",
-                target_id="ex_special_cubic",
+                target_id="ex_repeated_eigenvalue",
                 labels=["interesting"],
                 requested_actions=["promote_ranking"],
                 reason="This example may reveal the all-versus-very-general issue.",
@@ -1904,7 +1904,7 @@ def _human_feedback_scenario(
                 project_id=project_id,
                 target_type="example",
                 target_artifact="examples.yaml",
-                target_id="ex_special_cubic",
+                target_id="ex_repeated_eigenvalue",
                 labels=["misleading"],
                 requested_actions=["demote_ranking"],
                 reason="This example is superficially related but does not test the key source gap.",
@@ -1923,7 +1923,7 @@ def _human_feedback_scenario(
                 target_id="test_special_vs_very_general",
                 labels=["dangerous"],
                 requested_actions=["prioritize_counterexample_testing"],
-                reason="Special cubic pressure is the most dangerous place for theorem drift.",
+                reason="Repeated-eigenvalue pressure is the most dangerous place for theorem drift.",
                 direction="up",
                 weight="high",
             )

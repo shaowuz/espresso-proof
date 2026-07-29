@@ -29,14 +29,14 @@ from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
 THM = (
-    "Theorem 1.2. Exact literature statement supporting the Hodge-theoretic step "
-    "over base field C for cubic fourfolds."
+    "Theorem 1.2. Exact literature statement supporting the spectral step "
+    "over base field C for square matrices."
 )
 
 
 def _grounded_run(tmp_path: Path) -> Path:
     run_dir = run_mock_critique(
-        "g41", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path
+        "g41", FIXTURES / "all_matrices_diagonalizable" / "input.md", tmp_path
     )
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
@@ -79,8 +79,8 @@ def test_edited_statement_fails_excerpt_hash(tmp_path: Path) -> None:
     for ref in sg["source_refs"]:
         if ref["status"] == "source_backed":
             ref["statement_or_summary"] = (
-                "Theorem 1.2. Exact literature statement supporting the Hodge-theoretic "
-                "step over base field C for cubic fourfolds AND every singular threefold."
+                "Theorem 1.2. Exact literature statement supporting the spectral "
+                "step over base field C for square matrices AND every singular threefold."
             )
     write_yaml(run_dir / "source_grounding.yaml", sg)
     # the applicability audit is now also stale, but the FIRST failure must be

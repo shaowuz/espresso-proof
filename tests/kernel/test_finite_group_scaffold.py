@@ -76,8 +76,8 @@ def test_goal56a_finite_group_claims_get_domain_specific_scaffolds(
         for route in brief["top_strategies"]
         for value in route.values()
     ).lower()
-    assert "cubic" not in route_text
-    assert "hodge" not in route_text
+    assert "eigenvalue" not in route_text
+    assert "spectral" not in route_text
     assert "strategy_lock_claim" not in {r["id"] for r in brief["top_strategies"]}
 
 

@@ -22,7 +22,7 @@ FIXTURES = Path("tests/fixtures")
 
 def _run(tmp_path: Path) -> Path:
     return run_mock_critique(
-        "hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path
+        "linear_algebra", FIXTURES / "all_matrices_diagonalizable" / "input.md", tmp_path
     )
 
 

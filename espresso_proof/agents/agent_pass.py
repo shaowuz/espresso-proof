@@ -437,7 +437,7 @@ def assemble_llm_agent_run_report(
 # The ONLY machine-answerable request shape: the generic disjunctive
 # "(source or) exact computation for the most dangerous example/case" —
 # an ANCHORED FULLMATCH (Kernel Safety + Math Workflow review): a request
-# naming any specific object ("exact computation of the Hodge numbers ...")
+# naming any specific object ("exact computation of the eigenvalues ...")
 # never matches and stays open, because claim-scoped evidence does not bind
 # to specifics the entries' targets do not cover. Fail-closed false
 # negatives are the intended direction.

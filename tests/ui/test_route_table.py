@@ -132,7 +132,7 @@ def test_empty_route_has_no_table() -> None:
 
 def test_route_table_in_memo_sanitizes_proof_complete_free_text(tmp_path: Path) -> None:
     # A step's free text smuggling proof-complete language must not render as proof.
-    run = run_mock_critique("g24", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path)
+    run = run_mock_critique("g24", FIXTURES / "all_matrices_diagonalizable" / "input.md", tmp_path)
     artifacts = read_yaml(run / "run_manifest.yaml")["artifacts"]
     sg = read_yaml(run / artifacts["source_grounding"])
     sg.setdefault("steps", []).append({
@@ -152,7 +152,7 @@ def test_route_table_in_memo_sanitizes_proof_complete_free_text(tmp_path: Path) 
 
 # --- memo + dashboard integration -----------------------------------------
 def test_memo_and_dashboard_show_route_table(tmp_path: Path) -> None:
-    run = run_mock_critique("g24", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path)
+    run = run_mock_critique("g24", FIXTURES / "all_matrices_diagonalizable" / "input.md", tmp_path)
     _mark_claim_clear(run)
     verify_finite_groups(run, primes=[2])  # adds a scoped computation row
     validate_run(run)

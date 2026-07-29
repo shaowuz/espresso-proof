@@ -259,10 +259,8 @@ def _tokenize(text: str) -> list[str]:
 
 def _domain_aliases(terms: set[str]) -> set[str]:
     aliases = set()
-    if {"cubic", "fourfold", "fourfolds"} & terms:
-        aliases.update({"hodge", "period", "torelli", "rationality", "special"})
-    if "hodge" in terms:
-        aliases.update({"mirror", "atom", "atoms", "kkp", "kkpy"})
+    if {"matrix", "matrices", "eigenvalue", "eigenvalues"} & terms:
+        aliases.update({"spectral", "diagonalizable", "generic", "multiplicity"})
     if {"base", "change"} <= terms or "flat" in terms:
         aliases.update({"coherent", "proper", "semicontinuity", "stacks"})
     if "poincare" in terms or "fourier" in terms:

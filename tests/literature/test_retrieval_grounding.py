@@ -19,7 +19,7 @@ from espresso_proof.kernel.models import RetrievalResolutionReport
 from espresso_proof.literature.retrieval_grounding import retrieve_and_ground
 from espresso_proof.kernel.validators import validate_run
 
-FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "hodge_all_cubic_fourfolds" / "input.md"
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "all_matrices_diagonalizable" / "input.md"
 PGROUP_THEOREM = (
     "Theorem 1.1. Let G be a group with |G| = p^2 where p is prime; then the "
     "center Z(G) is nontrivial and G is abelian."
@@ -32,7 +32,7 @@ def _hyp(name: str) -> dict:
 
 def _run_needing_pgroup(tmp_path: Path, *, hypotheses: list[dict] | None = None) -> Path:
     """A run whose first source-grounding step needs the p^2 theorem."""
-    run_dir = run_mock_critique("hodge_atoms", FIXTURE, tmp_path)
+    run_dir = run_mock_critique("linear_algebra", FIXTURE, tmp_path)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     claim = read_yaml(run_dir / "locked_claim.yaml")
     claim["hypotheses"] = hypotheses or [_hyp("group of order p^2"), _hyp("p is prime")]

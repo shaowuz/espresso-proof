@@ -85,13 +85,13 @@ Open `http://127.0.0.1:8765`, paste a mathematical claim or proof sketch, and le
 
 ```text
 Claim sketch:
-For all smooth cubic fourfolds, the Hodge atom obstruction coming from the
-Hodge-theoretic mirror symmetry package proves irrationality.
+For all square matrices, the distinct-eigenvalue argument coming from the
+spectral mirror symmetry package proves diagonalizability.
 
 Proof sketch:
 The proof treats the very general case as if it applied to every smooth cubic
 fourfold. I have not pinned an exact theorem number, and I have not checked a
-special cubic fourfold example with extra algebraic classes.
+matrix with a repeated eigenvalue example with extra algebraic classes.
 
 What I want checked:
 Do not mark this as proved. Look for the all-versus-very-general jump, missing

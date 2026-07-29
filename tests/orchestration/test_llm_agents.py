@@ -173,8 +173,8 @@ def fake_codex_cli(tmp_path: Path, *, message: str) -> Path:
 
 def test_stub_llm_agents_write_schema_valid_candidate_artifact(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _mark_claim_clear(run_dir)
@@ -229,7 +229,7 @@ def test_stub_llm_agents_write_schema_valid_candidate_artifact(tmp_path: Path) -
 
 def test_inspect_reports_prover_loop_and_theorem_applicability(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -276,7 +276,7 @@ def test_inspect_reports_prover_loop_and_theorem_applicability(tmp_path: Path) -
 
 def test_inspect_focuses_selected_strategy_attempt(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -330,7 +330,7 @@ def test_inspect_focuses_selected_strategy_attempt(tmp_path: Path) -> None:
 
 def test_inspect_ignores_undeclared_optional_artifact_files(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -347,7 +347,7 @@ def test_inspect_ignores_undeclared_optional_artifact_files(tmp_path: Path) -> N
 
 def test_stub_espresso_reviewer_set_runs_three_role_reviewers(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -389,7 +389,7 @@ def test_run_flow_creates_literature_and_espresso_agent_artifacts(tmp_path: Path
             "--input",
             str(FIXTURES / "promising_but_unproved" / "input.md"),
             "--project",
-            "hodge_atoms",
+            "linear_algebra",
             "--literature-mode",
             "local",
             "--provider",
@@ -440,7 +440,7 @@ def test_run_flow_openai_provider_requires_api_key(tmp_path: Path, monkeypatch) 
             "--input",
             str(FIXTURES / "promising_but_unproved" / "input.md"),
             "--project",
-            "hodge_atoms",
+            "linear_algebra",
             "--literature-mode",
             "local",
             "--provider",
@@ -474,7 +474,7 @@ def test_run_flow_openai_network_preflight_fails_before_writing_run(
             "--input",
             str(FIXTURES / "promising_but_unproved" / "input.md"),
             "--project",
-            "hodge_atoms",
+            "linear_algebra",
             "--literature-mode",
             "local",
             "--provider",
@@ -532,7 +532,7 @@ def test_run_flow_openai_network_preflight_writes_provider_diagnostic(
             "--input",
             str(FIXTURES / "promising_but_unproved" / "input.md"),
             "--project",
-            "hodge_atoms",
+            "linear_algebra",
             "--literature-mode",
             "local",
             "--provider",
@@ -577,7 +577,7 @@ def test_run_flow_external_provider_uses_json_command(tmp_path: Path, monkeypatc
             "--input",
             str(FIXTURES / "promising_but_unproved" / "input.md"),
             "--project",
-            "hodge_atoms",
+            "linear_algebra",
             "--literature-mode",
             "local",
             "--provider",
@@ -700,7 +700,7 @@ def test_external_provider_reserved_status_language_is_contained(
             "--input",
             str(FIXTURES / "promising_but_unproved" / "input.md"),
             "--project",
-            "hodge_atoms",
+            "linear_algebra",
             "--literature-mode",
             "local",
             "--provider",
@@ -838,8 +838,8 @@ def test_agent_doctor_external_codex_adapter_rejects_fallback_as_ready(
 
 def test_resolve_agent_gate_does_not_upgrade_grade_or_source(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _mark_claim_clear(run_dir)
@@ -887,8 +887,8 @@ def test_resolve_agent_gate_does_not_upgrade_grade_or_source(tmp_path: Path) -> 
 
 def test_resolve_agent_gate_cannot_overwrite_resolved_gate(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _mark_claim_clear(run_dir)
@@ -944,8 +944,8 @@ def test_resolve_agent_gate_auto_records_no_human_involvement(tmp_path: Path) ->
     from espresso_proof.orchestration.orchestrator import _resolve_and_build_loop
 
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _mark_claim_clear(run_dir)
@@ -978,8 +978,8 @@ def test_resolve_agent_gate_rejects_unknown_provenance(tmp_path: Path) -> None:
     from espresso_proof.agents.llm_agents import resolve_agent_gate
 
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _mark_claim_clear(run_dir)
@@ -994,7 +994,7 @@ def test_resolve_agent_gate_rejects_unknown_provenance(tmp_path: Path) -> None:
 
 def test_human_choice_routes_prover_loop_strategy_and_effort(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1063,7 +1063,7 @@ def test_human_choice_routes_prover_loop_strategy_and_effort(tmp_path: Path) -> 
 
 def test_prover_loop_pending_gate_cannot_continue(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1095,7 +1095,7 @@ def test_prover_loop_pending_gate_cannot_continue(tmp_path: Path) -> None:
 
 def test_prover_loop_pending_gate_cannot_allocate_attempt_work(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1128,7 +1128,7 @@ def test_prover_loop_pending_gate_cannot_allocate_attempt_work(tmp_path: Path) -
 
 def test_prover_loop_reviewer_pointers_must_match_llm_report(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1160,7 +1160,7 @@ def test_prover_loop_reviewer_pointers_must_match_llm_report(tmp_path: Path) -> 
 
 def test_prover_loop_reviewer_pointers_must_be_unique(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1194,7 +1194,7 @@ def test_prover_loop_reviewer_pointers_must_be_unique(tmp_path: Path) -> None:
 
 def test_prover_loop_requires_round_index(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1226,7 +1226,7 @@ def test_prover_loop_requires_round_index(tmp_path: Path) -> None:
 
 def test_prover_round_artifact_must_match_loop_attempt(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1260,7 +1260,7 @@ def test_prover_round_artifact_must_match_loop_attempt(tmp_path: Path) -> None:
 
 def test_initial_prover_round_body_must_match_llm_agent_run(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1294,7 +1294,7 @@ def test_initial_prover_round_body_must_match_llm_agent_run(tmp_path: Path) -> N
 
 def test_prover_round_rejects_proof_like_language(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1328,7 +1328,7 @@ def test_prover_round_rejects_proof_like_language(tmp_path: Path) -> None:
 
 def test_prover_round_rejects_proof_like_language_variants(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1363,7 +1363,7 @@ def test_prover_round_rejects_proof_like_language_variants(tmp_path: Path) -> No
 
 def test_prover_round_input_artifacts_must_match_manifest(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1397,7 +1397,7 @@ def test_prover_round_input_artifacts_must_match_manifest(tmp_path: Path) -> Non
 
 def test_run_prover_loop_round_appends_child_attempt(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1484,7 +1484,7 @@ def test_run_prover_loop_round_appends_child_attempt(tmp_path: Path) -> None:
 
 def test_appended_prover_round_reviewers_must_match_loop_pointers(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1533,7 +1533,7 @@ def test_appended_prover_round_reviewers_must_match_loop_pointers(tmp_path: Path
 
 def test_prover_loop_round_prompt_contains_reviewer_blockers(tmp_path: Path) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
         tmp_path,
     )
@@ -1637,8 +1637,8 @@ def test_prover_loop_round_prompt_contains_reviewer_blockers(tmp_path: Path) -> 
 
 def test_openai_provider_requires_api_key(tmp_path: Path, monkeypatch) -> None:
     run_dir = run_mock_critique(
-        "hodge_atoms",
-        FIXTURES / "hodge_all_cubic_fourfolds" / "input.md",
+        "linear_algebra",
+        FIXTURES / "all_matrices_diagonalizable" / "input.md",
         tmp_path,
     )
     _mark_claim_clear(run_dir)
@@ -1897,7 +1897,7 @@ def test_safe_text_redaction_does_not_reintroduce_forbidden_word() -> None:
 def test_forbidden_language_redaction_covers_validator() -> None:
     """Regression (Golden Dogfood Run): every proof-complete phrase the kernel's
     prover-round language guard detects must be redacted by safe_text. A live
-    reviewer/prover sentence like "... is proven irrational" must be contained
+    reviewer/prover sentence like "... is proven diagonalizable" must be contained
     (redacted) rather than slip past safe_text and fail the run closed at the
     validator. Pins safe_text's FORBIDDEN_LANGUAGE as a superset of the validator
     forbidden set so the two layers cannot drift apart.
@@ -1911,16 +1911,16 @@ def test_forbidden_language_redaction_covers_validator() -> None:
         "with this the proof complete and final",
         "we proved the bound for every member",
         "this proved the theorem for all x",
-        "a single cubic fourfold is proven irrational",
+        "a single square matrix is proven diagonalizable",
         "the obstruction proves the claim outright",
         "the argument proves the theorem in general",
         "the statement has been proven already",
         "this proof closes the remaining gap",
         "a complete proof is now available",
-        "a full proof of irrationality follows",
+        "a full proof of diagonalizability follows",
         "the lemma establishes the theorem directly",
         "the witness establishes the claim for all x",
-        "the proof establishes irrationality everywhere",
+        "the proof establishes diagonalizability everywhere",
     ]
     for sentence in samples:
         # Precondition: the validator would flag the raw sentence.

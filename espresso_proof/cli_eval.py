@@ -32,7 +32,6 @@ from espresso_proof.cli_app import app
 from espresso_proof.cli_shared import (
     _assert_fixture_expectations,
     _resolve_front_half_mode,
-    _validate_seed_files,
 )
 
 
@@ -319,8 +318,10 @@ def eval(
 ) -> None:
     """Run deterministic P0 evals."""
     if schemas_only:
-        _validate_seed_files()
-        typer.echo("Schema-only validation passed")
+        typer.echo(
+            "Schema-only validation now lives in the test suite "
+            "(tests/kernel). Run: uv run python -m pytest tests/kernel -q"
+        )
         return
     if mode != "mock":
         raise typer.BadParameter("P0 eval only supports --mode mock")
@@ -341,7 +342,7 @@ def eval(
             raise KernelValidationError(
                 f"{fixture_dir}: fixture is missing required files {missing}"
             )
-        run_dir = run_mock_critique("hodge_atoms", input_path, Path(".eval_runs") / fixture_dir.name)
+        run_dir = run_mock_critique("eval", input_path, Path(".eval_runs") / fixture_dir.name)
         validate_run(run_dir)
         _assert_fixture_expectations(run_dir, read_yaml(expected_path))
         passed += 1

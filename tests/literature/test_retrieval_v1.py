@@ -91,15 +91,15 @@ def test_candidate_without_exact_locator_cannot_be_source_backed() -> None:
 # 4) A candidate with locator + attribution can be handed to grounding.
 # ---------------------------------------------------------------------------
 
-_HODGE_THM = (
-    "Theorem 1.2. Exact literature statement supporting the Hodge-theoretic step "
-    "over base field C for cubic fourfolds."
+_MATRIX_THM = (
+    "Theorem 1.2. Exact literature statement supporting the spectral step "
+    "over base field C for square matrices."
 )
 
 
-def _hodge_run(tmp_path: Path) -> Path:
+def _matrix_run(tmp_path: Path) -> Path:
     run_dir = run_mock_critique(
-        "hodge_atoms", FIXTURES / "hodge_all_cubic_fourfolds" / "input.md", tmp_path
+        "linear_algebra", FIXTURES / "all_matrices_diagonalizable" / "input.md", tmp_path
     )
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     ledger_path = run_dir / manifest["artifacts"]["hypothesis_ledger"]
@@ -111,14 +111,14 @@ def _hodge_run(tmp_path: Path) -> Path:
 
 
 def test_candidate_with_locator_and_attribution_is_handed_to_grounding(tmp_path: Path) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     # extraction finds an exact locator in the full text...
-    cands = extract_candidate_locators(_HODGE_THM)
+    cands = extract_candidate_locators(_MATRIX_THM)
     assert cands and cands[0]["is_exact"] is True
     # ...and the existing grounding pipeline earns source_backed only because the
     # source also has attribution + a hypothesis match.
     src = run_dir / "src.txt"
-    src.write_text(_HODGE_THM, encoding="utf-8")
+    src.write_text(_MATRIX_THM, encoding="utf-8")
     claim = read_yaml(run_dir / "locked_claim.yaml")
     report = ingest_source_for_theorems(
         claim_id=claim["id"], source=str(src), source_id="src_real",
@@ -155,10 +155,10 @@ def test_malformed_pdf_fails_closed_without_fabricated_locators() -> None:
 
 
 def test_retrieval_does_not_upgrade_grade_or_proof_status(tmp_path: Path) -> None:
-    run_dir = _hodge_run(tmp_path)
+    run_dir = _matrix_run(tmp_path)
     grade_before = read_yaml(run_dir / "idea_grade.yaml")
     src = run_dir / "src.txt"
-    src.write_text(_HODGE_THM, encoding="utf-8")
+    src.write_text(_MATRIX_THM, encoding="utf-8")
     claim = read_yaml(run_dir / "locked_claim.yaml")
     report = ingest_source_for_theorems(
         claim_id=claim["id"], source=str(src), source_id="src_real",

@@ -61,7 +61,7 @@ def test_source_not_applicable_is_not_reference_supported(tmp_path: Path) -> Non
     from espresso_proof.kernel.validators import validate_run
 
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         Path("tests/fixtures/source_misapplication_very_general_to_all/input.md"),
         tmp_path,
     )
@@ -83,7 +83,7 @@ def test_checked_counterexample_scope_is_respected(tmp_path: Path) -> None:
     from espresso_proof.kernel.validators import validate_run
 
     run_dir = run_mock_critique(
-        "hodge_atoms",
+        "linear_algebra",
         Path("tests/fixtures/refuted_by_all_hypotheses_counterexample/input.md"),
         tmp_path,
     )

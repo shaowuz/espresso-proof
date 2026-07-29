@@ -93,7 +93,6 @@ from espresso_proof.kernel.models import (
 )
 from espresso_proof.kernel.schema_export import check_schemas, write_schemas
 from espresso_proof.kernel.validators import KernelValidationError, validate_run
-from espresso_proof.orchestration.workflow_generator import generate_workflow_spec
 
 from espresso_proof.cli_app import app
 from espresso_proof.cli_shared import (
@@ -128,7 +127,7 @@ def export_schemas_command(
 
 
 @app.command()
-def init(project: str = "hodge_atoms") -> None:
+def init(project: str = "demo") -> None:
     """Initialize the local project directories used by the P0 kernel."""
     project_dir = Path("projects") / project
     (project_dir / "runs").mkdir(parents=True, exist_ok=True)
@@ -144,7 +143,7 @@ def init(project: str = "hodge_atoms") -> None:
 @app.command("new-run")
 def new_run(
     input: Path = typer.Option(..., "--input", "-i", exists=True, dir_okay=False),
-    project: str = typer.Option("hodge_atoms", "--project", "-p"),
+    project: str = typer.Option("demo", "--project", "-p"),
     output_root: Path = typer.Option(Path("."), "--output-root", file_okay=False),
 ) -> None:
     """Scaffold a kernel-valid 'unclear / needs_human' run for an arbitrary claim.
@@ -1495,70 +1494,6 @@ def summarize_feedback(
     validate_run(run)
     typer.echo(f"Wrote feedback summary to {run / 'example_feedback_summary.yaml'}")
 
-
-@app.command("generate-agent")
-def generate_agent(
-    prompt: Path = typer.Option(..., "--prompt", "-i", exists=True, dir_okay=False),
-    project: str = typer.Option("generated_agent", "--project", "-p"),
-    mode: str = typer.Option("v0", "--mode"),
-) -> None:
-    """Create a schema-checked draft agent workflow from a research prompt."""
-    if mode not in {"v0", "stub"}:
-        raise typer.BadParameter("P0 only supports --mode v0")
-    text = read_text(prompt)
-    project_dir = Path("projects") / project
-    project_dir.mkdir(parents=True, exist_ok=True)
-    spec = generate_workflow_spec(text, project_name=project)
-    WorkflowSpec.model_validate(spec)
-    contracts = default_agent_contracts(project)
-    AgentContracts.model_validate(contracts)
-    trial_dir = project_dir / "trial_fixture"
-    trial_dir.mkdir(parents=True, exist_ok=True)
-    trial_input = trial_dir / "input.md"
-    if not trial_input.exists():
-        write_text(
-            trial_input,
-            "Draft trial fixture. Replace with a representative proof sketch before admission.\n",
-        )
-    trial_expected = trial_dir / "expected.yaml"
-    if not trial_expected.exists():
-        write_yaml(
-            trial_expected,
-            {
-                "fixture": "draft_trial_fixture",
-                "required": {
-                    "idea_status": ["fragile", "likely_false", "unclear"],
-                    "forbidden_final_report_phrases": ["verified", "proof complete"],
-                },
-            },
-        )
-    admission = {
-        "project_id": project,
-        "workflow_spec_valid": True,
-        "agent_contracts_exist": True,
-        "required_artifacts_declared": True,
-        "trial_fixture_exists": trial_input.exists() and trial_expected.exists(),
-        "human_confirmed": False,
-        "admitted": False,
-        "blockers": ["human confirmation required before this workflow is reusable"],
-    }
-    AdmissionCheck.model_validate(admission)
-    write_yaml(project_dir / "workflow_spec.yaml", spec)
-    write_yaml(project_dir / "agent_contracts.yaml", contracts)
-    write_yaml(project_dir / "admission_check.yaml", admission)
-    write_text(
-        project_dir / "playbook.md",
-        "# Generated Agent Draft\n\n"
-        "This is a deterministic P0 workflow draft. It is schema-valid but must be reviewed by the mathematician before use.\n\n"
-        f"- Domain: {spec.get('domain')}\n"
-        f"- Domain key: {spec.get('domain_key', 'unknown')}\n"
-        f"- Uses live LLM: {spec.get('source', {}).get('uses_live_llm', False)}\n"
-        f"- Uses network: {spec.get('source', {}).get('uses_network', False)}\n\n"
-        "## Research Prompt\n\n"
-        f"{text}\n",
-    )
-    typer.echo(f"Wrote draft agent to {project_dir}")
-    typer.echo("Admission status: not admitted; human confirmation required")
 
 
 @app.command("improve-workflow")

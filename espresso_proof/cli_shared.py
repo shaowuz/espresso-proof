@@ -16,7 +16,6 @@ from espresso_proof.kernel.io import read_text, read_yaml
 from espresso_proof.kernel.models import AgentContracts, ContinueDecision, WorkflowSpec
 from espresso_proof.kernel.validators import KernelValidationError, validate_run
 from espresso_proof.orchestration.run_dashboard import write_run_dashboard
-from espresso_proof.orchestration.workflow_generator import generate_workflow_spec
 
 
 _WINDOWS_RUN_PATH_LIMIT = 240
@@ -191,16 +190,6 @@ def _focused_prover_loop_attempt(prover_loop: dict) -> dict:
         candidates,
         key=lambda attempt: (attempt.get("round_index", 0), attempt.get("attempt_id", "")),
     )[-1]
-
-
-def _validate_seed_files() -> None:
-    WorkflowSpec.model_validate(
-        generate_workflow_spec("Hodge atom mirror symmetry", project_name="generated_hodge")
-    )
-    WorkflowSpec.model_validate(
-        generate_workflow_spec("flat coherent base change", project_name="generated_base_change")
-    )
-    AgentContracts.model_validate(default_agent_contracts("scratch"))
 
 
 def _next_feedback_id(existing: list[dict]) -> str:
