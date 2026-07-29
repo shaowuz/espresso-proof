@@ -163,8 +163,14 @@ def _run_claude(prompt: str, *, timeout: int) -> tuple[str, dict | None]:
     """
 
     claude_cli = os.environ.get("ESPRESSO_CLAUDE_CLI", "claude")
+    # Default to the cheapest Claude model. Without an explicit --model the CLI
+    # runs whatever the interactive session defaults to — typically the most
+    # expensive tier — so an Espresso run inherited a pricing decision nobody
+    # made. The CLI self-reports the resolved model id in its JSON envelope, so
+    # provenance records what actually ran regardless of this knob.
+    claude_model = os.environ.get("ESPRESSO_CLAUDE_MODEL", "haiku")
     proc = subprocess.run(
-        [claude_cli, "-p", prompt, "--output-format", "json"],
+        [claude_cli, "-p", prompt, "--model", claude_model, "--output-format", "json"],
         text=True,
         capture_output=True,
         timeout=timeout,
