@@ -3,45 +3,55 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
 
-A local workspace that pressure-tests a mathematical idea and writes down what
-it actually established.
+**A controlled research runtime for long-horizon mathematical reasoning.**
 
-You paste in a claim or a proof sketch. LLM agents attack it from several
-directions — routes, examples, counterexamples, literature, reviewer objections
-— and everything they produce lands in files you can audit, each labelled with
-how much evidence is behind it.
+Espresso Proof is built for difficult mathematical problems that require many
+strategies, repeated proof attempts, literature investigation, examples,
+counterexamples, adversarial review, and sustained human judgment.
+
+A long research run creates a control problem. Over hours or days, the working
+claim can shift, hypotheses can disappear from context, a citation can become
+stronger in memory than it was in the source, a theorem can be applied outside
+its actual scope, and an important reviewer objection can be lost between
+rounds.
+
+Espresso keeps the investigation coherent by moving research state out of the
+chat and into typed, persistent artifacts. Every round starts from the recorded
+claim, hypotheses, sources, proof steps, objections, decisions, and provenance.
 
 ![The Espresso Proof cockpit](docs/assets/cockpit.png)
 
-Look at the labels in that screenshot: *Draft only — not checked*, *Needs a
-source*, *No step is reference-supported yet*. That is the whole idea. An agent
-can write anything; only the kernel decides what it may be **called**.
+## From a claim to an auditable research run
 
-Espresso is not a theorem prover, not a Lean formalization product, and not a
-chatbox. It keeps the important reasoning in files instead of in a conversation
-you will never re-read.
-
-The supported product path is intentionally narrow:
+Start with a mathematical claim or proof sketch. Espresso turns it into a
+resumable research program:
 
 ```text
-React cockpit -> espresso serve -> external Codex agent -> artifact kernel
+lock the claim and hypotheses
+        ↓
+generate and grade competing strategies
+        ↓
+search, read, and ground relevant literature
+        ↓
+pressure-test the claim with examples and counterexamples
+        ↓
+construct candidate proof routes
+        ↓
+run independent strategy, evidence, and line-proof reviewers
+        ↓
+convert objections into scoped repair targets
+        ↓
+ask the mathematician where judgment or direction is required
+        ↓
+publish an auditable research memo and complete run trace
+
+
 ```
 
-## What it does not guarantee
 
-Espresso Proof does not certify mathematical truth. Nothing it produces is a
-proof in the sense a referee would accept.
 
-The value is in the boundary: LLM agents propose freely, and a deterministic
-Python kernel decides what any of it is allowed to be *called*. An agent cannot
-mark its own work `proved`, cannot promote a source it merely cited into a
-checked one, and cannot upgrade a status by asserting it. Statuses are granted
-by kernel code against evidence the kernel can check itself, and anything
-uncertain fails closed.
 
-So a run tells you what is sourced, what is checked, what is inferred, and what
-is still speculation — and whether the idea is worth continuing. It does not
-tell you the claim is true. See [docs/product-philosophy.md](docs/product-philosophy.md).
+
 
 ## Requirements
 
