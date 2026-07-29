@@ -1,6 +1,6 @@
 """Tests for espresso_proof/agents/espresso_core_adapter.py (espresso-core prover backend).
 
-Phase A contract (docs/engineering/ESPRESSO_CORE_INTEGRATION.md): NO network,
+Phase A contract (docs/engineering/espresso-core-integration.md): NO network,
 NO real espresso-core execution, NO new deps. Mock mode reads a fixture core
 run directory; every translation must be schema-valid, candidate-only JSON
 that the espresso_proof kernel then re-validates and contains.
