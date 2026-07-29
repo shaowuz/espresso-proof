@@ -1,3 +1,3 @@
 # Rubric
 
-Vague citations such as "by Voisin" must be downgraded unless an exact locator and hypothesis match are provided.
+Vague citations that name-drop an author without a locator must be downgraded unless an exact locator and hypothesis match are provided.

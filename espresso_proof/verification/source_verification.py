@@ -325,12 +325,9 @@ def expanded_hypothesis_terms(text: str) -> list[str]:
 
 
 TERM_ALIASES = {
-    "cubic": ["degree 3", "degree-three"],
     "field": ["over", "base field"],
     "q": ["global field", "number field", "rational field"],
-    "fourfold": ["fourfolds", "four-dimensional"],
     "galois": ["galois group", "galois extension"],
-    "hodge": ["hodgetheoretic", "hodge-theoretic"],
     "order": ["|g|", "order", "cardinality", "number of elements"],
     "proper": ["complete"],
     "smooth": ["nonsingular", "non-singular"],

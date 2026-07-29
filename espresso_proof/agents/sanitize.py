@@ -24,7 +24,7 @@ from espresso_proof.kernel.proof_language import (
 # validators._first_forbidden_proof_language: the prover-round language guard
 # scans the (already redacted) content fields, so any phrase the validator
 # detects but redaction misses would let a live reviewer/prover sentence (e.g.
-# "... is proven irrational") fail the run closed instead of being contained.
+# "... is proven complete") fail the run closed instead of being contained.
 # test_forbidden_language_redaction_covers_validator pins this invariant.
 
 

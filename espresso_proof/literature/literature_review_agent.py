@@ -408,8 +408,6 @@ def compare_conclusion(statement: str, claim: dict) -> dict:
     if not claim_terms:
         return {"relation": "unclear", "reason": "The locked claim conclusion has no comparable terms."}
     overlap = statement_terms & claim_terms
-    if {"irrationality", "irrational"} & (statement_terms | claim_terms):
-        return {"relation": "same", "reason": "The theorem and claim both address irrationality."}
     if len(overlap) >= 2:
         return {"relation": "same", "reason": f"The theorem conclusion overlaps the claim on: {', '.join(sorted(overlap)[:5])}."}
     if overlap:

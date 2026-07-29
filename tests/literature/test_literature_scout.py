@@ -66,12 +66,12 @@ class _FakeClient:
 
 def _candidate_payload(step_id: str, **overrides) -> dict:
     candidate = {
-        "title": "Derived categories of square matrices",
-        "authors": ["A. Kuznetsov"],
+        "title": "Spectra of generic matrices",
+        "authors": ["A. Author"],
         "source_type": "paper",
         "locator_hint": "Section 4",
-        "statement_hint": "structure of the Kuznetsov component",
-        "url_or_identifier": "arXiv:0808.3351",
+        "statement_hint": "structure of the eigenvalue decomposition",
+        "url_or_identifier": "arXiv:0000.00000",
         "why_relevant": "may support the obstruction step",
     }
     candidate.update(overrides)
@@ -122,7 +122,7 @@ def test_scout_ties_candidates_to_known_step(tmp_path: Path) -> None:
     step = next(s for s in report["proof_step_candidates"] if s["proof_step_id"] == "step_001")
     assert len(step["candidates"]) == 1
     cand = step["candidates"][0]
-    assert cand["title"] == "Derived categories of square matrices"
+    assert cand["title"] == "Spectra of generic matrices"
     assert cand["status"] == "candidate"
     # exact locator is never supplied by the scout.
     assert "exact_locator" in cand["missing_metadata"]

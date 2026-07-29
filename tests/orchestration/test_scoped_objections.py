@@ -62,7 +62,7 @@ def _scoped(**overrides) -> dict:
         "proof_step_id": None,
         "kind": "missing_source",
         "severity": "P1",
-        "suggested_next_action": "Cite Voisin or add a finite check.",
+        "suggested_next_action": "Pin an exact source or add a finite check.",
     }
     base.update(overrides)
     return base

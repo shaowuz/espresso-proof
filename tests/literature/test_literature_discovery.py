@@ -31,15 +31,15 @@ def _matrix_project(tmp_path: Path) -> Path:
     (project / "core_papers.md").write_text(
         """# core papers
 
-### KKP 0806.0107
+### Core reference 1
 
-- **Title:** Spectral theoretic aspects of mirror symmetry
-- **Authors:** Ludmil Katzarkov, Maxim Kontsevich, Tony Pantev
-- **URL:** https://arxiv.org/abs/0806.0107
+- **Title:** Spectral properties of generic matrices
+- **Authors:** A. Author, B. Author
+- **URL:** https://example.org/spectral-properties
 
 ### Square matrices
 
-- Claire Voisin, *Spectral Theory and Complex Algebraic Geometry*.
+- C. Author, *Matrix Analysis*.
 """,
         encoding="utf-8",
     )
@@ -173,7 +173,7 @@ def test_live_search_parsers_return_candidate_references() -> None:
     arxiv_payload = b"""<?xml version="1.0" encoding="UTF-8"?>
     <feed xmlns="http://www.w3.org/2005/Atom">
       <entry>
-        <id>http://arxiv.org/abs/2508.05105v1</id>
+        <id>http://arxiv.org/abs/0000.00000v1</id>
         <title>Birational invariants from Spectral structures</title>
         <summary>A theorem about square matrix examples.</summary>
         <author><name>Ada Example</name></author>
@@ -1008,7 +1008,7 @@ def test_live_positive_hits_validate_in_literature_report() -> None:
             provider="crossref",
             results=[
                 LiveSearchResult(
-                    title="Irrationality of generic square matrices",
+                    title="Eigenvalues of generic square matrices",
                     authors=["B. Author"],
                     locator_kind="url",
                     locator_value="https://doi.org/10.1000/xyz",
@@ -1039,7 +1039,7 @@ def test_smooth_hypothesis_not_covered_by_singular_statement() -> None:
 
     hypotheses = [{"name": "X is smooth", "status": "explicit", "source": "agent"}]
     result = check_hypothesis_applicability(
-        "Theorem 2.1. Every singular cubic threefold X admits a resolution.",
+        "Theorem 2.1. Every real symmetric matrix X admits an orthonormal eigenbasis.",
         hypotheses,
         [],
     )

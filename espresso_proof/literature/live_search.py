@@ -230,7 +230,7 @@ def infer_relevance(title: str, abstract: str) -> str:
     text = f"{title} {abstract}".lower()
     if "counterexample" in text or "patholog" in text:
         return "counterexample_source"
-    if "example" in text or "cubic" in text or "base change" in text:
+    if "example" in text or "counterexample" in text:
         return "example_source"
     if "theorem" in text or "lemma" in text or "proof" in text:
         return "possible_theorem_source"

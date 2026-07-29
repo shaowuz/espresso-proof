@@ -450,11 +450,11 @@ def infer_relevance(reference: LocalReference) -> str:
     text = " ".join([reference.title, reference.topic, reference.raw_line]).lower()
     if "counterexample" in text or "patholog" in text:
         return "counterexample_source"
-    if "example" in text or "cubic" in text or "p^1" in text:
+    if "example" in text or "counterexample" in text:
         return "example_source"
     if "theorem" in text or "lemma" in text or "stacks project" in text:
         return "possible_theorem_source"
-    if "core" in reference.topic.lower() or "kkp" in text or "kkpy" in text:
+    if "core" in reference.topic.lower():
         return "core"
     return "background"
 
@@ -540,28 +540,23 @@ def dedupe_references(references: list[LocalReference]) -> list[LocalReference]:
     return deduped
 
 
+# Structural signals that a line is a citation rather than prose. Deliberately
+# not a list of author surnames: a curated roster only recognises one field's
+# bibliography and silently fails on every other, which is worse than the
+# generic markers below.
 REFERENCE_MARKERS = {
     "arxiv",
-    "beauville",
-    "bittner",
-    "charles",
-    "clemens",
-    "coates",
-    "deligne",
-    "gromov",
-    "griffiths",
-    "hartshorne",
-    "hassett",
-    "hertling",
-    "huybrechts",
-    "iritani",
-    "kontsevich",
-    "kuznetsov",
-    "looijenga",
-    "sabbah",
-    "saito",
+    "doi",
     "stacks project",
-    "voisin",
+    "theorem",
+    "lemma",
+    "proposition",
+    "corollary",
+    "chapter",
+    "section",
+    "vol.",
+    "pp.",
+    "et al",
 }
 
 STOPWORDS = {

@@ -81,7 +81,7 @@ def _detect_scenario(input_path: Path, text: str) -> str:
         return "all_matrices_diagonalizable"
     if "drop smooth" in lowered or "without projective" in lowered:
         return "dropped_hypothesis_not_refutation"
-    if "by voisin" in lowered or "source backed" in lowered:
+    if "by a well-known author" in lowered or "source backed" in lowered:
         return "fake_source_backed_rejected"
     if "eigenvalue multiplicity" in lowered and "compute" in lowered:
         return "unchecked_example_not_evidence"
@@ -297,7 +297,7 @@ def _common_literature_review(claim_id: str) -> dict:
         "query_summary": "Mock literature pass for distinct-eigenvalue / square matrix pressure points.",
         "candidate_references": [
             {
-                "id": "lit_candidate_kkpy",
+                "id": "lit_candidate_core",
                 "title": "Candidate generic-matrix reference",
                 "authors": ["Placeholder Author"],
                 "locator": {"kind": "unknown", "value": "to_be_filled"},
@@ -1056,7 +1056,7 @@ def _dropped_hypothesis(text: str, run_id: str) -> dict[str, object]:
 
 def _fake_source_backed(text: str, run_id: str) -> dict[str, object]:
     artifacts = _all_matrices_diagonalizable(text, run_id)
-    artifacts["review.yaml"]["source_risks"] = ["A vague 'by Voisin' citation is only candidate, not source_backed."]
+    artifacts["review.yaml"]["source_risks"] = ["A vague name-drop citation is only candidate, not source_backed."]
     artifacts["review.yaml"]["reviewers"][0]["objections"].append("The strategy relies on a vague source citation.")
     artifacts["final_report.md"] = "Mock critique: vague citations are downgraded to candidate source status.\n"
     return artifacts

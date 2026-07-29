@@ -659,7 +659,6 @@ HYPOTHESIS_PHRASES = [
     "base change",
     "base field",
     "coherent",
-    "cubic fourfold",
     "finite solvable group",
     "flat",
     "galois extension",

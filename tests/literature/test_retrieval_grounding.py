@@ -118,7 +118,7 @@ def test_missing_local_source_fails_closed(tmp_path: Path) -> None:
 def test_url_without_network_is_skipped_not_fetched(tmp_path: Path) -> None:
     run_dir = _run_needing_pgroup(tmp_path)
     report = retrieve_and_ground(
-        run_dir=run_dir, url="https://arxiv.org/abs/0808.3351", network_enabled=False
+        run_dir=run_dir, url="https://arxiv.org/abs/0000.00000", network_enabled=False
     )
     assert report["resolution_status"] == "skipped"
     assert report["source_kind"] == "arxiv"
