@@ -430,10 +430,10 @@ See
 
 ## Architecture references
 
-- [Execution Trunk](docs/engineering/EXECUTION_TRUNK.md) — canonical path from problem text to run artifacts
+- [Execution Trunk](docs/engineering/execution-trunk.md) — canonical path from problem text to run artifacts
 - [Product Philosophy](docs/product-philosophy.md) — research goals and design principles
 - [Product Path Boundaries](docs/engineering/product-path-boundaries.md) — supported runtime ownership and boundaries
-- [Espresso Core Integration](docs/engineering/ESPRESSO_CORE_INTEGRATION.md) — external espresso-core adapter contract
+- [Espresso Core Integration](docs/engineering/espresso-core-integration.md) — external espresso-core adapter contract
 - [Contributing](CONTRIBUTING.md) — setup, tests, pull request expectations, and trust-boundary rules
 - [Security](SECURITY.md) — vulnerability reporting
 - [Code of Conduct](CODE_OF_CONDUCT.md) — contributor conduct
