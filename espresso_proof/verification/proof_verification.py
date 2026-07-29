@@ -125,6 +125,16 @@ def build_gl2_f3_solvability_entry(claim_id: str, *, entry_id: str = "gl2_f3_sol
     return entry, witness
 
 
+
+# Deterministic witnesses that a scoped-verification request may name by id.
+# Keeping this a registry rather than an if-chain is what lets a reviewer
+# blocker be answered by machine: the blocker names a witness, the dispatcher
+# looks it up here, and the witness regenerates its own finite data.
+NAMED_FINITE_WITNESSES = {
+    "gl2_f3_solvable": build_gl2_f3_solvability_entry,
+}
+
+
 def build_proof_verification(run_dir: Path, *, primes: list[int]) -> dict:
     run_dir = Path(run_dir)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
@@ -560,6 +570,17 @@ def auto_wire_scoped_verifications(
                 skip(rid, f"modulus {modulus} exceeds auto cap {max_modulus} (too expensive)")
                 continue
             entry = build_ring_identity_entry(claim_id, entry_id=entry_id, identity=identity, modulus=modulus, target=target)
+        elif kind == "named_finite_witness":
+            # A request naming a finite object this repository already has a
+            # deterministic witness builder for. No table travels in the request:
+            # the witness is regenerated here, so a caller cannot smuggle in
+            # fabricated finite data.
+            witness_id = req.get("witness")
+            builder = NAMED_FINITE_WITNESSES.get(witness_id)
+            if builder is None:
+                skip(rid, f"unknown named witness {witness_id!r}")
+                continue
+            entry, _ = builder(claim_id, entry_id=entry_id)
         elif kind == "matrix_rank":
             matrix = req.get("table")
             if not isinstance(matrix, list) or not matrix or not isinstance(matrix[0], list):

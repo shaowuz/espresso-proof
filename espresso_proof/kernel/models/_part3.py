@@ -394,7 +394,16 @@ class ScopedVerificationRequest(StrictBaseModel):
     """
 
     id: str
-    kind: Literal["finite_identity_table", "finite_ring_identity", "matrix_rank"]
+    kind: Literal[
+        "finite_identity_table",
+        "finite_ring_identity",
+        "matrix_rank",
+        "named_finite_witness",
+    ]
+    # named_finite_witness carries no data of its own: `witness` names a
+    # builder in NAMED_FINITE_WITNESSES that regenerates the finite object,
+    # so a hand-edited request cannot supply fabricated tables.
+    witness: str = ""
     identity: str = ""
     table: list[list[int]] | None = None  # operation table (finite_identity_table) or matrix (matrix_rank)
     modulus: int | None = None  # required for finite_ring_identity
