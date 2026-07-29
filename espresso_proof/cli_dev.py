@@ -467,7 +467,7 @@ def run_external_tool_command(
     """Run an allowlisted DETERMINISTIC FAKE external tool in the sandbox executor
     and record an audited run (raw evidence only -- never a proof/source/grade
     status). Unknown tools are refused. Timeout / nonzero exit / malformed output
-    fail closed (no parsed result). Slice 2: records only; earns nothing.
+    fail closed (no parsed result). Records only; earns nothing.
     """
     if list_tools:
         for name, spec in FAKE_TOOLS.items():

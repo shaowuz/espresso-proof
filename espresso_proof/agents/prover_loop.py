@@ -716,7 +716,7 @@ def build_next_prover_input_from_reviewer_feedback(
         }
     )
 
-    # Phase 5: feed the prior round's reviewer objections that NAMED this subgoal
+    # Feed the prior round's reviewer objections that NAMED this subgoal
     # back to the prover so a repair attempt can directly address them (instead of
     # only seeing the same free-text blockers). Advisory prompt context only — the
     # round's outputs are re-validated by the kernel, and the pairing is recorded in

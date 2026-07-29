@@ -1,4 +1,4 @@
-"""Proof Verification Bridge V0 (Six-Hour goal, Phase 4).
+"""Proof Verification Bridge V0.
 
 Turns trusted-verifier runs into a recorded, SCOPED proof-verification status.
 Natural-language prover/reviewer approval is NOT proof verification and never

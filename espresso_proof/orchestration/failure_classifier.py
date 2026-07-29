@@ -1,9 +1,6 @@
 """Failure Classifier: turn reviewer objections and failed tests into typed,
 actionable failure categories with routing.
 
-Step 5 (AGENT_AUTOMATION_ENGINEERING_PLAN; contract
-the failure classifier design notes).
-
 This is advisory-only and deterministic: it reads already-validated run artifacts
 and classifies the current failure signals into categories that route the next
 action. It NEVER upgrades proof/source/evidence status (the report model carries

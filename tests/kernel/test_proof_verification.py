@@ -1,4 +1,4 @@
-"""Proof Verification Bridge V0 (Six-Hour goal, Phase 4).
+"""Proof Verification Bridge V0.
 
 Only a trusted deterministic backend with a confirming result earns a checked
 status, and it is SCOPED to what was actually checked. There is no ``proved``
@@ -215,7 +215,7 @@ def test_grade_computation_checked_requires_confirming_machine_result(tmp_path: 
 def test_grade_computation_checked_valid_with_confirming_entry(tmp_path: Path) -> None:
     # A scoped finite check that genuinely earned a trusted+confirmed entry DOES
     # back computation_checked (e.g. the claim is exactly the enumerated scope).
-    # Use a fixture without failed reviewers so only the Goal-23 gate is exercised.
+    # Use a fixture without failed reviewers so only the gate is exercised.
     run_dir = run_mock_critique("pv", FIXTURES / "promising_but_unproved" / "input.md", tmp_path)
     _mark_claim_clear(run_dir)
     verify_finite_groups(run_dir, primes=[2])  # trusted+confirmed instance_checked entries

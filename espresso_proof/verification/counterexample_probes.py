@@ -1,4 +1,4 @@
-"""Deterministic counterexample probes (cycle 1).
+"""Deterministic counterexample probes.
 
 When a locked claim states EXACTLY "every group of order N is abelian" for a
 concrete integer N, the counterexamples pipeline can do better than asking a

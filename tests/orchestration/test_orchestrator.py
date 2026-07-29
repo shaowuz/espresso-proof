@@ -147,7 +147,7 @@ def test_orchestrate_resume_explicit_human_keeps_human_provenance(
 
 
 def test_orchestrate_resume_auto_records_no_human_involvement(tmp_path: Path) -> None:
-    # Pivot PR1 (e): an auto resume must leave honest provenance in BOTH gate
+    # an auto resume must leave honest provenance in BOTH gate
     # artifacts — selected_by/resolved_by='auto' with human_confirmed=false —
     # and the whole run must stay kernel-valid to COMPLETED_MEMO.
     run_dir = _orchestrate(tmp_path, CLEAR_CLAIM, "clear", front_half="mock")

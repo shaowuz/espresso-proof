@@ -236,7 +236,7 @@ def _probe_matcher_discipline() -> dict:
 
 def _probe_counterexample_discipline() -> dict:
     """Counterexample family (n=6): the deterministic
-    probes from loop cycles 1/8/10 must keep their earned outcomes — an
+    probes must keep their earned outcomes — an
     admissible checked refutation exactly where a non-abelian construction
     exists, silence on every true claim, and a non-refuting exposing record
     for the missing-hypothesis family."""

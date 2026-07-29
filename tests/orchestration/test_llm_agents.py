@@ -939,7 +939,7 @@ def test_resolve_agent_gate_cannot_overwrite_resolved_gate(tmp_path: Path) -> No
 
 
 def test_resolve_agent_gate_auto_records_no_human_involvement(tmp_path: Path) -> None:
-    # Pivot PR1 (d): an auto resolution writes honest provenance — resolved_by=auto
+    # an auto resolution writes honest provenance — resolved_by=auto
     # and human_confirmed=false — and the run stays kernel-valid.
     from espresso_proof.orchestration.orchestrator import _resolve_and_build_loop
 

@@ -58,7 +58,7 @@ exactly a missing external statement; `blocked` only when the detailed argument
 is unsalvageable at line level (e.g. the chain visibly assumes the conclusion);
 `plausible_direction` only when line-level detail exists AND no line failed.
 
-## Consensus mode (Goal-69 mock-check seal, seat 1)
+## Consensus mode (mock-check seal, seat 1)
 
 You review a structured `line_numbered_proof` — lines with `line_id`,
 `statement`, `justification`, `depends_on`, `dependencies` — adversarially. If

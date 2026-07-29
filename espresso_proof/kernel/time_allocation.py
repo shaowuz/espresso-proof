@@ -1,4 +1,4 @@
-"""V2 Task 04: provisional Strategy Grader -> Time Allocation plan.
+"""provisional Strategy Grader -> Time Allocation plan.
 
 The plan is a manifest-registered optional sidecar. It is scheduling-only:
 route scores, missing context, and effort hints can choose what to try next, but

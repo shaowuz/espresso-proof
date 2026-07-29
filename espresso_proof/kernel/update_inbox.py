@@ -1,4 +1,4 @@
-"""V2 Task 05: write-safe, scheduling-only Update Inbox.
+"""Write-safe, scheduling-only Update Inbox.
 
 The inbox is an optional manifest artifact. It records late/advisory scheduling
 signals only; it never owns proof/source/evidence/theorem/refutation/grade

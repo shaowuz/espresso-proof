@@ -411,7 +411,7 @@ class TheoremApplicabilityReport(StrictBaseModel):
     source_grounding_artifact: str
     literature_review_agent_artifact: str | None = None
     usages: list[TheoremApplicabilityUsage]
-    # Slice-2: default-deny usages derived from the advisory theorem
+    # Default-deny usages derived from the advisory theorem
     # condition ledger (reviewer source_requests). These are NOT source-grounding
     # usages: they never map to a proof step, never earn source_backed, and (being
     # default-deny) are NEVER ``applicable`` unless a condition is explicitly

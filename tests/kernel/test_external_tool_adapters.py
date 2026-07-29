@@ -136,7 +136,7 @@ def test_confirmed_entry_carries_reproducibility_provenance(tmp_path: Path) -> N
 
 
 def test_entries_without_reproducibility_fields_still_validate() -> None:
-    # Additive-only schema change: pre-Goal-38 entries (no provenance fields)
+    # Additive-only schema change: older entries (no provenance fields)
     # must keep validating.
     from espresso_proof.kernel.models import ProofVerificationEntry
 

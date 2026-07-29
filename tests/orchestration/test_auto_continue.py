@@ -1,4 +1,4 @@
-"""Pivot PR2: same-process auto-continue past the prover human gate.
+"""same-process auto-continue past the prover human gate.
 
 ``orchestrate_run(auto_continue=True)`` may continue past a PENDING prover
 human gate by selecting the top-scored strategy — but ONLY with honest

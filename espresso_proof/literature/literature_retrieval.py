@@ -1,4 +1,4 @@
-"""Real Literature Retrieval V0 (Six-Hour goal, Phase 3).
+"""Real Literature Retrieval V0.
 
 The first real retrieval boundary: instead of relying only on a human-provided
 source, Espresso can SEARCH a local source corpus (and, optionally, surface arXiv

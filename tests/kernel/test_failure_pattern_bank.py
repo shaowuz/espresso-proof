@@ -1,4 +1,4 @@
-"""Math Failure Pattern Bank V1 (Six-Hour goal, Phase 2).
+"""Math Failure Pattern Bank V1.
 
 Three tiers, none of which earns/clears status:
 - candidate -> warn only

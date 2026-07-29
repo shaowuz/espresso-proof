@@ -318,8 +318,7 @@ def _to_resolved_loop_via_resume(tmp_path: Path) -> tuple[Path, str]:
 #     human_confirmed=true) may legitimately coexist with a pending prover-pass gate
 #     (the human picked a route; the prover output still awaits review). The kernel
 #     already forbids prover WORK on a pending gate; it must NOT, however, reject this
-#     legitimate selected+pending state. This guard locks that so the Goal-47
-#     'fabricated human_confirmed' misread is never "fixed" with an unsafe cross-check.
+#     legitimate selected+pending state. This guard locks that so the #     'fabricated human_confirmed' misread is never "fixed" with an unsafe cross-check.
 
 
 def test_selected_continue_with_pending_prover_gate_is_valid(tmp_path: Path) -> None:

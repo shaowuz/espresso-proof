@@ -263,7 +263,7 @@ def test_entry_requires_at_least_one_condition() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Slice-2: theorem applicability audit is default-deny against the ledger
+# theorem applicability audit is default-deny against the ledger
 # (fixes the 56C dogfood bug: an empty grounding-derived audit defaulted
 # all_applicable, hiding an inapplicable theorem).
 # ---------------------------------------------------------------------------

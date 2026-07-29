@@ -1,5 +1,4 @@
-"""Run a batch of on-demand evidence agents (Claude-reconstructs-Espresso-Proof
-subgoals 03/05).
+"""Run a batch of on-demand evidence agents.
 
 This is the EXPLICIT, on-demand batch path — it is NOT called by orchestrate_run.
 The fast-core orchestrate pass still defers the evidence agents (they stay

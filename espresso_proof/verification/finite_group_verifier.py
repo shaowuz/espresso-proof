@@ -1,4 +1,4 @@
-"""Deterministic finite-group micro-verifier (Six-Hour goal, Phase 4).
+"""Deterministic finite-group micro-verifier.
 
 A small, zero-dependency, auditable backend that checks a property of an
 EXPLICITLY-GIVEN finite group (as a Cayley table) by brute force:

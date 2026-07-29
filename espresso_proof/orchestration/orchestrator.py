@@ -179,7 +179,7 @@ def _stop_before_prover(run_dir: Path) -> dict:
     NOTE: ``ask_human`` does NOT skip the first pass — see
     ``_STOP_BEFORE_PROVER_ACTIONS`` — because that pass runs before the human gate
     by design and ``ask_human`` is emitted broadly. Crash protection for that case
-    is server survival (65C), not skipping the pass."""
+    is server survival, not skipping the pass."""
     try:
         loop_control = read_yaml(run_dir / "loop_control.yaml") or {}
         next_action = loop_control.get("next_action")

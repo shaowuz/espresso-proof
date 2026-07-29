@@ -1,4 +1,4 @@
-"""Mathematical Judgment Layer V1 (Six-Hour goal, Phase 1).
+"""Mathematical Judgment Layer V1.
 
 The layer records conservative mathematical RISK judgments. It must NEVER upgrade
 proof/source/evidence status: it can only warn, request more evidence, downgrade

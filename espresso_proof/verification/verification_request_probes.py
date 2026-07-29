@@ -65,7 +65,7 @@ def propose_scoped_verification_requests(claim: dict) -> list[dict]:
         for index, (name, table) in enumerate(
             all_groups_of_order_p_squared(p), start=1
         ):
-            # Math Workflow review: machine-verify associativity too, so the
+            # Machine-verify associativity too, so the
             # instance evidence does not silently trust the table constructor
             # for the group law (identity/inverses remain constructor-level).
             for identity in ("commutative", "associative"):

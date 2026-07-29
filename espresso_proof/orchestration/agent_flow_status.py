@@ -338,7 +338,7 @@ def _agent_event_stage_projection(
 ) -> dict | None:
     """Project agent_events.jsonl records for one stage into process status.
 
-    Pairing follows the Goal-65 identity (stage, agent_name, retry_index,
+    Pairing follows the identity (stage, agent_name, retry_index,
     round_index). A hanging ``started`` with no terminal record projects
     ``running`` (a SIGKILLed process leaves exactly this residue); the latest
     ``failed``/``timed_out`` terminal projects ``failed``. A ``finished``

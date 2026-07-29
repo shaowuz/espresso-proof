@@ -1,4 +1,4 @@
-"""Math Failure Pattern Bank V1 (Six-Hour goal, Phase 2).
+"""Math Failure Pattern Bank V1.
 
 A structured catalogue of mathematical failure patterns plus a per-run audit that
 records which patterns the run's signals match.

@@ -716,7 +716,7 @@ class Workbench:
             validate_run(run_dir)
         except Exception as exc:
             # the run no longer validates: never serve a stale fragment for it,
-            # and surface honest product copy (G31) instead of a generic error.
+            # and surface honest product copy instead of a generic error.
             with self._status_cache_lock:
                 self._status_cache.pop(run_id, None)
             raise WorkbenchError(
@@ -738,7 +738,7 @@ class Workbench:
 
     def _run_stalled(self, run_id: str, run_dir: Path) -> dict[str, Any] | None:
         """Report when a run has an agent call that recorded ``started``
-        but no terminal record (the 65B dangling-start signal) AND no in-memory
+        but no terminal record (the dangling-start signal) AND no in-memory
         job is progressing it — i.e. the worker/process died mid-call (the order-3
         failure: the server vanished and the in-memory job table with it). This is
         the diagnostic trail that turns a silent dead page into a visible

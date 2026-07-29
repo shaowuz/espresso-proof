@@ -1,8 +1,6 @@
 """Concise Answer Agent: render a compact, user-facing research memo.
 
-This is the first post-Kernel-Beta runtime slice (AGENT_AUTOMATION_ENGINEERING_PLAN
-Step 1, contract the concise answer contract). It turns
-already-validated run artifacts into the central product output: a short memo with
+It turns already-validated run artifacts into the central product output: a short memo with
 the grade, the strongest obstruction, source gaps, the top route, and the next
 cheapest test -- without overstating the result.
 

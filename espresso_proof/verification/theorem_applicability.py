@@ -31,7 +31,7 @@ def audit_theorem_applicability(run_dir: Path) -> dict:
         usages.append(
             _usage_for_step(step, source_grounding, literature_report, claim_hypotheses)
         )
-    # Slice-2: in ADDITION to the grounding-derived usages, read the
+    # in ADDITION to the grounding-derived usages, read the
     # optional theorem condition ledger and emit one DEFAULT-DENY usage per
     # ledger entry. These never earn source_backed and never flip overall to
     # all_applicable unless a condition is explicitly matched with an exact
@@ -63,7 +63,7 @@ def audit_theorem_applicability(run_dir: Path) -> dict:
     return report
 
 
-# Slice-2: map a ledger condition's match_status onto the existing
+# map a ledger condition's match_status onto the existing
 # applicability condition status vocabulary. DEFAULT-DENY: only an explicit
 # ``matched`` is ever "satisfied"; the slice-1 default ``unknown`` is "not_checked"
 # (a bad/blocking status), and ``unmatched`` is "mismatched" (misapplied).

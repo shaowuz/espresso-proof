@@ -112,7 +112,7 @@ def test_scorecard_markdown_is_stable_for_trends(tmp_path: Path) -> None:
 
 
 def test_dogfood_replay_records_honest_auto_provenance(tmp_path: Path) -> None:
-    # Pivot PR1: the scorecard picks the strategy itself (no human in the loop),
+    # the scorecard picks the strategy itself (no human in the loop),
     # so the replayed run's gate artifacts must say so — selected_by/resolved_by
     # 'auto' with human_confirmed=false — instead of the previous provenance lie
     # (auto pick recorded as human_confirmed=true).
@@ -187,7 +187,7 @@ def test_dogfood_replay_fails_on_unauthorized_source_backed(tmp_path: Path) -> N
 
 
 def test_matcher_discipline_probe_fails_on_regressed_matcher(tmp_path: Path, monkeypatch) -> None:
-    # If the matcher loses its negation discipline (regression to pre-Goal-41
+    # If the matcher loses its negation discipline (regression to older
     # behavior), the scorecard must fail.
     import re
 

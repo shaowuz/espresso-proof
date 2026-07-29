@@ -242,7 +242,7 @@ def _understanding_claim(*, run_dir: Path, client: LLMClient, context: dict) -> 
             missing_or_unclear = norm["missing_or_unclear"]
             claim_precision = "precise"
             notes = notes + [
-                "claim normalized by the Goal-66 simple-claim normalizer "
+                "claim normalized by the simple-claim normalizer "
                 "(advisory; locks a precise claim only; no proof/source/evidence "
                 "status implied)"
             ]

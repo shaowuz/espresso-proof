@@ -1,4 +1,4 @@
-"""Phase 1: persisted claim/ledger normalization (conservative, claim-clear-neutral).
+"""Persisted claim/ledger normalization (conservative, claim-clear-neutral).
 
 Proves the helper: consolidates expanded group-axiom hypotheses on an
 already-persisted run; is idempotent (a second call is a no-op); preserves the
@@ -69,7 +69,7 @@ def test_consolidates_expanded_axioms(tmp_path: Path) -> None:
     assert evaluate_claim_clear(run_dir).clear
     validate_run(run_dir)
     notes = read_yaml(ledger_path).get("notes") or []
-    assert any("Phase 1 persisted-claim normalization" in n for n in notes)
+    assert any("persisted-claim normalization" in n for n in notes)
 
 
 def test_idempotent_noop(tmp_path: Path) -> None:

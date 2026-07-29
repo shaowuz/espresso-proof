@@ -22,9 +22,8 @@ already allow, never because an agent wrote a file. All cross-artifact
 validation still runs downstream on the aggregated model in ``validators.py``.
 
 The concept (per-item bank dirs + ``_meta.yaml`` + ``NN-<id>.yaml`` + an
-add-bank-item tool) comes from an earlier proposal; this is a small, focused
-re-implementation (no dashboard, no prompt changes, no fixture migration),
-not a merge of that branch.
+add-bank-item tool) is a small, focused implementation: no dashboard, no prompt
+changes, no fixture migration.
 """
 
 from __future__ import annotations

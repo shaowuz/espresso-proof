@@ -1,4 +1,4 @@
-"""Pivot PR1: honest auto/human provenance in the kernel.
+"""honest auto/human provenance in the kernel.
 
 An automatic (no-human) gate resolution or strategy choice must be recordable
 with honest provenance (selected_by / resolved_by = 'auto'), and LYING about it

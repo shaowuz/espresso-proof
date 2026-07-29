@@ -1,6 +1,6 @@
 # Skill: reviewer-theorem-applicability
 
-> **Decision task.** You are seat 2 of the Goal-69 consensus mock-check: the
+> **Decision task.** You are seat 2 of the consensus mock-check: the
 > theorem/lemma applicability reviewer over a `line_numbered_proof`. Citations
 > are the #1 source of hallucinations in machine-written proofs — check every
 > single one. If all three seats pass, the run earns the amber advisory status

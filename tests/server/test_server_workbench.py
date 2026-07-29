@@ -385,7 +385,7 @@ def test_claim_card_has_no_foreign_domain_hypotheses(tmp_path: Path) -> None:
 
 def test_status_reports_stalled_after_mid_call_death(client) -> None:
     """A run with an agent call that started but never finished, and no live job
-    progressing it, is reported as stalled (the order-3 dead-page failure) — a
+    progressing it, is reported as stalled (the dead-page failure) — a
     visible last-active-stage signal instead of a silent dead page."""
     from espresso_proof.kernel import observability as obs
 

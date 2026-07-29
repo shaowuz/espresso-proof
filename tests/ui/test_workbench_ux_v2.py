@@ -175,7 +175,7 @@ def test_product_create_run_defaults_to_codex_mode() -> None:
 
 
 def test_react_cockpit_wires_collapsed_agent_flow_trace() -> None:
-    """PR70K: the React cockpit consumes the display-safe trace panel, collapsed
+    """the React cockpit consumes the display-safe trace panel, collapsed
     by default, without treating process state as proof/evidence."""
 
     types = Path("web/src/lib/types.ts").read_text(encoding="utf-8")

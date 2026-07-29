@@ -22,7 +22,7 @@ Artifacts produced (all OPTIONAL — old runs validate without them):
 - ``agent_events.jsonl``  — one record per agent/model call.
 - ``timings.yaml``        — aggregated stage/agent durations + stall signals.
 
-Deliberate, backward-compatible scope note on ``events.jsonl``: the Goal-54A spec
+Deliberate, backward-compatible scope note on ``events.jsonl``: the original spec
 sketches a rich per-event schema (event_id, event_type, validation_status, state
 labels, ...). The existing ``events.jsonl`` is intentionally the *minimal canonical
 timeline* (kind/stage/detail) consumed by local diagnostics; rewriting it to
@@ -212,7 +212,7 @@ def observed_agent_call(
     client=None,
     **extra,
 ):
-    """Wrap ONE external agent call in paired Goal-65 observability records.
+    """Wrap ONE external agent call in paired observability records.
 
     Enter: an ``agent_call_started`` events.jsonl line plus a ``started``
     agent_events.jsonl record. Success: a matching ``finished`` record with

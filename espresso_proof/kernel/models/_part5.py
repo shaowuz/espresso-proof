@@ -193,7 +193,7 @@ class TimeAllocationEntry(StrictBaseModel):
 
 
 class TimeAllocationPlan(StrictBaseModel):
-    """V2 Task 04 provisional scheduling plan from Strategy Grader.
+    """provisional scheduling plan from Strategy Grader.
 
     This artifact is deliberately scheduling-only: it can order work and name
     missing context, but it has no field that can own proof/source/evidence/
@@ -559,8 +559,7 @@ class ScopedObjection(StrictBaseModel):
       refute, close, or upgrade any proof/source/evidence/grade/claim status;
     - ``counterexample_pressure`` is unchecked pressure, never a refutation;
     - ``subgoal_id`` / ``proof_step_id`` are UNVERIFIED provenance, deliberately
-      NOT hard-reconciled against the live proof graph in ``validate_run`` (Goal-39
-      precedent: blocker-derived node ids renumber across rebuilds). Reconciliation
+      NOT hard-reconciled against the live proof graph in ``validate_run`` (precedent: blocker-derived node ids renumber across rebuilds). Reconciliation
       is done at graph-build time (attach-if-matches); falsely-subgoal-specific free
       text is recorded as route/global instead.
     """

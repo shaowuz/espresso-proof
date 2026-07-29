@@ -370,8 +370,7 @@ def test_literature_review_agent_flags_very_general_theorem_for_universal_claim(
 
 def test_literature_review_agent_cannot_emit_source_backed_source(tmp_path: Path) -> None:
     # Literature Review finds candidate references only; it cannot decide
-    # source_backed or misapplied (KERNEL_SAFETY_RULES Literature And Source
-    # Rules). Those remain Referencing / Source Grounding decisions.
+    # source_backed or misapplied (kernel safety rule). Those remain Referencing / Source Grounding decisions.
     run_dir = run_mock_critique(
         "linear_algebra",
         FIXTURES / "all_matrices_diagonalizable" / "input.md",
@@ -727,8 +726,7 @@ def test_theorem_applicability_rejects_unknown_source_ref(tmp_path: Path) -> Non
 
 def test_source_backed_step_rejects_very_general_for_universal_claim(tmp_path: Path) -> None:
     # A very-general / generic theorem cannot back a universal ("all") claim
-    # without an explicit scope justification (KERNEL_SAFETY_RULES "very general
-    # cannot support all unless explicitly justified"), now structurally gated.
+    # without an explicit scope justification (kernel safety rule), now structurally gated.
     run_dir, manifest, source_grounding, ref_id, step_id = _setup_source_backed_run(tmp_path)
     usage = _theorem_usage(
         proof_step_id=step_id,
@@ -821,7 +819,7 @@ def _theorem_usage(**overrides) -> dict:
 
 def test_theorem_usage_rejects_applicable_with_mismatched_condition() -> None:
     # A contradicted/mismatched theorem hypothesis cannot be called applicable
-    # (KERNEL_SAFETY_RULES Literature And Source Rules).
+    # (kernel safety rule).
     usage = _theorem_usage(
         conditions=[
             {
@@ -840,7 +838,7 @@ def test_theorem_usage_rejects_applicable_with_mismatched_condition() -> None:
 
 def test_theorem_usage_rejects_applicable_with_contradicting_conclusion() -> None:
     # A theorem whose conclusion does not match the supported step cannot be
-    # applicable (KERNEL_SAFETY_RULES: theorem conclusion must match the step).
+    # applicable (kernel safety rule).
     usage = _theorem_usage(conclusion_status="contradicts")
     with pytest.raises(ValueError, match="compatible conclusion"):
         TheoremApplicabilityUsage.model_validate(usage)

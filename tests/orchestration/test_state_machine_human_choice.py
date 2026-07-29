@@ -60,7 +60,7 @@ def test_front_half_done_precedes_claim_clear() -> None:
     assert _state_index("FRONT_HALF_DONE") < _state_index("CLAIM_CLEAR")
 
 
-# Pivot PR1: AUTO_CHOICE_CONTINUE_SELECTED is the honest auto-provenance peer of
+# AUTO_CHOICE_CONTINUE_SELECTED is the honest auto-provenance peer of
 # HUMAN_CHOICE_CONTINUE_SELECTED. Nothing writes it yet (the auto-continue writer
 # is a later PR), but the state machinery must already accept it with identical
 # ordering semantics so a persisted run carrying it validates and resumes.

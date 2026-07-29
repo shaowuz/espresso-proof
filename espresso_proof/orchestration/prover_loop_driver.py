@@ -7,7 +7,6 @@ proof / source / evidence status (the loop/round artifacts are StrictBaseModels
 with no status fields, and ``make_prover_attempt`` pins ``needs_human``), and the
 loop fails closed.
 
-See the prover continuation design notes.
 """
 
 from __future__ import annotations

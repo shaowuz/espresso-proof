@@ -14,7 +14,6 @@ that the existing grounding / deterministic-verification gates actually earned
 (re-checked by ``validators._validate_subgoal_graph``). The builder fails closed
 and is idempotent.
 
-See the subgoal graph design notes.
 """
 
 from __future__ import annotations
@@ -235,7 +234,7 @@ def _scoped_objection_reviews(run_dir: Path, llm_agent_run: dict | None) -> list
     """Every verifier review that can carry a subgoal-scoped objection: the
     gate-time ``llm_agent_run`` plus every continuation round file. Round files are
     where the inferred-target subgoal objections live (gate-time reviews are
-    route-scoped before any subgoal exists), so the Goal-54B attach must read both
+    route-scoped before any subgoal exists), so the attach must read both
     or a round's subgoal objection never reaches its node."""
     reviews: list[dict] = list((llm_agent_run or {}).get("verifier_reviews") or [])
     rounds = Path(run_dir) / "prover_rounds"
@@ -649,7 +648,8 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
     # (or was dropped), so a route-death finding never became its own actionable
     # blocked node. Here each such objection (with non-empty text + kind) becomes ONE
     # first-class blocked_reviewer_objection node, disjoint from every other id family
-    # (subgoal_main/route/block_*/tool_*/tcl_*). 54B owns scope=="subgoal" objections;
+    # (subgoal_main/route/block_*/tool_*/tcl_*). Subgoal-scoped objections are
+    # attached elsewhere;
     # those are skipped here so no duplicate node is ever created. Dedup is by
     # objection text so a rebuild — and the same objection echoed across rounds — is
     # idempotent (one node). A reviewer-named node is advisory SEARCH state only: it
@@ -866,7 +866,7 @@ def select_next_subgoal(graph: dict | None) -> dict[str, Any] | None:
     node in graph order wins, so selection is stable/deterministic.
 
     Refutation dominates: if the main goal is already ``contradicted`` (the claim
-    was refuted by an admissible checked counterexample, the Goal-21 hard gate),
+    was refuted by an admissible checked counterexample, the hard gate),
     there is nothing to "prove", so no subgoal is selected -- stale route optimism
     cannot override a claim-level checked refutation.
     """

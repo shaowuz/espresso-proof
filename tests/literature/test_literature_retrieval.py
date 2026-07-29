@@ -1,4 +1,4 @@
-"""Real Literature Retrieval V0 (Six-Hour goal, Phase 3).
+"""Real Literature Retrieval V0.
 
 Retrieval surfaces CANDIDATE sources only. It never sets source_backed, never
 skips exact locator / hypothesis match / attribution, never treats a snippet as a

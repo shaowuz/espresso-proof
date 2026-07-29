@@ -333,7 +333,7 @@ def _load_optional_agent_consensus_review(
     ``AgentConsensusReview`` (StrictBaseModel) carries NO proof/source/evidence/
     grade/checked status FIELD, so a smuggled field name is rejected at load. But
     StrictBaseModel does not police forbidden TOKENS inside the free-text fields, so
-    we additionally scan every reviewer-authored text field (which Slice C renders)
+    we additionally scan every reviewer-authored text field (which the UI renders)
     for a status smuggle. The model validator already enforces the three distinct
     reviewers + ``consensus`` == unanimous no-fatal-flaw. Light binding: claim_id /
     run_id must match the run; the heavy provenance gate (hash binding, reviewer

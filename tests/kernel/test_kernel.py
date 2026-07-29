@@ -446,7 +446,7 @@ def _memory_entry(**overrides) -> dict:
 def test_memory_entry_schema_rejects_status_fields() -> None:
     # Memory is advisory, not evidential: it cannot set source_backed, mark
     # examples/computations checked, or upgrade evidence/proof status
-    # (KERNEL_SAFETY_RULES; memory_reuse slice). The schema has no status slot,
+    # (memory reuse). The schema has no status slot,
     # so any such field is rejected.
     forbidden_fields = (
         "source_backed",
@@ -617,7 +617,7 @@ def test_memo_unclear_claim_recommends_locking(tmp_path: Path) -> None:
 def test_memo_no_proof_complete_language_for_weak_artifacts(tmp_path: Path) -> None:
     # The memo must not overstate: for a proof_candidate it shows the real status,
     # and never emits memo-generated proof-complete language (Concise Answer
-    # safety; AGENT_AUTOMATION_ENGINEERING_PLAN Step 1).
+    # safety).
     run_dir = run_mock_critique(
         "linear_algebra",
         FIXTURES / "promising_but_unproved" / "input.md",
@@ -651,8 +651,7 @@ def test_inspect_does_not_mutate_run(tmp_path: Path) -> None:
 
 
 def test_workflow_spec_rejects_missing_lean_non_goal() -> None:
-    # Espresso is not Lean-heavy by default (KERNEL_SAFETY_RULES Mathematical
-    # Status Rules): a workflow spec must keep Lean formalization an explicit
+    # Espresso is not Lean-heavy by default (kernel safety rule): a workflow spec must keep Lean formalization an explicit
     # non-goal. Dropping that non-goal must be rejected.
     spec = {
         "name": "example_workflow",
@@ -1040,7 +1039,7 @@ def test_strategy_rules_reject_high_score_for_likely_false_or_refuted_idea(tmp_p
 
 def test_strategy_rules_reject_high_score_for_refuted_idea(tmp_path: Path) -> None:
     # A refuted idea cannot carry a high-confidence (>=75) strategy route
-    # (KERNEL_SAFETY_RULES Strategy Rules; strategy_scoring_gate slice). The
+    # (kernel safety rule). The
     # sibling test exercises likely_false; this isolates the refuted status.
     run_dir = run_mock_critique(
         "linear_algebra",
@@ -1302,16 +1301,14 @@ def _human_feedback_with_extra(extra: dict) -> dict:
 
 
 def test_human_feedback_schema_rejects_checked_status_fields() -> None:
-    # Human taste cannot mark examples/computations checked (KERNEL_SAFETY_RULES
-    # Human Feedback Rules): the feedback schema has no evidence-status slot.
+    # Human taste cannot mark examples/computations checked (kernel safety rule): the feedback schema has no evidence-status slot.
     data = _human_feedback_with_extra({"evidence_status": "checked"})
     with pytest.raises(ValueError, match="Extra inputs"):
         HumanExampleFeedback.model_validate(data)
 
 
 def test_human_feedback_schema_rejects_proof_status_field() -> None:
-    # Human taste cannot upgrade proof status (KERNEL_SAFETY_RULES Human Feedback
-    # Rules): the feedback schema has no proof-status slot.
+    # Human taste cannot upgrade proof status (kernel safety rule): the feedback schema has no proof-status slot.
     data = _human_feedback_with_extra({"proof_status": "proof_complete"})
     with pytest.raises(ValueError, match="Extra inputs"):
         HumanExampleFeedback.model_validate(data)
@@ -1337,7 +1334,7 @@ def _counterexample_test(**overrides) -> dict:
 
 def test_counterexample_proof_step_attack_cannot_refute_claim() -> None:
     # A proof-step failure is not automatically a theorem refutation
-    # (KERNEL_SAFETY_RULES Example And Counterexample Rules).
+    # (kernel safety rule).
     data = _counterexample_test(
         target="proof_step",
         result="failed",
@@ -1350,7 +1347,7 @@ def test_counterexample_proof_step_attack_cannot_refute_claim() -> None:
 
 def test_counterexample_dropped_hypothesis_cannot_refute_claim() -> None:
     # Dropping a claim hypothesis cannot refute the original claim
-    # (KERNEL_SAFETY_RULES Example And Counterexample Rules), enforced at the
+    # (kernel safety rule), enforced at the
     # model level, not only cross-artifact.
     data = _counterexample_test(
         satisfies_all_claim_hypotheses=False,
@@ -1429,7 +1426,7 @@ def test_counterexample_accepts_optional_support_fields() -> None:
 
 def test_human_choice_schema_cannot_override_applicability() -> None:
     # Human preference cannot override theorem applicability / source status
-    # (KERNEL_SAFETY_RULES Human Feedback Rules): HumanChoice has no slot to
+    # (kernel safety rule): HumanChoice has no slot to
     # set applicability or source status, so any such field is rejected.
     data = {
         "claim_id": "claim_001",

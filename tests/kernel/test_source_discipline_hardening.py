@@ -110,7 +110,7 @@ def test_legacy_refs_without_hash_still_validate(tmp_path: Path) -> None:
     for ref in sg["source_refs"]:
         ref.pop("statement_sha256", None)
     write_yaml(run_dir / "source_grounding.yaml", sg)
-    # additive field: pre-Goal-41 artifacts keep validating — but the audit
+    # additive field: older artifacts keep validating — but the audit
     # binding now notices the grounding bytes changed, so refresh the audit.
     from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
 

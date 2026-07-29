@@ -252,7 +252,7 @@ _NEW_BACKHALF_SKILLS = (
 
 
 def test_skill_selection_covers_backhalf_proof_roles_with_runtime_prompts() -> None:
-    """Each Goal-69/70 back-half role selects its own skill against the EXACT
+    """Each back-half back-half role selects its own skill against the EXACT
     system/prompt text the runtime sends (llm_agents prompt builders), and the
     role skill owns ``selection.stage`` (first hit in the catalog)."""
     cases = [

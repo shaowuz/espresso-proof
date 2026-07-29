@@ -12,8 +12,6 @@ could. Every requested-theorem string and every condition string is copied
 VERBATIM; ``match_status`` starts ``unknown`` and is NEVER inferred from the
 claim text (this builder does no matching at all — that is a later slice). The
 builder fails closed (validates the model before writing) and is idempotent.
-
-See the theorem-condition ledger design notes.
 """
 
 from __future__ import annotations

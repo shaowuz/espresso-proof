@@ -105,7 +105,7 @@ def test_source_conclusion_mismatch_stays_candidate_and_preserves_requested_step
     source_grounding_path = run_dir / "source_grounding.yaml"
     sg_before = read_yaml(source_grounding_path)
     requested = (
-        "square matrices over base field C imply the intermediate Jacobian is trivial"
+        "square matrices over base field C have distinct eigenvalues"
     )
     sg_before["steps"][0]["needed_theorem"] = requested
     write_yaml(source_grounding_path, sg_before)

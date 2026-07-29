@@ -1,10 +1,10 @@
-"""Phase 1: normalize an ALREADY-PERSISTED claim + hypothesis ledger before reuse.
+"""Normalize an ALREADY-PERSISTED claim + hypothesis ledger before reuse.
 
 Brings old / externally-created / denormalized persisted runs up to the same
 MEANING-PRESERVING hypothesis shape a freshly-generated run gets, WITHOUT weakening
 or silently strengthening the claim-clear gate.
 
-Scope (decided via 2-agent debate): apply ONLY
+Scope: apply ONLY
 ``normalize_ambient_object_hypotheses`` — the idempotent, meaning-preserving
 group-axiom consolidation (e.g. four separate axiom hypotheses, or a single
 "G is a group (closure, associativity, identity, inverses)", collapse to
@@ -43,7 +43,7 @@ from espresso_proof.kernel.stage_runner import StageRunner
 from espresso_proof.kernel.validators import validate_run
 
 _LEDGER_NOTE = (
-    "hypotheses consolidated by Phase 1 persisted-claim normalization "
+    "hypotheses consolidated by persisted-claim normalization "
     "(meaning-preserving; claim-clear-neutral; no proof/source/evidence status implied)"
 )
 

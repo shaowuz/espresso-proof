@@ -383,7 +383,7 @@ LEGACY_MAPPING: tuple[AgentFlowLegacyMapping, ...] = (
         notes=(
             "Live-capable proof candidate path; cannot declare proof completion.",
             "proof_verification.yaml may record scoped finite/computational checks, not a universal proof.",
-            "Optional Lean bridge results append through proof_verification.yaml but remain unverified in PR70J; lean_checked is not earnable.",
+            "Optional Lean bridge results append through proof_verification.yaml but remain unverified; lean_checked is not earnable.",
             "Statement locks are equivalence gates for optional formal checks, not proof evidence.",
         ),
     ),
