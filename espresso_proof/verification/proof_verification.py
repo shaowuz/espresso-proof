@@ -26,6 +26,7 @@ from pathlib import Path
 from espresso_proof.claim.claim_clear import ensure_claim_clear_for_downstream
 from espresso_proof.verification.finite_group_verifier import (
     all_groups_of_order_p_squared,
+    gl2_f3_order_spectrum_witness,
     gl2_f3_solvability_witness,
     verify_group_abelian,
     verify_identity_on_table,
@@ -130,8 +131,40 @@ def build_gl2_f3_solvability_entry(claim_id: str, *, entry_id: str = "gl2_f3_sol
 # Keeping this a registry rather than an if-chain is what lets a reviewer
 # blocker be answered by machine: the blocker names a witness, the dispatcher
 # looks it up here, and the witness regenerates its own finite data.
+
+def build_gl2_f3_order_spectrum_entry(
+    claim_id: str, *, entry_id: str = "gl2_f3_distinct_from_s4xc2"
+) -> tuple[dict, dict]:
+    """Scoped witness separating GL_2(F_3) from S_4 x C_2 by element orders.
+
+    Earns ``instance_checked`` for that separation only. It is not a
+    classification of the groups of order 48 and carries no Galois content.
+    """
+
+    witness = gl2_f3_order_spectrum_witness()
+    confirmed = bool(witness["confirmed"])
+    entry = {
+        "id": entry_id,
+        "verifier_type": "finite_group_cayley",
+        "claim_id": claim_id,
+        "statement": (
+            "GL_2(F_3) is not isomorphic to S_4 x C_2: the element-order spectra "
+            f"differ at orders {', '.join(witness['separating_orders'])}."
+        ),
+        "result": "confirmed" if confirmed else "unverified",
+        "earned_status": "instance_checked" if confirmed else "unverified",
+        "scope": (
+            "Separates these two order-48 groups only. Not a classification of "
+            "all groups of order 48, and no Galois statement is earned."
+        ),
+        "transcript_sha256": witness["transcript_sha256"],
+    }
+    return entry, witness
+
+
 NAMED_FINITE_WITNESSES = {
     "gl2_f3_solvable": build_gl2_f3_solvability_entry,
+    "gl2_f3_distinct_from_s4xc2": build_gl2_f3_order_spectrum_entry,
 }
 
 

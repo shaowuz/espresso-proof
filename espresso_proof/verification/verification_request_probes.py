@@ -114,6 +114,17 @@ def propose_named_witness_requests(claim: dict) -> list[dict]:
         return []
     return [
         {
+            "id": "req_gl2_f3_distinct",
+            "kind": "named_finite_witness",
+            "witness": "gl2_f3_distinct_from_s4xc2",
+            "target": (
+                "GL_2(F_3) is not isomorphic to S_4 x C_2, by element-order "
+                "spectrum. Order 48 alone does not pin the abstract group; this "
+                "separates it from the group it is most often confused with. It "
+                "is not a classification of all groups of order 48."
+            ),
+        },
+        {
             "id": "req_gl2_f3_solvable",
             "kind": "named_finite_witness",
             "witness": "gl2_f3_solvable",

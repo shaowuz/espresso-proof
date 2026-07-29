@@ -76,3 +76,41 @@ def test_unknown_witness_name_is_rejected() -> None:
     assert "no_such_witness" not in NAMED_FINITE_WITNESSES
     with pytest.raises(KeyError):
         NAMED_FINITE_WITNESSES["no_such_witness"]
+
+
+# --- second witness: the registry had to take an entry without a dispatcher change
+
+
+def test_registry_holds_both_witnesses() -> None:
+    assert set(NAMED_FINITE_WITNESSES) >= {"gl2_f3_solvable", "gl2_f3_distinct_from_s4xc2"}
+
+
+def test_probe_proposes_both_for_a_gl2_f3_claim() -> None:
+    reqs = propose_named_witness_requests(
+        {"normalized_statement": "GL_2(F_3) is a Galois group over Q."}
+    )
+    assert {r["witness"] for r in reqs} == {"gl2_f3_solvable", "gl2_f3_distinct_from_s4xc2"}
+    assert len({r["id"] for r in reqs}) == len(reqs)  # ids must not collide
+
+
+def test_order_spectrum_separates_the_two_order_48_groups() -> None:
+    from espresso_proof.verification.finite_group_verifier import (
+        gl2_f3_order_spectrum_witness,
+    )
+
+    w = gl2_f3_order_spectrum_witness()
+    assert w["order"] == 48 and w["rival_order"] == 48
+    # The decisive fact: GL_2(F_3) has a nonsplit torus, S_4 x C_2 has no order-8
+    # element at all.
+    assert w["order_spectrum"]["8"] == 12
+    assert "8" not in w["rival_order_spectrum"]
+    assert w["confirmed"] is True
+
+
+def test_separation_earns_nothing_about_galois() -> None:
+    entry, _ = NAMED_FINITE_WITNESSES["gl2_f3_distinct_from_s4xc2"]("claim_001", entry_id="e")
+    assert entry["earned_status"] == "instance_checked"
+    blob = (entry["statement"] + entry["scope"]).lower()
+    assert "galois" in entry["scope"].lower()  # explicitly disclaims Galois content
+    for forbidden in ("proved", "proof complete", "[proof-close]"):
+        assert forbidden not in blob

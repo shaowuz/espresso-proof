@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from itertools import product
+from itertools import permutations, product
 
 
 def verify_group_abelian(cayley: list[list[int]]) -> dict:
@@ -251,6 +251,91 @@ def gl2_f3_solvability_witness() -> dict:
         ),
     }
 
+
+
+def gl2_f3_order_spectrum_witness() -> dict:
+    """Distinguish GL_2(F_3) from the other order-48 group it is confused with.
+
+    A reviewer on a real run asked for "enough data to distinguish the abstract
+    group", "not just a related order-48 group". Order alone cannot do that:
+    there are many groups of order 48. The element-order spectrum can, and it is
+    finite data this module can enumerate.
+
+    GL_2(F_3) contains a nonsplit torus, so it has elements of order 8. The
+    usual confusion, S_4 x C_2, has none. Differing spectra prove the two groups
+    are not isomorphic; agreeing spectra would prove nothing, so this witness
+    confirms only when they differ.
+    """
+
+    elements = [
+        m
+        for m in product(range(3), repeat=4)
+        if _det_f3((m[0], m[1], m[2], m[3])) != 0
+    ]
+    identity: Matrix2 = (1, 0, 0, 1)
+
+    def _order(m: Matrix2) -> int:
+        current, n = m, 1
+        while current != identity:
+            current = _matmul_f3(current, m)
+            n += 1
+            if n > 48:  # cannot happen in a group of order 48; fail closed
+                return -1
+        return n
+
+    spectrum: dict[int, int] = {}
+    for m in elements:
+        spectrum[_order(m)] = spectrum.get(_order(m), 0) + 1
+
+    # S_4 x C_2, enumerated the same way rather than asserted from a table.
+    perms = list(permutations(range(4)))
+
+    def _pmul(a: tuple[int, ...], b: tuple[int, ...]) -> tuple[int, ...]:
+        return tuple(a[b[i]] for i in range(4))
+
+    def _porder(p: tuple[int, ...]) -> int:
+        current, n, e = p, 1, (0, 1, 2, 3)
+        while current != e:
+            current = _pmul(current, p)
+            n += 1
+        return n
+
+    rival: dict[int, int] = {}
+    for p in perms:
+        po = _porder(p)
+        for central in (0, 1):
+            o = po if central == 0 else (po * 2 if po % 2 else po)
+            rival[o] = rival.get(o, 0) + 1
+
+    order_ok = len(elements) == 48 and sum(rival.values()) == 48
+    distinguishes = order_ok and spectrum != rival
+    transcript = {
+        "group": "GL_2(F_3)",
+        "compared_against": "S_4 x C_2",
+        "element_encoding": "matrix (a,b,c,d) represents [[a,b],[c,d]] with entries mod 3",
+        "method": "enumerate all elements of both groups and count element orders",
+        "order": len(elements),
+        "rival_order": sum(rival.values()),
+        "order_spectrum": {str(k): v for k, v in sorted(spectrum.items())},
+        "rival_order_spectrum": {str(k): v for k, v in sorted(rival.items())},
+        "separating_orders": sorted(
+            str(k) for k in set(spectrum) | set(rival) if spectrum.get(k) != rival.get(k)
+        ),
+    }
+    transcript_hash = hashlib.sha256(
+        json.dumps(transcript, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return {
+        **transcript,
+        "distinguishes": distinguishes,
+        "confirmed": distinguishes,
+        "transcript_sha256": transcript_hash,
+        "review_required": (
+            "This separates GL_2(F_3) from S_4 x C_2 only. It is not a "
+            "classification of all groups of order 48, and it says nothing about "
+            "whether either group occurs as a Galois group over Q."
+        ),
+    }
 
 def _det_f3(m: Matrix2) -> int:
     a, b, c, d = m
