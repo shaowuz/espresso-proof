@@ -23,7 +23,8 @@ status — fail closed, no exceptions carved out for specific problems.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+import re
+from typing import Any, Callable, Mapping
 
 # adapter_id -> callable(recompute_input) -> dict carrying at least "confirmed",
 # and "transcript_sha256" when that verifier produces one. Callables must be
@@ -100,6 +101,147 @@ def recompute_result(
         "transcript_sha256": digest if isinstance(digest, str) and digest else None,
         "canonical_target": canonical if isinstance(canonical, str) and canonical else None,
     }
+
+
+# What a builder is allowed to append after the machine-authored target: the
+# requester's own wording, inside one labelled parenthetical, containing no
+# closing paren of its own. Prefix matching alone was not enough — it let
+# arbitrary false mathematics ride along after a true machine-authored prefix
+# ("...table of order 4 — hence every group of order p^2 is abelian").
+REQUESTED_FOR_SUFFIX = re.compile(r" \(requested for: [^)]*\)\Z", re.DOTALL)
+
+
+def checked_entry_rejection_reason(entry: Mapping[str, Any]) -> str | None:
+    """Why this proof-verification entry may NOT hold a checked status, or None.
+
+    One implementation, two callers: the validator raises with the reason, and
+    every consumer that acts on checked evidence asks the same question. A
+    consumer that read ``trusted`` / ``confirmed`` / ``earned_status`` straight
+    out of the file was reading a declaration — `_resolve_reviewer_blockers` did
+    exactly that, by path, so an UNREGISTERED forged ``proof_verification.yaml``
+    silenced reviewer blockers without ever passing the validator.
+
+    Returns a human-readable reason string on rejection. None means the kernel
+    re-derived the result itself and the recorded target is what the adapter says
+    it checked.
+    """
+
+    if not isinstance(entry, Mapping):
+        return "entry is not a mapping"
+    if not (entry.get("trusted") and entry.get("confirmed")):
+        return "it carries no trusted + confirming verifier result"
+    adapter_id = str(entry.get("adapter_id") or "")
+    if not is_recomputable(adapter_id):
+        return (
+            f"adapter_id {adapter_id!r} is not a kernel-recomputable deterministic "
+            "verifier; a checked status cannot be earned from a result the kernel "
+            "cannot re-derive"
+        )
+    recompute_input = entry.get("recompute_input")
+    recomputed = recompute_result(
+        adapter_id, recompute_input if isinstance(recompute_input, Mapping) else None
+    )
+    if recomputed is None:
+        return (
+            f"the kernel could not re-derive it with {adapter_id!r} (missing or "
+            "malformed recompute_input)"
+        )
+    if not recomputed["confirmed"]:
+        return "the kernel's own recomputation does not confirm it"
+    canonical = recomputed["canonical_target"]
+    if not canonical:
+        # Opt-in binding is not binding. An adapter that does not say what it
+        # checked cannot have its result attached to any target, so it must not
+        # be able to earn a status at all — otherwise registering an adapter
+        # without this field silently reopens the borrowed-hash bypass.
+        return (
+            f"{adapter_id!r} does not report what it checked; an adapter must state "
+            "a canonical target to earn a status"
+        )
+    target = str(entry.get("target") or "")
+    if not target.startswith(canonical):
+        return (
+            f"it names target {target[:60]!r}, but {adapter_id!r} checked "
+            f"{canonical[:60]!r}; a checked status cannot be earned for a target the "
+            "verifier did not check"
+        )
+    remainder = target[len(canonical) :]
+    if remainder and not REQUESTED_FOR_SUFFIX.fullmatch(remainder):
+        return (
+            f"it appends {remainder[:60]!r} to the machine-authored target; only a "
+            "'(requested for: ...)' note may follow, so unchecked mathematics cannot "
+            "ride along behind a checked prefix"
+        )
+    # Hash comparison only when the adapter produced one: several shipped
+    # verifiers emit no transcript hash, and the re-derived confirming boolean
+    # above is the part a forged entry cannot fake.
+    digest = recomputed["transcript_sha256"]
+    recorded = str(entry.get("output_hash") or "")
+    if digest and digest != recorded:
+        return (
+            "the kernel's recomputation does not reproduce the recorded output_hash "
+            f"(recorded {recorded[:16]!r}, recomputed {digest[:16]!r})"
+        )
+    return None
+
+
+# A machine check is re-derived from its own recorded (kind, expression,
+# expected) — all three are already in the artifact — so the cache key is the
+# whole input and caching is sound: the backend is pure and deterministic.
+# Without it, validate_run (called after every stage) would re-run the same
+# capped-but-real computation dozens of times per run.
+_COMPUTATION_CACHE: dict[tuple[str, str, str], dict[str, str] | None] = {}
+
+
+def recompute_computation_check(
+    kind: object, expression: object, expected: object
+) -> dict[str, str] | None:
+    """What the kernel derives for one machine check, or None if it cannot.
+
+    ``computation_verification.yaml`` was the second checked-status path, and the
+    recompute gate did not cover it: ``_validate_proof_verification`` re-derived
+    its entries, but a ``ComputationVerificationResult`` carrying
+    ``executed: true, verdict: confirmed`` was believed as written. A hostile
+    review reproduced it end to end — a hand-written result naming a backend that
+    does not exist, whose expression was the prose sentence "forall p prime:
+    every group of order p^2 is abelian", earned the grade-level
+    ``computation_checked`` with ``validate_run`` passing and no machine work at
+    all.
+
+    The check is re-derived through the same ``verify_check`` the single writer
+    uses, so there is one implementation and no second copy to drift. Returns
+    ``{"verdict", "backend", "computed"}``; None means the kernel could not
+    derive anything and callers must treat that as failure, never as permission.
+    """
+
+    key = (str(kind), str(expression), str(expected))
+    if key in _COMPUTATION_CACHE:
+        return _COMPUTATION_CACHE[key]
+    derived: dict[str, str] | None = None
+    try:
+        from espresso_proof.verification.verifier import verify_check
+
+        out = verify_check(
+            {
+                "id": "kernel_recompute",
+                "claim_id": "kernel_recompute",
+                "machine_check": {
+                    "kind": key[0],
+                    "expression": key[1],
+                    "expected": key[2],
+                },
+            }
+        )
+    except Exception:
+        out = None
+    if isinstance(out, dict):
+        derived = {
+            "verdict": str(out.get("verdict") or ""),
+            "backend": str(out.get("backend") or ""),
+            "computed": str(out.get("computed") or ""),
+        }
+    _COMPUTATION_CACHE[key] = derived
+    return derived
 
 
 def _install_default_recomputers() -> None:
@@ -247,7 +389,10 @@ def _install_default_recomputers() -> None:
 
 
 __all__ = [
+    "REQUESTED_FOR_SUFFIX",
+    "checked_entry_rejection_reason",
     "is_recomputable",
+    "recompute_computation_check",
     "recompute_result",
     "register_recomputer",
 ]

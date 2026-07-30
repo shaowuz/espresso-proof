@@ -6,6 +6,8 @@ compatibility facade and re-exports every public name defined here.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -45,6 +47,7 @@ from espresso_proof.kernel.models import LLMAgentRunReport
 from espresso_proof.kernel.observability import usage_sink_for_run
 from espresso_proof.kernel.pressure_status import artifact_revision_hash
 from espresso_proof.kernel.proof_language import NO_AGENT_TEXT, safe_list, safe_text
+from espresso_proof.kernel.recompute import checked_entry_rejection_reason
 from espresso_proof.kernel.time_allocation import (
     TimeAllocationPlan,
     ensure_prover_time_allocation_plan,
@@ -480,11 +483,17 @@ def _split_machine_answered_blockers(
         entries = read_yaml(pv_path).get("entries", [])
     except Exception:  # noqa: BLE001 - fail closed: unreadable evidence answers nothing
         return blockers, []
+    # Ask the kernel, do not read the booleans. This consumer reads the file by
+    # PATH, so an unregistered forged proof_verification.yaml never met the
+    # validator's recompute gate at all, and "trusted and confirmed" was the
+    # forger's own word — enough to silence reviewer blockers. Same rule, one
+    # implementation: kernel/recompute.py.
     confirmed = [
         e for e in entries
-        if e.get("trusted") and e.get("confirmed")
+        if isinstance(e, dict)
         and e.get("earned_status") in {"instance_checked", "computation_checked"}
         and e.get("claim_id") == claim_id
+        and checked_entry_rejection_reason(e) is None
     ]
     if not confirmed:
         return blockers, []
@@ -774,6 +783,14 @@ def _normalize_verification_requests(raw: dict, *, agent_id: str) -> list[dict]:
     ScopedVerificationRequest schema or it is dropped. Ids are reassigned so a
     reply cannot collide with (or overwrite) another agent's request. Nothing
     here earns anything — execution happens later in the trusted backend.
+
+    The id carries a digest of the proposal's own content, not just the agent slot
+    and position. ``agent_id`` is stable across prover rounds (the round prefix is
+    applied downstream, after normalization), so a position-only id made round 2's
+    genuinely different request collide with round 1's and the append-only merge
+    dropped it as an already-known duplicate — silently, counted only as
+    ``skipped``. Content-derived ids keep the merge idempotent for a repeated
+    proposal while letting a changed one through.
     """
 
     from espresso_proof.kernel.models import ScopedVerificationRequest
@@ -790,7 +807,10 @@ def _normalize_verification_requests(raw: dict, *, agent_id: str) -> list[dict]:
         # models reject unknown keys wholesale).
         allowed = set(ScopedVerificationRequest.model_fields)
         candidate = {k: v for k, v in entry.items() if k in allowed}
-        candidate["id"] = f"{agent_id}_req_{i:02d}"
+        digest = hashlib.sha256(
+            json.dumps({k: v for k, v in candidate.items() if k != "id"}, sort_keys=True, default=str).encode()
+        ).hexdigest()[:8]
+        candidate["id"] = f"{agent_id}_req_{i:02d}_{digest}"
         try:
             validated = ScopedVerificationRequest.model_validate(candidate)
         except Exception:

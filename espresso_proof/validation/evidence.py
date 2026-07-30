@@ -109,6 +109,37 @@ def _validate_test_report_evidence(
                     )
 
 
+def _require_recomputed_computation(result: ComputationVerificationResult) -> None:
+    """Fail closed unless the kernel re-derives this confirming result itself."""
+
+    from espresso_proof.kernel.recompute import recompute_computation_check
+
+    recomputed = recompute_computation_check(result.kind, result.expression, result.expected)
+    if recomputed is None:
+        raise KernelValidationError(
+            f"computation check {result.check_id} claims a confirmed machine result but the "
+            f"kernel cannot re-derive it (kind={result.kind!r}); a declared verdict is not "
+            f"machine evidence"
+        )
+    if recomputed["verdict"] != VerificationVerdict.confirmed.value:
+        raise KernelValidationError(
+            f"computation check {result.check_id} claims verdict 'confirmed' but the kernel "
+            f"re-derived {recomputed['verdict']!r} for the recorded expression; a checked "
+            f"status cannot rest on a result the kernel does not reproduce"
+        )
+    if recomputed["backend"] != result.backend:
+        raise KernelValidationError(
+            f"computation check {result.check_id} names backend {result.backend!r} but the "
+            f"kernel re-derived it with {recomputed['backend']!r}; a confirming result cannot "
+            f"be attributed to a backend that did not produce it"
+        )
+    if recomputed["computed"] != result.computed:
+        raise KernelValidationError(
+            f"computation check {result.check_id} records computed {result.computed!r} but the "
+            f"kernel re-derived {recomputed['computed']!r} for the same expression"
+        )
+
+
 def _validate_computation_verification(
     computations: ComputationChecks,
     verification: ComputationVerificationReport | None,
@@ -122,7 +153,16 @@ def _validate_computation_verification(
     - a check refuted by the machine cannot claim checked/source_checked;
     - a check that carries a machine_check spec and claims ``checked`` must have
       a confirming verification result (no asserting evidence the backend could
-      have checked but did not confirm).
+      have checked but did not confirm);
+    - an executed, confirming result must survive the KERNEL re-deriving it.
+
+    That last rule is the one that makes the rest mean anything. ``executed`` and
+    ``verdict`` are written by whoever wrote the file, and this artifact backs
+    the grade-level ``computation_checked`` and a ``scoped_checked`` subgoal
+    node, so believing them handed out a checked status for a hand-written line —
+    reproduced end to end during a hostile review. The kernel now re-runs each
+    confirming check through the same backend the single writer uses and requires
+    its own verdict, backend and computed value to agree.
     """
     if verification is None:
         return
@@ -139,6 +179,8 @@ def _validate_computation_verification(
             raise KernelValidationError(
                 f"computation_verification references unknown check id: {result.check_id}"
             )
+        if result.executed and result.verdict == VerificationVerdict.confirmed:
+            _require_recomputed_computation(result)
         if result.verdict == VerificationVerdict.refuted and check.status in evidence_statuses:
             raise KernelValidationError(
                 f"computation check {result.check_id} claims status "

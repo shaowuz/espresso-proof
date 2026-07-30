@@ -92,7 +92,10 @@ def test_wellformed_proposal_survives_normalization_with_reassigned_id() -> None
         agent_id="strategy_reviewer_001",
     )
     assert len(out) == 1
-    assert out[0]["id"] == "strategy_reviewer_001_req_00"  # never the agent's own id
+    # Never the agent's own id; the slot leads and a content digest follows so a
+    # later round's different proposal cannot collide with this one.
+    assert out[0]["id"].startswith("strategy_reviewer_001_req_00_")
+    assert "attacker_chosen_id" not in out[0]["id"]
     doc = {"claim_id": "c", "requests": out}
     ScopedVerificationRequests.model_validate(doc)
 
@@ -147,3 +150,61 @@ def test_no_object_name_matching_remains_in_probes() -> None:
 
     assert not hasattr(probes, "propose_named_witness_requests")
     assert not hasattr(probes, "_GL2_F3")
+
+
+# --- round three: a proposal id must distinguish rounds, not just agent slots
+
+
+def test_a_changed_proposal_in_a_later_round_is_not_a_duplicate() -> None:
+    """Ids were `{agent_id}_req_{i:02d}` and agent_id is stable across rounds.
+
+    The round prefix is applied downstream, AFTER normalization, so round 2's
+    genuinely different request carried round 1's id and the append-only merge
+    dropped it as already-known — counted only as `skipped`, reported nowhere.
+    """
+
+    from espresso_proof.agents.agent_pass import _normalize_verification_requests
+
+    def _reply(target: str) -> dict:
+        return {
+            "verification_requests": [
+                {"kind": "named_finite_witness", "witness": "gl2_f3_solvability", "target": target}
+            ]
+        }
+
+    first = _normalize_verification_requests(_reply("round-1 request"), agent_id="llm_prover_001")
+    second = _normalize_verification_requests(_reply("round-2 request"), agent_id="llm_prover_001")
+    repeat = _normalize_verification_requests(_reply("round-1 request"), agent_id="llm_prover_001")
+
+    assert first and second and repeat
+    assert first[0]["id"] != second[0]["id"], "a different proposal must get a different id"
+    assert first[0]["id"] == repeat[0]["id"], "an identical proposal must stay idempotent"
+
+
+def test_ids_still_separate_two_agents_making_the_same_request() -> None:
+    from espresso_proof.agents.agent_pass import _normalize_verification_requests
+
+    reply = {
+        "verification_requests": [
+            {"kind": "named_finite_witness", "witness": "gl2_f3_solvability", "target": "t"}
+        ]
+    }
+    a = _normalize_verification_requests(reply, agent_id="llm_prover_001")
+    b = _normalize_verification_requests(reply, agent_id="strategy_reviewer_001")
+    assert a[0]["id"] != b[0]["id"]
+    assert a[0]["id"].startswith("llm_prover_001_")
+
+
+def test_two_different_requests_in_one_reply_stay_distinct() -> None:
+    from espresso_proof.agents.agent_pass import _normalize_verification_requests
+
+    out = _normalize_verification_requests(
+        {
+            "verification_requests": [
+                {"kind": "named_finite_witness", "witness": "gl2_f3_solvability", "target": "a"},
+                {"kind": "named_finite_witness", "witness": "gl2_f3_solvability", "target": "b"},
+            ]
+        },
+        agent_id="llm_prover_001",
+    )
+    assert len({entry["id"] for entry in out}) == len(out) == 2

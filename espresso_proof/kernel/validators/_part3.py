@@ -41,7 +41,7 @@ from espresso_proof.validation.manifest import ManifestPathValidationError
 from espresso_proof.validation.manifest import validate_relative_artifact_path
 
 
-from espresso_proof.kernel.recompute import is_recomputable, recompute_result
+from espresso_proof.kernel.recompute import checked_entry_rejection_reason
 from espresso_proof.kernel.validators._part1 import (
     _TRUSTED_EARNED,
     _adapt_legacy_memory_context,
@@ -518,73 +518,17 @@ def _validate_proof_verification(
                 f"proof_verification entry {entry.id!r}: lean_checked is not earnable in V0"
             )
         if earned in {"instance_checked", "computation_checked"}:
-            if not (entry.trusted and entry.confirmed):
+            # trusted / confirmed / target are written by whoever wrote the file,
+            # so they are a declaration, not evidence. The kernel re-derives the
+            # result itself, binds the status to WHAT the adapter says it checked,
+            # and compares its own transcript hash. The rule lives in
+            # kernel/recompute.py because every consumer that acts on checked
+            # evidence has to ask the same question — a consumer with its own copy
+            # of "trusted and confirmed" is how the gate got bypassed before.
+            reason = checked_entry_rejection_reason(entry.model_dump(mode="json"))
+            if reason is not None:
                 raise KernelValidationError(
-                    f"proof_verification entry {entry.id!r} claims {earned} without a "
-                    "trusted + confirming verifier result"
-                )
-            # The booleans above are written by whoever wrote the file, so they
-            # are a declaration, not evidence. The kernel re-derives the result
-            # itself and compares its own transcript hash. A forged entry cannot
-            # pass: no adapter reproduces a hash it invented.
-            if not is_recomputable(entry.adapter_id):
-                raise KernelValidationError(
-                    f"proof_verification entry {entry.id!r} claims {earned} but "
-                    f"adapter_id {entry.adapter_id!r} is not a kernel-recomputable "
-                    "deterministic verifier; a checked status cannot be earned from "
-                    "a result the kernel cannot re-derive"
-                )
-            recomputed = recompute_result(entry.adapter_id, entry.recompute_input)
-            if recomputed is None:
-                raise KernelValidationError(
-                    f"proof_verification entry {entry.id!r} claims {earned} but the "
-                    f"kernel could not re-derive it with {entry.adapter_id!r} "
-                    "(missing or malformed recompute_input)"
-                )
-            if not recomputed["confirmed"]:
-                raise KernelValidationError(
-                    f"proof_verification entry {entry.id!r} claims {earned} but the "
-                    "kernel's own recomputation does not confirm it"
-                )
-            # Bind the earned status to WHAT was checked, not only to the fact
-            # that something confirmed. Two shipped witnesses take no input and
-            # are fully deterministic, so their transcript hash is public: anyone
-            # could write an entry carrying that hash with a target sentence of
-            # their choosing and earn a checked status for it. Requiring the
-            # recorded target to match what the adapter says it checked closes
-            # that, and the trailing "(requested for: ...)" note stays allowed
-            # because the machine-authored part still leads.
-            canonical = recomputed["canonical_target"]
-            if not canonical:
-                # Opt-in binding is not binding. An adapter that does not say
-                # what it checked cannot have its result attached to any target,
-                # so it must not be able to earn a status at all — otherwise
-                # registering an adapter without this field silently reopens the
-                # borrowed-hash bypass.
-                raise KernelValidationError(
-                    f"proof_verification entry {entry.id!r} claims {earned} but "
-                    f"{entry.adapter_id!r} does not report what it checked; an "
-                    "adapter must state a canonical target to earn a status"
-                )
-            if not entry.target.startswith(canonical):
-                raise KernelValidationError(
-                    f"proof_verification entry {entry.id!r} claims {earned} for "
-                    f"target {entry.target[:60]!r}, but {entry.adapter_id!r} checked "
-                    f"{canonical[:60]!r}; a checked status cannot be earned for a "
-                    "target the verifier did not check"
-                )
-            # Hash comparison only when both sides produced one: several shipped
-            # verifiers do not emit a transcript hash, and the re-derived
-            # confirming boolean above is the part a forged entry cannot fake.
-            digest = recomputed["transcript_sha256"]
-            if digest and digest != entry.output_hash:
-                # Not opt-out: an entry that simply omits output_hash used to
-                # skip this comparison entirely.
-                raise KernelValidationError(
-                    f"proof_verification entry {entry.id!r} claims {earned} but the "
-                    "kernel's recomputation does not reproduce the recorded "
-                    f"output_hash (recorded {entry.output_hash[:16]}..., recomputed "
-                    f"{digest[:16]}...)"
+                    f"proof_verification entry {entry.id!r} claims {earned} but {reason}"
                 )
             if _TRUSTED_EARNED.get(vt) != earned:
                 raise KernelValidationError(

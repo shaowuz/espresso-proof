@@ -192,3 +192,127 @@ def test_a_vacuous_group_cannot_earn_a_checked_status() -> None:
             expected_order=order, expected_solvable=True,
         )
         assert entry["earned_status"] == "unverified", gens
+
+
+# --- round three: the rule must be the SAME rule everywhere, and prefix-only
+# binding was not binding
+
+
+def test_arbitrary_mathematics_cannot_ride_behind_a_checked_prefix() -> None:
+    """The round-two binding's own bypass.
+
+    The target check was `entry.target.startswith(canonical)`, which pins a
+    prefix and leaves the rest free. A true 4-element table check could therefore
+    be published as "...table of order 4 - hence every group of order p^2 is
+    abelian for every prime p" and still earn instance_checked. Only the
+    machine-authored wording plus one labelled "(requested for: ...)" note is
+    allowed now.
+    """
+
+    from espresso_proof.kernel.recompute import checked_entry_rejection_reason, recompute_result
+
+    canonical = recompute_result("verify_group_abelian", {"table": [[0, 1], [1, 0]]})[
+        "canonical_target"
+    ]
+    entry = {
+        "id": "e",
+        "trusted": True,
+        "confirmed": True,
+        "adapter_id": "verify_group_abelian",
+        "recompute_input": {"table": [[0, 1], [1, 0]]},
+        "target": canonical + " - hence every group of order p^2 is abelian for every prime p",
+        "output_hash": "",
+    }
+    reason = checked_entry_rejection_reason(entry)
+    assert reason is not None and "ride along" in reason
+
+    # The machine-authored target alone, and the labelled note, both stay legal.
+    assert checked_entry_rejection_reason({**entry, "target": canonical}) is None
+    assert (
+        checked_entry_rejection_reason(
+            {**entry, "target": canonical + " (requested for: some claim)"}
+        )
+        is None
+    )
+
+
+def test_the_note_cannot_be_closed_early_to_append_content() -> None:
+    from espresso_proof.kernel.recompute import checked_entry_rejection_reason, recompute_result
+    from espresso_proof.verification.proof_verification import requested_for_note
+
+    canonical = recompute_result("verify_group_abelian", {"table": [[0, 1], [1, 0]]})[
+        "canonical_target"
+    ]
+    base = {
+        "id": "e", "trusted": True, "confirmed": True,
+        "adapter_id": "verify_group_abelian",
+        "recompute_input": {"table": [[0, 1], [1, 0]]},
+        "output_hash": "",
+    }
+    escaped = canonical + " (requested for: x) and therefore all primes p"
+    assert checked_entry_rejection_reason({**base, "target": escaped}) is not None
+    # The builder's note strips the parens that would allow it.
+    note = requested_for_note("x) and therefore all primes p")
+    assert note.count("(") == 1 and note.count(")") == 1 and note.endswith(")")
+    assert checked_entry_rejection_reason({**base, "target": canonical + note}) is None
+
+
+def test_every_shipped_builder_survives_its_own_binding_rule() -> None:
+    # A builder whose target does not satisfy the rule would break the legitimate
+    # path; this is the regression guard for that.
+    from espresso_proof.kernel.recompute import checked_entry_rejection_reason
+    from espresso_proof.verification import proof_verification as pv
+
+    built = list(pv.build_finite_group_entries("claim_001", [2, 3]))
+    built.append(pv.build_gl2_f3_solvability_entry("claim_001")[0])
+    built.append(pv.build_gl2_f3_order_spectrum_entry("claim_001", entry_id="s")[0])
+    built.append(
+        pv.build_permutation_group_entry(
+            "claim_001", entry_id="p",
+            generators=[[1, 2, 3, 4, 0], [1, 2, 0, 3, 4]],
+            expected_order=60, expected_solvable=False,
+            target="Sz(8) is a Galois group over Q",
+        )[0]
+    )
+    built.append(
+        pv.build_identity_table_entry(
+            "claim_001", entry_id="t", table=[[0, 1], [1, 0]],
+            identity="commutative", target="every group of order p^2 is abelian (all p)",
+        )
+    )
+    built.append(
+        pv.build_matrix_rank_entry(
+            "claim_001", entry_id="m", matrix=[[1, 0], [0, 1]], expected_rank=2,
+            target="rank claim",
+        )
+    )
+    for entry in built:
+        if entry.get("earned_status") == "instance_checked":
+            assert checked_entry_rejection_reason(entry) is None, entry["id"]
+
+
+def test_a_consumer_of_checked_evidence_uses_the_kernel_rule() -> None:
+    """`_split_machine_answered_blockers` read the file by PATH and trusted its booleans.
+
+    That made an UNREGISTERED forged proof_verification.yaml enough to silence
+    reviewer blockers: unregistered means the validator's recompute gate never
+    looked at it. The consumer now asks the kernel the same question.
+    """
+
+    import inspect
+
+    from espresso_proof.agents import agent_pass
+
+    source = inspect.getsource(agent_pass._split_machine_answered_blockers)
+    assert "checked_entry_rejection_reason" in source
+    # The old predicate must be gone, not merely supplemented.
+    assert 'e.get("trusted") and e.get("confirmed")' not in source
+
+
+def test_the_forged_entry_is_rejected_by_the_shared_rule_too() -> None:
+    from espresso_proof.kernel.recompute import checked_entry_rejection_reason
+
+    assert checked_entry_rejection_reason(_forged()) is not None
+    assert checked_entry_rejection_reason(_forged(adapter_id="gl2_f3_solvability_witness")) is not None
+    assert checked_entry_rejection_reason({}) is not None
+    assert checked_entry_rejection_reason(None) is not None

@@ -14,6 +14,7 @@ THEOREM_BLOCKERS = "theorem_blockers"
 REVIEWER_BLOCKERS = "reviewer_blockers"
 PROVER_REVIEWER_BLOCKERS = "prover_reviewer_blockers"
 UPDATE_INBOX_PENDING = "update_inbox_pending"
+AGENT_PROPOSED_CHECKS_PENDING = "agent_proposed_checks_pending"
 
 # Single source of truth for the front-half placeholder wording: the producer
 # (front_half/safety.py) and the supersession logic below must share it, or a
@@ -287,6 +288,7 @@ def collect_surface_warnings(
     line_numbered_proof: dict[str, Any] | None = None,
     agent_consensus_review: dict[str, Any] | None = None,
     prover_loop: dict[str, Any] | None = None,
+    pending_agent_checks: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     warnings: list[dict[str, Any]] = []
     prover_attempts = _items((prover_loop or {}).get("attempts"))
@@ -391,6 +393,29 @@ def collect_surface_warnings(
                     "ids": open_blockers,
                 }
             )
+    pending_checks = [
+        request
+        for request in _items(pending_agent_checks)
+        if str(request.get("id") or "").strip()
+    ]
+    if pending_checks:
+        ids = [str(request["id"]).strip() for request in pending_checks]
+        kinds = sorted({str(request.get("kind") or "unspecified") for request in pending_checks})
+        warnings.append(
+            {
+                "category": AGENT_PROPOSED_CHECKS_PENDING,
+                "title": "Agent-proposed machine checks not yet harvested",
+                "text": (
+                    f"Agent-proposed machine checks not yet harvested: {len(ids)} request(s) "
+                    f"({', '.join(kinds)}) recorded by the prover/reviewer pass are absent from "
+                    "this run's scoped-verification requests, so no deterministic verifier has "
+                    "been run for them and they carry no evidence: "
+                    + ", ".join(ids[:6])
+                    + "."
+                ),
+                "ids": ids,
+            }
+        )
     pending_updates = pending_update_inbox_ids(update_inbox or {})
     if pending_updates:
         warnings.append(
@@ -453,6 +478,68 @@ def latest_prover_round_reviews(run_dir: Path) -> dict[str, Any]:
         except Exception:
             return {}
     return {}
+
+def pending_agent_verification_requests(run_dir: Path) -> list[dict[str, Any]]:
+    """Agent-proposed verification requests that no deterministic check has seen.
+
+    The general channel lets any prover/reviewer propose a machine check, but the
+    stage that harvests those proposals into ``scoped_verification_requests.yaml``
+    runs BEFORE the prover/reviewer pass, and its guard stops once the run reaches
+    the human gate. So on a first pass a request exists only inside
+    ``llm_agent_run.yaml`` / ``prover_rounds/*``: real, recorded, and unexecuted.
+    Observed in a live run — a reviewer asked for a finite-group lookup and the
+    surface said nothing about it.
+
+    Reporting the difference keeps the omission visible instead of implying the
+    reviewers asked for nothing. Read-only; never claims a request will run.
+    """
+
+    from espresso_proof.kernel.io import read_yaml
+
+    run_dir = Path(run_dir)
+    try:
+        manifest = read_yaml(run_dir / "run_manifest.yaml") or {}
+    except Exception:
+        manifest = {}
+    optional = manifest.get("optional_artifacts") or {}
+
+    def _load(path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        try:
+            doc = read_yaml(path)
+        except Exception:
+            return {}
+        # A well-formed YAML file whose top level is not a mapping is still
+        # unreadable for this purpose; treating it as one raises later.
+        return doc if isinstance(doc, dict) else {}
+
+    harvested: set[str] = set()
+    requests_rel = optional.get("scoped_verification_requests") or "scoped_verification_requests.yaml"
+    for request in _items(_load(run_dir / requests_rel).get("requests")):
+        harvested.add(str(request.get("id") or "").strip())
+
+    sources = [run_dir / (optional.get("llm_agent_run") or "llm_agent_run.yaml")]
+    rounds_dir = run_dir / "prover_rounds"
+    if rounds_dir.is_dir():
+        sources.extend(sorted(rounds_dir.glob("round_*.yaml")))
+
+    pending: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for path in sources:
+        doc = _load(path)
+        records = [doc.get("prover_attempt") or {}] + list(_items(doc.get("verifier_reviews")))
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            for request in _items(record.get("verification_requests")):
+                request_id = str(request.get("id") or "").strip()
+                if not request_id or request_id in harvested or request_id in seen:
+                    continue
+                seen.add(request_id)
+                pending.append(request)
+    return pending
+
 
 def rank_scoped_objections(llm_agent_run: dict[str, Any] | None) -> dict[str, Any]:
     """Report whether the reviewers actually ranked their objections.
@@ -590,6 +677,7 @@ def collect_surface_warnings_from_run(run_dir: Path) -> list[dict[str, Any]]:
         line_numbered_proof=optional_artifact("line_numbered_proof"),
         agent_consensus_review=optional_artifact("agent_consensus_review"),
         prover_loop=optional_artifact("prover_loop"),
+        pending_agent_checks=pending_agent_verification_requests(run_dir),
     )
 
 
