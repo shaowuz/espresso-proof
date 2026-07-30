@@ -748,6 +748,9 @@ def make_prover_attempt(
         "proposed_steps": proposed_steps,
         "source_requests": safe_list(raw.get("source_requests", [])),
         "risks": risks,
+        "verification_requests": _normalize_verification_requests(
+            raw, agent_id="llm_prover_001"
+        ),
         "status": "needs_human",
     }
 
@@ -759,6 +762,41 @@ _OBJECTION_KINDS = {
 }
 _OBJECTION_SEVERITIES = {"P0", "P1", "P2", "P3"}
 
+
+
+_MAX_PROPOSED_REQUESTS_PER_REPLY = 4
+
+
+def _normalize_verification_requests(raw: dict, *, agent_id: str) -> list[dict]:
+    """Well-formed machine-check proposals from one agent reply, or [].
+
+    Untrusted proposals only: each entry must validate against the kernel's
+    ScopedVerificationRequest schema or it is dropped. Ids are reassigned so a
+    reply cannot collide with (or overwrite) another agent's request. Nothing
+    here earns anything — execution happens later in the trusted backend.
+    """
+
+    from espresso_proof.kernel.models import ScopedVerificationRequest
+
+    entries = raw.get("verification_requests")
+    if not isinstance(entries, list):
+        return []
+    out: list[dict] = []
+    for i, entry in enumerate(entries[:_MAX_PROPOSED_REQUESTS_PER_REPLY]):
+        if not isinstance(entry, dict):
+            continue
+        # Whitelist known fields before validating: the model is untrusted and
+        # one invented key must not void an otherwise sound proposal (strict
+        # models reject unknown keys wholesale).
+        allowed = set(ScopedVerificationRequest.model_fields)
+        candidate = {k: v for k, v in entry.items() if k in allowed}
+        candidate["id"] = f"{agent_id}_req_{i:02d}"
+        try:
+            validated = ScopedVerificationRequest.model_validate(candidate)
+        except Exception:
+            continue
+        out.append(validated.model_dump(exclude_none=True))
+    return out
 
 def _normalize_scoped_objections(
     raw: dict, *, verifier_id: str, target_subgoal_id: str | None
@@ -859,6 +897,7 @@ def make_verifier_review(
         "missing_hypotheses": safe_list(raw.get("missing_hypotheses", [])),
         "source_requests": safe_list(raw.get("source_requests", [])),
         "unsafe_language": unsafe_language,
+        "verification_requests": _normalize_verification_requests(raw, agent_id=verifier_id),
         "scoped_objections": _normalize_scoped_objections(
             raw, verifier_id=verifier_id, target_subgoal_id=target_subgoal_id
         ),

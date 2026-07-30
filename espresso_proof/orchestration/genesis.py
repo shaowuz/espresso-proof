@@ -24,10 +24,7 @@ from espresso_proof.orchestration.mock_pipeline import (
     _with_final_report_disclosures,
 )
 from espresso_proof.verification.counterexample_probes import propose_deterministic_counterexamples
-from espresso_proof.verification.verification_request_probes import (
-    propose_named_witness_requests,
-    propose_scoped_verification_requests,
-)
+from espresso_proof.verification.verification_request_probes import propose_scoped_verification_requests
 
 
 def run_mock_critique(project_id: str, input_path: Path, output_root: Path) -> Path:
@@ -64,7 +61,7 @@ def run_mock_critique(project_id: str, input_path: Path, output_root: Path) -> P
     # instance_checked, and the probe fails closed on any other claim.
     verification_requests = propose_scoped_verification_requests(
         artifacts["locked_claim.yaml"]
-    ) + propose_named_witness_requests(artifacts["locked_claim.yaml"])
+    )
     if verification_requests:
         artifacts["scoped_verification_requests.yaml"] = {
             "claim_id": claim_id,

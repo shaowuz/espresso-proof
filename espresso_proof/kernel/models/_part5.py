@@ -548,6 +548,13 @@ class LLMAgentAttempt(StrictBaseModel):
     source_requests: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     status: Literal["candidate", "needs_human", "blocked", "error"]
+    # Advisory proposals only: concrete machine-checkable requests this agent
+    # wants run. The kernel validates the shape here, a harvester merges them
+    # into scoped_verification_requests.yaml, and only the trusted deterministic
+    # backend can turn one into earned evidence. Carrying a request grants
+    # nothing.
+    verification_requests: list[ScopedVerificationRequest] = Field(default_factory=list)
+
 
 
 class ScopedObjection(StrictBaseModel):
@@ -622,6 +629,12 @@ class LLMAgentVerifierReview(StrictBaseModel):
     # into route/global scoped_objections (scope_source='legacy_fallback') so older
     # producers stay valid and downstream has one structured surface.
     scoped_objections: list[ScopedObjection] = Field(default_factory=list)
+    # Advisory proposals only: concrete machine-checkable requests this agent
+    # wants run. The kernel validates the shape here, a harvester merges them
+    # into scoped_verification_requests.yaml, and only the trusted deterministic
+    # backend can turn one into earned evidence. Carrying a request grants
+    # nothing.
+    verification_requests: list[ScopedVerificationRequest] = Field(default_factory=list)
     recommended_human_action: Literal["continue", "revise", "stop"]
     status: Literal["candidate", "needs_human", "blocked"]
 

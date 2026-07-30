@@ -84,6 +84,13 @@ def verifier_system_prompt(index: int, *, reviewer_role: str = "verifier") -> st
         "logical_gap|computation_needed|counterexample_pressure|unclear_claim|reviewer_disagreement|other), "
         "severity (P0 fatal flaw | P1 blocking step flaw | P2 blocking gap or source/computation request — the default | P3 non-blocking context note ONLY, never a step flaw), and a suggested_next_action. An objection only blocks or prioritizes "
         "repair; it never proves, refutes, or closes anything. "
+        "When a blocker is machine-decidable (order/solvability of a concrete "
+        "finite group, an identity on a finite table, a matrix rank), also return "
+        "it in 'verification_requests' so the deterministic backend can settle it: "
+        "permutation generators use ONE-LINE IMAGE notation (entry i is the image "
+        "of i), 0-indexed, all generators the same degree — cycle notation like "
+        "(0 1 2) written as a list will be rejected or misread as the identity. "
+        "Proposing a request earns nothing; only the backend's confirming run does. "
         "Do not upgrade proof, evidence, source, or grade status. Return JSON only."
     )
 

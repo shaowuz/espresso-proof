@@ -196,6 +196,9 @@ def orchestrate(
             # Run the strategy/prover stage's explicit scoped finite/computational
             # checks BEFORE the loop; a confirming result earns instance_checked
             # (finite/computational scope only, never a universal proof).
+            from espresso_proof.verification.proof_verification import merge_agent_proposed_requests
+
+            merge_agent_proposed_requests(resume)
             summary = auto_wire_scoped_verifications(resume)
             typer.echo(
                 f"Auto-wired scoped checks: {len(summary['appended'])} run, "

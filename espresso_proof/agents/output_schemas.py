@@ -25,6 +25,47 @@ AGENT_OUTPUT_SCHEMA = {
         # correctly obeyed the schema, and every objection fell back to the
         # kernel default P2 with no suggested action. Across five real rounds:
         # 51 objections, 51 fallbacks, zero explicit.
+        # Optional. Concrete machine-checkable proposals: the kernel validates
+        # the shape, a trusted deterministic backend executes, and only a
+        # confirming execution earns instance_checked. Proposing grants nothing.
+        # finite_group_from_generators carries its own data (permutations in
+        # one-line image notation, 0-indexed), so no named-object matching is
+        # needed anywhere.
+        "verification_requests": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "kind": {
+                        "enum": [
+                            "finite_group_from_generators",
+                            "finite_identity_table",
+                            "finite_ring_identity",
+                            "matrix_rank",
+                            "named_finite_witness",
+                        ]
+                    },
+                    "generators": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "integer"}},
+                    },
+                    "expected_order": {"type": ["integer", "null"]},
+                    "expected_solvable": {"type": ["boolean", "null"]},
+                    "table": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "integer"}},
+                    },
+                    "identity": {"type": "string"},
+                    "modulus": {"type": ["integer", "null"]},
+                    "expected_rank": {"type": ["integer", "null"]},
+                    "expected_determinant": {"type": ["integer", "null"]},
+                    "witness": {"type": "string"},
+                    "target": {"type": "string"},
+                },
+                "required": ["kind", "target"],
+            },
+        },
         "scoped_objections": {
             "type": "array",
             "items": {

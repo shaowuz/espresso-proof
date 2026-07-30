@@ -594,7 +594,14 @@ def execute_scoped_machine_checks(*, run_dir: Path) -> None:
     # requests wires nothing; a confirming result earns instance_checked
     # only — never a universal status).
     if not _reached(run_dir, "WAITING_LLM_AGENT_HUMAN_GATE"):
-        from espresso_proof.verification.proof_verification import auto_wire_scoped_verifications
+        from espresso_proof.verification.proof_verification import (
+            auto_wire_scoped_verifications,
+            merge_agent_proposed_requests,
+        )
+
+        # Agent-proposed requests (validated at normalization) join the probe-
+        # proposed ones before the trusted backend runs anything.
+        merge_agent_proposed_requests(run_dir)
 
         auto_wire_scoped_verifications(run_dir)
 

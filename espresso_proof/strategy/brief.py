@@ -164,7 +164,6 @@ def write_scoped_verification_requests(run_dir: Path, *, context: dict) -> int:
     """Persist deterministic scoped-verification requests proposed from strategy context."""
 
     from espresso_proof.verification.verification_request_probes import (
-        propose_named_witness_requests,
         propose_scoped_verification_requests,
     )
 
@@ -172,7 +171,6 @@ def write_scoped_verification_requests(run_dir: Path, *, context: dict) -> int:
     claim = context["claim"]
     claim_id = claim["id"]
     requests = propose_scoped_verification_requests(claim)
-    requests += propose_named_witness_requests(claim)
     if not requests:
         return 0
     requests_doc = {"claim_id": claim_id, "requests": requests}

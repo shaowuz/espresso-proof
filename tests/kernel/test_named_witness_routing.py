@@ -1,134 +1,149 @@
-"""A reviewer blocker that names a decidable property must reach the verifier.
+"""A decidable side condition must be reachable by GENERAL mechanism.
 
-The gap this covers, observed on a real run: a reviewer asked for "an accepted
-finite-group derivation or exact source establishing solvability of GL_2(F_3)",
-a deterministic witness for exactly that already existed, and nothing connected
-the two — so the run stopped and asked a human for something the machine could
-settle.
+History, because it shaped the design. A reviewer on a real run asked for a
+finite-group derivation that gl2_f3_solvability_witness could already decide,
+and nothing connected them. The first fix routed by an object-name regex
+(_GL2_F3) — which violated the maintainer principle that changes must target
+general problems, not one specific one. The regex is gone. The general path:
+an agent PROPOSES a concrete machine-checkable request in its structured
+reply (untrusted), the kernel validates the shape at normalization, a
+harvester merges it into scoped_verification_requests.yaml, and only the
+trusted deterministic backend can turn it into earned evidence.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from espresso_proof.kernel.models import ProofVerificationEntry, ScopedVerificationRequests
-from espresso_proof.verification.proof_verification import NAMED_FINITE_WITNESSES
-from espresso_proof.verification.verification_request_probes import (
-    propose_named_witness_requests,
+from espresso_proof.agents.agent_pass import _normalize_verification_requests
+from espresso_proof.kernel.models import (
+    ProofVerificationEntry,
+    ScopedVerificationRequests,
+)
+from espresso_proof.verification.proof_verification import (
+    NAMED_FINITE_WITNESSES,
+    build_permutation_group_entry,
 )
 
 
-def test_probe_fires_on_a_claim_naming_the_group() -> None:
-    for statement in (
-        "There exists a finite Galois extension K/Q with Gal(K/Q) isomorphic to GL_2(F_3).",
-        "GL2(F3) is a Galois group over Q.",
-        "Show that GL_2(\\mathbb{F}_3) occurs as a Galois group over the rationals.",
-    ):
-        assert propose_named_witness_requests({"normalized_statement": statement}), statement
+# --- the general witness: group defined by request-supplied data
 
 
-def test_probe_fails_closed_on_unrelated_claims() -> None:
-    for statement in (
-        "Every finite group of order p^2, where p is prime, is abelian.",
-        "Every continuous function on a closed interval is bounded.",
-        "",
-    ):
-        assert propose_named_witness_requests({"normalized_statement": statement}) == []
+def test_permutation_witness_confirms_only_matching_expectations() -> None:
+    # A_5 from (01234) and (012): order 60, not solvable.
+    entry, detail = build_permutation_group_entry(
+        "claim_001",
+        entry_id="e",
+        generators=[[1, 2, 3, 4, 0], [1, 2, 0, 3, 4]],
+        expected_order=60,
+        expected_solvable=False,
+    )
+    ProofVerificationEntry.model_validate(entry)
+    assert entry["earned_status"] == "instance_checked"
+    assert detail["derived_series_orders"] == [60]
+
+    entry, _ = build_permutation_group_entry(
+        "claim_001",
+        entry_id="e",
+        generators=[[1, 2, 3, 4, 0], [1, 2, 0, 3, 4]],
+        expected_order=60,
+        expected_solvable=True,  # wrong on purpose
+    )
+    assert entry["earned_status"] == "unverified"
 
 
-def test_request_validates_against_the_kernel_schema() -> None:
-    claim = {"id": "claim_001", "normalized_statement": "GL_2(F_3) is a Galois group over Q."}
-    doc = {"claim_id": claim["id"], "requests": propose_named_witness_requests(claim)}
+def test_malformed_generators_fail_closed() -> None:
+    for bad in ([[0, 0, 1]], [], [[1, 0], [0, 1, 2]]):
+        entry, _ = build_permutation_group_entry(
+            "claim_001", entry_id="e", generators=bad,
+            expected_order=1, expected_solvable=None,
+        )
+        assert entry["earned_status"] == "unverified"
+        ProofVerificationEntry.model_validate(entry)
+
+
+def test_scope_note_disclaims_identification() -> None:
+    entry, _ = build_permutation_group_entry(
+        "claim_001", entry_id="e", generators=[[1, 0, 2], [1, 2, 0]],
+        expected_order=6, expected_solvable=True,
+    )
+    assert "identif" in entry["scope_note"].lower()
+    blob = (entry["result"] + entry["scope_note"]).lower()
+    for forbidden in ("proved", "proof complete", "[proof-close]"):
+        assert forbidden not in blob
+
+
+# --- the proposal channel: untrusted shape-validated proposals
+
+
+def _raw(*reqs: dict) -> dict:
+    return {"verification_requests": list(reqs)}
+
+
+def test_wellformed_proposal_survives_normalization_with_reassigned_id() -> None:
+    out = _normalize_verification_requests(
+        _raw({
+            "id": "attacker_chosen_id",
+            "kind": "finite_group_from_generators",
+            "generators": [[1, 0, 2]],
+            "expected_order": 2,
+            "target": "order of the group generated by a transposition",
+        }),
+        agent_id="strategy_reviewer_001",
+    )
+    assert len(out) == 1
+    assert out[0]["id"] == "strategy_reviewer_001_req_00"  # never the agent's own id
+    doc = {"claim_id": "c", "requests": out}
     ScopedVerificationRequests.model_validate(doc)
 
 
-def test_request_carries_a_pointer_and_no_finite_data() -> None:
-    # The whole point of the named form: the request cannot smuggle in a
-    # fabricated table, because it contains none. The verifier regenerates it.
-    req = propose_named_witness_requests(
-        {"normalized_statement": "GL_2(F_3) is a Galois group over Q."}
-    )[0]
-    assert req["kind"] == "named_finite_witness"
-    assert req["witness"] in NAMED_FINITE_WITNESSES
-    assert req.get("table") is None
-    assert "status" not in req and "earned" not in req
-
-
-def test_named_witness_resolves_and_confirms() -> None:
-    builder = NAMED_FINITE_WITNESSES["gl2_f3_solvable"]
-    entry, detail = builder("claim_001", entry_id="gl2_f3_solvable")
-    assert entry["verifier_type"] == "finite_group_cayley"
-    # GL_2(F_3) -> SL_2(F_3) -> Q_8 -> {+-I} -> 1
-    assert detail["derived_series_orders"] == [48, 24, 8, 2, 1]
-    assert detail["is_solvable"] is True
-
-
-def test_a_confirmed_witness_still_earns_no_proof_status() -> None:
-    # Solvability of the group is a side condition, not the inverse Galois
-    # claim. Deciding it must not move the claim toward "proved".
-    _, detail = NAMED_FINITE_WITNESSES["gl2_f3_solvable"]("claim_001", entry_id="e")
-    blob = repr(detail).lower()
-    for forbidden in ("proved", "proof complete", "[proof-close]"):
-        assert forbidden not in blob
-
-
-def test_unknown_witness_name_is_rejected() -> None:
-    assert "no_such_witness" not in NAMED_FINITE_WITNESSES
-    with pytest.raises(KeyError):
-        NAMED_FINITE_WITNESSES["no_such_witness"]
-
-
-# --- second witness: the registry had to take an entry without a dispatcher change
-
-
-def test_registry_holds_both_witnesses() -> None:
-    assert set(NAMED_FINITE_WITNESSES) >= {"gl2_f3_solvable", "gl2_f3_distinct_from_s4xc2"}
-
-
-def test_probe_proposes_both_for_a_gl2_f3_claim() -> None:
-    reqs = propose_named_witness_requests(
-        {"normalized_statement": "GL_2(F_3) is a Galois group over Q."}
+def test_malformed_proposals_are_dropped_not_raised() -> None:
+    out = _normalize_verification_requests(
+        _raw(
+            {"kind": "no_such_kind", "target": "x"},
+            "not a dict",
+            {"kind": "finite_group_from_generators", "generators": "not a list", "target": "x"},
+            {"kind": "finite_group_from_generators", "generators": [[1, 0]], "expected_order": 2, "target": "ok"},
+        ),
+        agent_id="a",
     )
-    assert {r["witness"] for r in reqs} == {"gl2_f3_solvable", "gl2_f3_distinct_from_s4xc2"}
-    assert len({r["id"] for r in reqs}) == len(reqs)  # ids must not collide
+    assert len(out) == 1 and out[0]["target"] == "ok"
 
 
-def test_order_spectrum_separates_the_two_order_48_groups() -> None:
-    from espresso_proof.verification.finite_group_verifier import (
-        gl2_f3_order_spectrum_witness,
+def test_proposal_count_is_capped() -> None:
+    many = [
+        {"kind": "finite_group_from_generators", "generators": [[1, 0]],
+         "expected_order": 2, "target": f"t{i}"}
+        for i in range(10)
+    ]
+    assert len(_normalize_verification_requests(_raw(*many), agent_id="a")) == 4
+
+
+def test_a_proposal_carries_no_status() -> None:
+    out = _normalize_verification_requests(
+        _raw({"kind": "finite_group_from_generators", "generators": [[1, 0]],
+              "expected_order": 2, "target": "t"}),
+        agent_id="a",
     )
-
-    w = gl2_f3_order_spectrum_witness()
-    assert w["order"] == 48 and w["rival_order"] == 48
-    # The decisive fact: GL_2(F_3) has a nonsplit torus, S_4 x C_2 has no order-8
-    # element at all.
-    assert w["order_spectrum"]["8"] == 12
-    assert "8" not in w["rival_order_spectrum"]
-    assert w["confirmed"] is True
+    assert "status" not in out[0] and "earned_status" not in out[0] and "confirmed" not in out[0]
 
 
-def test_separation_earns_nothing_about_galois() -> None:
-    entry, _ = NAMED_FINITE_WITNESSES["gl2_f3_distinct_from_s4xc2"]("claim_001", entry_id="e")
-    assert entry["earned_status"] == "instance_checked"
-    blob = (entry["target"] + entry["result"] + entry["scope_note"]).lower()
-    assert "galois" in entry["scope_note"].lower()  # explicitly disclaims Galois content
-    for forbidden in ("proved", "proof complete", "[proof-close]"):
-        assert forbidden not in blob
+def test_absent_or_junk_field_yields_empty() -> None:
+    assert _normalize_verification_requests({}, agent_id="a") == []
+    assert _normalize_verification_requests({"verification_requests": "junk"}, agent_id="a") == []
 
 
-def test_every_registered_witness_builds_a_schema_valid_entry() -> None:
-    """The gap that let a broken builder ship.
+# --- curated named witnesses stay, but no runtime matches object names
 
-    The earlier tests called each builder and asserted on a few keys they
-    happened to know about, so a builder inventing its own field names passed
-    them and then failed the kernel at run time with eight validation errors.
-    Validating against ProofVerificationEntry is the check that actually
-    corresponds to what a run does.
-    """
 
-    assert NAMED_FINITE_WITNESSES, "registry must not be empty"
+def test_named_witness_registry_still_schema_valid() -> None:
     for name, builder in NAMED_FINITE_WITNESSES.items():
         entry, _ = builder("claim_001", entry_id=name)
         ProofVerificationEntry.model_validate(entry)
-        assert entry["earned_status"] in {"instance_checked", "unverified"}, name
-        assert entry["scope_note"], name
+
+
+def test_no_object_name_matching_remains_in_probes() -> None:
+    import espresso_proof.verification.verification_request_probes as probes
+
+    assert not hasattr(probes, "propose_named_witness_requests")
+    assert not hasattr(probes, "_GL2_F3")

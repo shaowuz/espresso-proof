@@ -399,11 +399,18 @@ class ScopedVerificationRequest(StrictBaseModel):
         "finite_ring_identity",
         "matrix_rank",
         "named_finite_witness",
+        "finite_group_from_generators",
     ]
     # named_finite_witness carries no data of its own: `witness` names a
     # builder in NAMED_FINITE_WITNESSES that regenerates the finite object,
     # so a hand-edited request cannot supply fabricated tables.
     witness: str = ""
+    # finite_group_from_generators: the group is DEFINED by the request's own
+    # data (permutations, one-line images, 0-indexed); the verifier enumerates
+    # the closure itself, so no named-object matching is involved anywhere.
+    generators: list[list[int]] | None = None
+    expected_order: int | None = None
+    expected_solvable: bool | None = None
     identity: str = ""
     table: list[list[int]] | None = None  # operation table (finite_identity_table) or matrix (matrix_rank)
     modulus: int | None = None  # required for finite_ring_identity
