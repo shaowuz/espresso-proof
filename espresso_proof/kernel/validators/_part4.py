@@ -7,6 +7,11 @@ import re
 from pathlib import Path
 
 
+from espresso_proof.kernel.proof_dependencies import (
+    trusted_human_allowed_theorem_refs,
+    trusted_source_grounded_theorem_refs,
+    unresolved_proof_dependency_lines,
+)
 from espresso_proof.kernel.models import (
     AgentConsensusReview,
     AgentConsensusVerdict,
@@ -446,6 +451,36 @@ def _validate_agent_consensus_review(
         raise KernelValidationError(
             "agent_consensus_review requires a line_numbered_proof.yaml; a route / "
             "proposed_steps / advisory_proof_sketch is not a sealable proof"
+        )
+
+    # 1b. No line may still carry an unresolved dependency. This rule used to live
+    #     only in orchestration/agent_consensus_seal.py, so the sanctioned path
+    #     enforced it and a hand-written agent_consensus_review.yaml did not —
+    #     reproduced by a hostile review, which sealed a proof whose lines still
+    #     carried gaps. A rule that decides a status has to be enforced where the
+    #     kernel can see it, not in the component that writes the artifact.
+    manifest_dict = manifest.model_dump() if hasattr(manifest, "model_dump") else dict(manifest)
+    proof_artifact = (manifest_dict.get("optional_artifacts") or {}).get(
+        "line_numbered_proof", "line_numbered_proof.yaml"
+    )
+    proof_dict = (
+        line_numbered_proof.model_dump()
+        if hasattr(line_numbered_proof, "model_dump")
+        else dict(line_numbered_proof)
+    )
+    unresolved = unresolved_proof_dependency_lines(
+        proof_dict,
+        trusted_human_allowed_theorem_refs=trusted_human_allowed_theorem_refs(
+            run_dir, manifest_dict, proof_artifact
+        ),
+        trusted_source_grounded_theorem_refs=trusted_source_grounded_theorem_refs(
+            run_dir, manifest_dict
+        ),
+    )
+    if unresolved:
+        raise KernelValidationError(
+            "agent_consensus_review cannot seal a line-numbered proof with "
+            f"unresolved dependencies: {', '.join(unresolved)}"
         )
 
     # 2. Every PASS must cite real proof line_id(s) (rule 4): a no-fatal-flaw
