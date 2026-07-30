@@ -423,6 +423,37 @@ def _proof_theorem_ref_ids(line_numbered_proof: dict[str, Any]) -> set[str]:
 _SEVERITY_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 
+
+def latest_prover_round_reviews(run_dir: Path) -> dict[str, Any]:
+    """The reviewer record of the LATEST prover round, for display ranking.
+
+    Rounds appended by the loop live in prover_rounds/round_*.yaml; the initial
+    pass lives in llm_agent_run.yaml. Ranking the initial pass while round 3 is
+    the live state would surface stale objections, so prefer the
+    highest-numbered round file and fall back to the initial record. Read-only
+    and fail-soft: unreadable files yield {}.
+    """
+
+    from espresso_proof.kernel.io import read_yaml
+
+    run_dir = Path(run_dir)
+    rounds_dir = run_dir / "prover_rounds"
+    candidates = sorted(rounds_dir.glob("round_*.yaml")) if rounds_dir.is_dir() else []
+    for path in reversed(candidates):
+        try:
+            doc = read_yaml(path) or {}
+        except Exception:
+            continue
+        if doc.get("verifier_reviews"):
+            return doc
+    initial = run_dir / "llm_agent_run.yaml"
+    if initial.exists():
+        try:
+            return read_yaml(initial) or {}
+        except Exception:
+            return {}
+    return {}
+
 def rank_scoped_objections(llm_agent_run: dict[str, Any] | None) -> dict[str, Any]:
     """Report whether the reviewers actually ranked their objections.
 

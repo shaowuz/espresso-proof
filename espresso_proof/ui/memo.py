@@ -31,6 +31,7 @@ from espresso_proof.kernel.research_bank import load_bankable_dict
 from espresso_proof.ui.route_table import build_route_step_rows, render_route_step_table_lines
 from espresso_proof.kernel.subgoal_graph import render_proof_search_lines
 from espresso_proof.kernel.surface_warnings import (
+    latest_prover_round_reviews,
     rank_scoped_objections,
     render_blocker_ranking,
     FRONT_HALF_REVIEW_PENDING_NOTE,
@@ -179,6 +180,12 @@ def render_proof_route_steps(
     return [scrub_source_support_language(line) for line in lines]
 
 
+
+def _display_objection_text(objection: dict) -> str:
+    from espresso_proof.kernel.surface_warnings import _display_text
+
+    return _display_text(str(objection.get("text") or ""))[:220]
+
 def build_concise_memo(run_dir: Path) -> str:
     """Render a compact memo string from a run's validated artifacts.
 
@@ -211,6 +218,9 @@ def build_concise_memo(run_dir: Path) -> str:
     claim_text = (claim.get("normalized_statement") or "").strip()
     claim_state = "locked" if claim.get("locked") else "unlocked"
     objection = (review.get("strongest_objection") or "none recorded").strip()
+    # Ranking source: the latest prover round's reviewers (falls back to the
+    # initial pass). Computed once; reused for the ranking section below.
+    _blocker_ranking = rank_scoped_objections(latest_prover_round_reviews(run_dir))
     # The front-half placeholder ("Front-half review pending; ...") must not be
     # presented as the strongest obstruction once the prover-pass reviewers
     # actually ran; the real objections surface via the prover-pass warning.
@@ -221,10 +231,17 @@ def build_concise_memo(run_dir: Path) -> str:
         and (run_dir / _pl_rel_early).exists()
         and (read_yaml(run_dir / _pl_rel_early) or {}).get("attempts")
     ):
-        objection = (
-            "superseded front-half placeholder; see the prover-pass reviewer "
-            "blockers in the prover loop record"
-        )
+        top = (_blocker_ranking.get("top") or [None])[0]
+        if top is not None:
+            # The strongest obstruction a reviewer actually recorded, at the
+            # severity the reviewer assigned. Display-scrubbed like every other
+            # reviewer-text surface; never invented here.
+            objection = f"[{top.get('severity')}] " + _display_objection_text(top)
+        else:
+            objection = (
+                "prover-pass reviewer blockers are open but unranked; see the "
+                "prover loop record"
+            )
 
     # Theorem-applicability audit (optional) carries the recorded "why it applies"
     # reason for a source-backed step; load it if present (never invented here).
@@ -314,13 +331,7 @@ def build_concise_memo(run_dir: Path) -> str:
         agent_consensus_review=agent_consensus_review,
         prover_loop=prover_loop_for_warnings,
     ))
-    _lar_rel = optional_artifacts.get("llm_agent_run")
-    _llm_run = (
-        read_yaml(run_dir / _lar_rel)
-        if _lar_rel and (run_dir / _lar_rel).exists()
-        else {}
-    )
-    ranking_lines = render_blocker_ranking(rank_scoped_objections(_llm_run))
+    ranking_lines = render_blocker_ranking(_blocker_ranking)
     if ranking_lines:
         lines.append("")
         lines.extend(ranking_lines)

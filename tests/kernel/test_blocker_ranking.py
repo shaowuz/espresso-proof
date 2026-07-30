@@ -9,6 +9,7 @@ the display layer inventing a judgement no reviewer made.
 from __future__ import annotations
 
 from espresso_proof.kernel.surface_warnings import (
+    latest_prover_round_reviews,
     rank_scoped_objections,
     render_blocker_ranking,
 )
@@ -83,3 +84,47 @@ def test_ranking_never_assigns_a_severity_itself() -> None:
     ranking = rank_scoped_objections(_run({"text": "no severity field"}))
     assert ranking["levels"] == {"P2": 1}
     assert ranking["differentiated"] is False
+
+
+# --- ranking must read the LATEST round, not the initial pass
+
+
+def _write(p, doc):
+    import yaml
+
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(yaml.safe_dump(doc), encoding="utf-8")
+
+
+def test_latest_round_wins_over_initial_pass(tmp_path) -> None:
+    _write(tmp_path / "llm_agent_run.yaml",
+           {"verifier_reviews": [{"scoped_objections": [_obj("stale round-1 objection")]}]})
+    _write(tmp_path / "prover_rounds" / "round_001_x.yaml",
+           {"verifier_reviews": [{"scoped_objections": [_obj("round 1")]}]})
+    _write(tmp_path / "prover_rounds" / "round_003_x.yaml",
+           {"verifier_reviews": [{"scoped_objections": [_obj("round 3 latest", "P1", "do X")]}]})
+    doc = latest_prover_round_reviews(tmp_path)
+    texts = [s["text"] for rv in doc["verifier_reviews"] for s in rv["scoped_objections"]]
+    assert texts == ["round 3 latest"]
+
+
+def test_no_rounds_falls_back_to_initial(tmp_path) -> None:
+    _write(tmp_path / "llm_agent_run.yaml",
+           {"verifier_reviews": [{"scoped_objections": [_obj("initial")]}]})
+    doc = latest_prover_round_reviews(tmp_path)
+    assert doc["verifier_reviews"]
+
+
+def test_empty_run_dir_yields_empty(tmp_path) -> None:
+    assert latest_prover_round_reviews(tmp_path) == {}
+    (tmp_path / "llm_agent_run.yaml").write_text(": bad yaml :", encoding="utf-8")
+    assert latest_prover_round_reviews(tmp_path) == {}
+
+
+def test_round_without_reviews_is_skipped_for_an_earlier_one(tmp_path) -> None:
+    # index.yaml and review-less round files must not shadow a real record.
+    _write(tmp_path / "prover_rounds" / "round_001_x.yaml",
+           {"verifier_reviews": [{"scoped_objections": [_obj("real")]}]})
+    _write(tmp_path / "prover_rounds" / "round_002_x.yaml", {"verifier_reviews": []})
+    doc = latest_prover_round_reviews(tmp_path)
+    assert doc["verifier_reviews"][0]["scoped_objections"][0]["text"] == "real"

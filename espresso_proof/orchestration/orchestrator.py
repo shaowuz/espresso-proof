@@ -1102,7 +1102,16 @@ def _resume_idempotent_memo(*, run_dir: Path) -> str:
     write_timings(run_dir)
     register_observability_artifacts(run_dir)
     write_run_dashboard(run_dir)
-    return build_concise_memo(run_dir)
+    # The last of the four silent no-op paths. This branch is idempotent by
+    # design, but its output used to be indistinguishable from a resume that
+    # actually drove rounds — three consecutive no-op resumes of a completed
+    # Sz(8) run each printed a full memo and exited 0. State it instead.
+    return build_concise_memo(run_dir) + (
+        "\n\nProver loop: no round ran — this run is already complete "
+        "(state COMPLETED_MEMO). Resuming again only refreshes dashboards; "
+        "to do more work, start a new run or approve a larger effort on a "
+        "route before the loop finishes."
+    )
 
 
 def _record_resume_human_choice(
