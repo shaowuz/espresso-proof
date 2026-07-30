@@ -200,7 +200,17 @@ continue to determine the meaning of every recorded status.
 
 ## Example
 
-<!-- Add one representative end-to-end complex research case here. -->
+`examples/quickstart.sh` runs one claim end to end with the deterministic stub
+provider — no model, no API key, no network — and prints the run directory it
+produced:
+
+```bash
+bash examples/quickstart.sh
+```
+
+It ends at a human gate, which is the normal outcome: the run records what it
+found and asks which route to spend effort on. `docs/engineering/execution-trunk.md`
+walks the same path stage by stage.
 
 ## Product path
 
@@ -356,7 +366,7 @@ Validate exported schemas:
 ```bash
 uv run espresso export-schemas
 uv run espresso export-schemas --check
-uv run espresso eval --schemas-only
+uv run python -m pytest tests/kernel -q   # schema + kernel contract checks
 ```
 
 Run the Python suite:

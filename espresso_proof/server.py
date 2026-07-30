@@ -1176,6 +1176,15 @@ def _make_handler(workbench: Workbench):
 
         def do_POST(self) -> None:  # noqa: N802
             try:
+                # Every POST here mutates run state or spends money on an external
+                # agent, so the loopback/CSRF guard belongs before dispatch rather
+                # than on individual branches. It used to be applied per-branch and
+                # four of them were missing it — create-run, start-agent,
+                # agents-batch and continue, i.e. exactly the ones that launch paid
+                # agent work. A page in the user's browser could POST to
+                # 127.0.0.1 cross-origin and start runs. Guarding here means a new
+                # endpoint cannot be added without the check.
+                self._require_loopback_origin()
                 parts = self._parts()
                 body = self._read_json()
                 if parts == ["api", "runs"]:
@@ -1206,9 +1215,6 @@ def _make_handler(workbench: Workbench):
                     )
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "jobs"] and parts[3] == "cancel":
-                    # mutating POST: enforce the loopback CSRF guard so another
-                    # origin cannot cancel a local run's jobs.
-                    self._require_loopback_origin()
                     self._send_json(workbench.cancel_job(parts[2]))
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "strategy-feedback":

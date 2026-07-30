@@ -6,7 +6,7 @@ uses the network, and -- crucially -- never writes a proof/source/evidence/grade
 status: a run record is raw evidence only (slice 1 guarantees this by
 construction). Earning a SCOPED status from a confirming run is reserved for the
 allowlisted-adapter + proof-verification bridge in slice 3; this slice's runner
-always records ``trusted=False``.
+records ``trusted`` from the tool's allowlist spec (False for the fake_* demo tools, True only for a real allowlisted tool such as exact_modexp).
 
 Safety properties of every run:
 - only a name in ``FAKE_TOOLS`` may execute (unknown / GitHub / PyPI tools are
@@ -66,7 +66,8 @@ def _parse_result_line(stdout: str) -> str:
 
 # Allowlisted deterministic FAKE tools. Each runs a small, network-free,
 # deterministic Python program. argv is recorded verbatim (the script is the
-# "tool"). These are NOT trusted backends: the runner records trusted=False, so a
+# "tool"). The fake_* demos are NOT trusted backends: the runner records their
+# trusted=False, so a
 # fake run earns nothing -- it only exercises the executor + record + fail-closed.
 _OK_SCRIPT = "print('RESULT: ok deterministic-check'); "
 _MALFORMED_SCRIPT = "print('no parseable result here')"
@@ -133,7 +134,8 @@ def run_external_tool(
 
     Pure executor: does not persist anything. Refuses any tool not in
     ``FAKE_TOOLS``. Fails closed (no parsed result) on timeout / nonzero exit /
-    malformed output. Always records ``trusted=False`` -- a RUN record is raw
+    malformed output. Records ``trusted`` from the allowlist spec (False for the
+    fake_* demos) -- a RUN record is raw
     evidence; earning a scoped status is the adapter's job via the kernel bridge.
 
     ``extra_args`` are appended to the fixed allowlisted argv as DATA only (each is

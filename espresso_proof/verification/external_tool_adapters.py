@@ -117,6 +117,11 @@ def run_exact_modexp_adapter(
             ),
             # Reproducibility provenance (never earns/upgrades status):
             "adapter_id": "exact_modexp",
+            # The kernel re-runs pow() over exactly these operands at validation
+            # time; the recorded verdict alone is not evidence.
+            "recompute_input": {
+                "base": base, "exp": exp, "mod": mod, "expected": expected,
+            },
             "code_version": f"espresso-proof {_package_version()}",
             "dependency_version": f"python {platform.python_version()} pow()",
             "input_hash": _sha256(f"exact_modexp|{base}|{exp}|{mod}|{expected}"),

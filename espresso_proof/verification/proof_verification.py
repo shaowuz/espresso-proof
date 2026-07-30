@@ -79,6 +79,8 @@ def build_finite_group_entries(claim_id: str, primes: list[int]) -> list[dict]:
                         "two tables are ALL groups of this order is the classification "
                         "theorem, not machine-verified here."
                     ),
+                    "adapter_id": "verify_group_abelian",
+                    "recompute_input": {"table": table},
                 }
             )
     return entries
@@ -123,6 +125,8 @@ def build_gl2_f3_solvability_entry(claim_id: str, *, entry_id: str = "gl2_f3_sol
         "input_hash": witness["transcript_sha256"],
         "output_hash": witness["transcript_sha256"],
         "adapter_id": "gl2_f3_solvability_witness",
+        # No input: the witness regenerates its own finite data.
+        "recompute_input": {},
     }
     return entry, witness
 
@@ -183,6 +187,12 @@ def build_permutation_group_entry(
         "input_hash": witness.get("transcript_sha256", ""),
         "output_hash": witness.get("transcript_sha256", ""),
         "adapter_id": "permutation_group_witness",
+        # The kernel re-enumerates from exactly this data at validation time.
+        "recompute_input": {
+            "generators": [list(g) for g in generators] if isinstance(generators, list) else [],
+            "expected_order": expected_order,
+            "expected_solvable": expected_solvable,
+        },
     }
     return entry, witness
 
@@ -231,6 +241,7 @@ def build_gl2_f3_order_spectrum_entry(
         "input_hash": witness["transcript_sha256"],
         "output_hash": witness["transcript_sha256"],
         "adapter_id": "gl2_f3_order_spectrum_witness",
+        "recompute_input": {},
     }
     return entry, witness
 
@@ -364,6 +375,8 @@ def build_identity_table_entry(claim_id: str, *, entry_id: str, table: object, i
         "confirmed": confirmed,
         "earned_status": "instance_checked" if confirmed else "unverified",
         "scope_note": result["scope_note"],
+        "adapter_id": "verify_identity_on_table",
+        "recompute_input": {"table": table, "identity": identity},
     }
 
 
@@ -387,6 +400,8 @@ def build_ring_identity_entry(claim_id: str, *, entry_id: str, identity: str, mo
         "confirmed": confirmed,
         "earned_status": "instance_checked" if confirmed else "unverified",
         "scope_note": result["scope_note"],
+        "adapter_id": "verify_ring_identity_mod",
+        "recompute_input": {"identity": identity, "modulus": modulus},
     }
 
 
@@ -425,6 +440,12 @@ def build_matrix_rank_entry(
         "confirmed": confirmed,
         "earned_status": "instance_checked" if confirmed else "unverified",
         "scope_note": result["scope_note"],
+    "adapter_id": "verify_matrix_rank",
+        "recompute_input": {
+            "matrix": matrix,
+            "expected_rank": expected_rank,
+            "expected_determinant": expected_determinant,
+        },
     }
 
 
@@ -469,6 +490,8 @@ def build_tensor_left_exact_counterexample_entry(
             "by 2 map and is nonzero. It is not a universal proof about tensor "
             "products or arbitrary modules."
         ),
+        "adapter_id": "tensor_left_exact_counterexample",
+        "recompute_input": {"modulus": modulus, "multiplier": 2, "witness": witness},
     }
 
 

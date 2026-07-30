@@ -13,13 +13,21 @@ npm --prefix web run build
 ```
 
 `uv sync` creates `.venv` and uses the Python version the project declares. You
-need `uv`, Node.js 20+, and — for real-agent runs — a Codex CLI on your `PATH`.
+need `uv` and Node.js 20+. Real-agent runs additionally need one agent backend
+on your `PATH` — the repository ships adapters for the Codex CLI, the Claude
+CLI, OpenAI, and espresso-core — but nothing below requires one.
 
 Check that it works without calling a model:
 
 ```bash
+printf 'Claim: every group of prime order is cyclic.\n' > problem.md
 uv run espresso orchestrate --input problem.md --project demo --provider stub --front-half stub
 ```
+
+The claim text matters here: the run stops at a clarification gate if it cannot
+lock a precise claim, which is correct behaviour but looks like a failure the
+first time. `examples/quickstart.sh` does the same thing with a claim known to
+get past that gate.
 
 ## Tests
 

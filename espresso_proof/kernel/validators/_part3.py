@@ -41,6 +41,7 @@ from espresso_proof.validation.manifest import ManifestPathValidationError
 from espresso_proof.validation.manifest import validate_relative_artifact_path
 
 
+from espresso_proof.kernel.recompute import is_recomputable, recompute_result
 from espresso_proof.kernel.validators._part1 import (
     _TRUSTED_EARNED,
     _adapt_legacy_memory_context,
@@ -509,6 +510,40 @@ def _validate_proof_verification(
                 raise KernelValidationError(
                     f"proof_verification entry {entry.id!r} claims {earned} without a "
                     "trusted + confirming verifier result"
+                )
+            # The booleans above are written by whoever wrote the file, so they
+            # are a declaration, not evidence. The kernel re-derives the result
+            # itself and compares its own transcript hash. A forged entry cannot
+            # pass: no adapter reproduces a hash it invented.
+            if not is_recomputable(entry.adapter_id):
+                raise KernelValidationError(
+                    f"proof_verification entry {entry.id!r} claims {earned} but "
+                    f"adapter_id {entry.adapter_id!r} is not a kernel-recomputable "
+                    "deterministic verifier; a checked status cannot be earned from "
+                    "a result the kernel cannot re-derive"
+                )
+            recomputed = recompute_result(entry.adapter_id, entry.recompute_input)
+            if recomputed is None:
+                raise KernelValidationError(
+                    f"proof_verification entry {entry.id!r} claims {earned} but the "
+                    f"kernel could not re-derive it with {entry.adapter_id!r} "
+                    "(missing or malformed recompute_input)"
+                )
+            if not recomputed["confirmed"]:
+                raise KernelValidationError(
+                    f"proof_verification entry {entry.id!r} claims {earned} but the "
+                    "kernel's own recomputation does not confirm it"
+                )
+            # Hash comparison only when both sides produced one: several shipped
+            # verifiers do not emit a transcript hash, and the re-derived
+            # confirming boolean above is the part a forged entry cannot fake.
+            digest = recomputed["transcript_sha256"]
+            if digest and entry.output_hash and digest != entry.output_hash:
+                raise KernelValidationError(
+                    f"proof_verification entry {entry.id!r} claims {earned} but the "
+                    "kernel's recomputation does not reproduce the recorded "
+                    f"output_hash (recorded {entry.output_hash[:16]}..., recomputed "
+                    f"{digest[:16]}...)"
                 )
             if _TRUSTED_EARNED.get(vt) != earned:
                 raise KernelValidationError(

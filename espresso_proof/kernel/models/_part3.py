@@ -223,6 +223,12 @@ class ProofVerificationEntry(StrictBaseModel):
     earned_status: ProofVerificationStatus
     scope_note: str
     adapter_id: str = ""
+    # What the kernel needs to re-derive this result itself. An entry claiming a
+    # checked status must name an adapter_id the kernel can recompute (see
+    # kernel/recompute.py) and record whatever input that adapter takes; the
+    # validator re-runs it and compares transcript hashes. Self-declared
+    # trusted/confirmed booleans are no longer sufficient.
+    recompute_input: dict[str, Any] = Field(default_factory=dict)
     code_version: str = ""
     dependency_version: str = ""
     input_hash: str = ""
