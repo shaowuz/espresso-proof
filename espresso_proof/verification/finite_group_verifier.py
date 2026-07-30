@@ -340,6 +340,17 @@ def permutation_group_witness(
         checks["order"] = len(group) == int(expected_order)
     if expected_solvable is not None:
         checks["solvable"] = solvable is bool(expected_solvable)
+    # A vacuous check is not a check. The trivial group satisfies "order 1" and
+    # "solvable" no matter what the surrounding artifact claims to be about, so
+    # confirming it would let a request earn instance_checked for a target
+    # sentence of the attacker's choosing while the machine work was one
+    # identity element. Same for the two-element group, whose properties are
+    # forced. Refusing here keeps the earned status proportional to the work.
+    if len(group) < 3:
+        return _bad(
+            f"enumerated group has order {len(group)}; a group this small has no "
+            "non-trivial property to confirm and cannot earn a checked status"
+        )
     confirmed = bool(checks) and all(checks.values())
 
     transcript = {

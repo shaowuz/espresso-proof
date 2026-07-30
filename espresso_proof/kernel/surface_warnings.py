@@ -509,7 +509,10 @@ def render_blocker_ranking(ranking: dict[str, Any]) -> list[str]:
     lines = ["Blocker ranking (reviewer-assigned severity):"]
     for obj in ranking.get("top") or []:
         sev = obj.get("severity")
-        action = str(obj.get("suggested_next_action") or "").strip()
+        # Scrubbed like the objection text beside it: this is agent free text
+        # reaching the user, and printing it raw let proof-complete language and
+        # markup through on the one line the ranking exists to highlight.
+        action = _display_text(str(obj.get("suggested_next_action") or "")).strip()
         text = _display_text(obj.get("text"))[:160]
         lines.append(f"  [{sev}] {text}")
         if action:

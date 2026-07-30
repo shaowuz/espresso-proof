@@ -104,7 +104,7 @@ def run_exact_modexp_adapter(
             "id": f"{entry_id}_pv",
             "verifier_type": "exact_computation",
             "claim_id": claim_id,
-            "target": f"exact value of {base}^{exp} mod {mod}",
+            "target": f"exact modular exponentiation {base}^{exp} mod {mod}",
             "input_summary": f"exact_modexp(base={base}, exp={exp}, mod={mod}); expected={expected}",
             "result": f"{base}^{exp} mod {mod} = {authoritative} (== expected)",
             "trusted": True,

@@ -44,7 +44,7 @@ from espresso_proof.kernel.llm_client import LLMClient
 from espresso_proof.kernel.models import LLMAgentRunReport
 from espresso_proof.kernel.observability import usage_sink_for_run
 from espresso_proof.kernel.pressure_status import artifact_revision_hash
-from espresso_proof.kernel.proof_language import NO_AGENT_TEXT, safe_list
+from espresso_proof.kernel.proof_language import NO_AGENT_TEXT, safe_list, safe_text
 from espresso_proof.kernel.time_allocation import (
     TimeAllocationPlan,
     ensure_prover_time_allocation_plan,
@@ -832,7 +832,10 @@ def _normalize_scoped_objections(
             proof_step_id = None
         return {
             "id": f"{verifier_id}_obj_{idx:03d}",
-            "text": text[:600],
+            # safe_text like every other agent free-text field committed here:
+            # explicit scoped_objections were the one path that went in with a bare
+            # str(), so reviewer prose reached artifacts unredacted.
+            "text": safe_text(text)[:600],
             "scope": scope,
             "scope_source": "explicit",
             "scope_inferred": False,
@@ -841,7 +844,7 @@ def _normalize_scoped_objections(
             "proof_step_id": proof_step_id,
             "kind": entry.get("kind") if entry.get("kind") in _OBJECTION_KINDS else "other",
             "severity": entry.get("severity") if entry.get("severity") in _OBJECTION_SEVERITIES else "P2",
-            "suggested_next_action": str(entry.get("suggested_next_action", ""))[:300],
+            "suggested_next_action": safe_text(entry.get("suggested_next_action", ""))[:300],
         }
 
     explicit = raw.get("scoped_objections")
