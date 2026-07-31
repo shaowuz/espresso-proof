@@ -20,8 +20,6 @@ conversation and into typed, persistent artifacts. Every round begins from the
 recorded claim, hypotheses, sources, proof steps, objections, decisions, and
 provenance.
 
-![The Espresso Proof cockpit](docs/assets/cockpit.png)
-
 ## Long-horizon research control
 
 Espresso gives common forms of research drift an explicit system response.
