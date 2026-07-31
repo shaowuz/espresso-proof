@@ -3,250 +3,105 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
 
-**A controlled research runtime for long-horizon mathematical reasoning.**
+**A local AI workspace for mathematical research. Agents generate the mathematics; a deterministic kernel owns the truth about its status.**
 
-Espresso Proof is built for difficult mathematical problems that require
-competing strategies, repeated proof attempts, literature investigation,
-examples, counterexamples, adversarial review, targeted repair, and sustained
-human judgment.
+Espresso Proof helps a mathematician turn a claim or proof sketch into auditable project artifacts: claim state, source gaps, examples, counterexamples, strategy notes, reviewer objections, line-numbered proof attempts, and a visible run trace. It is built around one practical question:
 
-Complex research rarely fits into one prompt. Over hours or days, the working
-claim may shift, hypotheses may disappear from context, a citation may become
-stronger in memory than it was in the source, a theorem may be applied outside
-its actual scope, and a reviewer objection may be lost between rounds.
+> *Is this mathematical idea worth continuing, and what is the cheapest next action?*
 
-Espresso solves this control problem by moving research state out of transient
-conversation and into typed, persistent artifacts. Every round begins from the
-recorded claim, hypotheses, sources, proof steps, objections, decisions, and
-provenance.
-
-## Long-horizon research control
-
-Espresso gives common forms of research drift an explicit system response.
-
-| Research risk | Espresso response |
-| --- | --- |
-| The claim changes between rounds | A locked claim and hypothesis ledger define the current mathematical target |
-| Definitions or assumptions become implicit | Reviewers record definition gaps, hypothesis gaps, and unresolved assumptions as typed blockers |
-| A promising citation is treated as established support | Literature discovery produces candidates; source grounding connects exact sources to exact proof steps |
-| A theorem is applied under the wrong hypotheses | Theorem-applicability review compares conditions, conclusion strength, and scope |
-| A universal claim is inferred from generic cases | Scope checks distinguish universal, generic, very general, and restricted statements |
-| Reviewer criticism disappears from context | Objections persist with severity, scope, target line or subgoal, and proposed next action |
-| A proof changes after review | Hash-bound review records require the current proof and evidence artifacts to match |
-| Human and automatic decisions become indistinguishable | Strategy and gate decisions record explicit `human` or `auto` provenance |
-| A stage writes inconsistent artifacts | Transactional validation restores the last valid run state |
-
-The result is a research record that remains inspectable and resumable across
-many agent calls and many research sessions.
-
-## From a claim to an auditable research run
-
-Start with a mathematical claim or proof sketch. Espresso turns it into a
-structured research program:
+The supported product path is intentionally narrow:
 
 ```text
-lock the claim and hypotheses
-        ↓
-generate and grade competing strategies
-        ↓
-search, read, and ground relevant literature
-        ↓
-pressure-test the claim with examples and counterexamples
-        ↓
-construct candidate proof routes
-        ↓
-run independent strategy, evidence, and line-proof reviewers
-        ↓
-convert objections into scoped repair targets
-        ↓
-ask the mathematician where research judgment is required
-        ↓
-publish an auditable research memo and complete run trace
+React cockpit -> espresso serve -> external agent (Codex or Claude CLI) -> artifact kernel
 ```
 
-Each stage reads explicit input artifacts and writes schema-validated output
-artifacts. Failed routes, unresolved blockers, source gaps, and human decisions
-remain available when the investigation resumes.
+Espresso is not a theorem prover, not a Lean formalization product, and not a chatbox. It is an agent-backed research workflow that keeps important reasoning in files instead of only in conversation.
 
-## Specialized agents with separate responsibilities
+## Why Espresso
 
-Espresso separates mathematical generation from mathematical criticism.
+Large language models are strong mathematical *generators* and unreliable *graders* of their own output. Most AI-for-math tools resolve that tension in one of two ways: trust the model's self-assessment, or demand full formalization before anything counts. Espresso takes a third position:
 
-| Component | Responsibility |
-| --- | --- |
-| Strategy pipeline | Generates competing routes, records their main risks and effort requirements, and identifies the cheapest informative next test |
-| Literature agents | Discover candidate sources, inspect available source text, and extract theorem statements, definitions, hypotheses, and locators |
-| Example agents | Construct informative special cases, extremal cases, and boundary cases |
-| Counterexample agents | Test universal claims, dropped hypotheses, analogies, and vulnerable proof steps |
-| Prover agent | Builds candidate arguments from the locked claim and current evidence |
-| Strategy reviewer | Tests reductions, analogy risks, theorem drift, and route quality |
-| Evidence reviewer | Audits how sources, examples, counterexamples, and computations support the argument |
-| Line-proof reviewer | Locates logical gaps, missing definitions, unsupported transitions, and theorem-applicability risks |
-| Repair loop | Converts typed reviewer objections into bounded, targeted follow-up rounds |
+**Let agents produce every candidate — strategies, examples, counterexamples, literature matches, line-numbered proofs, reviews. Let a small deterministic Python kernel be the only component that can grant status.**
 
-Reviewer feedback is stored as structured blockers with:
+Concretely:
 
-- a target proof step, subgoal, route, or global issue;
-- a severity level;
-- a failure category;
-- the reviewer’s concrete objection;
-- a proposed next action.
+- Every run is a directory of ~30 schema-validated YAML artifacts (69 registered artifact models). Nothing important lives only in a chat transcript.
+- Every mutation happens inside a transaction: snapshot → mutate → `validate_run` → advance, with rollback on failure. A run on disk is always in a valid state.
+- Agent output is scrubbed on entry: proof-claiming language is quarantined (English *and* Chinese completion phrases), and any status field an agent tries to attach is stripped. Log records that carry status-bearing keys are rejected outright — logs cannot impersonate evidence.
+- The phrases `fail closed` and `default-deny` appear **more than 200 times** in the source. That is the design temperament.
 
-The next prover round therefore receives a precise repair packet rather than an
-unstructured request to try again.
+The payoff: you can let agents run hard — fan out strategies, attack the claim with counterexamples, iterate prover/reviewer rounds overnight — and everything the run asserts afterwards is exactly as strong as the evidence trail behind it, no stronger.
 
-## Literature grounding and theorem applicability
+## The status ladder
 
-Espresso separates finding a source from establishing how that source supports
-an argument.
+Proof-language status is a strictly ordered vocabulary defined in the kernel. Every value states who can earn it; wording alone earns nothing.
 
-A literature agent may identify a promising paper, book, or theorem. Source
-grounding then connects a specific proof step to:
+| Status | Who can grant it |
+|---|---|
+| `idea_sketch`, `proof_candidate` | any agent — proposing is free |
+| `agent_consensus_mock_checked` | only the consensus seal: three adversarial reviewers, unanimous, line-citations required, hash-bound. **Amber by definition — explicitly not verification** |
+| `source_checked_argument` | exact source grounding of the load-bearing steps (default-deny theorem-applicability audit) |
+| `instance_checked`, `computation_checked` | only bounded machine verifiers that actually executed the check |
+| `lean_checked` | no code path can grant it today — reserved until a real formal backend exists |
+| `human_confirmed` | only an actual human decision, recorded as such. Automation can never write it |
 
-- an exact source;
-- an exact theorem or definition locator;
-- the statement used by the argument;
-- the source attribution;
-- the required hypotheses;
-- the available access record;
-- the proof step that consumes the result.
+The same discipline runs through every enum: retrieved sources have no `source_backed` state (only `candidate` / `unverified` / `not_found`), the proof-verification enum deliberately has no `proved`, and subgoal states include `blocked_missing_source` but nothing that spells success by assertion.
 
-The theorem-applicability layer compares the source theorem with the current
-proof obligation. It records whether each condition is:
-
-- satisfied;
-- missing;
-- mismatched;
-- unclear;
-- awaiting human judgment.
-
-It also compares the theorem’s conclusion and scope with the claim, including
-distinctions such as:
-
-- universal versus restricted;
-- very general versus arbitrary;
-- stronger versus weaker condition;
-
-This creates a traceable evidence chain:
+## How a run works
 
 ```text
-candidate source
-    → exact theorem extraction
-    → source grounding
-    → hypothesis and scope comparison
-    → applicability review
-    → kernel-validated evidence label
+problem.md, or a claim pasted into the cockpit
+        |
+  front half - claim clearing (default-deny: every unresolved entry blocks),
+        |       hypothesis ledger; an unclear claim parks the run with a human
+        |       question and spends nothing on provers
+  literature - candidate sources, never auto-trusted
+        |
+  scoped machine checks - the only way to earn instance_checked / computation_checked
+        |
+  strategy fan-out + grading  ->  HUMAN GATE (the designed stop)
+        |
+  human picks strategy + effort   (or --auto-continue: machinery picks the
+        |                          top-scored strategy and the artifacts say so —
+        |                          selected_by='auto', never 'human')
+  bounded prover <-> reviewer loop  ->  research memo (COMPLETED_MEMO)
 ```
 
-A discovered reference therefore becomes useful research evidence through an
-explicit sequence of inspectable artifacts.
+The memo answers the core question: the clarified claim, the strongest routes, what is sourced / checked / inferred / speculative, the main obstruction, and the next decision for the mathematician. Failed attempts are preserved as advisory memory instead of vanishing.
 
-## What the artifact kernel guarantees
+On-demand **evidence agents** (examples, counterexamples, literature, failure patterns) can be fanned out in parallel at any time — computation runs concurrently, commits are serialized in deterministic order, and results converge byte-identical with the serial path. One lane failing is captured, never silently dropped.
 
-The artifact kernel gives every status label a precise operational meaning. A
-label records which checks ran, which evidence they used, and which version of
-the research artifacts they reviewed.
+### The proof branch: line-numbered proofs and the consensus seal
 
-The kernel enforces:
+A route is not a proof, and Espresso enforces the difference structurally.
 
-- strict schemas for agent inputs and outputs;
-- valid references between claims, proof steps, sources, reviews, and evidence;
-- exact locator, attribution, and hypothesis requirements for source grounding;
-- condition, conclusion, and scope checks for theorem applicability;
-- scoped `instance_checked` and `computation_checked` results from machine
-  checks;
-- three distinct line-citing reviewers for an
-  `agent_consensus_mock_checked` proof seal;
-- hash binding between a review and the exact proof, claim, sources, and loop
-  state it examined;
-- automatic expiration of stale seals after relevant artifacts change;
-- explicit `human` versus `auto` provenance for strategy and gate decisions;
-- transactional stage writes with validation and rollback to the last valid
-  run;
-- path confinement and display-safe rendering of agent-generated material.
+`espresso write-proof` produces `line_numbered_proof.yaml`: every line carries a `statement`, a `justification`, and typed dependency edges (`prior_line`, `theorem_ref`, `human_assumption`, `unchecked_gap`, …). A line without a justification is rejected as a route step. The artifact's status field is pinned to `advisory` — the schema forbids attaching anything stronger.
 
-Agents generate mathematical content. The kernel determines which evidence
-conditions have been satisfied and records the resulting status.
+`espresso seal-consensus` then runs **three adversarial reviewers with disjoint jobs** — a line-by-line proof reviewer, a theorem/lemma-applicability reviewer, and a dedicated gap-hunter — over that proof object:
 
-## Human–AI research control
+- The seal is granted only on a unanimous *no fatal flaw found* verdict.
+- A passing reviewer **must cite the specific line ids** it checked; an uncited pass is a validation error.
+- The seal is **hash-bound** to the claim, the proof, and its source grounding. Editing a single line after review revokes it — the run fails validation until re-sealed.
+- A run with only a route and no line-numbered proof **fails closed**. So does an `unclear` verdict.
+- The offline stub client *refuses* the proof-writer and consensus-reviewer roles entirely: a test double can never earn the amber status.
 
-Espresso supports several levels of human involvement within the same research
-run.
+What this buys, stated exactly: `agent_consensus_mock_checked` means *three independent agent reviewers each failed to find a fatal flaw in a fully written-out proof and signed specific lines*. That is a meaningfully higher bar than "the model says proof-close" — and the kernel still displays it as unverified, because it is.
 
-| Interaction mode | How it works |
-| --- | --- |
-| Autonomous scouting | Agents explore strategies, literature, examples, counterexamples, and reviewer pressure before presenting a decision |
-| Strategy portfolio | Espresso presents multiple routes with risks, effort estimates, source gaps, and proposed next actions |
-| Human route selection | The mathematician chooses from kernel-valid strategies and selects the desired effort level |
-| Advisory steering | The mathematician marks routes as `focus`, `repair`, `normal`, or `reduce`; the next round adjusts ordering, compute, and prompt context |
-| Asynchronous checkpoint | The run persists its complete state at claim-clarification and strategy gates and resumes from disk later |
-| Auditable auto-continue | Espresso selects the highest-ranked allowed strategy and records the decision with `selected_by: auto` |
-| Targeted repair | Repairable proof-step and computation blockers receive bounded repair rounds |
-| Human research judgment | Ambiguous assumptions, definitions, source choices, and strategic decisions return to an explicit human gate |
+## The cockpit
 
-Available effort levels include:
+`espresso serve` hosts a local React workbench (React 18 + TypeScript + Vite, KaTeX math rendering): a claim card, strategy/route table, a prover-round ledger (selected strategy, effort, stop reason, open reviewer blockers), an evidence rail for examples / counterexamples / computations, a literature rail, streaming draft and chat panels (proof-language-scrubbed server-side), and a collapsible live trace of every agent call. The server is stdlib-only Python, loopback-bound, CSRF-guarded, and path-confines every run id — it never executes browser input.
 
-- `quick_test`;
-- `normal_pass`;
-- `deep_exploration`;
-- `long_watch`.
+## Quickstart
 
-Human steering controls where the system spends attention. Kernel evidence rules
-continue to determine the meaning of every recorded status.
+### Requirements
 
-## Example
-
-`examples/quickstart.sh` runs one claim end to end with the deterministic stub
-provider — no model, no API key, no network — and prints the run directory it
-produced:
-
-```bash
-bash examples/quickstart.sh
-```
-
-It ends at a human gate, which is the normal outcome: the run records what it
-found and asks which route to spend effort on. `docs/engineering/execution-trunk.md`
-walks the same path stage by stage.
-
-## Product path
-
-The supported runtime path is intentionally direct:
-
-```text
-React cockpit
-    → espresso serve
-    → orchestration and human gates
-    → configured external agent adapter
-    → artifact kernel
-    → local auditable run directory
-```
-
-The same run can be:
-
-- inspected through the cockpit;
-- executed headlessly from the CLI;
-- paused at a research decision;
-- resumed with its claim, evidence, reviewer objections, and provenance intact;
-- continued automatically with explicit automatic-decision provenance.
-
-## Requirements
-
-- Python 3.11 or newer
 - `uv` for Python dependencies and the project virtual environment
-- Node.js 20 or newer and npm for the React cockpit
-- one configured agent backend for real-agent runs
+- Node.js 20+ and npm for the React cockpit
+- An agent CLI for external-agent runs: Codex CLI as `codex`, or Claude Code as `claude`
 
-The repository includes adapters for:
+`uv sync` creates the local `.venv` automatically and uses the Python version declared by the project.
 
-- Codex CLI;
-- Claude CLI;
-- OpenAI;
-- espresso-core.
-
-`uv sync` creates the local virtual environment and uses the Python version
-declared by the project.
-
-## Install
+### Install
 
 ```bash
 uv sync --extra dev
@@ -254,205 +109,101 @@ npm --prefix web ci
 npm --prefix web run build
 ```
 
-## Deterministic smoke test
+### Start working
 
-The deterministic stub provider runs the complete orchestration path locally
-with reproducible agent outputs.
-
-Create a `problem.md` containing a mathematical claim or proof sketch, then run:
+Start the product server with the adapter for whichever agent CLI you use:
 
 ```bash
-uv run espresso orchestrate \
-  --input problem.md \
-  --project demo \
-  --provider stub \
-  --front-half stub
+export ESPRESSO_EXTERNAL_AGENT_COMMAND="uv run espresso-codex-agent"    # Codex CLI
+# or: export ESPRESSO_EXTERNAL_AGENT_COMMAND="uv run espresso-claude-agent"  # Claude Code CLI
+uv run espresso serve --runs-root . --host 127.0.0.1 --port 8765 --provider external
 ```
 
-The command creates a local run directory containing the claim, strategies,
-literature records, examples, counterexamples, reviews, state transitions, and
-research memo.
-
-To exercise automatic strategy selection and continuation:
-
-```bash
-uv run espresso orchestrate \
-  --input problem.md \
-  --project demo \
-  --provider stub \
-  --front-half stub \
-  --auto-continue
-```
-
-## Start the research cockpit
-
-Configure an external agent command. For the shipped Codex adapter:
-
-```bash
-export ESPRESSO_EXTERNAL_AGENT_COMMAND="uv run espresso-codex-agent"
-```
-
-Start the local product server:
-
-```bash
-uv run espresso serve \
-  --runs-root . \
-  --host 127.0.0.1 \
-  --port 8765 \
-  --provider external
-```
-
-Open:
+Open `http://127.0.0.1:8765`, paste a mathematical claim or proof sketch, and let Espresso create a run. Runs and memory are local artifacts under the runs root; they are not committed project files. For example, paste this into the cockpit to start a run:
 
 ```text
-http://127.0.0.1:8765
+Claim sketch:
+For all smooth cubic fourfolds, the Hodge atom obstruction coming from the
+Hodge-theoretic mirror symmetry package proves irrationality.
+
+Proof sketch:
+The proof treats the very general case as if it applied to every smooth cubic
+fourfold. I have not pinned an exact theorem number, and I have not checked a
+special cubic fourfold example with extra algebraic classes.
+
+What I want checked:
+Do not mark this as proved. Look for the all-versus-very-general jump, missing
+source grounding, and special-example tests that could break the argument.
 ```
 
-Paste a mathematical claim or proof sketch into the cockpit. Espresso creates a
-run, executes the research stages, displays the current artifacts, and presents
-human decisions when the workflow reaches a research gate.
+### Headless, without any model
 
-Runs and project memory are stored as local artifacts under the configured runs
-root.
-
-## Run headlessly
-
-The same workflow can run directly from the CLI:
+The full pipeline also runs from the CLI, and a deterministic offline stub makes the trunk testable end-to-end (`--provider` is required everywhere — there is no silent test mode):
 
 ```bash
-uv run espresso orchestrate \
-  --input problem.md \
-  --project demo \
-  --provider external
+echo "Claim: every group of prime order is cyclic." > problem.md
+uv run espresso orchestrate --input problem.md --project demo --provider stub --front-half stub
+# ...stops at the human gate. Pick a strategy from strategy_brief.yaml:
+uv run espresso orchestrate --resume projects/demo/runs/<run_id> --provider stub \
+    --select-strategy <strategy_id> --effort normal_pass
 ```
 
-Resume a run after selecting a strategy:
+## Bring your own agent
+
+Any agent that speaks the adapter contract can drive Espresso: one JSON request on stdin (`system`, `prompt`, `required_json_schema`, timeout), one JSON object on stdout, non-zero exit instead of malformed output for trust-relevant roles. Three adapters ship in-tree (a direct `openai` API provider is also built in):
+
+| Adapter | Backs onto | Notes |
+|---|---|---|
+| `espresso-codex-agent` | Codex CLI | reports per-call usage from the exec event stream |
+| `espresso-claude-agent` | Claude Code CLI | self-reports model identity, usage, and cost per call |
+| `espresso-core-agent` | espresso-core (experimental) | routes prover-family roles to a dedicated prover backend; consensus reviewers go elsewhere, so the seal never reviews its own author |
+
+Provenance is honest by construction: executor identity is recorded from the agent's own envelope, never from a CLI flag; unknown identity stays `null` rather than defaulting to a plausible model name; and every model call — including failures and timeouts — lands in an append-only `token_usage.jsonl` cost sidecar that survives rollbacks and that validation never reads.
+
+## By the numbers
+
+| | |
+|---|---|
+| Kernel + orchestration | 174 Python modules, ~58k lines, across 13 subpackages |
+| Runtime dependencies | **3** (`pydantic`, `PyYAML`, `typer`) — the trust surface stays auditable |
+| Artifact schemas | 69 registered models, exported and drift-checked in CI |
+| CLI surface | 60+ subcommands, incl. the `verify-*` family of bounded machine verifiers |
+| Agent roles | 17 prompt-defined roles (prover, strategy attacker, adversarial gap reviewer, …) |
+| Tests | 1,876 Python test functions in 142 files, plus 80+ web tests |
+| Honesty fixtures | 13 deterministic evals such as `fake_source_backed_rejected` and `human_feedback_does_not_upgrade_source_status` |
+
+Fast-iteration policy: while developing, run only the scoped checks you need (e.g. `pytest tests/<subsystem> -q`). The full suite — pytest, mock evals, benchmark, calibration, scorecard, web build — is required only when a PR merges into main; GitHub runs it automatically via [`.github/workflows/full-ci.yml`](.github/workflows/full-ci.yml).
 
 ```bash
-uv run espresso orchestrate \
-  --resume projects/demo/runs/<run_id> \
-  --select-strategy <strategy_id> \
-  --effort normal_pass
-```
-
-Run through the strategy gate with automatic selection:
-
-```bash
-uv run espresso orchestrate \
-  --input problem.md \
-  --project demo \
-  --provider external \
-  --auto-continue
-```
-
-Automatic selection chooses from the same allowed strategy set and records:
-
-```yaml
-selected_by: auto
-human_confirmed: false
-```
-
-## Run tests
-
-Use scoped tests while developing and the complete gate before merging changes
-into `main`.
-
-Validate exported schemas:
-
-```bash
-uv run espresso export-schemas
 uv run espresso export-schemas --check
-uv run python -m pytest tests/kernel -q   # schema + kernel contract checks
-```
-
-Run the Python suite:
-
-```bash
+uv run espresso eval --schemas-only
 uv run python -m pytest -q
-```
-
-Run the frontend suite:
-
-```bash
 npm --prefix web test
-npm --prefix web run build
 ```
 
-The generated `schemas/` directory is a local validation artifact.
+`schemas/` is a local generated directory and is intentionally ignored by git.
 
-## Repository map
+## What Espresso is not
 
-| Path | Responsibility |
-| --- | --- |
-| `espresso_proof/` | Product runtime |
-| `espresso_proof/kernel/` | Schemas, validators, status rules, transactions, and trust-bearing artifacts |
-| `espresso_proof/agents/` | Prover, reviewer, prompt, adapter, and agent-output processing |
-| `espresso_proof/orchestration/` | Canonical run control flow, resume logic, human gates, and prover loops |
-| `espresso_proof/literature/` | Literature discovery, retrieval, ingestion, extraction, and review |
-| `espresso_proof/verification/` | Scoped computations, source checks, and theorem-applicability services |
-| `espresso_proof/strategy/` | Strategy generation, grading, selection, feedback, and time allocation |
-| `espresso_proof/server.py` | Local HTTP server behind the cockpit |
-| `web/` | React research cockpit |
-| `tests/` | Contract, regression, integration, and hard-negative tests |
-| `docs/engineering/` | Maintainer-facing execution and integration documentation |
-| `docs/reference/` | Frozen comparison and reference material outside the product runtime |
+Stated plainly, because the whole product is about not overclaiming:
 
-## CLI surface
+- **Espresso does not certify mathematics.** The strongest status a purely agentic path can reach is the amber consensus seal. The green statuses (`lean_checked`, `human_confirmed`) require a formal backend that does not exist yet, or a human.
+- **It does not make an LLM's mathematics correct.** It makes uncorrected overclaiming structurally hard: every upgrade path runs through the kernel's validators, and every shortcut fails closed.
+- **It is a local, single-mathematician research tool** — not a hosted service, not a benchmark harness, not an autoformalization pipeline.
 
-Most users begin with these commands:
+The bet is that this is the useful half of the problem: a mathematician with strong agent horsepower does not need a system that agrees with the agents. They need one that keeps score honestly.
 
-| Command | Purpose |
-| --- | --- |
-| `espresso serve` | Start the local research cockpit |
-| `espresso orchestrate` | Run the canonical workflow headlessly |
-| `espresso choose-strategy` | Record a human strategy decision |
-| `espresso resolve-agent-gate` | Resolve a prover/reviewer research gate |
+## Reference
 
-Additional command groups support deeper workflows:
+- [docs/engineering/execution-trunk.md](docs/engineering/execution-trunk.md) — the end-to-end call tree from problem text to output files; start here for architecture.
+- [docs/product-philosophy.md](docs/product-philosophy.md) — product principles and the trust boundary.
+- [docs/engineering/product-path-boundaries.md](docs/engineering/product-path-boundaries.md) — supported product surface.
+- [docs/engineering/espresso-core-integration.md](docs/engineering/espresso-core-integration.md) — espresso-core external-agent contract.
+- [docs/engineering/adding-a-deterministic-verifier.md](docs/engineering/adding-a-deterministic-verifier.md) — how to contribute a new machine check.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — setup, tests, and trust-boundary rules for contributors. [SECURITY.md](SECURITY.md) — vulnerability reporting.
 
-| Group | Commands | Purpose |
-| --- | --- | --- |
-| Agent execution | `run-agent`, `run-agents` | Run focused evidence agents |
-| Proof review | `write-proof`, `seal-consensus` | Create and review a structured line-numbered proof |
-| Verification | `verify-*` | Run scoped machine and artifact checks |
-| Evaluation | `eval`, `benchmark`, `calibration`, `scorecard` | Measure workflow behavior and safety properties |
-| Development | `export-schemas`, `new-run`, `inspect`, `memo` | Maintain and inspect Espresso |
-| Compatibility | `run-flow` | Support earlier run workflows |
+## Team
 
-## Branches and reference material
+Espresso Proof is developed by [@shaowuz](https://github.com/shaowuz), @yangjunjie0320, and @w-ruizhe ([@w-ruizhe](https://github.com/w-ruizhe)). The literature subsystem — discovery, review agents, live search, PDF ingestion — was started with @w-ruizhe. @yangjunjie0320 contributed to the product philosophy and the Claude-centric comparison route.
 
-| Location | Role | Stability |
-| --- | --- | --- |
-| `main` | Current Espresso Proof product runtime | Supported public product |
-| `v2` | Future architecture laboratory | Evolving interfaces and artifact formats |
-
-as a concrete control group. It supports focused comparison between:
-
-- prompt-first and runtime-first architectures;
-- skill-managed and kernel-managed artifacts;
-- agent-directed and orchestrator-directed control flow.
-
-See
-
-## Architecture references
-
-- [Execution Trunk](docs/engineering/execution-trunk.md) — canonical path from problem text to run artifacts
-- [Product Philosophy](docs/product-philosophy.md) — research goals and design principles
-- [Product Path Boundaries](docs/engineering/product-path-boundaries.md) — supported runtime ownership and boundaries
-- [Espresso Core Integration](docs/engineering/espresso-core-integration.md) — external espresso-core adapter contract
-- [Adding a Deterministic Verifier](docs/engineering/adding-a-deterministic-verifier.md) — how to contribute a new machine check
-- [Contributing](CONTRIBUTING.md) — setup, tests, pull request expectations, and trust-boundary rules
-- [Security](SECURITY.md) — vulnerability reporting
-- [Code of Conduct](CODE_OF_CONDUCT.md) — contributor conduct
-
-## Acknowledgements
-
-The literature subsystem, including discovery, review-agent work, live search,
-and PDF ingestion, was started with @w-ruizhe.
-
-@yangjunjie0320 contributed to the product philosophy and the Claude-centric
-comparison route.
-
-## License
-
-Espresso Proof is released under the MIT License. See [LICENSE](LICENSE).
+**License:** MIT — see [LICENSE](LICENSE).
