@@ -111,9 +111,8 @@ The most natural contribution — a new deterministic verifier so runs in your
 area of mathematics can earn checked evidence — has a full walkthrough:
 [docs/engineering/adding-a-deterministic-verifier.md](docs/engineering/adding-a-deterministic-verifier.md).
 
-Espresso Proof does not certify mathematical truth. It is not a theorem prover.
-Please do not add documentation, UI text, or artifact wording that implies
-otherwise.
+Keep documentation, UI text, and artifact wording consistent with the status
+ladder: a status may only say what its evidence actually established.
 
 ## Reference material is not runtime
 

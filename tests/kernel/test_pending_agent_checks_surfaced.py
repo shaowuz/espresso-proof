@@ -178,3 +178,34 @@ def test_the_real_run_shape_is_covered(tmp_path) -> None:
         pending_agent_checks=pending,
     )
     assert any(w["category"] == AGENT_PROPOSED_CHECKS_PENDING for w in warnings)
+
+
+def test_the_disclosure_line_survives_the_final_report_language_gate() -> None:
+    """The kernel's own honesty line must not be flagged as dishonesty.
+
+    Found live on a graduate-problem run: the pending-checks disclosure —
+    "...no deterministic verifier has been run for them and they carry no
+    evidence: <id>" — was rejected by the final-report support-misuse gate,
+    which killed the whole run at validation. Two coincidences aligned: the
+    request id contains "reviewer" (a context term) and the sentence contains
+    "evidence" (a support term), and the disclaimer list knew "not evidence"
+    but not the noun-negated form "carry no evidence".
+    """
+
+    from espresso_proof.kernel.validators.final_gates import (
+        _first_final_report_unchecked_support_misuse,
+    )
+
+    warnings = collect_surface_warnings(
+        grade={}, review={}, examples={}, counterexamples={}, tests={},
+        pending_agent_checks=[
+            {"id": "evidence_reviewer_002_req_00_e815075e", "kind": "named_finite_witness"}
+        ],
+    )
+    text = "\n".join(render_warning_lines(warnings))
+    assert "carry no evidence" in text
+    assert _first_final_report_unchecked_support_misuse(text) is None
+
+    # The gate must still catch a REAL misuse next to the honest line.
+    dishonest = text + "\nThe reviewer approval supports the theorem for all primes."
+    assert _first_final_report_unchecked_support_misuse(dishonest) is not None

@@ -17,6 +17,8 @@ from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 from espresso_proof.server import Workbench, _friendly_error
 from espresso_proof.kernel.validators import validate_run
 
+from tests.support_jobs import wait_for_job
+
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 
 # Implementation TOKENS that must never appear anywhere on the main user path
@@ -185,13 +187,7 @@ def test_failed_job_keeps_raw_cause_only_in_detail(tmp_path: Path, monkeypatch) 
     monkeypatch.delenv("ESPRESSO_EXTERNAL_AGENT_COMMAND", raising=False)
     wb = Workbench(tmp_path / "root", provider="stub")
     out = wb.start_create_run(CLAIM, mode="codex")
-    deadline = time.time() + 15
-    while time.time() < deadline:
-        job = wb.get_job(out["job_id"])
-        if job["state"] in ("done", "failed"):
-            break
-        time.sleep(0.2)
-    assert job["state"] == "failed"
+    job = wait_for_job(lambda: wb.get_job(out["job_id"]), expect="failed")
     assert "Codex deep run is not set up" in job["error"]
     assert "ESPRESSO_EXTERNAL_AGENT_COMMAND" in job["error_detail"]
 

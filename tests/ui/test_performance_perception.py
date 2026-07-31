@@ -13,19 +13,15 @@ import espresso_proof.server as server_mod
 from espresso_proof.orchestration.agent_runner import run_single_agent
 from espresso_proof.server import Workbench, WorkbenchError
 
+from tests.support_jobs import wait_for_job
+
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 
 
 def _wb_with_run(tmp_path: Path) -> tuple[Workbench, str]:
     wb = Workbench(tmp_path / "root", provider="stub")
     out = wb.start_create_run(CLAIM)
-    deadline = time.time() + 20
-    while time.time() < deadline:
-        job = wb.get_job(out["job_id"])
-        if job["state"] in ("done", "failed"):
-            break
-        time.sleep(0.2)
-    assert job["state"] == "done", job
+    job = wait_for_job(lambda: wb.get_job(out["job_id"]))
     return wb, job["result"]["run_id"]
 
 

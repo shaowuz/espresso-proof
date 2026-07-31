@@ -82,9 +82,3 @@ restate its rules elsewhere, link to it.
 
 Do not weaken a test to make that gate pass, and do not mark a task complete on
 the strength of a gate you did not see finish.
-
-## What this project is not
-
-Espresso Proof is not a theorem prover and does not certify mathematical truth.
-Do not add documentation, UI text, commit messages, or artifact wording that
-implies it does.

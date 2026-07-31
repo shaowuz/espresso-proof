@@ -28,6 +28,8 @@ from espresso_proof.orchestration.agent_flow_status import (
 from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.server import Workbench, _make_handler
 
+from tests.support_jobs import wait_for_job
+
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -60,14 +62,8 @@ def client(tmp_path: Path):
 def _create(call) -> str:
     status, d = call("POST", "/api/runs", {"text": CLAIM})
     assert status == 202
-    deadline = time.time() + 20
-    while time.time() < deadline:
-        _, jd = call("GET", f"/api/jobs/{d['job_id']}")
-        if jd.get("state") in ("done", "failed"):
-            assert jd["state"] == "done", jd
-            return jd["result"]["run_id"]
-        time.sleep(0.2)
-    raise AssertionError("job did not finish")
+    job = wait_for_job(lambda: call("GET", f"/api/jobs/{d['job_id']}")[1])
+    return job["result"]["run_id"]
 
 
 def test_every_panel_serves_its_own_slice(client) -> None:

@@ -5,8 +5,8 @@ mathematician turn a claim or proof sketch into auditable artifacts: locked
 claim, hypotheses, candidate sources, examples, counterexamples, strategies,
 reviewer objections, and a visible process trace.
 
-Espresso is intentionally not a theorem prover, not a Lean formalization
-product, and not a general research office suite. The product path is:
+Espresso focuses on one thing: auditable research artifacts with earned,
+scoped statuses. The product path is:
 
 ```text
 React cockpit -> espresso serve -> external Codex agent -> artifact kernel

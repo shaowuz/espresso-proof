@@ -34,6 +34,8 @@ from espresso_proof.orchestration.evidence_coordinator import (
 from espresso_proof.orchestration.orchestrator import orchestrate_run
 from espresso_proof.server import Workbench, _make_handler
 
+from tests.support_jobs import JOB_DEADLINE_SECONDS
+
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 UNCLEAR_CLAIM = "Prove the thing about the nice mirror object."
 
@@ -272,7 +274,7 @@ def client(tmp_path: Path):
     httpd.shutdown()
 
 
-def _await_job(call, job_id: str, timeout: float = 30.0) -> dict:
+def _await_job(call, job_id: str, timeout: float = JOB_DEADLINE_SECONDS) -> dict:
     deadline = time.time() + timeout
     while time.time() < deadline:
         _, jd = call("GET", f"/api/jobs/{job_id}")

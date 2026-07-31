@@ -16,6 +16,8 @@ from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 from espresso_proof.server import Workbench, WorkbenchError, serve
 from espresso_proof.kernel.validators import validate_run
 
+from tests.support_jobs import wait_for_job
+
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 _PROOF_WORDS = ("proof-close", "proof complete", "the theorem is proved", "we have proved")
 
@@ -157,13 +159,7 @@ def test_codex_mode_fails_closed_when_external_unconfigured(tmp_path: Path, monk
     wb = Workbench(tmp_path / "root", provider="stub")
     out = wb.start_create_run(CLAIM, mode="codex")
     job_id = out["job_id"]
-    deadline = time.time() + 15
-    while time.time() < deadline:
-        job = wb.get_job(job_id)
-        if job["state"] in ("done", "failed"):
-            break
-        time.sleep(0.2)
-    assert job["state"] == "failed"
+    job = wait_for_job(lambda: wb.get_job(job_id), expect="failed")
     assert job.get("error")  # a human-readable error, not a hang
     assert wb.list_runs() == []  # no run dir created, nothing upgraded
 

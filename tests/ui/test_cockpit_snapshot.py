@@ -28,6 +28,8 @@ from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.orchestration.run_dashboard import status_summary
 from espresso_proof.server import Workbench, _make_handler
 
+from tests.support_jobs import wait_for_job
+
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 
 
@@ -60,15 +62,8 @@ def _create(call) -> str:
     status, _, raw = call("POST", "/api/runs", {"text": CLAIM})
     assert status == 202
     job_id = json.loads(raw)["job_id"]
-    deadline = time.time() + 20
-    while time.time() < deadline:
-        _, _, jraw = call("GET", f"/api/jobs/{job_id}")
-        jd = json.loads(jraw)
-        if jd.get("state") in ("done", "failed"):
-            assert jd["state"] == "done", jd
-            return jd["result"]["run_id"]
-        time.sleep(0.2)
-    raise AssertionError("job did not finish")
+    job = wait_for_job(lambda: json.loads(call("GET", f"/api/jobs/{job_id}")[2]))
+    return job["result"]["run_id"]
 
 
 # --------------------------------------------------------------------------- #

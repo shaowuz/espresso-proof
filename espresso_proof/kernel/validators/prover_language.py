@@ -123,6 +123,17 @@ def _prover_clause_is_support_disclaimer(clause: str) -> bool:
             "cannot count",
             "can't count",
             "not evidence",
+            # "carry/carries no evidence", "no evidence has been", "provides no
+            # evidence": the negation precedes the noun instead of the verb, and
+            # the phrase list missed that form entirely. Found live: the
+            # kernel's OWN disclosure line "no deterministic verifier has been
+            # run for them and they carry no evidence: <reviewer-request-id>"
+            # was flagged as treating advisory context as evidence — the id
+            # contains "reviewer" and the clause contains "evidence", and the
+            # sentence saying NO evidence was read as claiming evidence.
+            "no evidence",
+            "carry no",
+            "carries no",
             "is not proof",
             "not a proof",
         )

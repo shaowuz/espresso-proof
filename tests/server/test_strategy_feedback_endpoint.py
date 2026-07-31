@@ -24,6 +24,8 @@ import pytest
 from espresso_proof.kernel.io import read_yaml
 from espresso_proof.server import Workbench, _make_handler
 
+from tests.support_jobs import wait_for_job
+
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 
 
@@ -54,14 +56,8 @@ def client(tmp_path: Path):
 def _create(call) -> str:
     status, d = call("POST", "/api/runs", {"text": CLAIM})
     assert status == 202
-    deadline = time.time() + 25
-    while time.time() < deadline:
-        _, jd = call("GET", f"/api/jobs/{d['job_id']}")
-        if jd.get("state") in ("done", "failed"):
-            assert jd["state"] == "done", jd
-            return jd["result"]["run_id"]
-        time.sleep(0.2)
-    raise AssertionError("create job did not finish")
+    job = wait_for_job(lambda: call("GET", f"/api/jobs/{d['job_id']}")[1])
+    return job["result"]["run_id"]
 
 
 def _first_strategy(call, run_id: str) -> str:
@@ -225,13 +221,7 @@ def test_continue_receives_feedback_and_writes_round_ledger(client) -> None:
     )
     status, d = call("POST", f"/api/runs/{run_id}/continue", {"strategy": sid, "effort": "quick_test"})
     assert status == 202
-    deadline = time.time() + 40
-    while time.time() < deadline:
-        _, jd = call("GET", f"/api/jobs/{d['job_id']}")
-        if jd.get("state") in ("done", "failed"):
-            assert jd["state"] == "done", jd
-            break
-        time.sleep(0.3)
+    wait_for_job(lambda: call("GET", f"/api/jobs/{d['job_id']}")[1])
     run_dir = wb.resolve_run(run_id)
     # the continuation received the advisory feedback summary (human_choice).
     hc = read_yaml(run_dir / "human_choice.yaml")
@@ -269,13 +259,7 @@ def test_continue_coerces_disallowed_effort_and_run_stays_valid(client) -> None:
         {"strategy": restricted["id"], "effort": "normal_pass"},
     )
     assert status == 202
-    deadline = time.time() + 40
-    while time.time() < deadline:
-        _, jd = call("GET", f"/api/jobs/{d['job_id']}")
-        if jd.get("state") in ("done", "failed"):
-            assert jd["state"] == "done", jd
-            break
-        time.sleep(0.3)
+    wait_for_job(lambda: call("GET", f"/api/jobs/{d['job_id']}")[1])
     # the run still validates (the snapshot would 409 otherwise).
     status, _ = call("GET", f"/api/runs/{run_id}/snapshot")
     assert status == 200
