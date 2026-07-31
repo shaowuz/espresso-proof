@@ -124,10 +124,8 @@ It also compares the theorem’s conclusion and scope with the claim, including
 distinctions such as:
 
 - universal versus restricted;
-- generic versus every instance;
 - very general versus arbitrary;
-- stronger versus weaker conclusions;
-- compatible versus orthogonal statements.
+- stronger versus weaker condition;
 
 This creates a traceable evidence chain:
 
