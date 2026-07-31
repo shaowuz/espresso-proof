@@ -124,6 +124,43 @@ class StageRunner:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
 
+    # -- internal: undeclared-write detection ---------------------------------
+    def _fingerprint(self) -> dict[Path, tuple[int, int]]:
+        """Size + mtime of every run file, for detecting writes we cannot undo."""
+
+        out: dict[Path, tuple[int, int]] = {}
+        for path in self.run_dir.rglob("*"):
+            if not path.is_file() or path.name in _SNAPSHOT_EXCLUDED_NAMES:
+                continue
+            try:
+                stat = path.stat()
+            except OSError:  # vanished mid-walk; nothing to compare
+                continue
+            out[path] = (stat.st_size, stat.st_mtime_ns)
+        return out
+
+    def _undeclared_changes(self, before: dict, scope: list[Path]) -> list[Path]:
+        """Files a rolled-back stage changed OUTSIDE the paths it declared.
+
+        Rollback restores the declared snapshot and nothing else, so a stage that
+        narrowed its ``snapshot_paths`` and then wrote elsewhere left those writes
+        behind permanently while the runner reported a clean rollback. The residue
+        is the dangerous part: the run looks restored and is not. Detected only on
+        the failure path — a stage that succeeds and validates may write whatever
+        it validated.
+        """
+
+        after = self._fingerprint()
+
+        def covered(path: Path) -> bool:
+            return any(path == root or root in path.parents for root in scope)
+
+        return sorted(
+            path
+            for path in set(before) | set(after)
+            if not covered(path) and before.get(path) != after.get(path)
+        )
+
     # -- internal: lifecycle state -------------------------------------------
     def _advance_state(self, state_after: str) -> None:
         manifest_path = self.run_dir / MANIFEST_NAME
@@ -157,6 +194,7 @@ class StageRunner:
 
         append_event(self.run_dir, "stage_started", stage=name)
         snapshot = self._snapshot(scope)
+        before = self._fingerprint() if snapshot_paths is not None else {}
         try:
             mutate()
             validate()
@@ -165,13 +203,26 @@ class StageRunner:
                 self._advance_state(state_after)
         except Exception as exc:  # noqa: BLE001 - restore then re-raise with context
             self._restore(snapshot)
-            append_event(self.run_dir, "validation_failed", stage=name, detail=str(exc))
+            message = str(exc)
+            leaked = self._undeclared_changes(before, scope) if before else []
+            if leaked:
+                # Say so instead of reporting a clean rollback over a dirty run.
+                names = ", ".join(str(p.relative_to(self.run_dir)) for p in leaked[:6])
+                message = (
+                    f"{message} [rollback incomplete: the stage also wrote "
+                    f"{len(leaked)} path(s) outside its declared snapshot_paths and "
+                    f"they could not be restored: {names}]"
+                )
+                append_event(
+                    self.run_dir, "rollback_incomplete", stage=name, detail=names
+                )
+            append_event(self.run_dir, "validation_failed", stage=name, detail=message)
             append_event(self.run_dir, "rollback", stage=name)
             outcome = StageOutcome(
-                name=name, status="rolled_back", state_after=None, error=str(exc)
+                name=name, status="rolled_back", state_after=None, error=message
             )
             self.outcomes.append(outcome)
-            raise StageError(name, str(exc)) from exc
+            raise StageError(name, message) from exc
 
         append_event(self.run_dir, "stage_ok", stage=name)
         outcome = StageOutcome(name=name, status="ok", state_after=state_after)

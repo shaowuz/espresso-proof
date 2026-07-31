@@ -143,8 +143,13 @@ def conclusion_compatible(required_statement: str, theorem_statement: str) -> bo
         theorem_statement
     ):
         return False
-    if _group_theorem_conclusion_compatible(required_statement, theorem_statement):
-        return True
+    # There used to be a widening shortcut here: four hardcoded theorem shapes
+    # (Lagrange, order-divides, prime-order-generator, cyclic-by-definition) that
+    # returned True on a keyword pattern, so those four statements could be
+    # grounded on evidence no other statement could use. Removed. Every step now
+    # meets the same requirement — the cited statement must contain the step's
+    # own significant terms — which is stricter, not looser, and identical for
+    # every area of mathematics.
     required_terms = significant_terms(required_statement)
     if not required_terms:
         return False
@@ -264,7 +269,35 @@ def term_present(term: str, statement: str) -> bool:
     lowered = normalize_math_text(statement)
     if _unnegated_word_present(term, lowered):
         return True
+    for variant in _inflections(term):
+        if _unnegated_word_present(variant, lowered):
+            return True
     return term_covered(term, lowered)
+
+
+def _inflections(term: str) -> tuple[str, ...]:
+    """English inflections of one token: "divides" also reads as "divide".
+
+    The gate used to bridge this with four hardcoded theorem patterns — a step
+    saying "|H| divides |G|" was matched to a source saying "must divide" by a
+    rule that named Lagrange. The mismatch was never mathematical, it was
+    morphological, and every area of mathematics writes the same way. Handling
+    the inflection instead is subject-independent and keeps the requirement
+    itself unchanged: the source must still contain the step's own terms.
+    """
+
+    if len(term) < 4:
+        return ()
+    variants = {term + "s", term + "es"}
+    if term.endswith("es"):
+        variants.update({term[:-2], term[:-1]})
+    elif term.endswith("s"):
+        variants.add(term[:-1])
+    if term.endswith("y"):
+        variants.add(term[:-1] + "ies")
+    elif term.endswith("ies"):
+        variants.add(term[:-3] + "y")
+    return tuple(v for v in variants if len(v) >= 3 and v != term)
 
 
 def _unnegated_word_present(term: str, lowered_statement: str) -> bool:
@@ -331,8 +364,6 @@ TERM_ALIASES = {
     "order": ["|g|", "order", "cardinality", "number of elements"],
     "proper": ["complete"],
     "smooth": ["nonsingular", "non-singular"],
-    "realization": ["there exists", "galois group isomorphic"],
-    "realize": ["there exists", "galois group isomorphic"],
     "solvable": ["solvable group"],
 }
 
@@ -345,8 +376,6 @@ STOPWORDS = {
     "from",
     "hypothesis",
     "particular",
-    "schmidt",
-    "shafarevich",
     "source",
     "the",
     "theorem",
@@ -358,7 +387,6 @@ STOPWORDS = {
     "every",
     "occurs",
     "with",
-    "wingberg",
 }
 
 
@@ -389,7 +417,16 @@ def _hypothesis_relevant_to_step(
     required_statement: str,
     theorem_statement: str,
 ) -> bool:
-    """Only require claim hypotheses that the proof step/theorem actually uses."""
+    """Only require claim hypotheses that the proof step/theorem actually uses.
+
+    One rule for every hypothesis: a hypothesis is relevant when the step or the
+    cited theorem actually mentions one of its terms. There used to be three
+    branches ahead of it — "group", "finite", "prime"/"order" — each with its own
+    hand-written marker list, so a hypothesis about a group was judged by
+    different evidence than a hypothesis about a sheaf. That is the same
+    answer-key mechanism as the deleted theorem shortcuts, and it made the gate's
+    strictness depend on which area of mathematics the claim came from.
+    """
 
     combined = normalize_math_text(f"{required_statement} {theorem_statement}")
     hyp_terms = list(
@@ -397,80 +434,17 @@ def _hypothesis_relevant_to_step(
             significant_terms(hypothesis_name) + expanded_hypothesis_terms(hypothesis_name)
         )
     )
-    if "group" in hyp_terms:
-        return any(
-            marker in combined
-            for marker in (" group", "subgroup", "cyclic", "generator", "order of g")
-        )
-    if "finite" in hyp_terms:
-        return any(marker in combined for marker in ("finite", "order of g is p", "prime order"))
-    if "prime" in hyp_terms or "order" in hyp_terms:
-        return any(
-            marker in combined
-            for marker in ("prime", "order of g is p", "order p", "group of prime order")
-        )
+    # ANY term, deliberately: a hypothesis counts as used as soon as the step or
+    # the theorem touches something it is about. Requiring ALL of its terms was
+    # tried and rejected — it let a source whose hypotheses genuinely mismatch
+    # the step earn source_backed, because the mismatching hypothesis stopped
+    # being "relevant" and so stopped being checked. Between the two errors, the
+    # one that grounds a step on the wrong theorem is the one that matters, so
+    # this stays on the strict side and a citation the gate cannot line up stays
+    # a candidate.
     return any(term_present(term, combined) for term in hyp_terms)
 
 
-def _group_theorem_conclusion_compatible(
-    required_statement: str,
-    theorem_statement: str,
-) -> bool:
-    required = normalize_math_text(required_statement)
-    theorem = normalize_math_text(theorem_statement)
-
-    if _is_nonidentity_existence_request(required):
-        return False
-
-    if (
-        ("lagrange" in required or "subgroup" in required)
-        and "divide" in required
-        and "finite group" in theorem
-        and "subgroup" in theorem
-        and "divide" in theorem
-        and "order of h" in theorem
-        and "order of g" in theorem
-    ):
-        return True
-
-    if (
-        "order of g" in required
-        and "divide" in required
-        and "order of g" in theorem
-        and "divide" in theorem
-        and "finite group" in theorem
-    ):
-        return True
-
-    if (
-        "prime" in required
-        and ("nonidentity" in required or "not equal" in required or "!=" in required)
-        and ("order of <g>" in required or "order of g" in required or "generator" in required)
-        and "order of g is p" in theorem
-        and "prime" in theorem
-        and ("generator" in theorem or "cyclic" in theorem)
-    ):
-        return True
-
-    if (
-        "cyclic" in required
-        and ("definition" in required or "generator" in required or "<g>" in required)
-        and "cyclic" in theorem
-        and ("generator" in theorem or "order of g is p" in theorem)
-    ):
-        return True
-
-    return False
-
-
-def _is_nonidentity_existence_request(required: str) -> bool:
-    return (
-        ("nonidentity element" in required or "non-identity element" in required)
-        and ("p >= 2" in required or "p is prime" in required or "prime" in required)
-        and "cyclic" not in required
-        and "generator" not in required
-        and "divide" not in required
-    )
 
 
 def _is_subgroup_equality_request(required_statement: str) -> bool:

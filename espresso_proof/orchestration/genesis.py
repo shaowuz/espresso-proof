@@ -27,9 +27,22 @@ from espresso_proof.verification.counterexample_probes import propose_determinis
 from espresso_proof.verification.verification_request_probes import propose_scoped_verification_requests
 
 
-def run_mock_critique(project_id: str, input_path: Path, output_root: Path) -> Path:
+def run_mock_critique(
+    project_id: str,
+    input_path: Path,
+    output_root: Path,
+    *,
+    use_scenario_templates: bool = True,
+) -> Path:
     text = read_text(input_path)
-    scenario = _detect_scenario(input_path, text)
+    # Scenario templates are hand-authored fixture data: five specific theorem
+    # statements are matched by CONTENT and handed a ready-made grade, score and
+    # source answer, while every paraphrase gets the neutral shell. That is an
+    # answer key, and on a live run it seeds artifacts a live stage may not
+    # overwrite. It is now reachable only in the explicit dev/fixture mode that
+    # exists to exercise those scenarios; a live or stub run scaffolds the same
+    # neutral shell for every claim, whatever the claim says.
+    scenario = _detect_scenario(input_path, text, match_content=use_scenario_templates)
     run_id = f"{project_id}-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}-{uuid4().hex[:8]}"
     run_dir = output_root / "projects" / project_id / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)

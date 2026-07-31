@@ -359,15 +359,25 @@ def collect_surface_warnings(
                 "ids": theorem_blockers,
             }
         )
-    reviewer_summary = (
-        "" if (agent_consensus_review or {}).get("consensus") is True else reviewer_blocker_summary(review)
-    )
+    reviewer_summary = reviewer_blocker_summary(review)
     if reviewer_summary:
+        # An agent-granted consensus used to DELETE this disclosure. It is amber
+        # by construction — three language models agreeing, never machine-checked
+        # — so letting it erase the record of what reviewers objected to made the
+        # weakest evidence in the system silence the strongest warning. It now
+        # annotates instead: the reader sees both the objections and the fact
+        # that a consensus was recorded over them.
+        consensus_note = (
+            " (an agent consensus was recorded over these; agent consensus is never "
+            "machine-checked and does not resolve them)"
+            if (agent_consensus_review or {}).get("consensus") is True
+            else ""
+        )
         suffix = (
             " (front-half placeholder; prover-pass reviewers have since run)"
             if prover_attempts
             else ""
-        )
+        ) + consensus_note
         warnings.append(
             {
                 "category": REVIEWER_BLOCKERS,

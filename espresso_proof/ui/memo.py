@@ -237,6 +237,15 @@ def build_concise_memo(run_dir: Path) -> str:
             # severity the reviewer assigned. Display-scrubbed like every other
             # reviewer-text surface; never invented here.
             objection = f"[{top.get('severity')}] " + _display_objection_text(top)
+        elif _blocker_ranking.get("differentiated"):
+            # Reviewers DID rank, and nothing reached P0/P1. Saying "unranked"
+            # here contradicted the ranking section a few lines down, which
+            # correctly reported that the reviewers had ranked and that nothing
+            # was blocking. Same fact, two readings, from one empty "top" list.
+            objection = (
+                f"reviewers ranked {_blocker_ranking.get('total', 0)} objection(s) and none "
+                "is blocking (no P0/P1); see the prover loop record"
+            )
         else:
             objection = (
                 "prover-pass reviewer blockers are open but unranked; see the "

@@ -324,6 +324,12 @@ def orchestrate_run(
         input_path=input_path,
         output_root=output_root,
         token_budget=token_budget,
+        # Content-matched fixture templates are dev/fixture data. The line that
+        # matters is whether a REAL model is in play: with no live provider the
+        # templates are the fixture corpus the tests exercise, and with one they
+        # would seed a live run with a hand-authored answer for five specific
+        # theorem statements.
+        use_scenario_templates=front_half == "mock" or provider == "stub",
     )
 
     early = finish_if_resumed_claim_is_no_longer_clear(run_dir=run_dir, runner=runner)
@@ -432,6 +438,7 @@ def create_or_attach_genesis_run(
     input_path: Path,
     output_root: Path,
     token_budget: int | None = None,
+    use_scenario_templates: bool = True,
 ) -> tuple[Path, StageRunner]:
     """Stage 0 — scaffold a fresh genesis run, or attach a runner to an existing run."""
     # Stage 0 — scaffold a kernel-valid "unclear/needs_human" run for any claim.
@@ -439,7 +446,10 @@ def create_or_attach_genesis_run(
     # state ONLY through the transactional StageRunner (snapshot -> mutate ->
     # validate -> advance, with rollback on failure).
     if run_dir is None:
-        run_dir = run_mock_critique(project, input_path, output_root)
+        run_dir = run_mock_critique(
+            project, input_path, output_root,
+            use_scenario_templates=use_scenario_templates,
+        )
         _record_token_budget(run_dir, token_budget)
         runner = StageRunner(run_dir)
         runner.run(

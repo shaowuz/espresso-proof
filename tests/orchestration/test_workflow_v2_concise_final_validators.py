@@ -209,7 +209,16 @@ def test_warnings_scope_theorem_blockers_to_current_line_proof_refs() -> None:
     assert all(w["category"] != THEOREM_BLOCKERS for w in warnings)
 
 
-def test_warnings_suppress_legacy_reviewer_blockers_after_consensus() -> None:
+def test_consensus_annotates_reviewer_blockers_instead_of_deleting_them() -> None:
+    """An agent consensus used to erase this disclosure entirely.
+
+    That let the weakest evidence in the system silence the strongest warning:
+    `agent_consensus_mock_checked` is three language models agreeing and is never
+    machine-checked, so it cannot resolve a reviewer objection. The warning now
+    stays and says a consensus was recorded over it. (Previously asserted the
+    opposite; the suppression was the defect.)
+    """
+
     warnings = collect_surface_warnings(
         grade={},
         review={"reviewers": [{"reviewer_id": "legacy", "verdict": "unclear"}]},
@@ -219,7 +228,21 @@ def test_warnings_suppress_legacy_reviewer_blockers_after_consensus() -> None:
         source_grounding={},
         agent_consensus_review={"consensus": True},
     )
-    assert all(w["category"] != REVIEWER_BLOCKERS for w in warnings)
+    blockers = [w for w in warnings if w["category"] == REVIEWER_BLOCKERS]
+    assert len(blockers) == 1
+    text = blockers[0]["text"]
+    assert "agent consensus" in text and "does not resolve them" in text
+
+    without_consensus = collect_surface_warnings(
+        grade={},
+        review={"reviewers": [{"reviewer_id": "legacy", "verdict": "unclear"}]},
+        examples={"examples": []},
+        counterexamples={"tests": []},
+        tests={"tests": []},
+        source_grounding={},
+    )
+    plain = [w for w in without_consensus if w["category"] == REVIEWER_BLOCKERS]
+    assert len(plain) == 1 and "agent consensus" not in plain[0]["text"]
 
 
 def test_dashboard_memo_and_cockpit_scrub_strategy_source_vocabulary(tmp_path: Path) -> None:

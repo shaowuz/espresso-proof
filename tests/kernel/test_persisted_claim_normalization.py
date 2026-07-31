@@ -37,14 +37,24 @@ def _paths(run_dir: Path) -> tuple[Path, Path]:
 
 
 def _expand_group_hyp(run_dir: Path) -> None:
-    """Denormalize: rename the 'G is a group' hyp to the axiom-parenthetical form
-    on both the claim and the ledger, keeping the run kernel-valid."""
+    """Denormalize: put the axiom-parenthetical form on the claim and the ledger,
+    keeping the run kernel-valid.
+
+    The handle used to be the literal hypothesis name "G is a group", which only
+    existed because the claim normalizer carried a hand-authored answer key for
+    this one theorem. The normalizer now reports the statement's own wording, so
+    the fixture writes the expanded form onto the FIRST hypothesis instead of
+    looking for a name the system no longer invents. What is under test is the
+    axiom consolidator, not how the claim happened to be phrased.
+    """
     claim_path, ledger_path = _paths(run_dir)
     for path in (claim_path, ledger_path):
         doc = read_yaml(path)
-        for h in doc.get("hypotheses") or []:
-            if isinstance(h, dict) and h.get("name") == "G is a group":
+        hypotheses = doc.get("hypotheses") or []
+        for h in hypotheses:
+            if isinstance(h, dict):
                 h["name"] = _EXPANDED
+                break
         write_yaml(path, doc)
     validate_run(run_dir)
 

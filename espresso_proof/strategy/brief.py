@@ -84,6 +84,62 @@ def _effort_options_for(estimated: str, ceiling: str | None) -> list[str]:
     return list(EFFORT_TIERS[lo : hi + 1])
 
 
+def reapply_declared_budget(run_dir, token_budget: int | None) -> dict:
+    """Re-derive a written brief's effort options from a newly declared budget.
+
+    The budget is a human declaration, and the human may raise it after the
+    strategy stage has already run — that is the normal shape of "the first pass
+    ran out of room". The options were frozen into strategy_brief.yaml at write
+    time, so ``--token-budget`` on a resume was accepted and then silently
+    ignored: the run kept the tiers the old budget paid for.
+
+    Only ``allowed_human_choices`` moves, and only through the same
+    ``_effort_options_for`` the strategy stage used. Route estimates, scores and
+    every status stay exactly as graded. Returns what changed, for the caller to
+    report; an unchanged brief is not rewritten.
+    """
+
+    from pathlib import Path
+
+    from espresso_proof.kernel.io import read_yaml, write_yaml
+
+    run_dir = Path(run_dir)
+    if token_budget is None:
+        return {"updated": False, "reason": "no budget declared"}
+    manifest_path = run_dir / "run_manifest.yaml"
+    manifest = read_yaml(manifest_path)
+    rel = (manifest.get("artifacts") or {}).get("strategy_brief")
+    if not rel or not (run_dir / rel).exists():
+        return {"updated": False, "reason": "no strategy brief on this run yet"}
+    brief = read_yaml(run_dir / rel)
+    synthesis_rel = (manifest.get("artifacts") or {}).get("strategy_synthesis")
+    routes = []
+    if synthesis_rel and (run_dir / synthesis_rel).exists():
+        routes = (read_yaml(run_dir / synthesis_rel) or {}).get("routes") or []
+    estimates = {
+        str(route.get("id")): str(route.get("estimated_effort"))
+        for route in routes
+        if isinstance(route, dict)
+    }
+    ceiling = _declared_effort_ceiling({"token_budget": token_budget})
+    updated = []
+    for choice in brief.get("allowed_human_choices") or []:
+        strategy_id = str(choice.get("strategy_id"))
+        if strategy_id == "none" or strategy_id not in estimates:
+            continue
+        options = _effort_options_for(estimates[strategy_id], ceiling)
+        if options != list(choice.get("effort_options") or []):
+            choice["effort_options"] = options
+            updated.append(strategy_id)
+    if not updated:
+        return {"updated": False, "reason": "the declared budget changes no route's options"}
+    from espresso_proof.kernel.models import StrategyBrief
+
+    StrategyBrief.model_validate(brief)  # fail closed
+    write_yaml(run_dir / rel, brief)
+    return {"updated": True, "routes": updated, "ceiling": ceiling}
+
+
 def build_strategy_artifacts(
     *,
     context: dict,

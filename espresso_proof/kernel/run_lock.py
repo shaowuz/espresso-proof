@@ -94,6 +94,7 @@ def run_writer_lock(
     *,
     action: str = "action",
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    record_denial: bool = True,
 ):
     """Hold the per-run writer lock while mutating ``run_dir``.
 
@@ -102,6 +103,11 @@ def run_writer_lock(
     acquisition instead of deadlocking. Waits up to ``timeout_seconds`` for a
     holder in another process/thread, then raises :class:`RunLockedError`
     without touching the run.
+
+    ``record_denial=False`` serializes a directory that is not a run (the shared
+    project memory index is the case that needs it) without dropping a run event
+    log into it. The locking itself is identical: one implementation, so a second
+    serialized directory cannot drift from this one.
     """
 
     run_dir = Path(run_dir)
@@ -126,7 +132,8 @@ def run_writer_lock(
                 if exc.errno not in _LOCK_RETRY_ERRNOS:
                     raise
                 if time.monotonic() >= deadline:
-                    append_event(run_dir, "lock_denied", detail=action)
+                    if record_denial:
+                        append_event(run_dir, "lock_denied", detail=action)
                     raise RunLockedError(action) from None
                 time.sleep(0.05)
         held.add(key)

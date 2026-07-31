@@ -21,6 +21,7 @@ tested behavior.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 # Global "the whole thing is proved / proved by Espresso" overclaims, curated so
 # legitimate mathematician prose is PRESERVED. Two safe families only:
@@ -66,24 +67,103 @@ PROOF_COMPLETE_PHRASES: tuple[str, ...] = (
 # Neutral redaction marker (reuses the existing convention in llm_agents).
 REDACTION = "[withheld proof-like phrase]"
 
+# Separators INSIDE an acronym: someone who types "Q. E. D." means exactly what
+# "proof-close" means, and the periods/spaces carry no other reading.
+_SEP = r"[\s._\-‐-―]*"
+
+# Separators BETWEEN the words of a phrase: whitespace only. Hyphenating is not
+# a spelling variant here, it changes the part of speech — "a sketch-only
+# argument cannot become proof-complete evidence" is honest prose that names the
+# thing it denies, and this module's rule is that legitimate prose stays
+# readable. The hyphenated adjective remains covered by the agent-ingestion
+# redactor, which is a separate list with separate rules.
+_WORD_SEP = r"[\s\u00a0]+"
+
+# The end-of-proof tombstone: a literal claim that the proof is finished, in the
+# one notation everybody uses, which a list of English phrases could never catch.
+# U+220E is unambiguous anywhere. The hollow square is only a tombstone in the
+# position a tombstone occupies — ending a line — because "the square □ in the
+# diagram" is ordinary geometry prose that must stay readable.
+_TOMBSTONE_PATTERN = r"∎|□(?=[ \t]*$)"
+
+
+def _phrase_regex(phrase: str) -> str:
+    """Match one curated phrase tolerantly, without loosening what it means.
+
+    A literal phrase list is a list of spellings, not of meanings: "Q. E. D.",
+    "ＱＥＤ", "proof–complete" and "the proof is now complete" all assert the same
+    thing and all walked straight through. Every separator inside a phrase now
+    accepts the punctuation and spacing variants, an acronym accepts separators
+    between its letters, and "is complete" tolerates one intensifier ("is now
+    complete"). Nothing else is loosened: the words themselves, in order, are
+    still required.
+    """
+
+    if phrase in {"[proof-close]", "[proof-close]", "proof-close"}:
+        return _SEP.join(("q", "e", "d")) + r"\.?"
+    words = phrase.replace(".", "").split()
+    parts: list[str] = []
+    for index, word in enumerate(words):
+        if index:
+            parts.append(_WORD_SEP)
+            if word == "complete" and words[index - 1] == "is":
+                parts.append(r"(?:(?:now|hereby|thus|therefore)" + _WORD_SEP + r")?")
+        parts.append(re.escape(word))
+    return "".join(parts)
+
+
 # Both-sided word boundaries: a phrase must not match inside a longer word in
 # either direction ("proof completeness", "oedipus", "verified theorems" are NOT
 # matched). Longest phrases first so the whole assertion is replaced as a unit
 # (no dangling "the theorem" left behind).
 _PATTERN = re.compile(
-    r"(?<![A-Za-z0-9_])(?:"
-    + "|".join(re.escape(p) for p in sorted(PROOF_COMPLETE_PHRASES, key=len, reverse=True))
+    _TOMBSTONE_PATTERN
+    + r"|(?<![A-Za-z0-9_])(?:"
+    + "|".join(_phrase_regex(p) for p in sorted(PROOF_COMPLETE_PHRASES, key=len, reverse=True))
     + r")(?![A-Za-z0-9_])",
-    re.IGNORECASE,
+    re.IGNORECASE | re.MULTILINE,
 )
+
+
+def _folded_with_origin(text: str) -> tuple[str, list[int]]:
+    """A compatibility-folded view of ``text`` plus each char's source index.
+
+    Matching happens on the folded view so fullwidth, bold-math and ligature
+    spellings ("ＱＥＤ", "𝐐𝐄𝐃") are caught; the replacement happens on the
+    ORIGINAL, because folding the returned text would rewrite legitimate
+    mathematics on every render (NFKC turns "p²" into "p2").
+    """
+
+    folded: list[str] = []
+    origin: list[int] = []
+    for index, char in enumerate(text):
+        expansion = unicodedata.normalize("NFKC", char) or char
+        for piece in expansion:
+            folded.append(piece)
+            origin.append(index)
+    return "".join(folded), origin
+
+
+def _matches(text: str) -> list[tuple[int, int, str]]:
+    """Spans in the ORIGINAL text that a curated phrase covers, left to right."""
+
+    folded, origin = _folded_with_origin(text)
+    spans: list[tuple[int, int, str]] = []
+    for match in _PATTERN.finditer(folded):
+        start, end = match.span()
+        if start >= len(origin) or end == 0:
+            continue
+        spans.append((origin[start], origin[end - 1] + 1, match.group(0)))
+    return spans
 
 
 def contains_proof_language(text: object) -> str | None:
     """Return the first global proof-complete phrase in ``text``, or None."""
     if not text:
         return None
-    match = _PATTERN.search(str(text))
-    return match.group(0) if match else None
+    source = str(text)
+    spans = _matches(source)
+    return source[spans[0][0] : spans[0][1]] if spans else None
 
 
 def scrub_proof_language(text: object) -> str:
@@ -94,7 +174,17 @@ def scrub_proof_language(text: object) -> str:
     """
     if text is None:
         return ""
-    return _PATTERN.sub(REDACTION, str(text))
+    source = str(text)
+    out: list[str] = []
+    cursor = 0
+    for start, end, _ in _matches(source):
+        if start < cursor:  # overlapping match already covered
+            continue
+        out.append(source[cursor:start])
+        out.append(REDACTION)
+        cursor = end
+    out.append(source[cursor:])
+    return "".join(out)
 
 
 def scrub_source_support_language(text: object) -> str:

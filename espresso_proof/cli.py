@@ -229,6 +229,24 @@ def orchestrate(
                 f"Auto-ground (local-first): resolution={ag['resolution_status']} "
                 f"(retrieval never sets source_backed; the grounding gate decides)"
             )
+        if token_budget is not None:
+            # A budget declared on a resume used to be accepted and dropped: the
+            # effort tiers were frozen into strategy_brief.yaml when the strategy
+            # stage ran, so raising the ceiling after a first pass ran out of room
+            # -- the normal reason to raise it -- changed nothing.
+            from espresso_proof.orchestration.orchestrator import _record_token_budget
+            from espresso_proof.strategy.brief import reapply_declared_budget
+
+            _record_token_budget(resume, token_budget)
+            rebudget = reapply_declared_budget(resume, token_budget)
+            if rebudget["updated"]:
+                typer.echo(
+                    f"Token budget {token_budget}: effort options widened to the "
+                    f"{rebudget['ceiling']} tier for {len(rebudget['routes'])} route(s) "
+                    "(a budget schedules work; it never grants a status)"
+                )
+            else:
+                typer.echo(f"Token budget {token_budget} recorded: {rebudget['reason']}")
         if auto_continue:
             choice = auto_select_strategy(run_dir=resume)
             select_strategy = choice["selected_strategy"]

@@ -51,7 +51,7 @@ _CENTER_QUOTIENT_CYCLIC_EXACT = re.compile(
 )
 
 
-def _detect_scenario(input_path: Path, text: str) -> str:
+def _detect_scenario(input_path: Path, text: str, *, match_content: bool = True) -> str:
     name = input_path.parent.name
     if name in {
         "all_matrices_diagonalizable",
@@ -69,6 +69,13 @@ def _detect_scenario(input_path: Path, text: str) -> str:
         "human_feedback_does_not_upgrade_source_status",
     }:
         return name
+    if not match_content:
+        # Naming a fixture directory is an explicit opt-in and keeps working.
+        # Recognising a claim by its TEXT is the answer key: five specific
+        # theorem statements got a hand-authored grade, score and source answer
+        # that no paraphrase could get. On a live run that seeds artifacts a live
+        # stage may not overwrite, so it is off whenever a real model is in play.
+        return "vague_claim_unclear"
     lowered = text.lower()
     # A universal diagonalizability claim over ALL square matrices is the
     # canonical very-general-vs-all discipline test — the smoke run must

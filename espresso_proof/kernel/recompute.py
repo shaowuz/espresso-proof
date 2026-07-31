@@ -23,6 +23,7 @@ status — fail closed, no exceptions carved out for specific problems.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Callable, Mapping
 
@@ -31,6 +32,10 @@ from typing import Any, Callable, Mapping
 # deterministic, offline, and side-effect free: this runs inside validate_run,
 # on every validation.
 _RECOMPUTERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
+
+# (adapter_id, canonical input) -> what the kernel derived, or None for "could
+# not derive". See recompute_result for why caching is sound and necessary.
+_RECOMPUTE_CACHE: dict[tuple[str, str], dict[str, Any] | None] = {}
 
 
 def register_recomputer(
@@ -88,19 +93,38 @@ def recompute_result(
     fn = _RECOMPUTERS.get(adapter_id)
     if fn is None:
         return None
+    # Memoized on the whole input. validate_run runs after every stage and every
+    # validation re-ran every entry's adapter, so one accepted request for a
+    # large generated group made each of those validations pay the enumeration
+    # again — measured at 34s per validation for a single entry. Adapters are
+    # declared deterministic, offline and side-effect free, which is exactly the
+    # condition that makes caching sound.
+    try:
+        key = (adapter_id, json.dumps(recompute_input or {}, sort_keys=True, default=str))
+    except Exception:
+        key = None
+    if key is not None and key in _RECOMPUTE_CACHE:
+        return _RECOMPUTE_CACHE[key]
     try:
         result = fn(dict(recompute_input or {}))
     except Exception:
+        if key is not None:
+            _RECOMPUTE_CACHE[key] = None
         return None
     if not isinstance(result, dict):
+        if key is not None:
+            _RECOMPUTE_CACHE[key] = None
         return None
     digest = result.get("transcript_sha256")
     canonical = result.get("canonical_target")
-    return {
+    derived = {
         "confirmed": bool(result.get("confirmed")),
         "transcript_sha256": digest if isinstance(digest, str) and digest else None,
         "canonical_target": canonical if isinstance(canonical, str) and canonical else None,
     }
+    if key is not None:
+        _RECOMPUTE_CACHE[key] = derived
+    return derived
 
 
 # What a builder is allowed to append after the machine-authored target: the

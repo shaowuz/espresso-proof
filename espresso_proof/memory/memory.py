@@ -8,6 +8,7 @@ from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.kernel.models import MemoryEntry, MemoryIndex, MemoryIndexEntry
 from espresso_proof.kernel.models import _has_run_artifact_provenance, _validate_memory_text_boundary
 from espresso_proof.kernel.proof_language import scrub_proof_language
+from espresso_proof.kernel.run_lock import run_writer_lock
 from espresso_proof.kernel.research_bank import bankable_artifact_path, load_bankable_dict
 
 
@@ -168,17 +169,25 @@ def write_memory_entry(
     entry_filename = filename or f"{entry['id']}.yaml"
     if Path(entry_filename).name != entry_filename:
         raise ValueError("memory entry filename must not contain directories")
-    index = _build_updated_memory_index(
-        memory_dir,
-        project_id,
-        entry,
-        entry_filename,
-        tags=tags or [],
-    )
-    MemoryIndex.model_validate(index)
-    entry_path = memory_dir / entry_filename
-    write_yaml(entry_path, entry)
-    _write_memory_index(memory_dir, index)
+    # The index is PROJECT-scoped: it is read, modified and written by every run
+    # in the project, so a per-run lock cannot cover it and nothing did. Two runs
+    # created concurrently (the server's POST /api/runs path does exactly that)
+    # both read the same index and the later write dropped the earlier entry.
+    # Read-modify-write is one critical section, taken on the directory that is
+    # actually shared.
+    memory_dir.mkdir(parents=True, exist_ok=True)
+    with run_writer_lock(memory_dir, action="memory index update", record_denial=False):
+        index = _build_updated_memory_index(
+            memory_dir,
+            project_id,
+            entry,
+            entry_filename,
+            tags=tags or [],
+        )
+        MemoryIndex.model_validate(index)
+        entry_path = memory_dir / entry_filename
+        write_yaml(entry_path, entry)
+        _write_memory_index(memory_dir, index)
     return entry_path
 
 

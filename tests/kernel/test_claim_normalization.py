@@ -1,10 +1,17 @@
-"""Simple math claim normalization + fast lock.
+"""Math claim normalization + fast lock, from SHAPE not from subject matter.
 
-The claim-understanding layer used to mark standard elementary theorems (a
-prime-order group is cyclic) as "unclear", tripping the claim-clear gate before
-any proof-search work. A narrow, conservative normalizer now locks a PRECISE
-claim for recognized phrasings — without weakening the gate for vague claims and
-without upgrading any proof/source/evidence/refutation/checked status.
+The claim-understanding layer can mark a standard theorem as "unclear",
+tripping the claim-clear gate before any proof-search work. A conservative
+normalizer locks a PRECISE claim for statements whose logical shape it can
+recover — without weakening the gate for vague claims and without upgrading any
+proof/source/evidence/refutation/checked status.
+
+These tests used to pin one theorem's hand-authored output ("G is a group",
+"|G| = p"). That was the defect, not the coverage: the normalizer carried an
+answer key for a single sentence, so every paraphrase of every other theorem
+fell through to "unclear". What is under test now is the property that must
+hold for ANY statement — the parts are recovered from the user's own wording,
+and hedged or shapeless text still gets nothing.
 """
 
 from __future__ import annotations
@@ -29,6 +36,12 @@ HARD_NEGATIVES = [
     "prove that the object is regular",
     "show that the mirror object does something",
 ]
+# Shapeless or hedged text: a well-formed sentence is not automatically a claim.
+HEDGED = [
+    "every group is probably interesting",
+    "some objects are useful",
+    "prove the Riemann hypothesis",
+]
 
 
 # --- helper: command-wrapper stripping --------------------------------------
@@ -45,33 +58,50 @@ def test_strip_command_wrapper(raw: str, expected: str):
 
 # --- normalizer recognizes the target patterns ------------------------------
 
-def test_normalize_symbolic_prime_order():
+def test_parts_come_from_the_users_own_wording():
     norm = normalize_simple_claim("prove that a group of order p is cyclic when p is a prime number")
     assert norm is not None
     assert norm["claim_precision"] == "precise"
-    assert norm["conclusion"] == "G is cyclic."
     assert norm["missing_or_unclear"] == []
-    assert "G: group" in norm["objects"] and "p: prime number" in norm["objects"]
-    names = {h["name"] for h in norm["hypotheses"]}
-    assert {"G is a group", "|G| = p", "p is prime"} <= names
+    # The predicate is the user's, not a rewrite the module invented.
+    assert norm["conclusion"].startswith("cyclic")
+    assert "group of order p" in norm["objects"][0]
+    assert "group of order p" in norm["hypotheses"][0]["name"]
     # every hypothesis status is a valid kernel status (no 'assumed')
     assert all(h["status"] in {"explicit", "inferred", "missing", "unclear"} for h in norm["hypotheses"])
 
 
-def test_normalize_concrete_order():
-    norm = normalize_simple_claim("prove that a group of order 3 is cyclic")
+@pytest.mark.parametrize("claim,shape", [
+    ("every group of prime order is cyclic", "universal"),
+    ("prove that a group of order 3 is cyclic", "indefinite"),
+    ("if K/Q is a Galois extension, then Gal(K/Q) is finite", "conditional"),
+    ("each continuous function on a compact set is bounded", "universal"),
+    ("every graph with minimum degree at least n/2 is Hamiltonian", "universal"),
+])
+def test_shapes_are_recognized_without_any_subject_vocabulary(claim: str, shape: str):
+    """The point of the rewrite: no theorem gets treatment no other theorem gets."""
+    norm = normalize_simple_claim(claim)
     assert norm is not None and norm["claim_precision"] == "precise"
-    assert norm["objects"] == ["G: group"]  # no symbolic p for a concrete order
-    names = {h["name"] for h in norm["hypotheses"]}
-    assert {"G is a group", "|G| = 3"} <= names
+    assert norm["recognized"] == shape
 
 
-def test_normalize_every_group_of_prime_order():
-    norm = normalize_simple_claim("every group of prime order is cyclic")
-    assert norm is not None and norm["claim_precision"] == "precise"
+def test_the_module_knows_no_mathematics():
+    # A guard against the answer key coming back: no subject-matter vocabulary
+    # may appear in the module's source.
+    import inspect
+
+    from espresso_proof.claim import claim_normalization
+
+    body = "".join(
+        line for line in inspect.getsource(claim_normalization).splitlines(keepends=True)
+        if not line.strip().startswith("#")
+    )
+    code = body.split('"""')[0] + '"""'.join(body.split('"""')[2:])
+    for term in ("cyclic", "prime", "abelian", "galois", "|G|"):
+        assert term not in code.lower(), term
 
 
-@pytest.mark.parametrize("claim", HARD_NEGATIVES)
+@pytest.mark.parametrize("claim", HARD_NEGATIVES + HEDGED)
 def test_normalizer_does_not_over_normalize(claim: str):
     assert normalize_simple_claim(claim) is None
 
@@ -110,7 +140,7 @@ def test_target_claims_become_precise_and_clear(claim: str):
     assert manifest["current_state"] != "WAITING_CLAIM_CLARIFICATION"
     # claim only — no proof status upgrade
     assert locked["human_confirmed"] is False
-    assert locked["conclusion"] == "G is cyclic."
+    assert locked["conclusion"].strip()
 
 
 @pytest.mark.parametrize("claim", HARD_NEGATIVES[:2])

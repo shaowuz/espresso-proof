@@ -143,7 +143,21 @@ def test_applicability_finite_does_not_match_infinite() -> None:
     assert result["matches"] == "unclear"
 
 
-def test_lagrange_step_does_not_require_irrelevant_prime_hypothesis() -> None:
+def test_lagrange_step_now_fails_closed_on_the_irrelevant_prime_hypothesis() -> None:
+    """A capability the per-domain answer key bought, and what replaced it.
+
+    There used to be three hand-written branches ("group", "finite",
+    "prime"/"order"), each with its own marker list, which let the gate know that
+    a primality hypothesis is irrelevant to Lagrange. Deleting them costs exactly
+    this: a step that mentions orders now counts the claim's order-and-primality
+    hypothesis as relevant, does not find primality in the source, and stays a
+    CANDIDATE instead of earning source_backed.
+
+    The alternative was tried and rejected: requiring all of a hypothesis's terms
+    instead of any let a source with genuinely mismatched hypotheses ground a
+    step, which is the error that actually matters. Between under-grounding a
+    correct citation and grounding a wrong one, this fails closed.
+    """
     statement = (
         r"Lagrange Let \(G\) be a finite group and let \(H\) be a subgroup of "
         r"\(G\text{.}\) In particular, the number of elements in \(H\) must "
@@ -162,8 +176,8 @@ def test_lagrange_step_does_not_require_irrelevant_prime_hypothesis() -> None:
             "|H| divides |G|."
         ),
     )
-    assert result["matches"] is True
-    assert not any("prime" in item for item in result["mismatches"])
+    assert result["matches"] == "unclear"
+    assert any("prime" in item for item in result["mismatches"])
 
 
 def test_prime_order_corollary_covers_prime_order_cyclic_step() -> None:
@@ -200,11 +214,20 @@ def test_group_theory_conclusion_matching_stays_specific() -> None:
         "Lagrange's theorem: for a finite group G and subgroup H, |H| divides |G|.",
         lagrange,
     )
-    assert conclusion_compatible(
+    # "g is nonidentity" and the source's "g != e" are the same condition written
+    # two ways, and nothing subject-independent bridges them. This used to pass
+    # through a hardcoded pattern that named this exact pair of statements. With
+    # that answer key deleted, the gate fails closed and the step stays a
+    # candidate — the correct direction for a trust boundary, and an honest
+    # report of what the system can and cannot check on its own.
+    assert not conclusion_compatible(
         "If g is nonidentity and |G| = p is prime, then |<g>| = p.",
         prime_order_cyclic,
     )
-    assert conclusion_compatible(
+    # Same boundary: the step cites a DEFINITION ("there exists g such that
+    # G = <g>") and the source states a theorem that never spells the definition
+    # out. Term overlap says no, and no general rule can say otherwise.
+    assert not conclusion_compatible(
         "Definition of cyclic group: G is cyclic if there exists g in G such that G = <g>.",
         prime_order_cyclic,
     )
