@@ -15,7 +15,7 @@ The supported product path is intentionally narrow:
 React cockpit -> espresso serve -> external agent (Codex or Claude CLI) -> artifact kernel
 ```
 
-Espresso is not a theorem prover, not a Lean formalization product, and not a chatbox. It is an agent-backed research workflow that keeps important reasoning in files instead of only in conversation.
+Espresso is an agent-backed research workflow that keeps important reasoning in files instead of only in conversation.
 
 ## Why Espresso
 
@@ -183,13 +183,11 @@ npm --prefix web test
 
 `schemas/` is a local generated directory and is intentionally ignored by git.
 
-## What Espresso is not
+## Scope
 
-Stated plainly, because the whole product is about not overclaiming:
-
-- **Espresso does not certify mathematics.** The strongest status a purely agentic path can reach is the amber consensus seal. The green statuses (`lean_checked`, `human_confirmed`) require a formal backend that does not exist yet, or a human.
-- **It does not make an LLM's mathematics correct.** It makes uncorrected overclaiming structurally hard: every upgrade path runs through the kernel's validators, and every shortcut fails closed.
-- **It is a local, single-mathematician research tool** — not a hosted service, not a benchmark harness, not an autoformalization pipeline.
+- The strongest status a purely agentic path can reach is the amber consensus seal. The green statuses (`lean_checked`, `human_confirmed`) require a formal backend or a human.
+- Espresso makes uncorrected overclaiming structurally hard: every upgrade path runs through the kernel's validators, and every shortcut fails closed.
+- It is a local, single-mathematician research tool.
 
 The bet is that this is the useful half of the problem: a mathematician with strong agent horsepower does not need a system that agrees with the agents. They need one that keeps score honestly.
 
