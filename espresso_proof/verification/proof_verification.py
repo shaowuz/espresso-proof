@@ -691,50 +691,57 @@ def merge_agent_proposed_requests(run_dir: Path) -> dict:
     from espresso_proof.kernel.models import ScopedVerificationRequests
 
     run_dir = Path(run_dir)
-    manifest = read_yaml(run_dir / "run_manifest.yaml")
-    claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
+    # The whole read -> merge -> write is one critical section under the run
+    # writer lock. It used to run unlocked, so two concurrent callers (CLI resume
+    # racing the server, or two resumes) could both read the same requests file
+    # and manifest and the later write dropped the earlier merge — the same
+    # read-modify-write defect the memory index had. The lock is re-entrant per
+    # thread, so an outer CLI/orchestrator holder shares one acquisition.
+    with run_writer_lock(run_dir, action="merge agent-proposed requests"):
+        manifest = read_yaml(run_dir / "run_manifest.yaml")
+        claim_id = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])["id"]
 
-    proposed: list[dict] = []
-    sources = [run_dir / (manifest.get("optional_artifacts") or {}).get("llm_agent_run", "llm_agent_run.yaml")]
-    rounds_dir = run_dir / "prover_rounds"
-    if rounds_dir.is_dir():
-        sources.extend(sorted(rounds_dir.glob("round_*.yaml")))
-    for path in sources:
-        if not path.exists():
-            continue
-        try:
-            doc = read_yaml(path) or {}
-        except Exception:
-            continue
-        agents = [doc.get("prover_attempt") or {}] + list(doc.get("verifier_reviews") or [])
-        for record in agents:
-            for req in record.get("verification_requests") or []:
-                if isinstance(req, dict):
-                    proposed.append(req)
+        proposed: list[dict] = []
+        sources = [run_dir / (manifest.get("optional_artifacts") or {}).get("llm_agent_run", "llm_agent_run.yaml")]
+        rounds_dir = run_dir / "prover_rounds"
+        if rounds_dir.is_dir():
+            sources.extend(sorted(rounds_dir.glob("round_*.yaml")))
+        for path in sources:
+            if not path.exists():
+                continue
+            try:
+                doc = read_yaml(path) or {}
+            except Exception:
+                continue
+            agents = [doc.get("prover_attempt") or {}] + list(doc.get("verifier_reviews") or [])
+            for record in agents:
+                for req in record.get("verification_requests") or []:
+                    if isinstance(req, dict):
+                        proposed.append(req)
 
-    if not proposed:
-        return {"merged": 0, "skipped": 0}
+        if not proposed:
+            return {"merged": 0, "skipped": 0}
 
-    requests_path = run_dir / "scoped_verification_requests.yaml"
-    existing = read_yaml(requests_path) if requests_path.exists() else {"claim_id": claim_id, "requests": []}
-    known = {r.get("id") for r in existing.get("requests") or []}
-    merged = skipped = 0
-    for req in proposed:
-        if req.get("id") in known:
-            skipped += 1
-            continue
-        existing.setdefault("requests", []).append(req)
-        known.add(req.get("id"))
-        merged += 1
-    if merged:
-        ScopedVerificationRequests.model_validate(existing)
-        write_yaml(requests_path, existing)
-        stage_manifest = read_yaml(run_dir / "run_manifest.yaml")
-        stage_manifest.setdefault("optional_artifacts", {})["scoped_verification_requests"] = (
-            "scoped_verification_requests.yaml"
-        )
-        write_yaml(run_dir / "run_manifest.yaml", stage_manifest)
-    return {"merged": merged, "skipped": skipped}
+        requests_path = run_dir / "scoped_verification_requests.yaml"
+        existing = read_yaml(requests_path) if requests_path.exists() else {"claim_id": claim_id, "requests": []}
+        known = {r.get("id") for r in existing.get("requests") or []}
+        merged = skipped = 0
+        for req in proposed:
+            if req.get("id") in known:
+                skipped += 1
+                continue
+            existing.setdefault("requests", []).append(req)
+            known.add(req.get("id"))
+            merged += 1
+        if merged:
+            ScopedVerificationRequests.model_validate(existing)
+            write_yaml(requests_path, existing)
+            stage_manifest = read_yaml(run_dir / "run_manifest.yaml")
+            stage_manifest.setdefault("optional_artifacts", {})["scoped_verification_requests"] = (
+                "scoped_verification_requests.yaml"
+            )
+            write_yaml(run_dir / "run_manifest.yaml", stage_manifest)
+        return {"merged": merged, "skipped": skipped}
 
 
 def auto_wire_scoped_verifications(

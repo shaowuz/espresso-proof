@@ -107,6 +107,10 @@ If a feature you want conflicts with these, the boundary wins. Propose the
 boundary change on its own, with its own tests, rather than folding it into a
 feature PR.
 
+The most natural contribution — a new deterministic verifier so runs in your
+area of mathematics can earn checked evidence — has a full walkthrough:
+[docs/engineering/adding-a-deterministic-verifier.md](docs/engineering/adding-a-deterministic-verifier.md).
+
 Espresso Proof does not certify mathematical truth. It is not a theorem prover.
 Please do not add documentation, UI text, or artifact wording that implies
 otherwise.

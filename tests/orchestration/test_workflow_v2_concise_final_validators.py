@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 import json
 import subprocess
 import sys
@@ -363,6 +365,10 @@ def _make_first_step_source_backed(run_dir: Path) -> str:
     ref["authors"] = ["A. Author"]
     ref["title"] = "Attributed exact source"
     ref["locator"] = {"kind": "theorem", "value": "Theorem 1.2"}
+    # The kernel refuses a source_backed ref that is not bound to quoted bytes.
+    ref["statement_sha256"] = hashlib.sha256(
+        str(ref.get("statement_or_summary") or "").encode("utf-8")
+    ).hexdigest()
     ref["hypothesis_match"] = {"matches": True, "mismatches": []}
     step = source_grounding["steps"][0]
     step["status"] = "source_backed"

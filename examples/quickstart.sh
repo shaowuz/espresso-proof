@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/espresso-quickstart.XXXXXX")
-echo "Claim: every group of prime order is cyclic." > "$WORKDIR/problem.md"
+echo "every group of prime order is cyclic" > "$WORKDIR/problem.md"
 uv run espresso orchestrate --input "$WORKDIR/problem.md" --project demo --provider stub
 
 RUN_DIR=$(ls -dt projects/demo/runs/* | head -1)

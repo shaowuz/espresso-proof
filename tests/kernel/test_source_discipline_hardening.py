@@ -104,17 +104,47 @@ def test_consistently_forged_hash_fails_extraction_membership(tmp_path: Path) ->
         validate_run(run_dir)
 
 
-def test_legacy_refs_without_hash_still_validate(tmp_path: Path) -> None:
+def test_source_backed_ref_without_hash_is_rejected(tmp_path: Path) -> None:
+    """Previously asserted the legacy exemption; the exemption was the gap.
+
+    A source_backed ref with no statement_sha256 skipped BOTH excerpt bindings,
+    so a fabricated citation could support a step (and resolve theorem_ref
+    dependencies on the amber-seal path) by simply not recording a hash. The
+    sanctioned grounding pipeline always writes one, so nothing legitimate is
+    lost by refusing.
+    """
+
     run_dir = _grounded_run(tmp_path)
     sg = read_yaml(run_dir / "source_grounding.yaml")
     for ref in sg["source_refs"]:
         ref.pop("statement_sha256", None)
     write_yaml(run_dir / "source_grounding.yaml", sg)
-    # additive field: older artifacts keep validating — but the audit
-    # binding now notices the grounding bytes changed, so refresh the audit.
     from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
 
     audit_theorem_applicability(run_dir)
+    with pytest.raises(KernelValidationError, match="must record its excerpt"):
+        validate_run(run_dir)
+
+
+def test_candidate_refs_without_hash_still_validate(tmp_path: Path) -> None:
+    # The additive contract survives where no status is at stake: a CANDIDATE
+    # ref carries no authority, so an old artifact without hashes still loads.
+    run_dir = _grounded_run(tmp_path)
+    sg = read_yaml(run_dir / "source_grounding.yaml")
+    for ref in sg["source_refs"]:
+        ref.pop("statement_sha256", None)
+        ref["status"] = "candidate"
+    for step in sg["steps"]:
+        if step.get("status") == "source_backed":
+            step["status"] = "candidate"
+            step["note"] = "downgraded for the legacy-artifact test"
+    write_yaml(run_dir / "source_grounding.yaml", sg)
+    from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
+    from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
+
+    audit_theorem_applicability(run_dir)
+    # The downgrade opens source-gap warnings the final report must disclose.
+    refresh_final_report_disclosures(run_dir)
     validate_run(run_dir)
 
 
@@ -129,9 +159,12 @@ def test_grounding_edit_after_audit_fails_stale_audit(tmp_path: Path) -> None:
     with pytest.raises(KernelValidationError, match="stale"):
         validate_run(run_dir)
     # re-running the audit refreshes the binding and the run validates again.
+    from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
     from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
 
     audit_theorem_applicability(run_dir)
+    # The downgrade opens source-gap warnings the final report must disclose.
+    refresh_final_report_disclosures(run_dir)
     validate_run(run_dir)
 
 

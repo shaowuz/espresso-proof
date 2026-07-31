@@ -7,7 +7,26 @@ from typer.testing import CliRunner
 
 from espresso_proof.cli import app
 from espresso_proof.claim.claim_clear import ClaimClearBlockedError
+import hashlib
+
 from espresso_proof.kernel.io import read_yaml, write_yaml
+
+
+def _bind_excerpts(source_grounding: dict) -> dict:
+    """Stamp each source_backed ref's excerpt hash, as the real pipeline does.
+
+    These fixtures hand-edit refs to source_backed to exercise the LATER
+    validators (applicability audit, locator, usage binding). The kernel now
+    refuses a source_backed ref with no statement_sha256 outright, so an
+    unbound fixture never reaches the rule it is testing.
+    """
+
+    for ref in source_grounding.get("source_refs") or []:
+        if ref.get("status") == "source_backed" and not ref.get("statement_sha256"):
+            ref["statement_sha256"] = hashlib.sha256(
+                str(ref.get("statement_or_summary") or "").encode("utf-8")
+            ).hexdigest()
+    return source_grounding
 from espresso_proof.literature.literature_discovery import discover_local_literature
 from espresso_proof.literature.live_search import parse_ads_json, parse_arxiv_atom, parse_crossref_json
 from espresso_proof.literature.literature_review_agent import ReviewSourceSpec, run_literature_review_agent
@@ -543,7 +562,7 @@ def test_source_backed_step_requires_theorem_applicability_artifact(tmp_path: Pa
     source_grounding["steps"][0]["status"] = "source_backed"
     source_grounding["steps"][0]["source_refs"] = [ref_id]
     source_grounding["steps"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
-    write_yaml(run_dir / "source_grounding.yaml", source_grounding)
+    write_yaml(run_dir / "source_grounding.yaml", _bind_excerpts(source_grounding))
 
     try:
         validate_run(run_dir)
@@ -573,7 +592,7 @@ def test_source_backed_step_requires_applicable_theorem_conditions(tmp_path: Pat
     source_grounding["steps"][0]["status"] = "source_backed"
     source_grounding["steps"][0]["source_refs"] = [ref_id]
     source_grounding["steps"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
-    write_yaml(run_dir / "source_grounding.yaml", source_grounding)
+    write_yaml(run_dir / "source_grounding.yaml", _bind_excerpts(source_grounding))
     applicability = {
         "schema_version": 1,
         "claim_id": source_grounding["claim_id"],
@@ -642,7 +661,7 @@ def _setup_source_backed_run(tmp_path: Path):
     source_grounding["steps"][0]["status"] = "source_backed"
     source_grounding["steps"][0]["source_refs"] = [ref_id]
     source_grounding["steps"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
-    write_yaml(run_dir / "source_grounding.yaml", source_grounding)
+    write_yaml(run_dir / "source_grounding.yaml", _bind_excerpts(source_grounding))
     step_id = source_grounding["steps"][0]["proof_step_id"]
     return run_dir, manifest, source_grounding, ref_id, step_id
 
@@ -866,7 +885,7 @@ def test_source_backed_step_requires_exact_applicability_locator(tmp_path: Path)
     source_grounding["steps"][0]["status"] = "source_backed"
     source_grounding["steps"][0]["source_refs"] = [ref_id]
     source_grounding["steps"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
-    write_yaml(run_dir / "source_grounding.yaml", source_grounding)
+    write_yaml(run_dir / "source_grounding.yaml", _bind_excerpts(source_grounding))
     applicability = {
         "schema_version": 1,
         "claim_id": source_grounding["claim_id"],
@@ -932,7 +951,7 @@ def test_source_backed_step_applicability_usage_must_match_step_source_ref(tmp_p
     source_grounding["steps"][0]["status"] = "source_backed"
     source_grounding["steps"][0]["source_refs"] = [good_ref["id"]]
     source_grounding["steps"][0]["hypothesis_match"] = {"matches": True, "mismatches": []}
-    write_yaml(run_dir / "source_grounding.yaml", source_grounding)
+    write_yaml(run_dir / "source_grounding.yaml", _bind_excerpts(source_grounding))
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     applicability = {
         "schema_version": 1,

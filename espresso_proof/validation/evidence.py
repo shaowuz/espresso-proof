@@ -146,8 +146,7 @@ def _validate_computation_verification(
 ) -> None:
     """Enforce honesty between machine verification and claimed computation status.
 
-    Only runs when a computation_verification artifact is present, so existing
-    runs without machine verification are unaffected. Rules:
+    Rules:
 
     - every verification result must reference a real check;
     - a check refuted by the machine cannot claim checked/source_checked;
@@ -156,17 +155,30 @@ def _validate_computation_verification(
       have checked but did not confirm);
     - an executed, confirming result must survive the KERNEL re-deriving it.
 
-    That last rule is the one that makes the rest mean anything. ``executed`` and
-    ``verdict`` are written by whoever wrote the file, and this artifact backs
-    the grade-level ``computation_checked`` and a ``scoped_checked`` subgoal
-    node, so believing them handed out a checked status for a hand-written line —
-    reproduced end to end during a hostile review. The kernel now re-runs each
-    confirming check through the same backend the single writer uses and requires
-    its own verdict, backend and computed value to agree.
+    The recompute rule is the one that makes the rest mean anything. ``executed``
+    and ``verdict`` are written by whoever wrote the file, and this artifact
+    backs the grade-level ``computation_checked`` and a ``scoped_checked``
+    subgoal node, so believing them handed out a checked status for a
+    hand-written line — reproduced end to end during a hostile review.
+
+    A MISSING artifact is not an exemption. This validator used to return early
+    when ``computation_verification.yaml`` was absent, so a check claiming
+    ``checked`` with a machine_check spec validated as long as the artifact that
+    would have contradicted it was simply not shipped — the whole gate was
+    opt-in for exactly the entries it existed to stop. The machine_check rule
+    now runs unconditionally; with no artifact, nothing is confirmed, and a
+    machine-checkable ``checked`` claim fails closed.
     """
-    if verification is None:
-        return
     evidence_statuses = {ComputationStatus.checked, ComputationStatus.source_checked}
+    if verification is None:
+        for check in computations.checks:
+            if check.machine_check is not None and check.status == ComputationStatus.checked:
+                raise KernelValidationError(
+                    f"computation check {check.id} claims 'checked' with a machine_check "
+                    "spec but the run carries no computation_verification artifact; "
+                    "omitting the machine's answer does not stand in for a confirming one"
+                )
+        return
     checks_by_id = {check.id: check for check in computations.checks}
     confirmed = {
         result.check_id

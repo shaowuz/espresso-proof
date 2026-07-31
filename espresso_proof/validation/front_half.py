@@ -31,8 +31,7 @@ def validate_front_half_run(run_dir: Path) -> None:
     if not rel:
         return  # optional + old-run compatible: absence is fine
 
-    # local import to avoid any import cycle with the front_half package
-    from espresso_proof.front_half import FRONT_HALF_STAGES
+    from espresso_proof.kernel.front_half_contract import FRONT_HALF_STAGES
 
     path = run_dir / rel
     try:

@@ -19,6 +19,7 @@ Each stage returns a plain audit outcome (used by Phase 03).
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -94,35 +95,72 @@ class StageRunner:
         return resolved
 
     # -- internal: snapshot / restore ----------------------------------------
+    # Symlinks are never followed by snapshot or restore. Path confinement
+    # checks the DECLARED paths, but a symlink sitting INSIDE a covered
+    # directory redirects the file operations themselves: read_bytes() would
+    # capture the outside target's content and write_bytes() on restore would
+    # write THROUGH the link to wherever it points — the one way this runner
+    # could mutate something outside the run directory it promises to confine
+    # itself to. A link is treated as an opaque entry: skipped by the walks, and
+    # unlinked (the link, not its target) before a real file is restored at its
+    # path.
+
     def _snapshot(self, scope: list[Path]):
         files: dict[Path, bytes | None] = {}
+        links: dict[Path, str] = {}
         covered_dirs: list[Path] = []
         for root in scope:
-            if root.is_dir():
+            if root.is_dir() and not root.is_symlink():
                 covered_dirs.append(root)
                 for f in root.rglob("*"):
-                    if f.is_file() and f.name not in _SNAPSHOT_EXCLUDED_NAMES:
+                    if f.name in _SNAPSHOT_EXCLUDED_NAMES:
+                        continue
+                    if f.is_symlink():
+                        links[f] = os.readlink(f)
+                    elif f.is_file():
                         files[f] = f.read_bytes()
+            elif root.is_symlink():
+                links[root] = os.readlink(root)
             else:
                 files[root] = root.read_bytes() if root.exists() else None
-        return files, covered_dirs
+        return files, links, covered_dirs
 
     def _restore(self, snapshot) -> None:
-        files, covered_dirs = snapshot
+        files, links, covered_dirs = snapshot
         # Drop files created inside a covered directory during the failed stage.
+        # unlink() removes a link itself, never its target, so a planted link is
+        # safe to drop here.
         for directory in covered_dirs:
             if directory.exists():
                 for f in directory.rglob("*"):
-                    if f.is_file() and f not in files and f.name not in _SNAPSHOT_EXCLUDED_NAMES:
+                    if (
+                        (f.is_file() or f.is_symlink())
+                        and f not in files
+                        and f not in links
+                        and f.name not in _SNAPSHOT_EXCLUDED_NAMES
+                    ):
                         f.unlink()
         # Restore captured file bytes (or remove files that did not exist before).
         for path, data in files.items():
             if data is None:
-                if path.exists():
+                if path.is_symlink() or path.exists():
                     path.unlink()
             else:
+                if path.is_symlink():
+                    # Restore a real file AT the path, never through the link.
+                    path.unlink()
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
+        # Restore links AS links (their recorded target string, never followed).
+        for path, target in links.items():
+            if path.is_symlink():
+                if os.readlink(path) == target:
+                    continue
+                path.unlink()
+            elif path.exists():
+                path.unlink()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.symlink_to(target)
 
     # -- internal: undeclared-write detection ---------------------------------
     def _fingerprint(self) -> dict[Path, tuple[int, int]]:

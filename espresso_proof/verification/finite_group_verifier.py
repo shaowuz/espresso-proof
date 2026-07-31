@@ -339,7 +339,16 @@ def permutation_group_witness(
     if expected_order is not None:
         checks["order"] = len(group) == int(expected_order)
     if expected_solvable is not None:
-        checks["solvable"] = solvable is bool(expected_solvable)
+        # Strict bool only. bool() would truthy-coerce the YAML string "false"
+        # to True, silently inverting the expectation the requester recorded;
+        # a request that cannot state its expectation as a boolean has not
+        # stated it, and fails closed.
+        if not isinstance(expected_solvable, bool):
+            return _bad(
+                "expected_solvable must be a boolean, got "
+                f"{type(expected_solvable).__name__} {expected_solvable!r}"
+            )
+        checks["solvable"] = solvable is expected_solvable
     # A vacuous check is not a check. The trivial group satisfies "order 1" and
     # "solvable" no matter what the surrounding artifact claims to be about, so
     # confirming it would let a request earn instance_checked for a target

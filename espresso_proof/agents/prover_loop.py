@@ -538,8 +538,10 @@ def append_prover_loop_round(
         client=client,
         created_at=created_at,
         input_artifacts=input_artifacts,
+        # Round-aware BEFORE normalization, so this round's proposal/objection
+        # ids carry this round's identity instead of round 1's.
+        agent_id=f"llm_prover_{next_round:03d}",
     )
-    prover["agent_id"] = f"llm_prover_{next_round:03d}"
     _apply_missing_context_notes(prover, time_context)
 
     reviewer_roles = _reviewer_roles(reviewer_set, 3)
@@ -559,8 +561,8 @@ def append_prover_loop_round(
             index=index,
             reviewer_role=reviewer_role,
             target_subgoal_id=target_subgoal.get("id"),  # Bind objections to the attacked subgoal
+            verifier_id=f"round_{next_round:03d}_{reviewer_role}_{index:03d}",
         )
-        review["verifier_id"] = f"round_{next_round:03d}_{review['verifier_id']}"
         verifier_reviews.append(review)
 
     # Priority-ordered, deduplicated, UNCAPPED — same mechanism as the initial

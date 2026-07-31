@@ -258,3 +258,86 @@ def test_ranked_but_nothing_blocking_is_not_called_unranked() -> None:
     source = inspect.getsource(memo)
     assert 'elif _blocker_ranking.get("differentiated"):' in source
     assert "none\n                is blocking" in source or "none " in source
+
+
+# --- symlinks must not let snapshot/restore reach outside the run directory
+
+
+def test_rollback_never_writes_through_a_symlink(tmp_path: Path) -> None:
+    outside = tmp_path / "outside.txt"
+    outside.write_text("untouched\n", encoding="utf-8")
+    run_dir = _run_shell(tmp_path)
+    (run_dir / "link.yaml").symlink_to(outside)
+
+    def _mutate() -> None:
+        raise RuntimeError("boom")
+
+    with pytest.raises(StageError):
+        StageRunner(run_dir).run(name="s", mutate=_mutate, validate=lambda: None)
+    # The outside target was neither captured nor rewritten.
+    assert outside.read_text() == "untouched\n"
+    assert (run_dir / "link.yaml").is_symlink()
+
+
+def test_a_symlink_created_by_a_failed_stage_is_removed_not_followed(tmp_path: Path) -> None:
+    outside = tmp_path / "outside.txt"
+    outside.write_text("untouched\n", encoding="utf-8")
+    run_dir = _run_shell(tmp_path)
+
+    def _mutate() -> None:
+        (run_dir / "planted.yaml").symlink_to(outside)
+        raise RuntimeError("boom")
+
+    with pytest.raises(StageError):
+        StageRunner(run_dir).run(name="s", mutate=_mutate, validate=lambda: None)
+    assert not (run_dir / "planted.yaml").exists()
+    assert outside.read_text() == "untouched\n"
+
+
+def test_a_file_replaced_by_a_symlink_is_restored_as_a_real_file(tmp_path: Path) -> None:
+    outside = tmp_path / "outside.txt"
+    outside.write_text("untouched\n", encoding="utf-8")
+    run_dir = _run_shell(tmp_path)
+
+    def _mutate() -> None:
+        # The attack shape: swap a tracked file for a link so the restore's
+        # write_bytes lands outside the run directory.
+        (run_dir / "declared.yaml").unlink()
+        (run_dir / "declared.yaml").symlink_to(outside)
+        raise RuntimeError("boom")
+
+    with pytest.raises(StageError):
+        StageRunner(run_dir).run(name="s", mutate=_mutate, validate=lambda: None)
+    assert outside.read_text() == "untouched\n"
+    assert not (run_dir / "declared.yaml").is_symlink()
+    assert (run_dir / "declared.yaml").read_text() == "original\n"
+
+
+# --- concurrent request merges must not drop each other
+
+
+def test_merge_agent_proposed_requests_is_serialized(tmp_path: Path) -> None:
+    from espresso_proof.kernel.io import write_yaml
+    from espresso_proof.verification.proof_verification import merge_agent_proposed_requests
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_yaml(run_dir / "run_manifest.yaml",
+               {"artifacts": {"locked_claim": "locked_claim.yaml"}, "optional_artifacts": {}})
+    write_yaml(run_dir / "locked_claim.yaml", {"id": "claim_001"})
+    write_yaml(
+        run_dir / "llm_agent_run.yaml",
+        {"prover_attempt": {"verification_requests": [
+            {"id": f"prover_req_{i:02d}", "kind": "named_finite_witness",
+             "witness": "gl2_f3_solvability", "target": f"t{i}"}
+            for i in range(6)
+        ]}, "verifier_reviews": []},
+    )
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(lambda _: merge_agent_proposed_requests(run_dir), range(6)))
+
+    from espresso_proof.kernel.io import read_yaml
+
+    requests = read_yaml(run_dir / "scoped_verification_requests.yaml")["requests"]
+    assert len(requests) == 6  # every request exactly once, none dropped
+    assert sum(r["merged"] for r in results) == 6

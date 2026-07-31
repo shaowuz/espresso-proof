@@ -6,18 +6,10 @@ from collections.abc import Callable
 
 # Front-half stages in Core-Flow order. Names are stable identifiers used by the
 # registry, the CLI ``--front-half`` plumbing, and the orchestrator.
-FRONT_HALF_STAGES: list[str] = [
-    "understanding_claim",  # S1: locked_claim + hypothesis_ledger (+ claim_precision)
-    "literature_review",    # S2: candidate references only
-    "examples",             # S3: examples + computation_checks
-    "counterexamples",      # S4: counterexamples + admissibility tests
-    "source_theorem",       # S7: source matching + theorem applicability (candidate)
-    "check_generator",      # Rail-A machine_check proposals bound to source steps
-    "regrade",              # evidence-aware grade recompute (before strategy)
-    "strategy",             # S5: strategy generator + grader + brief
-    "attacker",             # S6: example/counterexample attacker
-    "grade_memory_memo",    # S8: grade refresh + memory + concise answer
-]
+# Canonical order lives in the kernel (the validator enforces it and must not
+# import this package); re-exported here so implementations and callers keep
+# one import site.
+from espresso_proof.kernel.front_half_contract import FRONT_HALF_STAGES
 
 # stage name -> normalizer(run_dir=..., client=..., context=...) -> dict
 # A normalizer returns an outcome dict; recognized keys: "unsafe_language" (list)

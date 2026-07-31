@@ -184,6 +184,11 @@ export async function fetchStatus(runId: string): Promise<StatusView> {
   return {
     state: status.state ?? "",
     proof_status: status.proof_status ?? "",
+    // Both server-side honesty signals must survive normalization: dropping
+    // continue_available left the Continue button always enabled, and dropping
+    // stalled hid the dead-worker diagnostic the server computes per poll.
+    continue_available: status.continue_available,
+    stalled: status.stalled ?? null,
     completed: status.completed ?? false,
     routes_preliminary: status.routes_preliminary ?? false,
     selected_route: status.selected_route ?? null,

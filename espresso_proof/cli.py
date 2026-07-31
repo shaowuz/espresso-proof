@@ -336,10 +336,24 @@ def orchestrate(
             "Auto-continue skipped: the run stopped at an earlier human "
             "question, which machinery must not answer"
         )
-    typer.echo(
-        f"Resume with: espresso orchestrate --resume {result['run_dir']} "
-        "--select-strategy <id> [--effort <mode>]"
-    )
+    # The next step depends on WHERE the run stopped. This hint used to be
+    # printed unconditionally, so a run parked at claim clarification was told
+    # to resume with a strategy selection — a command that then fails at the
+    # claim-clear gate. Verified live from the shipped quickstart.
+    if result["state"] == "WAITING_CLAIM_CLARIFICATION":
+        typer.echo(
+            "Next: the claim needs clarification before any strategy can run.\n"
+            f"  1. Read the questions in {result['run_dir']}/hypothesis_ledger.yaml\n"
+            "  2. Rewrite the claim as one precise mathematical statement "
+            "(e.g. \"every group of prime order is cyclic\")\n"
+            "  3. Start a fresh run: espresso orchestrate --input <file> --project <name>"
+        )
+    else:
+        typer.echo(
+            f"Resume with: espresso orchestrate --resume {result['run_dir']} "
+            "--select-strategy <id> [--effort <mode>]\n"
+            f"  (strategy ids: {result['run_dir']}/strategy_brief.yaml top_strategies[].id)"
+        )
 
 
 @app.command("run-agent")

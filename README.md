@@ -440,6 +440,7 @@ See
 - [Product Philosophy](docs/product-philosophy.md) — research goals and design principles
 - [Product Path Boundaries](docs/engineering/product-path-boundaries.md) — supported runtime ownership and boundaries
 - [Espresso Core Integration](docs/engineering/espresso-core-integration.md) — external espresso-core adapter contract
+- [Adding a Deterministic Verifier](docs/engineering/adding-a-deterministic-verifier.md) — how to contribute a new machine check
 - [Contributing](CONTRIBUTING.md) — setup, tests, pull request expectations, and trust-boundary rules
 - [Security](SECURITY.md) — vulnerability reporting
 - [Code of Conduct](CODE_OF_CONDUCT.md) — contributor conduct

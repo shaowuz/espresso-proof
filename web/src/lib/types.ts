@@ -47,12 +47,27 @@ export interface PressureLaneView {
   claim_clear_blocked: boolean;
 }
 
+/** Live dead-worker diagnostic: an agent call recorded `started` with no
+ * terminal record and no in-memory job progressing it. Display only — carries
+ * no mathematical status. */
+export interface StalledInfo {
+  stage: string;
+  last_active_stage: string;
+  since: string | null;
+  elapsed_seconds: number | null;
+  last_successful_stage: string | null;
+  diagnostics: string[];
+  message: string;
+}
+
 export interface StatusView {
   state: string;
   proof_status: string;
   /** True when the run is at or past the decision point, so a Continue would
    * be accepted by the kernel (absent on older servers → treat as true). */
   continue_available?: boolean;
+  /** Non-null when the server detected a dead worker mid-call. */
+  stalled?: StalledInfo | null;
   completed: boolean;
   routes_preliminary: boolean;
   selected_route: { id: string; title: string } | null;

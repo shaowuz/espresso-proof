@@ -18,14 +18,29 @@ from espresso_proof.agents.clients import (
     build_client,
 )
 
-# Shipped adapters that self-report identity through the reply envelope; only
-# these may earn verified_real_provider (an arbitrary wrapper cannot
-# self-declare as verified).
+# Shipped adapters that self-report identity through the reply envelope, mapped
+# to the command-token substrings the resolved executor must contain. The
+# envelope's adapter string is written by whatever process was executed, so on
+# its own it is a self-declaration; requiring the RESOLVED command (recorded by
+# the client from the actual argv, not the reply) to name the matching shipped
+# adapter binds the claim to which program actually ran. An arbitrary wrapper
+# can still copy the envelope string, but then its command basename does not
+# match and it earns unverified — which is the honest label for it.
 _SELF_REPORTING_ADAPTERS = {
-    "espresso_codex_agent",
-    "espresso_claude_agent",
-    "espresso_core_adapter",
+    "espresso_codex_agent": ("codex",),
+    "espresso_claude_agent": ("claude",),
+    "espresso_core_adapter": ("espresso_core", "core_adapter"),
 }
+
+
+def _command_matches_adapter(adapter: str, command_basename: str) -> bool:
+    tokens = _SELF_REPORTING_ADAPTERS.get(adapter)
+    if not tokens:
+        return False
+    lowered = command_basename.lower()
+    # Every shipped launcher token carries "espresso" (module, console script, or
+    # adapter file); the per-adapter token separates the three from each other.
+    return "espresso" in lowered and any(token in lowered for token in tokens)
 from espresso_proof.agents.prompts import (
     _reviewer_roles,
     agent_prompt,
@@ -169,10 +184,12 @@ def _agent_call_diagnostic(
         fallback_used = meta.get("fallback_used") is True
         fallback_reason = str(meta.get("fallback_reason") or "")
         request_id = str(meta.get("request_id") or "")
-        # Same evidence standard as the historical codex-only rule, extended
-        # to every SHIPPED self-reporting adapter (no self-declared wrappers).
+        # Same evidence standard as the historical codex-only rule, extended to
+        # every SHIPPED self-reporting adapter — and bound to the RESOLVED
+        # command, because the envelope string alone is whatever the executed
+        # process chose to write about itself.
         verified = (
-            adapter in _SELF_REPORTING_ADAPTERS
+            _command_matches_adapter(adapter, command_basename)
             and parse_status == "ok"
             and not fallback_used
         )
@@ -728,7 +745,12 @@ def make_prover_attempt(
     client: LLMClient,
     created_at: str,
     input_artifacts: list[str] | None = None,
+    agent_id: str = "llm_prover_001",
 ) -> dict:
+    # The identity is a parameter because everything minted DURING normalization
+    # (request ids, objection ids) embeds it. The round lane used to rename the
+    # attempt afterwards, so every round's proposals carried round 1's ids and
+    # their provenance was ambiguous across rounds.
     output_summary, summary_neutralized = safe_prover_text(raw.get("summary", ""))
     # The prover attempt's summary is the ONE sanctioned home for the
     # no-output placeholder (safe_text itself no longer manufactures it, so
@@ -747,7 +769,7 @@ def make_prover_attempt(
             ],
         )
     return {
-        "agent_id": "llm_prover_001",
+        "agent_id": agent_id,
         "role": "prover",
         "provider": client.provider,
         "model": client.model,
@@ -757,9 +779,7 @@ def make_prover_attempt(
         "proposed_steps": proposed_steps,
         "source_requests": safe_list(raw.get("source_requests", [])),
         "risks": risks,
-        "verification_requests": _normalize_verification_requests(
-            raw, agent_id="llm_prover_001"
-        ),
+        "verification_requests": _normalize_verification_requests(raw, agent_id=agent_id),
         "status": "needs_human",
     }
 
@@ -905,11 +925,15 @@ def make_verifier_review(
     index: int,
     reviewer_role: str,
     target_subgoal_id: str | None = None,
+    verifier_id: str | None = None,
 ) -> dict:
     unsafe_language = collect_unsafe_language(raw)
     verdict = normalize_verdict(raw.get("verdict", "needs_revision"))
     action = normalize_action(raw.get("recommended_human_action", "revise"))
-    verifier_id = f"{reviewer_role}_{index:03d}"
+    # Same rule as the prover attempt: the identity must be final BEFORE
+    # normalization mints request/objection ids from it.
+    if verifier_id is None:
+        verifier_id = f"{reviewer_role}_{index:03d}"
     return {
         "verifier_id": verifier_id,
         "provider": client.provider,

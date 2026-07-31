@@ -8,6 +8,8 @@ source-backed / checked / proved).
 """
 from __future__ import annotations
 
+import hashlib
+
 from pathlib import Path
 
 import pytest
@@ -371,6 +373,10 @@ def test_writer_prefers_direct_source_backed_theorem(tmp_path: Path) -> None:
             "authors": ["A. Author"],
             "locator": {"kind": "theorem", "value": "Theorem 2.1"},
             "statement_or_summary": f"If the locked hypotheses hold, then {claim['conclusion']}",
+            # The kernel refuses a source_backed ref with no excerpt hash.
+            "statement_sha256": hashlib.sha256(
+                f"If the locked hypotheses hold, then {claim['conclusion']}".encode()
+            ).hexdigest(),
             "hypothesis_match": {"matches": True, "mismatches": [], "matched": []},
             "confidence": "high",
             "status": "source_backed",
@@ -540,6 +546,9 @@ def test_source_grounded_theorem_dependency_can_seal_when_cross_checked(
             "authors": ["A. Algebraist"],
             "locator": {"kind": "theorem", "value": "Theorem 1.2"},
             "statement_or_summary": "If H is a subgroup of finite G, then |H| divides |G|.",
+            "statement_sha256": hashlib.sha256(
+                b"If H is a subgroup of finite G, then |H| divides |G|."
+            ).hexdigest(),
             "hypothesis_match": {"matches": True, "mismatches": [], "matched": []},
             "confidence": "high",
             "status": "source_backed",

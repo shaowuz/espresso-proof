@@ -231,9 +231,26 @@ def test_validator_unknown_check_id():
         _validate_computation_verification(checks, report)
 
 
-def test_validator_noop_without_verification():
+def test_missing_report_no_longer_exempts_a_machine_checkable_claim():
+    """Previously asserted the no-op; the no-op was the bypass.
+
+    A check claiming 'checked' WITH a machine_check spec validated whenever
+    computation_verification.yaml was simply absent — the artifact that would
+    have contradicted it was opt-in. Now it fails closed; a check without a
+    machine_check spec, or without a checked status, is still exempt (there is
+    nothing the machine could have been asked to confirm).
+    """
+
     checks = _checks([_check("c1", "checked", "exact_arithmetic", "2**5 - 9", "24")])
-    _validate_computation_verification(checks, None)  # no raise when no report
+    with pytest.raises(KernelValidationError, match="no computation_verification artifact"):
+        _validate_computation_verification(checks, None)
+
+    unchecked = _checks([_check("c1", "inconclusive", "exact_arithmetic", "2**5 - 9", "23")])
+    _validate_computation_verification(unchecked, None)  # nothing claimed, nothing owed
+
+    specless = _check("c2", "checked", "exact_arithmetic", "1+1", "2")
+    specless.pop("machine_check")
+    _validate_computation_verification(_checks([specless]), None)
 
 
 def test_build_report_skips_specless_checks():

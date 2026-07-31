@@ -726,6 +726,27 @@ export function Workspace({
 
   return (
     <div className="flex flex-col gap-4 p-4">
+      {/* Dead-worker diagnostic: the server recomputes this on every poll; a
+          silent dead page becomes a visible last-active-stage + recovery hint.
+          Display only — no mathematical status. */}
+      {status?.stalled && (
+        <div
+          role="status"
+          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[14px] text-amber-900"
+        >
+          <p className="flex items-center gap-1.5 font-medium">
+            <ShieldAlert className="h-4 w-4 shrink-0" aria-hidden />
+            {status.stalled.message}
+          </p>
+          {status.stalled.last_successful_stage && (
+            <p className="mt-1 text-amber-800">
+              Last completed step: {status.stalled.last_successful_stage}
+              {status.stalled.elapsed_seconds != null &&
+                ` — unresponsive for ${Math.round(status.stalled.elapsed_seconds / 60)} min`}
+            </p>
+          )}
+        </div>
+      )}
       <ClaimCard claim={claim.data?.claim} missing={claim.data?.missing ?? true} />
       <CompactResearchMemo memo={strat.data?.compact_memo} />
       <AgentFlowTrace

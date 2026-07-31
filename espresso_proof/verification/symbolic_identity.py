@@ -27,7 +27,12 @@ def _difference_of_squares(n: int, vals: tuple[int, ...]) -> bool:
 
 
 def _freshmans_dream(n: int, vals: tuple[int, ...]) -> bool:
-    # (a+b)^n == a^n + b^n in Z/n holds iff n is prime (Frobenius in char p).
+    # (a+b)^n == a^n + b^n in Z/n. Holds for every prime n (Frobenius in
+    # char p) but NOT only for primes: any n with a^n == a for all a — the
+    # Carmichael numbers 561, 1105, ... — satisfies it too, so confirming this
+    # identity is never evidence of primality. (The first Carmichael number
+    # sits above the current modulus cap, which is why the false "iff prime"
+    # reading survived testing.)
     a, b = vals
     return pow(a + b, n, n) == (pow(a, n, n) + pow(b, n, n)) % n
 
