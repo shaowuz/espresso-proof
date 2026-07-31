@@ -25,8 +25,8 @@ from espresso_proof.kernel.models import (
     StrategyBrief,
 )
 from espresso_proof.kernel.validators import KernelValidationError, validate_run
-from espresso_proof.kernel.validators._part5 import _validate_human_choice
-from espresso_proof.kernel.validators._part6 import _validate_llm_loop_artifacts
+from espresso_proof.kernel.validators.consistency_gates import _validate_human_choice
+from espresso_proof.kernel.validators.final_gates import _validate_llm_loop_artifacts
 from espresso_proof.orchestration.genesis import run_mock_critique
 
 FIXTURES = Path("tests/fixtures")

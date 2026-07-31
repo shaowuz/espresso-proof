@@ -1,27 +1,23 @@
-"""Kernel data models — file-order slice 2/8. Imported via espresso_proof.kernel.models."""
-
+"""Examples, computation checks/verification, failure patterns, judgment, counterexamples, tests."""
 
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
-
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 from pydantic import Field, model_validator
+from typing import Any, Literal
+from typing import Literal
+import re
 
-
-from espresso_proof.kernel.models._part1 import (
-    ComputationStatus,
-    ExampleStatus,
-    SourceRef,
-    StrictBaseModel,
-)
+from espresso_proof.kernel.models.foundations import ComputationStatus, ExampleStatus, StrictBaseModel
 
 
 class InvariantValue(StrictBaseModel):
     value: str
     status: ComputationStatus
     source_ref: str | None = None
-
 
 class ExampleHypotheses(StrictBaseModel):
     smooth: bool | Literal["unknown"]
@@ -30,7 +26,6 @@ class ExampleHypotheses(StrictBaseModel):
     base_field: str | Literal["unknown"]
     characteristic: str | Literal["unknown"]
     additional: list[str] = Field(default_factory=list)
-
 
 class ExampleRecord(StrictBaseModel):
     id: str
@@ -45,14 +40,12 @@ class ExampleRecord(StrictBaseModel):
     claim_applicability: Literal["applies", "does_not_apply", "unclear"]
     notes: str = ""
 
-
 class ExampleBank(StrictBaseModel):
     version: float | str
     project_id: str
     purpose: str
     source_refs: list[SourceRef]
     examples: list[ExampleRecord]
-
 
 class TestedExample(StrictBaseModel):
     id: str
@@ -67,11 +60,9 @@ class TestedExample(StrictBaseModel):
     source_or_reason: str
     nontriviality: Literal["routine", "standard", "literature_counterexample", "research_level"]
 
-
 class ExampleSelection(StrictBaseModel):
     claim_id: str
     examples: list[TestedExample]
-
 
 class MachineCheckSpec(StrictBaseModel):
     """A machine-runnable specification a real verifier backend can execute.
@@ -93,7 +84,6 @@ class MachineCheckSpec(StrictBaseModel):
     expected: str
     target_step_id: str | None = None
     notes: str = ""
-
 
 class ExampleComputationCheck(StrictBaseModel):
     id: str
@@ -118,7 +108,6 @@ class ExampleComputationCheck(StrictBaseModel):
             raise ValueError("source_checked evidence must use source_lookup")
         return self
 
-
 class ComputationChecks(StrictBaseModel):
     claim_id: str
     checks: list[ExampleComputationCheck]
@@ -136,13 +125,11 @@ class ComputationChecks(StrictBaseModel):
             )
         return self
 
-
 class VerificationVerdict(str, Enum):
     confirmed = "confirmed"
     refuted = "refuted"
     error = "error"
     unsupported = "unsupported"
-
 
 class PolynomialWitness(StrictBaseModel):
     """A durable rational witness that a polynomial identity is FALSE over Q.
@@ -159,7 +146,6 @@ class PolynomialWitness(StrictBaseModel):
     rhs_value: str
     difference: str
 
-
 class ComputationVerificationResult(StrictBaseModel):
     check_id: str
     claim_id: str
@@ -173,7 +159,6 @@ class ComputationVerificationResult(StrictBaseModel):
     detail: str = ""
     # Present only for a refuted polynomial_identity that yielded a witness.
     witness: PolynomialWitness | None = None
-
 
 class ComputationVerificationReport(StrictBaseModel):
     """Output of a real verifier backend that actually executed machine checks.
@@ -201,7 +186,6 @@ class ComputationVerificationReport(StrictBaseModel):
             raise ValueError(f"verification result claim_id mismatch: {mismatches}")
         return self
 
-
 class FailureCategory(str, Enum):
     claim_ambiguous = "claim_ambiguous"
     claim_refuted = "claim_refuted"
@@ -215,13 +199,11 @@ class FailureCategory(str, Enum):
     no_progress = "no_progress"
     human_blocked = "human_blocked"
 
-
 class FailureClassification(StrictBaseModel):
     category: FailureCategory
     signal: str
     recommended_route: str
     explanation: str
-
 
 class FailureClassificationReport(StrictBaseModel):
     """Typed classification of reviewer objections / failed tests into actionable
@@ -241,7 +223,6 @@ class FailureClassificationReport(StrictBaseModel):
     classifications: list[FailureClassification]
     notes: list[str] = Field(default_factory=list)
 
-
 class JudgmentRiskKind(str, Enum):
     """The kind of mathematical risk a judgment finding flags."""
 
@@ -253,7 +234,6 @@ class JudgmentRiskKind(str, Enum):
     reviewer_objection_decisiveness = "reviewer_objection_decisiveness"
     reviewer_approval_without_verifier = "reviewer_approval_without_verifier"
     grade_route_conflict = "grade_route_conflict"
-
 
 class JudgmentRiskTier(str, Enum):
     """How strong the advisory signal is. None of these upgrade any status.
@@ -270,7 +250,6 @@ class JudgmentRiskTier(str, Enum):
     warn = "warn"
     block_candidate = "block_candidate"
 
-
 class JudgmentAction(str, Enum):
     """A conservative next action the layer may recommend (advisory only)."""
 
@@ -281,7 +260,6 @@ class JudgmentAction(str, Enum):
     downgrade_confidence = "downgrade_confidence"
     none = "none"
 
-
 class MathematicalJudgmentFinding(StrictBaseModel):
     kind: JudgmentRiskKind
     tier: JudgmentRiskTier
@@ -289,7 +267,6 @@ class MathematicalJudgmentFinding(StrictBaseModel):
     signal: str
     recommended_action: JudgmentAction
     explanation: str
-
 
 class MathematicalJudgmentReport(StrictBaseModel):
     """Conservative middle layer: records mathematical RISK judgments without
@@ -310,7 +287,6 @@ class MathematicalJudgmentReport(StrictBaseModel):
     findings: list[MathematicalJudgmentFinding]
     notes: list[str] = Field(default_factory=list)
 
-
 class FailurePatternTier(str, Enum):
     """How strong a failure pattern is allowed to act. None earns/clears status.
 
@@ -328,12 +304,10 @@ class FailurePatternTier(str, Enum):
     audited = "audited"
     hard = "hard"
 
-
 class FailurePatternAction(str, Enum):
     warn = "warn"
     rank_downgrade = "rank_downgrade"
     block_via_validator = "block_via_validator"
-
 
 class FailurePattern(StrictBaseModel):
     """One catalogued mathematical failure pattern.
@@ -351,11 +325,9 @@ class FailurePattern(StrictBaseModel):
     enforced_by: str = ""
     origin: Literal["seed", "ai_suggested", "reviewer_suggested"] = "seed"
 
-
 class FailurePatternBank(StrictBaseModel):
     schema_version: Literal[1] = 1
     patterns: list[FailurePattern]
-
 
 class FailurePatternMatch(StrictBaseModel):
     pattern_id: str
@@ -366,7 +338,6 @@ class FailurePatternMatch(StrictBaseModel):
     signal: str
     explanation: str
     enforced_by: str = ""
-
 
 class FailurePatternAudit(StrictBaseModel):
     """Per-run record of which catalogued failure patterns the run's signals match.
@@ -387,33 +358,103 @@ class FailurePatternAudit(StrictBaseModel):
     matches: list[FailurePatternMatch]
     notes: list[str] = Field(default_factory=list)
 
+class CounterexampleTest(StrictBaseModel):
+    id: str
+    operator_id: str
+    example_id: str
+    satisfies_all_claim_hypotheses: bool | Literal["unclear"]
+    target: Literal["theorem", "proof_step", "hypothesis", "analogy"]
+    result: ExampleStatus
+    refutes_claim: bool
+    refutes_step_only: bool
+    exposes_missing_hypothesis: bool
+    missing_hypothesis: str | None = None
+    support: str | None = None
+    explanation: str
+    repaired_claim_suggestion: str | None = None
+
+    @model_validator(mode="after")
+    def validate_refutation_scope(self) -> CounterexampleTest:
+        # A counterexample can refute the claim only with a checked 'failed'
+        # result: refutes_claim is honest only once the example was actually
+        # tested against the claim and the claim FAILED on it. not_tested /
+        # inconclusive / survived can never carry a refutation (mirrors the
+        # dropped-hypothesis / proof-step guards below; the kernel must enforce
+        # this, not rely on agent good behavior).
+        if self.refutes_claim and self.result != ExampleStatus.failed:
+            raise ValueError(
+                "a counterexample can refute the claim only with a checked 'failed' "
+                "result; an untested / survived / inconclusive result cannot refute"
+            )
+        if self.refutes_claim and (self.exposes_missing_hypothesis or self.missing_hypothesis):
+            raise ValueError(
+                "dropped-hypothesis / missing-hypothesis pressure cannot refute "
+                "the original claim"
+            )
+        if self.satisfies_all_claim_hypotheses is False and self.refutes_claim:
+            raise ValueError("dropped-hypothesis tests cannot refute the original claim")
+        if self.satisfies_all_claim_hypotheses is not True and self.refutes_claim:
+            raise ValueError(
+                "a counterexample can refute the claim only when every claim hypothesis "
+                "is explicitly satisfied; unclear admissibility cannot refute"
+            )
+        if self.refutes_step_only and self.refutes_claim:
+            raise ValueError("a proof-step attack cannot refute the original claim")
+        if self.refutes_claim and self.target != "theorem":
+            raise ValueError("claim refutation requires target='theorem'")
+        return self
+
+class CounterexampleReport(StrictBaseModel):
+    claim_id: str
+    tests: list[CounterexampleTest]
+
+class TestReportItem(StrictBaseModel):
+    id: str
+    description: str
+    uses_examples: list[str] = Field(default_factory=list)
+    uses_counterexamples: list[str] = Field(default_factory=list)
+    result: ExampleStatus
+    evidence_status: ComputationStatus
+    main_observation: str
+    next_action: str
+
+class TestReport(StrictBaseModel):
+    claim_id: str
+    target: Literal["claim", "user_sketch", "proof_step", "strategy"]
+    tests: list[TestReportItem]
+    summary: str
+
 
 __all__ = [
-    'ComputationChecks',
-    'ComputationVerificationReport',
-    'ComputationVerificationResult',
-    'ExampleBank',
-    'ExampleComputationCheck',
-    'ExampleHypotheses',
-    'ExampleRecord',
-    'ExampleSelection',
-    'FailureCategory',
-    'FailureClassification',
-    'FailureClassificationReport',
-    'FailurePattern',
-    'FailurePatternAction',
-    'FailurePatternAudit',
-    'FailurePatternBank',
-    'FailurePatternMatch',
-    'FailurePatternTier',
-    'InvariantValue',
-    'JudgmentAction',
-    'JudgmentRiskKind',
-    'JudgmentRiskTier',
-    'MachineCheckSpec',
-    'MathematicalJudgmentFinding',
-    'MathematicalJudgmentReport',
-    'PolynomialWitness',
-    'TestedExample',
-    'VerificationVerdict',
+    "ComputationChecks",
+    "ComputationVerificationReport",
+    "ComputationVerificationResult",
+    "CounterexampleReport",
+    "CounterexampleTest",
+    "ExampleBank",
+    "ExampleComputationCheck",
+    "ExampleHypotheses",
+    "ExampleRecord",
+    "ExampleSelection",
+    "FailureCategory",
+    "FailureClassification",
+    "FailureClassificationReport",
+    "FailurePattern",
+    "FailurePatternAction",
+    "FailurePatternAudit",
+    "FailurePatternBank",
+    "FailurePatternMatch",
+    "FailurePatternTier",
+    "InvariantValue",
+    "JudgmentAction",
+    "JudgmentRiskKind",
+    "JudgmentRiskTier",
+    "MachineCheckSpec",
+    "MathematicalJudgmentFinding",
+    "MathematicalJudgmentReport",
+    "PolynomialWitness",
+    "TestReport",
+    "TestReportItem",
+    "TestedExample",
+    "VerificationVerdict",
 ]

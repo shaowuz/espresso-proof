@@ -1,17 +1,92 @@
-"""Validators — internal topological slice 6/6 (callees precede callers). Imported via espresso_proof.kernel.validators."""
-
+"""Prover-round language, final-report honesty gates, and validate_run."""
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
-
-
 from espresso_proof.kernel.io import path_exists, path_is_file, read_text, read_yaml
-from espresso_proof.kernel.research_bank import (
-    load_counterexamples_artifact,
-    load_examples_artifact,
-    load_strategy_synthesis_artifact,
+from espresso_proof.kernel.io import path_exists, read_yaml
+from espresso_proof.kernel.io import read_yaml
+from espresso_proof.kernel.models import (
+    AgentConsensusReview,
+    AgentConsensusVerdict,
+    AIReviewAssessment,
+    Claim,
+    ComputationVerificationReport,
+    ProofGoalGraph,
+    ProofVerificationReport,
+    ProofVerificationStatus,
+    SubgoalState,
+    IdeaGrade,
+    IdeaStatus,
+    LineNumberedProof,
+    LLMAgentRunReport,
+    LiteratureReviewAgentReport,
+    ProofLanguageStatus,
+    ProverLoopReport,
+    ProverRoundIndex,
+    Review,
+    ReviewerVerdict,
+    RunManifest,
+    SourceGroundingReport,
+    SourceStatus,
+    StrategyBrief,
+    TheoremApplicabilityReport,
+    TheoremApplicabilityReviewArtifact,
+    TheoremConditionLedger,
+    TheoremExtractionReport,
+)
+from espresso_proof.kernel.models import (
+    AgentConsensusReview,
+    AutonomousLiteratureRetrievalReport,
+    Claim,
+    ComputationVerificationReport,
+    ExternalToolCandidatesReport,
+    ExternalToolRunsReport,
+    FiniteObjectWitnessReport,
+    LiteratureCandidates,
+    MemoryContext,
+    RetrievalResolutionReport,
+    LiteratureRetrievalReport,
+    LiteratureSearchPlan,
+    ProofVerificationReport,
+    ProofVerificationStatus,
+    ProofGapResolutionReport,
+    IdeaGrade,
+    LineNumberedProof,
+    ProofLanguageStatus,
+    VerificationVerdict,
+    RunManifest,
+    SourceGroundingReport,
+    SourceStatus,
+    TheoremExtractionReport,
+)
+from espresso_proof.kernel.models import (
+    AgentContracts,
+    AttemptStatus,
+    Claim,
+    ComputationChecks,
+    CounterexampleReport,
+    ContinueDecision,
+    ExampleSelection,
+    ExampleFeedbackSummary,
+    HypothesisLedger,
+    HumanChoice,
+    HumanExampleFeedback,
+    HumanChoiceStatus,
+    IdeaGrade,
+    IdeaStatus,
+    LiteratureReviewReport,
+    LoopControl,
+    ProofLanguageStatus,
+    Review,
+    ReviewerVerdict,
+    RunManifest,
+    SourceGroundingReport,
+    SourceStatus,
+    StrategyBrief,
+    StrategySynthesis,
+    TestReport,
+    TheoremApplicabilityReport,
+    TheoremExtractionReport,
 )
 from espresso_proof.kernel.models import (
     AgentContracts,
@@ -40,149 +115,182 @@ from espresso_proof.kernel.models import (
     TheoremApplicabilityReport,
     UpdateInboxReport,
 )
+from espresso_proof.kernel.models import (
+    AgentRunStatusReport,
+    Claim,
+    CounterexampleReport,
+    _has_run_artifact_provenance,
+    PressureLaneBarrierReport,
+    ExampleSelection,
+    ExampleStatus,
+    PressureStatusReport,
+    RunManifest,
+    StageStatusReport,
+    TimeAllocationPlan,
+    UpdateInboxReport,
+)
+from espresso_proof.kernel.models import (
+    Claim,
+    ComputationVerificationReport,
+    CounterexampleReport,
+    FailureClassificationReport,
+    FailurePatternAudit,
+    LiteratureRetrievalReport,
+    MathematicalJudgmentReport,
+    ExampleFeedbackSummary,
+    HumanExampleFeedback,
+    IdeaGrade,
+    IdeaStatus,
+    RunManifest,
+    StrategyBrief,
+    StrategySynthesis,
+    TimeAllocationPlan,
+    UpdateInboxReport,
+)
+from espresso_proof.kernel.research_bank import (
+    load_counterexamples_artifact,
+    load_examples_artifact,
+    load_strategy_synthesis_artifact,
+)
 from espresso_proof.kernel.surface_warnings import (
     collect_surface_warnings,
     final_report_missing_disclosures,
 )
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validation.front_half import validate_front_half_run
 from espresso_proof.validation.evidence import (
     _validate_computation_verification,
     _validate_example_evidence,
     _validate_test_report_evidence,
 )
+from espresso_proof.validation.front_half import validate_front_half_run
 from espresso_proof.validation.manifest import ManifestPathValidationError
 from espresso_proof.validation.manifest import validate_relative_artifact_path
+from pathlib import Path
+import re
+
+from espresso_proof.kernel.validators.agent_artifact_gates import _load_optional_agent_consensus_review, _load_optional_ai_review, _load_optional_line_numbered_proof, _load_optional_llm_agent_run, _load_optional_proof_goal_graph, _load_optional_prover_loop, _load_optional_theorem_applicability, _load_optional_theorem_applicability_review, _load_optional_theorem_condition_ledger, _load_optional_theorem_extraction, _validate_agent_consensus_review, _validate_subgoal_graph, _validate_theorem_applicability
+from espresso_proof.kernel.validators.consistency_gates import _validate_agent_contracts, _validate_claim_id_consistency, _validate_human_choice, _validate_loop_control, _validate_review_outcome, _validate_source_backing, _validate_source_discipline_bindings, _validate_strategy_brief, _validate_strategy_synthesis
+from espresso_proof.kernel.validators.evidence_gates import _load_optional_computation_verification, _load_optional_failure_classification, _load_optional_failure_pattern_audit, _load_optional_human_feedback, _load_optional_mathematical_judgment, _validate_failure_classification, _validate_failure_pattern_audit, _validate_human_feedback, _validate_mathematical_judgment, _validate_refuted_grade_admissible
+from espresso_proof.kernel.validators.language_gate import _first_forbidden_proof_language
+from espresso_proof.kernel.validators.literature_gates import _load_optional_autonomous_literature_retrieval, _load_optional_literature_candidates, _load_optional_literature_retrieval, _load_optional_literature_review_agent, _load_optional_literature_search_plan, _load_optional_memory_context, _load_optional_proof_gap_resolution, _load_optional_retrieval_resolution, _validate_autonomous_literature_retrieval, _validate_literature_retrieval, _validate_literature_review_separation, _validate_memory_context, _validate_proof_gap_resolution
+from espresso_proof.kernel.validators.machine_evidence_gates import _load_optional_external_tool_candidates, _load_optional_external_tool_runs, _load_optional_finite_object_witness, _load_optional_proof_verification, _validate_external_tool_artifacts, _validate_grade_10_requires_global_proof_status, _validate_proof_verification
+from espresso_proof.kernel.validators.prover_language import _prover_assertion_clauses, _prover_clause_is_support_disclaimer, _prover_status_smuggling_field, _prover_unchecked_support_misuse
+from espresso_proof.kernel.validators.runtime_status import _load_optional_agent_run_status, _load_optional_pressure_lane_barrier, _load_optional_pressure_status, _load_optional_stage_status, _validate_agent_run_status, _validate_manifest_paths, _validate_pressure_lane_barrier, _validate_pressure_status, _validate_stage_status, validate_yaml_model
+from espresso_proof.kernel.validators.scheduling import _load_optional_time_allocation, _load_optional_update_inbox, _validate_time_allocation, _validate_update_inbox
 
 
-from espresso_proof.kernel.validators._part1 import (
-    _load_optional_agent_run_status,
-    _load_optional_pressure_lane_barrier,
-    _load_optional_pressure_status,
-    _load_optional_stage_status,
-    _load_optional_time_allocation,
-    _load_optional_update_inbox,
-    _validate_agent_run_status,
-    _validate_pressure_lane_barrier,
-    _validate_pressure_status,
-    _validate_stage_status,
-    validate_yaml_model,
-)
-from espresso_proof.kernel.validators._part2 import (
-    _first_forbidden_proof_language,
-    _load_optional_computation_verification,
-    _load_optional_failure_classification,
-    _load_optional_failure_pattern_audit,
-    _load_optional_human_feedback,
-    _load_optional_literature_retrieval,
-    _load_optional_mathematical_judgment,
-    _validate_failure_classification,
-    _validate_failure_pattern_audit,
-    _validate_mathematical_judgment,
-    _validate_refuted_grade_admissible,
-    _validate_time_allocation,
-    _validate_update_inbox,
-)
-from espresso_proof.kernel.validators._part3 import (
-    _load_optional_autonomous_literature_retrieval,
-    _load_optional_external_tool_candidates,
-    _load_optional_external_tool_runs,
-    _load_optional_finite_object_witness,
-    _load_optional_literature_candidates,
-    _load_optional_literature_search_plan,
-    _load_optional_memory_context,
-    _load_optional_proof_gap_resolution,
-    _load_optional_proof_verification,
-    _load_optional_retrieval_resolution,
-    _validate_autonomous_literature_retrieval,
-    _validate_external_tool_artifacts,
-    _validate_grade_10_requires_global_proof_status,
-    _validate_grade_proof_language_backed,
-    _validate_literature_retrieval,
-    _validate_memory_context,
-    _validate_proof_gap_resolution,
-    _validate_proof_verification,
-)
-from espresso_proof.kernel.validators._part4 import (
-    _load_optional_agent_consensus_review,
-    _load_optional_ai_review,
-    _load_optional_line_numbered_proof,
-    _load_optional_literature_review_agent,
-    _load_optional_llm_agent_run,
-    _load_optional_proof_goal_graph,
-    _load_optional_prover_loop,
-    _load_optional_prover_round_index,
-    _load_optional_theorem_applicability,
-    _load_optional_theorem_applicability_review,
-    _load_optional_theorem_condition_ledger,
-    _load_optional_theorem_extraction,
-    _prover_assertion_clauses,
-    _prover_status_smuggling_field,
-    _validate_agent_consensus_review,
-    _validate_manifest_paths,
-    _validate_subgoal_graph,
-)
-from espresso_proof.kernel.validators._part5 import (
-    _validate_agent_contracts,
-    _validate_claim_id_consistency,
-    _validate_human_choice,
-    _validate_human_feedback,
-    _validate_literature_review_separation,
-    _validate_loop_control,
-    _validate_review_outcome,
-    _validate_source_backing,
-    _validate_source_discipline_bindings,
-    _validate_strategy_brief,
-    _validate_strategy_synthesis,
-    _validate_theorem_applicability,
-)
+def _validate_grade_proof_language_backed(
+    idea_grade: IdeaGrade,
+    source_grounding: SourceGroundingReport,
+    computation_verification: ComputationVerificationReport | None,
+    proof_verification: ProofVerificationReport | None,
+    agent_consensus_review: AgentConsensusReview | None = None,
+) -> None:
+    """A "verified-proof" grade status must be backed by a real trusted result.
 
+    ``idea_grade.proof_language_status`` renders as "A proof has been checked by a
+    trusted verifier", so the VERIFIED statuses cannot be asserted from prose or a
+    forged grade:
 
-def _prover_clause_is_support_disclaimer(clause: str) -> bool:
-    return any(
-        phrase in clause
-        for phrase in (
-            "cannot support",
-            "can't support",
-            "does not support",
-            "doesn't support",
-            "not support",
-            "never support",
-            "cannot contribute",
-            "can't contribute",
-            "do not contribute",
-            "does not contribute",
-            "doesn't contribute",
-            "not contribute",
-            "cannot count",
-            "can't count",
-            "not evidence",
-            "is not proof",
-            "not a proof",
-        )
-    )
-
-
-def _prover_unchecked_support_misuse(text: str) -> str | None:
-    for clause in _prover_assertion_clauses(text):
-        if _prover_clause_is_support_disclaimer(clause):
-            continue
-        supportish = re.search(r"\b(?:support|supports|establish|establishes|prove|proves)\b", clause)
-        if not supportish:
-            continue
-        if "unchecked" in clause and any(
-            noun in clause
-            for noun in ("citation", "citations", "source", "sources", "reference", "references")
+    - ``source_checked_argument`` requires at least one source-grounding step
+      that actually earned ``source_backed``. This remains step-local reference
+      support, not a checked proof.
+    - ``computation_checked`` requires an actual confirming MACHINE result -- a
+      trusted+confirming proof-verification entry (computation/instance checked)
+      or a confirmed computation-verification result. A scoped/finite computation
+      that genuinely backs the grade therefore stays scoped (it earned its entry);
+      a grade that merely *claims* computation_checked with no machine result is
+      rejected. This is the "no global proof status from scoped computation" gate.
+    - ``lean_checked`` / ``human_confirmed`` are NOT earnable in V0: Espresso has
+      no Lean/global-proof lane and no human-proof-attestation artifact (and human
+      feedback may never upgrade proof status). Fail closed.
+    - Any OTHER status (i.e. a future enum member) is rejected outright: a new
+      proof-language status must add an explicit backing rule here before a run
+      carrying it can validate. Only the two weak statuses (``idea_sketch``,
+      ``proof_candidate``) validate without backing.
+    """
+    status = idea_grade.proof_language_status
+    if status == ProofLanguageStatus.agent_consensus_mock_checked:
+        # Agent-consensus mock-check: amber/advisory, NOT machine-verified. Requires
+        # a unanimous adversarial consensus artifact; reviewer prose alone cannot
+        # upgrade the proof language. The hash binding + cross-checks live in
+        # _validate_agent_consensus_review.
+        if agent_consensus_review is None or not agent_consensus_review.consensus:
+            raise KernelValidationError(
+                "idea_grade.proof_language_status=agent_consensus_mock_checked requires "
+                "a unanimous agent_consensus_review (no_fatal_flaw_found from all three "
+                "reviewers); reviewer prose cannot upgrade proof language"
+            )
+    elif status == ProofLanguageStatus.source_checked_argument:
+        if not any(
+            step.status == SourceStatus.source_backed
+            for step in source_grounding.steps
         ):
-            return "unchecked citation/source"
-        if "unchecked" in clause and "example" in clause:
-            return "unchecked example"
-        if "pending theorem applicability" in clause:
-            return "pending theorem applicability"
-        if "line-level gap" in clause:
-            return "line-level gap"
-    return None
+            raise KernelValidationError(
+                "idea_grade.proof_language_status=source_checked_argument requires "
+                "at least one earned source-grounding step; reviewer/source prose "
+                "cannot upgrade proof language"
+            )
+    elif status == ProofLanguageStatus.computation_checked:
+        machine_confirmed = bool(
+            proof_verification
+            and any(
+                entry.trusted
+                and entry.confirmed
+                and entry.earned_status
+                in {
+                    ProofVerificationStatus.computation_checked,
+                    ProofVerificationStatus.instance_checked,
+                }
+                for entry in proof_verification.entries
+            )
+        ) or bool(
+            computation_verification
+            and any(
+                result.executed and result.verdict == VerificationVerdict.confirmed
+                for result in computation_verification.results
+            )
+        )
+        if not machine_confirmed:
+            raise KernelValidationError(
+                "idea_grade.proof_language_status=computation_checked requires a confirming "
+                "trusted machine result (a proof-verification or computation-verification "
+                "entry); a scoped/finite computation cannot upgrade the grade to a global "
+                "checked proof without one"
+            )
+    elif status in {
+        ProofLanguageStatus.lean_checked,
+        ProofLanguageStatus.human_confirmed,
+    }:
+        raise KernelValidationError(
+            f"idea_grade.proof_language_status={status.value} is not earnable in V0: "
+            "Espresso has no Lean/global-proof lane and no human-proof-attestation "
+            "artifact (human feedback cannot upgrade proof status)"
+        )
+    elif status not in {
+        ProofLanguageStatus.idea_sketch,
+        ProofLanguageStatus.proof_candidate,
+    }:
+        # Default-deny backstop: a proof-language status with no explicit backing
+        # rule above must never validate. Without this, adding a new enum member
+        # would silently fall through as if it needed no backing at all.
+        raise KernelValidationError(
+            f"idea_grade.proof_language_status={getattr(status, 'value', status)!r} has "
+            "no backing rule in the kernel validator; a new status must add an explicit "
+            "fail-closed branch here before a run carrying it can validate"
+        )
 
+def _load_optional_prover_round_index(
+    run_dir: Path,
+    manifest: RunManifest,
+) -> ProverRoundIndex | None:
+    optional = manifest.optional_artifacts
+    if "prover_round_index" not in optional:
+        return None
+    return validate_yaml_model(
+        run_dir / optional["prover_round_index"],
+        ProverRoundIndex,
+    )
 
 def _validate_prover_round_language(loop_attempt_id: str, report: ProverRoundReport) -> None:
     text_parts = [
@@ -223,7 +331,6 @@ def _validate_prover_round_language(loop_attempt_id: str, report: ProverRoundRep
             raise KernelValidationError(
                 f"{loop_attempt_id}: prover round treats unchecked context as support ({misuse})"
             )
-
 
 def _validate_prover_round_index(
     run_dir: Path,
@@ -369,7 +476,6 @@ def _validate_prover_round_index(
             raise KernelValidationError(
                 f"{entry.loop_attempt_id}: appended prover round source is wrong"
             )
-
 
 def _validate_llm_loop_artifacts(
     run_dir: Path,
@@ -533,7 +639,6 @@ def _validate_llm_loop_artifacts(
         prover_round_index,
     )
 
-
 def _optional_final_report_context_artifact(
     run_dir: Path,
     manifest: RunManifest,
@@ -545,13 +650,11 @@ def _optional_final_report_context_artifact(
     path = run_dir / rel
     return read_yaml(path) if path_exists(path) else {}
 
-
 def _first_matching_pattern(text: str, patterns: dict[str, str]) -> str | None:
     for pattern, phrase in patterns.items():
         if re.search(pattern, text):
             return phrase
     return None
-
 
 def _validate_final_report_does_not_hide_pending_checks(
     text: str,
@@ -636,7 +739,6 @@ def _validate_final_report_does_not_hide_pending_checks(
                 f"({', '.join(counterexample_pressure_gaps)}): {phrase!r}"
             )
 
-
 def _has_theorem_applicability_blocker(
     theorem_applicability: TheoremApplicabilityReport | None,
 ) -> bool:
@@ -649,7 +751,6 @@ def _has_theorem_applicability_blocker(
         for usage in [*theorem_applicability.usages, *theorem_applicability.ledger_usages]
     )
 
-
 def _has_reviewer_blocker(review: Review) -> bool:
     return (
         any(reviewer.verdict != ReviewerVerdict.passed for reviewer in review.reviewers)
@@ -659,7 +760,6 @@ def _has_reviewer_blocker(review: Review) -> bool:
         or bool(review.example_risks)
         or bool(review.downgrade_reasons)
     )
-
 
 def _first_stale_clearing_phrase(text: str) -> str | None:
     for clause in _prover_assertion_clauses(text):
@@ -694,7 +794,6 @@ def _first_stale_clearing_phrase(text: str) -> str | None:
         if phrase:
             return phrase
     return None
-
 
 def _validate_final_report_does_not_hide_blockers(
     text: str,
@@ -767,7 +866,6 @@ def _validate_final_report_does_not_hide_blockers(
                 "final_report.md cannot present stale/pending scheduling signals "
                 f"as cleared ({', '.join(pending_update_ids)}): {phrase!r}"
             )
-
 
 def _first_final_report_unchecked_support_misuse(text: str) -> str | None:
     context_terms = (
@@ -845,7 +943,6 @@ def _first_final_report_unchecked_support_misuse(text: str) -> str | None:
             return clause
     return None
 
-
 def _first_final_report_global_source_backed_projection(text: str) -> str | None:
     patterns = {
         r"\bsource[-_ ]backed\s+(?:proof|argument|route|strategy)\b": "source-backed proof/argument/route",
@@ -871,7 +968,6 @@ def _first_final_report_global_source_backed_projection(text: str) -> str | None
         if phrase:
             return phrase
     return None
-
 
 def _validate_final_report_language(
     final_report: Path,
@@ -955,7 +1051,6 @@ def _validate_final_report_language(
             "final_report.md must disclose active blocker/pending/stale categories: "
             + ", ".join(missing)
         )
-
 
 def validate_run(run_dir: Path) -> None:
     manifest = validate_yaml_model(run_dir / "run_manifest.yaml", RunManifest)
@@ -1167,23 +1262,3 @@ def validate_run(run_dir: Path) -> None:
         theorem_applicability,
         update_inbox,
     )
-
-
-__all__ = [
-    '_first_final_report_global_source_backed_projection',
-    '_first_final_report_unchecked_support_misuse',
-    '_first_matching_pattern',
-    '_first_stale_clearing_phrase',
-    '_has_reviewer_blocker',
-    '_has_theorem_applicability_blocker',
-    '_optional_final_report_context_artifact',
-    '_prover_clause_is_support_disclaimer',
-    '_prover_unchecked_support_misuse',
-    '_validate_final_report_does_not_hide_blockers',
-    '_validate_final_report_does_not_hide_pending_checks',
-    '_validate_final_report_language',
-    '_validate_llm_loop_artifacts',
-    '_validate_prover_round_index',
-    '_validate_prover_round_language',
-    'validate_run',
-]

@@ -1,29 +1,21 @@
-"""Kernel data models — file-order slice 1/8. Imported via espresso_proof.kernel.models."""
-
+"""Base model classes, shared enums, and the locked claim."""
 
 from __future__ import annotations
 
-from datetime import datetime
 from enum import Enum
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
+from typing import Any, Literal
+from typing import Literal
 
 
 class StrictBaseModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-
 class FlexibleBaseModel(BaseModel):
     model_config = ConfigDict(extra="allow")
-
-
-def _parse_stage_status_timestamp(value: str, field_name: str) -> datetime:
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError as exc:
-        raise ValueError(f"stage_status {field_name} must be ISO 8601") from exc
-
 
 class SourceStatus(str, Enum):
     source_backed = "source_backed"
@@ -32,13 +24,11 @@ class SourceStatus(str, Enum):
     misapplied = "misapplied"
     not_found = "not_found"
 
-
 class ExampleStatus(str, Enum):
     survived = "survived"
     failed = "failed"
     inconclusive = "inconclusive"
     not_tested = "not_tested"
-
 
 class ComputationStatus(str, Enum):
     checked = "checked"
@@ -47,14 +37,12 @@ class ComputationStatus(str, Enum):
     wrong = "wrong"
     human_needed = "human_needed"
 
-
 class IdeaStatus(str, Enum):
     promising = "promising"
     fragile = "fragile"
     likely_false = "likely_false"
     refuted = "refuted"
     unclear = "unclear"
-
 
 class ProofLanguageStatus(str, Enum):
     idea_sketch = "idea_sketch"
@@ -68,26 +56,22 @@ class ProofLanguageStatus(str, Enum):
     lean_checked = "lean_checked"
     human_confirmed = "human_confirmed"
 
-
 class ExplorationMode(str, Enum):
     quick_test = "quick_test"
     normal_pass = "normal_pass"
     deep_exploration = "deep_exploration"
     long_watch = "long_watch"
 
-
 class HumanChoiceStatus(str, Enum):
     pending = "pending"
     selected = "selected"
     declined = "declined"
-
 
 class ContinueDecision(str, Enum):
     pending = "pending"
     continue_run = "continue"
     stop = "stop"
     revise = "revise"
-
 
 class HumanFeedbackLabel(str, Enum):
     interesting = "interesting"
@@ -100,13 +84,11 @@ class HumanFeedbackLabel(str, Enum):
     needs_computation = "needs_computation"
     favorite = "favorite"
 
-
 class HumanFeedbackScope(str, Enum):
     current_run = "current_run"
     project = "project"
     domain = "domain"
     personal_global = "personal_global"
-
 
 class HumanFeedbackTargetType(str, Enum):
     example = "example"
@@ -115,7 +97,6 @@ class HumanFeedbackTargetType(str, Enum):
     source_ref = "source_ref"
     source_step = "source_step"
     strategy = "strategy"
-
 
 class HumanFeedbackAction(str, Enum):
     prioritize_counterexample_testing = "prioritize_counterexample_testing"
@@ -127,17 +108,14 @@ class HumanFeedbackAction(str, Enum):
     request_claim_review = "request_claim_review"
     request_rubric_update = "request_rubric_update"
 
-
 class RankingDirection(str, Enum):
     up = "up"
     down = "down"
-
 
 class RankingWeight(str, Enum):
     low = "low"
     medium = "medium"
     high = "high"
-
 
 class HypothesisStatus(str, Enum):
     explicit = "explicit"
@@ -145,24 +123,20 @@ class HypothesisStatus(str, Enum):
     missing = "missing"
     unclear = "unclear"
 
-
 class ReviewerVerdict(str, Enum):
     passed = "pass"
     failed = "fail"
     unclear = "unclear"
-
 
 class ReviewerApplicability(str, Enum):
     applicable = "applicable"
     sketch_only = "sketch_only"
     not_applicable = "not_applicable"
 
-
 class AttemptStatus(str, Enum):
     passed = "passed"
     failed = "failed"
     unclear = "unclear"
-
 
 class Locator(StrictBaseModel):
     kind: Literal[
@@ -188,7 +162,6 @@ class Locator(StrictBaseModel):
             "tbd",
         }
 
-
 class HypothesisMatch(StrictBaseModel):
     matches: bool | Literal["unclear"]
     mismatches: list[str] = Field(default_factory=list)
@@ -197,7 +170,6 @@ class HypothesisMatch(StrictBaseModel):
     # matched and never relaxes the source_backed gate (exact locator +
     # attribution + matches is True are still required by the validator below).
     matched: list[str] = Field(default_factory=list)
-
 
 class SourceRef(StrictBaseModel):
     id: str
@@ -231,12 +203,10 @@ class SourceRef(StrictBaseModel):
                 raise ValueError("source_backed requires a source title")
         return self
 
-
 class Hypothesis(StrictBaseModel):
     name: str
     status: HypothesisStatus
     source: Literal["user", "agent", "source"]
-
 
 class Claim(StrictBaseModel):
     id: str
@@ -256,7 +226,6 @@ class Claim(StrictBaseModel):
             raise ValueError("P0 critique requires a locked claim")
         return self
 
-
 class HypothesisLedger(StrictBaseModel):
     claim_id: str
     hypotheses: list[Hypothesis]
@@ -269,31 +238,30 @@ class HypothesisLedger(StrictBaseModel):
 
 
 __all__ = [
-    'AttemptStatus',
-    'Claim',
-    'ComputationStatus',
-    'ContinueDecision',
-    'ExampleStatus',
-    'ExplorationMode',
-    'FlexibleBaseModel',
-    'HumanChoiceStatus',
-    'HumanFeedbackAction',
-    'HumanFeedbackLabel',
-    'HumanFeedbackScope',
-    'HumanFeedbackTargetType',
-    'Hypothesis',
-    'HypothesisLedger',
-    'HypothesisMatch',
-    'HypothesisStatus',
-    'IdeaStatus',
-    'Locator',
-    'ProofLanguageStatus',
-    'RankingDirection',
-    'RankingWeight',
-    'ReviewerApplicability',
-    'ReviewerVerdict',
-    'SourceRef',
-    'SourceStatus',
-    'StrictBaseModel',
-    '_parse_stage_status_timestamp',
+    "AttemptStatus",
+    "Claim",
+    "ComputationStatus",
+    "ContinueDecision",
+    "ExampleStatus",
+    "ExplorationMode",
+    "FlexibleBaseModel",
+    "HumanChoiceStatus",
+    "HumanFeedbackAction",
+    "HumanFeedbackLabel",
+    "HumanFeedbackScope",
+    "HumanFeedbackTargetType",
+    "Hypothesis",
+    "HypothesisLedger",
+    "HypothesisMatch",
+    "HypothesisStatus",
+    "IdeaStatus",
+    "Locator",
+    "ProofLanguageStatus",
+    "RankingDirection",
+    "RankingWeight",
+    "ReviewerApplicability",
+    "ReviewerVerdict",
+    "SourceRef",
+    "SourceStatus",
+    "StrictBaseModel",
 ]

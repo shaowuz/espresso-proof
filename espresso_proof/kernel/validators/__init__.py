@@ -1,4 +1,4 @@
-"""Run validators (kernel trust gate), split into topological slices.
+"""Run validators (kernel trust gate), grouped by artifact family.
 
 Public API unchanged: validate_run, validate_yaml_model (+ every internal
 _validate_*/_load_optional_* helper, AND the names validators.py imported
@@ -123,14 +123,23 @@ from espresso_proof.validation.manifest import ManifestPathValidationError
 from espresso_proof.validation.manifest import validate_relative_artifact_path
 from espresso_proof.validation.manifest import validate_manifest_paths
 
-from espresso_proof.kernel.validators._part1 import *  # noqa: F401,F403
-
-from espresso_proof.kernel.validators._part2 import *  # noqa: F401,F403
-
-from espresso_proof.kernel.validators._part3 import *  # noqa: F401,F403
-
-from espresso_proof.kernel.validators._part4 import *  # noqa: F401,F403
-
-from espresso_proof.kernel.validators._part5 import *  # noqa: F401,F403
-
-from espresso_proof.kernel.validators._part6 import *  # noqa: F401,F403
+from espresso_proof.kernel.validators import language_gate as _m_language_gate
+globals().update({k: v for k, v in vars(_m_language_gate).items() if not k.startswith('__')})
+from espresso_proof.kernel.validators import runtime_status as _m_runtime_status
+globals().update({k: v for k, v in vars(_m_runtime_status).items() if not k.startswith('__')})
+from espresso_proof.kernel.validators import scheduling as _m_scheduling
+globals().update({k: v for k, v in vars(_m_scheduling).items() if not k.startswith('__')})
+from espresso_proof.kernel.validators import evidence_gates as _m_evidence_gates
+globals().update({k: v for k, v in vars(_m_evidence_gates).items() if not k.startswith('__')})
+from espresso_proof.kernel.validators import literature_gates as _m_literature_gates
+globals().update({k: v for k, v in vars(_m_literature_gates).items() if not k.startswith('__')})
+from espresso_proof.kernel.validators import machine_evidence_gates as _m_machine_evidence_gates
+globals().update({k: v for k, v in vars(_m_machine_evidence_gates).items() if not k.startswith('__')})
+from espresso_proof.kernel.validators import prover_language as _m_prover_language
+globals().update({k: v for k, v in vars(_m_prover_language).items() if not k.startswith('__')})
+from espresso_proof.kernel.validators import consistency_gates as _m_consistency_gates
+globals().update({k: v for k, v in vars(_m_consistency_gates).items() if not k.startswith('__')})
+from espresso_proof.kernel.validators import agent_artifact_gates as _m_agent_artifact_gates
+globals().update({k: v for k, v in vars(_m_agent_artifact_gates).items() if not k.startswith('__')})
+from espresso_proof.kernel.validators import final_gates as _m_final_gates
+globals().update({k: v for k, v in vars(_m_final_gates).items() if not k.startswith('__')})

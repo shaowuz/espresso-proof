@@ -1,14 +1,126 @@
-"""Validators — internal topological slice 1/6 (callees precede callers). Imported via espresso_proof.kernel.validators."""
-
+"""Agent run status, pressure status/lane barriers, stage status, memory-context adapters, validate_yaml_model."""
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
-
-from pydantic import BaseModel, ValidationError
-
+from espresso_proof.kernel.agent_flow_legacy_map import get_legacy_mapping
+from espresso_proof.kernel.agent_flow_spec import (
+    get_stage,
+    ordered_stage_ids,
+    stages_blocked_by_unclear_claim,
+)
+from espresso_proof.kernel.io import path_exists, path_is_file, read_text, read_yaml
 from espresso_proof.kernel.io import path_exists, read_yaml
+from espresso_proof.kernel.io import read_yaml
+from espresso_proof.kernel.models import (
+    AgentConsensusReview,
+    AgentConsensusVerdict,
+    AIReviewAssessment,
+    Claim,
+    ComputationVerificationReport,
+    ProofGoalGraph,
+    ProofVerificationReport,
+    ProofVerificationStatus,
+    SubgoalState,
+    IdeaGrade,
+    IdeaStatus,
+    LineNumberedProof,
+    LLMAgentRunReport,
+    LiteratureReviewAgentReport,
+    ProofLanguageStatus,
+    ProverLoopReport,
+    ProverRoundIndex,
+    Review,
+    ReviewerVerdict,
+    RunManifest,
+    SourceGroundingReport,
+    SourceStatus,
+    StrategyBrief,
+    TheoremApplicabilityReport,
+    TheoremApplicabilityReviewArtifact,
+    TheoremConditionLedger,
+    TheoremExtractionReport,
+)
+from espresso_proof.kernel.models import (
+    AgentConsensusReview,
+    AutonomousLiteratureRetrievalReport,
+    Claim,
+    ComputationVerificationReport,
+    ExternalToolCandidatesReport,
+    ExternalToolRunsReport,
+    FiniteObjectWitnessReport,
+    LiteratureCandidates,
+    MemoryContext,
+    RetrievalResolutionReport,
+    LiteratureRetrievalReport,
+    LiteratureSearchPlan,
+    ProofVerificationReport,
+    ProofVerificationStatus,
+    ProofGapResolutionReport,
+    IdeaGrade,
+    LineNumberedProof,
+    ProofLanguageStatus,
+    VerificationVerdict,
+    RunManifest,
+    SourceGroundingReport,
+    SourceStatus,
+    TheoremExtractionReport,
+)
+from espresso_proof.kernel.models import (
+    AgentContracts,
+    AttemptStatus,
+    Claim,
+    ComputationChecks,
+    CounterexampleReport,
+    ContinueDecision,
+    ExampleSelection,
+    ExampleFeedbackSummary,
+    HypothesisLedger,
+    HumanChoice,
+    HumanExampleFeedback,
+    HumanChoiceStatus,
+    IdeaGrade,
+    IdeaStatus,
+    LiteratureReviewReport,
+    LoopControl,
+    ProofLanguageStatus,
+    Review,
+    ReviewerVerdict,
+    RunManifest,
+    SourceGroundingReport,
+    SourceStatus,
+    StrategyBrief,
+    StrategySynthesis,
+    TestReport,
+    TheoremApplicabilityReport,
+    TheoremExtractionReport,
+)
+from espresso_proof.kernel.models import (
+    AgentContracts,
+    Claim,
+    ComputationChecks,
+    CounterexampleReport,
+    ExampleSelection,
+    HypothesisLedger,
+    HumanChoice,
+    ExampleStatus,
+    IdeaGrade,
+    LLMAgentRunReport,
+    LiteratureReviewReport,
+    LoopControl,
+    ProofLanguageStatus,
+    ProverLoopReport,
+    ProverRoundIndex,
+    ProverRoundReport,
+    Review,
+    ReviewerVerdict,
+    RunManifest,
+    SourceGroundingReport,
+    SourceStatus,
+    StrategyBrief,
+    TestReport,
+    TheoremApplicabilityReport,
+    UpdateInboxReport,
+)
 from espresso_proof.kernel.models import (
     AgentRunStatusReport,
     Claim,
@@ -23,6 +135,31 @@ from espresso_proof.kernel.models import (
     TimeAllocationPlan,
     UpdateInboxReport,
 )
+from espresso_proof.kernel.models import (
+    Claim,
+    ComputationVerificationReport,
+    CounterexampleReport,
+    FailureClassificationReport,
+    FailurePatternAudit,
+    LiteratureRetrievalReport,
+    MathematicalJudgmentReport,
+    ExampleFeedbackSummary,
+    HumanExampleFeedback,
+    IdeaGrade,
+    IdeaStatus,
+    RunManifest,
+    StrategyBrief,
+    StrategySynthesis,
+    TimeAllocationPlan,
+    UpdateInboxReport,
+)
+from espresso_proof.kernel.pressure_lane_barrier import (
+    PRESSURE_LANE_BARRIER_AGENT_ROLES,
+    PRESSURE_LANE_BARRIER_AGENT_STAGE_IDS,
+    PRESSURE_LANE_BARRIER_FILENAME,
+    PRESSURE_LANE_BARRIER_MODE,
+    order_for_pressure_lane_barrier,
+)
 from espresso_proof.kernel.pressure_status import (
     artifact_revision_hash,
     derive_counterexamples_pressure_state,
@@ -31,32 +168,20 @@ from espresso_proof.kernel.pressure_status import (
     is_inadmissible_counterexample_pressure,
     needs_counterexample_admissibility,
 )
-from espresso_proof.kernel.agent_flow_spec import (
-    get_stage,
-    ordered_stage_ids,
-    stages_blocked_by_unclear_claim,
+from espresso_proof.kernel.pressure_status import (
+    artifact_revision_hash,
 )
-from espresso_proof.kernel.agent_flow_legacy_map import get_legacy_mapping
-from espresso_proof.kernel.pressure_lane_barrier import (
-    PRESSURE_LANE_BARRIER_AGENT_ROLES,
-    PRESSURE_LANE_BARRIER_AGENT_STAGE_IDS,
-    PRESSURE_LANE_BARRIER_FILENAME,
-    PRESSURE_LANE_BARRIER_MODE,
-    order_for_pressure_lane_barrier,
+from espresso_proof.kernel.pressure_status import (
+    is_admissible_refutation,
 )
 from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.validation.manifest import ManifestPathValidationError
+from espresso_proof.validation.manifest import validate_manifest_paths
 from espresso_proof.validation.manifest import validate_relative_artifact_path
-
-
-# verifier_type -> the only checked status it may earn (with a confirming result).
-_TRUSTED_EARNED = {
-    "finite_group_cayley": "instance_checked",
-    "finite_identity_table": "instance_checked",
-    "finite_ring_identity": "instance_checked",
-    "matrix_rank": "instance_checked",
-    "exact_computation": "computation_checked",
-}
+from pathlib import Path
+from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
+import re
 
 
 def validate_yaml_model(path: Path, model: type[BaseModel]) -> BaseModel:
@@ -64,7 +189,6 @@ def validate_yaml_model(path: Path, model: type[BaseModel]) -> BaseModel:
         return model.model_validate(read_yaml(path))
     except ValidationError as exc:
         raise KernelValidationError(f"{path}: schema validation failed\n{exc}") from exc
-
 
 def _memory_context_schema_version(raw: object) -> int:
     if not isinstance(raw, dict):
@@ -74,10 +198,8 @@ def _memory_context_schema_version(raw: object) -> int:
     except (TypeError, ValueError):
         return 1
 
-
 def _legacy_memory_context_provenance(run_dir: Path, artifact_path: str) -> str:
     return f"projects/{run_dir.parents[1].name}/runs/{run_dir.name}/{artifact_path}"
-
 
 def _adapt_legacy_memory_context(raw: dict, run_dir: Path, artifact_path: str) -> dict:
     """Keep legacy memory_context files readable without replaying them.
@@ -119,7 +241,6 @@ def _adapt_legacy_memory_context(raw: dict, run_dir: Path, artifact_path: str) -
     adapted.setdefault("constraints", [])
     return adapted
 
-
 def _load_optional_agent_run_status(
     run_dir: Path,
     manifest: RunManifest,
@@ -132,7 +253,6 @@ def _load_optional_agent_run_status(
         AgentRunStatusReport,
     )
 
-
 def _load_optional_pressure_status(
     run_dir: Path,
     manifest: RunManifest,
@@ -144,7 +264,6 @@ def _load_optional_pressure_status(
         run_dir / optional["pressure_status"],
         PressureStatusReport,
     )
-
 
 def _load_optional_stage_status(
     run_dir: Path,
@@ -160,7 +279,6 @@ def _load_optional_stage_status(
         StageStatusReport,
     )
 
-
 def _load_optional_pressure_lane_barrier(
     run_dir: Path,
     manifest: RunManifest,
@@ -172,33 +290,6 @@ def _load_optional_pressure_lane_barrier(
         run_dir / optional["pressure_lane_barrier"],
         PressureLaneBarrierReport,
     )
-
-
-def _load_optional_time_allocation(
-    run_dir: Path,
-    manifest: RunManifest,
-) -> TimeAllocationPlan | None:
-    optional = manifest.optional_artifacts
-    if "time_allocation" not in optional:
-        return None
-    return validate_yaml_model(
-        run_dir / optional["time_allocation"],
-        TimeAllocationPlan,
-    )
-
-
-def _load_optional_update_inbox(
-    run_dir: Path,
-    manifest: RunManifest,
-) -> UpdateInboxReport | None:
-    optional = manifest.optional_artifacts
-    if "update_inbox" not in optional:
-        return None
-    return validate_yaml_model(
-        run_dir / optional["update_inbox"],
-        UpdateInboxReport,
-    )
-
 
 def _validate_agent_run_status(
     agent_run_status: AgentRunStatusReport | None,
@@ -256,7 +347,6 @@ def _validate_agent_run_status(
                     "but its artifact is missing"
                 )
 
-
 def _expected_pressure_state(
     kind: str,
     agent_status: str,
@@ -266,7 +356,6 @@ def _expected_pressure_state(
     if kind == "examples":
         return derive_examples_pressure_state(list(examples.examples), agent_status)
     return derive_counterexamples_pressure_state(list(counterexamples.tests), agent_status)
-
 
 def _validate_pressure_counts(
     entry,
@@ -303,7 +392,6 @@ def _validate_pressure_counts(
         raise KernelValidationError(f"pressure_status {entry.kind} inadmissible_pressure_count is stale")
     if entry.admissible_refutation_count != admissible:
         raise KernelValidationError(f"pressure_status {entry.kind} admissible_refutation_count is stale")
-
 
 def _validate_pressure_status(
     pressure_status: PressureStatusReport | None,
@@ -399,7 +487,6 @@ def _validate_pressure_status(
             if marker.origin_artifact_id not in valid_ids:
                 raise KernelValidationError("late pressure marker origin_artifact_id is stale")
 
-
 def _contains_forbidden_stage_status_token(value) -> bool:
     forbidden_keys = {
         "proof_status",
@@ -445,7 +532,6 @@ def _contains_forbidden_stage_status_token(value) -> bool:
     if isinstance(value, (list, tuple, set)):
         return any(_contains_forbidden_stage_status_token(item) for item in value)
     return False
-
 
 def _validate_stage_status(
     stage_status: StageStatusReport | None,
@@ -568,7 +654,6 @@ def _validate_stage_status(
                 "stage_status time_allocation cannot start before strategy_grader is done"
             )
 
-
 def _validate_pressure_lane_barrier(
     pressure_lane_barrier: PressureLaneBarrierReport | None,
     claim: Claim,
@@ -658,24 +743,8 @@ def _validate_pressure_lane_barrier(
                 f"pressure_lane_barrier {agent} failed but agent board is done"
             )
 
-
-__all__ = [
-    '_TRUSTED_EARNED',
-    '_adapt_legacy_memory_context',
-    '_contains_forbidden_stage_status_token',
-    '_expected_pressure_state',
-    '_legacy_memory_context_provenance',
-    '_load_optional_agent_run_status',
-    '_load_optional_pressure_lane_barrier',
-    '_load_optional_pressure_status',
-    '_load_optional_stage_status',
-    '_load_optional_time_allocation',
-    '_load_optional_update_inbox',
-    '_memory_context_schema_version',
-    '_validate_agent_run_status',
-    '_validate_pressure_counts',
-    '_validate_pressure_lane_barrier',
-    '_validate_pressure_status',
-    '_validate_stage_status',
-    'validate_yaml_model',
-]
+def _validate_manifest_paths(run_dir: Path, manifest: RunManifest) -> None:
+    try:
+        validate_manifest_paths(run_dir, manifest)
+    except ManifestPathValidationError as exc:
+        raise KernelValidationError(str(exc)) from exc

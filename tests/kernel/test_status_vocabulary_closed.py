@@ -34,8 +34,10 @@ from espresso_proof.kernel.models import (
     VerifierType,
 )
 from espresso_proof.kernel.validators import KernelValidationError
-from espresso_proof.kernel.validators._part3 import (
+from espresso_proof.kernel.validators.final_gates import (
     _validate_grade_proof_language_backed,
+)
+from espresso_proof.kernel.validators.machine_evidence_gates import (
     _validate_proof_verification,
 )
 

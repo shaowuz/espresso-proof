@@ -1,17 +1,7 @@
-"""Validators — internal topological slice 4/6 (callees precede callers). Imported via espresso_proof.kernel.validators."""
-
+"""Theorem extraction/applicability loaders, LLM agent run, prover loop/rounds, proof goal graph, AI review, agent consensus, line-numbered proof."""
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
-
-
-from espresso_proof.kernel.proof_dependencies import (
-    trusted_human_allowed_theorem_refs,
-    trusted_source_grounded_theorem_refs,
-    unresolved_proof_dependency_lines,
-)
 from espresso_proof.kernel.models import (
     AgentConsensusReview,
     AgentConsensusVerdict,
@@ -41,15 +31,142 @@ from espresso_proof.kernel.models import (
     TheoremConditionLedger,
     TheoremExtractionReport,
 )
+from espresso_proof.kernel.models import (
+    AgentConsensusReview,
+    AutonomousLiteratureRetrievalReport,
+    Claim,
+    ComputationVerificationReport,
+    ExternalToolCandidatesReport,
+    ExternalToolRunsReport,
+    FiniteObjectWitnessReport,
+    LiteratureCandidates,
+    MemoryContext,
+    RetrievalResolutionReport,
+    LiteratureRetrievalReport,
+    LiteratureSearchPlan,
+    ProofVerificationReport,
+    ProofVerificationStatus,
+    ProofGapResolutionReport,
+    IdeaGrade,
+    LineNumberedProof,
+    ProofLanguageStatus,
+    VerificationVerdict,
+    RunManifest,
+    SourceGroundingReport,
+    SourceStatus,
+    TheoremExtractionReport,
+)
+from espresso_proof.kernel.models import (
+    AgentContracts,
+    AttemptStatus,
+    Claim,
+    ComputationChecks,
+    CounterexampleReport,
+    ContinueDecision,
+    ExampleSelection,
+    ExampleFeedbackSummary,
+    HypothesisLedger,
+    HumanChoice,
+    HumanExampleFeedback,
+    HumanChoiceStatus,
+    IdeaGrade,
+    IdeaStatus,
+    LiteratureReviewReport,
+    LoopControl,
+    ProofLanguageStatus,
+    Review,
+    ReviewerVerdict,
+    RunManifest,
+    SourceGroundingReport,
+    SourceStatus,
+    StrategyBrief,
+    StrategySynthesis,
+    TestReport,
+    TheoremApplicabilityReport,
+    TheoremExtractionReport,
+)
+from espresso_proof.kernel.models import (
+    AgentContracts,
+    Claim,
+    ComputationChecks,
+    CounterexampleReport,
+    ExampleSelection,
+    HypothesisLedger,
+    HumanChoice,
+    ExampleStatus,
+    IdeaGrade,
+    LLMAgentRunReport,
+    LiteratureReviewReport,
+    LoopControl,
+    ProofLanguageStatus,
+    ProverLoopReport,
+    ProverRoundIndex,
+    ProverRoundReport,
+    Review,
+    ReviewerVerdict,
+    RunManifest,
+    SourceGroundingReport,
+    SourceStatus,
+    StrategyBrief,
+    TestReport,
+    TheoremApplicabilityReport,
+    UpdateInboxReport,
+)
+from espresso_proof.kernel.models import (
+    AgentRunStatusReport,
+    Claim,
+    CounterexampleReport,
+    _has_run_artifact_provenance,
+    PressureLaneBarrierReport,
+    ExampleSelection,
+    ExampleStatus,
+    PressureStatusReport,
+    RunManifest,
+    StageStatusReport,
+    TimeAllocationPlan,
+    UpdateInboxReport,
+)
+from espresso_proof.kernel.models import (
+    Claim,
+    ComputationVerificationReport,
+    CounterexampleReport,
+    FailureClassificationReport,
+    FailurePatternAudit,
+    LiteratureRetrievalReport,
+    MathematicalJudgmentReport,
+    ExampleFeedbackSummary,
+    HumanExampleFeedback,
+    IdeaGrade,
+    IdeaStatus,
+    RunManifest,
+    StrategyBrief,
+    StrategySynthesis,
+    TimeAllocationPlan,
+    UpdateInboxReport,
+)
+from espresso_proof.kernel.pressure_status import (
+    artifact_revision_hash,
+    derive_counterexamples_pressure_state,
+    derive_examples_pressure_state,
+    is_admissible_refutation,
+    is_inadmissible_counterexample_pressure,
+    needs_counterexample_admissibility,
+)
 from espresso_proof.kernel.pressure_status import (
     artifact_revision_hash,
 )
+from espresso_proof.kernel.proof_dependencies import (
+    trusted_human_allowed_theorem_refs,
+    trusted_source_grounded_theorem_refs,
+    unresolved_proof_dependency_lines,
+)
 from espresso_proof.validation.errors import KernelValidationError
-from espresso_proof.validation.manifest import ManifestPathValidationError
-from espresso_proof.validation.manifest import validate_manifest_paths
+from pathlib import Path
+import re
 
-
-from espresso_proof.kernel.validators._part1 import validate_yaml_model
+from espresso_proof.kernel.validators.consistency_gates import _locator_tuple, _normalize_source_text
+from espresso_proof.kernel.validators.prover_language import _prover_status_smuggling_field
+from espresso_proof.kernel.validators.runtime_status import validate_yaml_model
 
 
 def _load_optional_theorem_extraction(
@@ -64,20 +181,6 @@ def _load_optional_theorem_extraction(
         TheoremExtractionReport,
     )
 
-
-def _load_optional_literature_review_agent(
-    run_dir: Path,
-    manifest: RunManifest,
-) -> LiteratureReviewAgentReport | None:
-    optional = manifest.optional_artifacts
-    if "literature_review_agent" not in optional:
-        return None
-    return validate_yaml_model(
-        run_dir / optional["literature_review_agent"],
-        LiteratureReviewAgentReport,
-    )
-
-
 def _load_optional_theorem_applicability(
     run_dir: Path,
     manifest: RunManifest,
@@ -89,7 +192,6 @@ def _load_optional_theorem_applicability(
         run_dir / optional["theorem_applicability"],
         TheoremApplicabilityReport,
     )
-
 
 def _load_optional_theorem_applicability_review(
     run_dir: Path,
@@ -109,7 +211,6 @@ def _load_optional_theorem_applicability_review(
         raise KernelValidationError("theorem_applicability_review run_id does not match manifest")
     return review
 
-
 def _load_optional_theorem_condition_ledger(
     run_dir: Path,
     manifest: RunManifest,
@@ -124,7 +225,6 @@ def _load_optional_theorem_condition_ledger(
         TheoremConditionLedger,
     )
 
-
 def _load_optional_llm_agent_run(
     run_dir: Path,
     manifest: RunManifest,
@@ -136,7 +236,6 @@ def _load_optional_llm_agent_run(
         run_dir / optional["llm_agent_run"],
         LLMAgentRunReport,
     )
-
 
 def _load_optional_prover_loop(
     run_dir: Path,
@@ -150,20 +249,6 @@ def _load_optional_prover_loop(
         ProverLoopReport,
     )
 
-
-def _load_optional_prover_round_index(
-    run_dir: Path,
-    manifest: RunManifest,
-) -> ProverRoundIndex | None:
-    optional = manifest.optional_artifacts
-    if "prover_round_index" not in optional:
-        return None
-    return validate_yaml_model(
-        run_dir / optional["prover_round_index"],
-        ProverRoundIndex,
-    )
-
-
 def _load_optional_proof_goal_graph(
     run_dir: Path,
     manifest: RunManifest,
@@ -175,7 +260,6 @@ def _load_optional_proof_goal_graph(
         run_dir / optional["proof_goal_graph"],
         ProofGoalGraph,
     )
-
 
 def _load_optional_ai_review(
     run_dir: Path,
@@ -224,109 +308,6 @@ def _load_optional_ai_review(
             "rebuild ai_review.yaml before rendering the advisory signal"
         )
     return assessment
-
-
-def _prover_assertion_clauses(text: str) -> list[str]:
-    normalized = " ".join(str(text).lower().split())
-    rough = re.split(
-        r"(?:[.;!?]\s+|,\s+|\n+|\s+\b(?:but|however|while|although|whereas)\b\s+)",
-        normalized,
-    )
-    return [part.strip() for part in rough if part.strip()]
-
-
-def _prover_clause_is_status_boundary_disclaimer(clause: str) -> bool:
-    return any(
-        phrase in clause
-        for phrase in (
-            "does not upgrade",
-            "do not upgrade",
-            "cannot upgrade",
-            "can never upgrade",
-            "never upgrades",
-            "never upgrade",
-            "does not set",
-            "cannot set",
-            "cannot write",
-            "must not upgrade",
-            "not proof status",
-            "not evidence",
-            "not a proof",
-            "is not proof",
-            "not applicable",
-            "not checked",
-            "not refuted",
-            "advisory only",
-            "advisory-only",
-            "scheduling-only",
-        )
-    )
-
-
-def _prover_status_smuggling_field(text: str) -> str | None:
-    for clause in _prover_assertion_clauses(text):
-        for field in (
-            "proof_status",
-            "proof_language_status",
-            "agent_consensus_mock_checked",
-            "agent_consensus",
-            "mock_checked",
-            "source_status",
-            "source_backed_status",
-            "source_backed",
-            "evidence_status",
-            "checked_evidence",
-            "theorem_applicability",
-            "theorem_applicability_status",
-            "applicability_status",
-            "refutation_status",
-            "counterexample_refutes_claim",
-            "refutes_claim",
-            "grade_status",
-        ):
-            if re.search(rf"\b{re.escape(field)}\s*[:=]", clause):
-                return field
-        owner_status_patterns = [
-            (r"\bproof[_ -]?language[_ -]?status\s+(?:is|are|was|were)\s+[\w -]+", "proof_language_status"),
-            (r"\bproof\s+status\s+(?:is|are|was|were)\s+[\w -]+", "proof_status"),
-            (r"\bsource[_ -]?backed[_ -]?status\s+(?:is|are|was|were)\s+[\w -]+", "source_backed_status"),
-            (r"\bsource\s+status\s+(?:is|are|was|were)\s+[\w -]+", "source_status"),
-            (r"\bevidence\s+status\s+(?:is|are|was|were)\s+[\w -]+", "evidence_status"),
-            (r"\bchecked[_ -]?evidence\s+(?:is|are|was|were)\s+[\w -]+", "checked_evidence"),
-            (r"\btheorem[_ -]?applicability[_ -]?status\s+(?:is|are|was|were)\s+[\w -]+", "theorem_applicability_status"),
-            (r"\btheorem\s+applicability\s+status\s+(?:is|are|was|were)\s+[\w -]+", "theorem_applicability_status"),
-            (r"\brefutation\s+status\s+(?:is|are|was|were)\s+[\w -]+", "refutation_status"),
-            (r"\bgrade[_ -]?status\s+(?:is|are|was|were)\s+[\w -]+", "grade_status"),
-            (r"\bgrade\s+status\s+(?:is|are|was|were)\s+[\w -]+", "grade_status"),
-        ]
-        for pattern, name in owner_status_patterns:
-            if re.search(pattern, clause):
-                return name
-        if _prover_clause_is_status_boundary_disclaimer(clause):
-            continue
-        status_patterns = [
-            (r"\b(?:is|are|as|becomes|became|counts?\s+as|treats?\s+as)\s+source[_ -]?backed\b", "source_backed"),
-            (r"\bsource\s+(?:status\s+)?(?:is|=|:)\s*(?:backed|checked|supported)\b", "source_status"),
-            (r"\bchecked[_ -]?evidence\s+(?:supports?|establishes?|proves?|is|are)\b", "checked_evidence"),
-            (r"\b(?:is|are|as|counts?\s+as|treats?\s+as)\s+checked[_ -]?evidence\b", "checked_evidence"),
-            (r"\bevidence\s+(?:status\s+)?(?:is|=|:)\s*(?:checked|verified)\b", "evidence_status"),
-            (r"\btheorem\s+applicability(?:\s+status)?\s+(?:is|=|:)\s*(?:applicable|all[_ ]applicable)\b", "theorem_applicability"),
-            (r"\bapplicability[_ ]status\s*(?:is|=|:)\s*(?:applicable|all[_ ]applicable)\b", "theorem_applicability"),
-            (r"\ball[_ ]applicable\b", "theorem_applicability"),
-            (r"\bexamples?\s+(?:have\s+)?survived\b", "example_status"),
-            (r"\bsurvived\s+examples?\b", "example_status"),
-            (r"\bno\s+counterexamples?\s+(?:remain|exist|found|pressure)\b", "counterexample_pressure"),
-            (r"\bmissing\s+counterexamples?\s+(?:imply|mean|show|prove)\s+no\s+pressure\b", "counterexample_pressure"),
-            (r"\bcounterexamples?\s+refutes?\b", "counterexample_refutes_claim"),
-            (r"\bcounterexample[_ -]?refutes[_ -]?claim\b", "counterexample_refutes_claim"),
-            (r"\b(?:claim|route|statement)\s+is\s+refuted\b", "refutation_status"),
-            (r"\brefuted\b", "refutation_status"),
-        ]
-        for pattern, name in status_patterns:
-            if re.search(pattern, clause):
-                return name
-    return None
-
 
 def _load_optional_agent_consensus_review(
     run_dir: Path,
@@ -381,7 +362,6 @@ def _load_optional_agent_consensus_review(
             )
     return consensus
 
-
 def _load_optional_line_numbered_proof(
     run_dir: Path,
     manifest: RunManifest,
@@ -402,7 +382,6 @@ def _load_optional_line_numbered_proof(
             f"claim {claim.id!r}"
         )
     return proof
-
 
 def _validate_agent_consensus_review(
     consensus: AgentConsensusReview | None,
@@ -563,7 +542,6 @@ def _validate_agent_consensus_review(
             "proof_language_status=agent_consensus_mock_checked"
         )
 
-
 def _validate_subgoal_graph(
     proof_goal_graph: ProofGoalGraph | None,
     claim: Claim,
@@ -699,31 +677,161 @@ def _validate_subgoal_graph(
                     "repair node)"
                 )
 
+def _validate_applicability_usage_source_binding(
+    usage,
+    source_ref,
+    theorem_extraction: TheoremExtractionReport | None,
+) -> None:
+    """Bind step-local theorem applicability to the cited checked source.
 
-def _validate_manifest_paths(run_dir: Path, manifest: RunManifest) -> None:
-    try:
-        validate_manifest_paths(run_dir, manifest)
-    except ManifestPathValidationError as exc:
-        raise KernelValidationError(str(exc)) from exc
+    A source-backed applicability usage may only discuss the exact statement and
+    locator that the source-grounding artifact already checked. When extraction
+    is present, that pair must also name a real extracted theorem and source.
+    """
 
+    if _normalize_source_text(usage.theorem_statement) != _normalize_source_text(
+        source_ref.statement_or_summary
+    ):
+        raise KernelValidationError(
+            f"{usage.proof_step_id}: theorem_applicability theorem_statement does not "
+            "match the cited source_ref statement"
+        )
+    if _locator_tuple(usage.locator) != _locator_tuple(source_ref.locator):
+        raise KernelValidationError(
+            f"{usage.proof_step_id}: theorem_applicability locator does not match "
+            "the cited source_ref locator"
+        )
+    if theorem_extraction is None:
+        return
 
-__all__ = [
-    '_load_optional_agent_consensus_review',
-    '_load_optional_ai_review',
-    '_load_optional_line_numbered_proof',
-    '_load_optional_literature_review_agent',
-    '_load_optional_llm_agent_run',
-    '_load_optional_proof_goal_graph',
-    '_load_optional_prover_loop',
-    '_load_optional_prover_round_index',
-    '_load_optional_theorem_applicability',
-    '_load_optional_theorem_applicability_review',
-    '_load_optional_theorem_condition_ledger',
-    '_load_optional_theorem_extraction',
-    '_prover_assertion_clauses',
-    '_prover_clause_is_status_boundary_disclaimer',
-    '_prover_status_smuggling_field',
-    '_validate_agent_consensus_review',
-    '_validate_manifest_paths',
-    '_validate_subgoal_graph',
-]
+    extraction_sources = {source.id: source for source in theorem_extraction.sources}
+    matching_theorems = [
+        theorem
+        for theorem in theorem_extraction.theorems
+        if _normalize_source_text(theorem.statement) == _normalize_source_text(usage.theorem_statement)
+        and _locator_tuple(theorem.locator) == _locator_tuple(usage.locator)
+    ]
+    if not matching_theorems:
+        raise KernelValidationError(
+            f"{usage.proof_step_id}: theorem_applicability statement/locator does not "
+            "match any extracted theorem"
+        )
+    if usage.theorem_id is not None and usage.theorem_id not in {
+        theorem.id for theorem in matching_theorems
+    }:
+        raise KernelValidationError(
+            f"{usage.proof_step_id}: theorem_applicability theorem_id does not match "
+            "the extracted theorem"
+        )
+    source_matches = False
+    for theorem in matching_theorems:
+        extracted_source = extraction_sources.get(theorem.source_ref_id)
+        if extracted_source is None:
+            continue
+        if (
+            extracted_source.title == source_ref.title
+            and extracted_source.authors == source_ref.authors
+        ):
+            source_matches = True
+            break
+    if not source_matches:
+        raise KernelValidationError(
+            f"{usage.proof_step_id}: theorem_applicability extracted theorem source "
+            "does not match the cited source_ref"
+        )
+
+def _validate_theorem_applicability(
+    manifest: RunManifest,
+    claim: Claim,
+    source_grounding: SourceGroundingReport,
+    theorem_applicability: TheoremApplicabilityReport | None,
+    theorem_extraction: TheoremExtractionReport | None,
+) -> None:
+    has_source_backed_step = any(
+        step.status == SourceStatus.source_backed for step in source_grounding.steps
+    )
+    if theorem_applicability is None:
+        if has_source_backed_step:
+            raise KernelValidationError(
+                "source_backed theorem steps require theorem_applicability audit"
+            )
+        return
+    if theorem_applicability.claim_id != claim.id:
+        raise KernelValidationError("theorem_applicability claim_id does not match locked claim")
+    if theorem_applicability.run_id != manifest.run_id:
+        raise KernelValidationError("theorem_applicability run_id does not match manifest")
+    if theorem_applicability.source_grounding_artifact != manifest.artifacts["source_grounding"]:
+        raise KernelValidationError("theorem_applicability must cite the source_grounding artifact")
+    if theorem_applicability.literature_review_agent_artifact is not None:
+        expected = manifest.optional_artifacts.get("literature_review_agent")
+        if theorem_applicability.literature_review_agent_artifact != expected:
+            raise KernelValidationError(
+                "theorem_applicability literature_review_agent_artifact does not match manifest"
+            )
+    known_steps = {step.proof_step_id: step for step in source_grounding.steps}
+    refs_by_id = {ref.id: ref for ref in source_grounding.source_refs}
+    known_refs = set(refs_by_id)
+    usages_by_step = {usage.proof_step_id: usage for usage in theorem_applicability.usages}
+    for usage in theorem_applicability.usages:
+        if usage.proof_step_id not in known_steps:
+            raise KernelValidationError(
+                f"theorem_applicability references unknown proof step {usage.proof_step_id!r}"
+            )
+        if usage.source_ref_id not in known_refs and usage.source_ref_id != "missing_source_ref":
+            raise KernelValidationError(
+                f"theorem_applicability references unknown source ref {usage.source_ref_id!r}"
+            )
+        step = known_steps[usage.proof_step_id]
+        if (
+            usage.source_ref_id == "missing_source_ref"
+            and (usage.source_status == SourceStatus.source_backed or step.status == SourceStatus.source_backed)
+        ):
+            raise KernelValidationError(
+                f"{usage.proof_step_id}: source_backed theorem applicability requires "
+                "a concrete cited source_ref_id"
+            )
+        if usage.source_ref_id != "missing_source_ref" and usage.source_ref_id not in step.source_refs:
+            raise KernelValidationError(
+                f"{usage.proof_step_id}: theorem_applicability source_ref_id is not used by proof step"
+            )
+        if usage.source_status != step.status:
+            raise KernelValidationError(
+                f"{usage.proof_step_id}: theorem_applicability source_status does not match source_grounding step"
+            )
+        if usage.source_ref_id in refs_by_id and refs_by_id[usage.source_ref_id].status != usage.source_status:
+            raise KernelValidationError(
+                f"{usage.proof_step_id}: theorem_applicability source_status does not match source ref"
+            )
+        if usage.source_status == SourceStatus.source_backed and usage.source_ref_id in refs_by_id:
+            _validate_applicability_usage_source_binding(
+                usage, refs_by_id[usage.source_ref_id], theorem_extraction
+            )
+    for step in source_grounding.steps:
+        if step.status != SourceStatus.source_backed:
+            continue
+        usage = usages_by_step.get(step.proof_step_id)
+        if usage is None:
+            raise KernelValidationError(
+                f"{step.proof_step_id}: source_backed theorem step lacks applicability audit"
+            )
+        if usage.applicability_status != "applicable" or usage.blocks_source_backed:
+            raise KernelValidationError(
+                f"{step.proof_step_id}: source_backed theorem step is blocked by theorem applicability"
+            )
+        if any(condition.status != "satisfied" for condition in usage.conditions):
+            raise KernelValidationError(
+                f"{step.proof_step_id}: source_backed theorem step has unsatisfied theorem conditions"
+            )
+        if not usage.locator.is_exact:
+            raise KernelValidationError(
+                f"{step.proof_step_id}: source_backed theorem step requires an exact applicability locator"
+            )
+        if (
+            usage.theorem_scope in {"very_general", "generic"}
+            and usage.claim_scope == "universal"
+            and not usage.scope_justification.strip()
+        ):
+            raise KernelValidationError(
+                f"{step.proof_step_id}: a '{usage.theorem_scope}' theorem cannot back a universal "
+                f"('all') claim without an explicit scope_justification"
+            )

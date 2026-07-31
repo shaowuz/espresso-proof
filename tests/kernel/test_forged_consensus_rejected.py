@@ -142,8 +142,8 @@ def test_validator_enforces_the_rule_itself() -> None:
     # validator module, not only from orchestration.
     import inspect
 
-    from espresso_proof.kernel.validators import _part4
+    from espresso_proof.kernel.validators import agent_artifact_gates
 
-    source = inspect.getsource(_part4)
+    source = inspect.getsource(agent_artifact_gates)
     assert "unresolved_proof_dependency_lines" in source
     assert "cannot seal a line-numbered proof with" in source

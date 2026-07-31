@@ -5,8 +5,8 @@ an entry claiming a checked status is now re-derived by the kernel and bound to
 what the adapter says it checked. Round three found the same defect one artifact
 over. `computation_verification.yaml` carries `executed` and `verdict` booleans
 written by whoever wrote the file, and they back the grade-level
-`computation_checked` (`kernel/validators/_part3.py`) and a `scoped_checked`
-subgoal node (`_part4.py`). Nothing re-ran them.
+`computation_checked` (`kernel/validators (final_gates)`) and a `scoped_checked`
+subgoal node (subgoal_graph). Nothing re-ran them.
 
 Reproduced end to end before the fix: a run whose ONLY machine evidence was a
 hand-written result naming `a_backend_that_does_not_exist`, whose expression was
