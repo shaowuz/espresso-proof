@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from espresso_proof.ui import instant_lane
 from espresso_proof.ui.instant_lane import INSTANT_FILE, load_instant_conversation
 from espresso_proof.kernel.proof_language import contains_proof_language
 from espresso_proof.server import Workbench, _make_handler
@@ -51,6 +52,31 @@ def client(tmp_path: Path):
     httpd.shutdown()
 
 
+class _FakeFastClient:
+    """Stands in for the bounded preview model. It echoes the prompt back with
+    proof-complete language attached, so the scrub-on-the-way-in contract is
+    exercised against MODEL output and not just against the user's message."""
+
+    provider = "external"
+    model = "fake-fast-model"
+
+    def complete_json(self, *, system: str, prompt: str) -> dict:
+        return {
+            "answer": f"First read of {prompt.splitlines()[0]} — we have proved it, proof-close.",
+            "routes": ["Reduce to the abelian case."],
+            "caveats": ["The finiteness hypothesis is needed."],
+        }
+
+
+@pytest.fixture()
+def fast_model(monkeypatch):
+    """Configure the preview lane with a model. Without one the lane correctly
+    shows no draft (see test_a_lane_with_no_model_streams_no_draft_lines), which
+    is not the case these streaming tests are about."""
+
+    monkeypatch.setattr(instant_lane, "build_fast_client", lambda provider: _FakeFastClient())
+
+
 def _create(call) -> str:
     status, _, raw = call("POST", "/api/runs", {"text": CLAIM})
     assert status == 202
@@ -73,7 +99,7 @@ def _parse_sse(text: str) -> list[dict]:
     return events
 
 
-def test_instant_draft_acks_then_streams_labeled_draft(client) -> None:
+def test_instant_draft_acks_then_streams_labeled_draft(client, fast_model) -> None:
     wb, call = client
     run_id = _create(call)
     start = time.monotonic()
@@ -97,7 +123,7 @@ def test_instant_draft_acks_then_streams_labeled_draft(client) -> None:
     assert metrics["background_run_started"] is True
 
 
-def test_transient_instant_draft_needs_no_run_and_persists_nothing(client) -> None:
+def test_transient_instant_draft_needs_no_run_and_persists_nothing(client, fast_model) -> None:
     # the PRE-RUN lane answers the claim with no run id, decoupled from creation.
     wb, call = client
     start = time.monotonic()
@@ -118,6 +144,22 @@ def test_transient_instant_draft_needs_no_run_and_persists_nothing(client) -> No
     assert not list((wb.root).glob("projects/*/runs/*"))
 
 
+def test_a_lane_with_no_model_streams_no_draft_lines(client) -> None:
+    """No preview model configured (the fixture's workbench is provider=stub):
+    the endpoint still acks and completes cleanly, and streams zero draft lines
+    instead of claim-independent filler. The panel renders that as one explicit
+    line, so the page is never dead and never padded."""
+
+    wb, call = client
+    status, ctype, raw = call("POST", "/api/instant-draft", {"message": "is this true?"})
+    assert status == 200 and "text/event-stream" in ctype
+    events = _parse_sse(raw)
+    assert events[0]["event"] == "ack"
+    assert [e for e in events if e["event"] == "draft"] == []
+    done = events[-1]
+    assert done["event"] == "done" and done["data"]["ok"] is True
+
+
 def test_transient_instant_draft_blocks_cross_site_origin(client) -> None:
     wb, call = client
     status, _, raw = call(
@@ -127,7 +169,7 @@ def test_transient_instant_draft_blocks_cross_site_origin(client) -> None:
     assert status == 403 and "cross-site" in json.loads(raw)["error"]
 
 
-def test_instant_draft_is_scrubbed_even_on_hostile_message(client) -> None:
+def test_instant_draft_is_scrubbed_even_on_hostile_message(client, fast_model) -> None:
     wb, call = client
     run_id = _create(call)
     _, _, raw = call(
@@ -140,7 +182,7 @@ def test_instant_draft_is_scrubbed_even_on_hostile_message(client) -> None:
     assert "proof-close" not in joined.lower()
 
 
-def test_instant_draft_persists_only_advisory_sidecar(client) -> None:
+def test_instant_draft_persists_only_advisory_sidecar(client, fast_model) -> None:
     wb, call = client
     run_id = _create(call)
     run_dir = wb.resolve_run(run_id)

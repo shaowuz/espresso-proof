@@ -41,23 +41,32 @@ class _SlowClient:
 
 # -- fast visible state for a simple claim (the order-3 regression) -----------
 
-def test_order3_gets_fast_labeled_draft_without_client() -> None:
+def test_order3_returns_a_definite_state_without_client() -> None:
+    """The original regression was a dead page: nothing visible for a long time.
+
+    What fixes that is a definite, fast RESULT, not filler — the lane returns
+    immediately with a recorded status the panel renders as an explicit line
+    ("No instant read for this claim"). Text invented to fill the card said the
+    same three things about every claim and was removed; the visible state that
+    replaced the dead page is what this pins.
+    """
+
     t0 = time.monotonic()
     draft = build_instant_draft(ORDER3, created_at="t0")
     assert time.monotonic() - t0 < 1.0  # fast, never blocks
-    assert draft.status in ("fallback", "draft")
+    assert draft.status == "fallback"
     assert draft.visible_label == VISIBLE_LABEL
     assert draft.advisory_only is True
     assert draft.writes_kernel_status is False
-    assert draft.answer.strip()  # a useful visible state, not a dead page
+    assert draft.answer == ""  # nothing claim-specific to say, and it says none
 
 
 def test_order3_slow_model_falls_back_within_budget() -> None:
     t0 = time.monotonic()
     draft = build_instant_draft(ORDER3, client=_SlowClient(), budget_seconds=0.5, created_at="t0")
     assert time.monotonic() - t0 < 3.0  # abandoned the slow model, fell back fast
-    assert draft.status in ("unavailable", "fallback")
-    assert draft.answer.strip()
+    assert draft.status == "unavailable"
+    assert draft.answer == ""
 
 
 # -- earned-status verdict filter (the safety gap scrub_proof_language misses) -
