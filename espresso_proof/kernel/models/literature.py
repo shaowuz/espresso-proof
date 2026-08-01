@@ -230,6 +230,10 @@ class LiteratureItem(StrictBaseModel):
     ]
     status: SourceStatus
     why_relevant: str
+    # Optional link to the source (URL / arXiv / DOI). Display convenience only:
+    # a link never contributes support — grounding still needs an exact locator
+    # and a hypothesis match.
+    url: str = ""
     found_by: Literal["user", "literature_review", "memory", "local_notes", "web_search"]
 
     @model_validator(mode="after")

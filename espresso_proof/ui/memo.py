@@ -320,6 +320,10 @@ def build_concise_memo(run_dir: Path) -> str:
         scrub_source_support_language(g).rstrip(".")
         for g in source_gaps
     ]
+    # Cap the dump: a reader needs the two most substantive gaps and the count,
+    # not a comma-joined wall including per-ref bookkeeping ids.
+    if len(shown_gaps) > 2:
+        shown_gaps = shown_gaps[:2] + [f"+{len(source_gaps) - 2} more (see the panels)"]
     lines.append(
         "Source gaps: "
         + (", ".join(shown_gaps) if shown_gaps else "none")
@@ -348,6 +352,11 @@ def build_concise_memo(run_dir: Path) -> str:
         lines.append("")
         lines.append("Open blockers / pending checks:")
         for warning in warning_lines:
+            # A line that announces itself as a superseded placeholder is not a
+            # disclosure, it is noise: real reviewer blockers appear in the
+            # prover-pass line right below it.
+            if "front-half placeholder; prover-pass reviewers have since run" in warning:
+                continue
             lines.append(f"  - {warning}")
     # Phase 6: when the run carries the agent-consensus mock check, disclose it as
     # advisory (agent consensus only, not a machine check) and note how many residual
@@ -446,21 +455,23 @@ def build_concise_memo(run_dir: Path) -> str:
     if agent_rows:
         lines.append("")
         lines.append("Evidence agents:")
+        # One row per agent that has something to SAY; every idle agent shares
+        # one line. Five consecutive "has not run; not counted as evidence"
+        # rows told the reader the same fact five times.
+        idle = [row["title"] for row in agent_rows if row["status"] in {"not_run", "skipped"}]
         for row in agent_rows:
+            if row["status"] in {"not_run", "skipped"}:
+                continue
             note = ""
             if row["status"] == "failed" and row["error_summary"]:
                 note = f" — {str(row['error_summary'])[:80]}"
-            elif row["status"] == "not_run":
-                note = " — has not run; not counted as evidence"
-            elif row["status"] == "skipped":
-                note = " — skipped by request; contributes no evidence"
             elif row["status"] == "running":
                 note = " — in progress; not yet evidence"
             lines.append(f"  - {row['title']}: {row['status_word']}{note}")
-        lines.append(
-            "  (Only a 'Done' agent's results count as evidence; the kernel still "
-            "checks them. Missing/running/skipped/failed agents are not evidence.)"
-        )
+        if idle:
+            lines.append(
+                f"  - Not run yet (not evidence): {', '.join(idle)}"
+            )
     from espresso_proof.orchestration.pressure_lanes import pressure_lane_memo_lines
 
     lane_lines = pressure_lane_memo_lines(run_dir)
@@ -480,7 +491,8 @@ def build_concise_memo(run_dir: Path) -> str:
                 f"[score {route.get('score')} / 100, effort: {effort_phrase(route.get('estimated_effort'))}]"
             )
             if route.get("main_risk"):
-                lines.append(f"     risk: {route.get('main_risk')}")
+                risk = str(route.get("main_risk")).split(". ")[0].rstrip(".")
+                lines.append(f"     risk: {risk}.")
     else:
         lines.append("  none")
     lines.append("")

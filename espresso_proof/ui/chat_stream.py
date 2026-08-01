@@ -61,9 +61,10 @@ def chat_progress_lines(
     """
 
     lines: list[str] = []
+    # The user's message renders directly above the reply in the conversation
+    # panel; echoing it back ("You asked: ...") doubled every exchange. The
+    # scrub still runs — the message text feeds the claim-echo check below.
     msg = scrub_source_support_language(str(user_message)).strip()[:200]
-    if msg:
-        lines.append(_safe(f'You asked: "{msg}"'))
 
     if (run_dir / "run_manifest.yaml").exists():
         try:
@@ -78,7 +79,6 @@ def chat_progress_lines(
     claim = _artifact(run_dir, "locked_claim")
     grade = _artifact(run_dir, "idea_grade")
     if claim:
-        lines.append(_safe("Reading the locked claim and what it is precise enough to test."))
         sentence = describe_grade(
             status=(grade or {}).get("status"),
             proof_language_status=(grade or {}).get("proof_language_status"),
@@ -114,8 +114,62 @@ def chat_progress_lines(
     else:
         lines.append(_safe("No candidate references yet; a literature pass would look for relevant theorems."))
 
+    # The reply must END with what to actually DO. Observed live: the human
+    # pasted their claim into a page already bound to that problem, got a state
+    # summary back, and concluded nothing was running — the summary described
+    # where the run stood but never said how to advance it.
+    next_step = _next_step_line(run_dir, claim, msg)
+    if next_step:
+        lines.append(next_step)
+
     lines.append(_safe("This is a conversational preview of the current artifacts — the panels above are the source of truth."))
     return [ln for ln in lines if ln]
+
+
+def _next_step_line(run_dir: Path, claim: dict | None, msg: str) -> str:
+    """One concrete, state-aware instruction (deterministic product copy)."""
+
+    try:
+        from espresso_proof.kernel.io import read_yaml
+
+        state = str((read_yaml(run_dir / "run_manifest.yaml") or {}).get("current_state") or "")
+    except Exception:  # noqa: BLE001 - guidance is a convenience
+        return ""
+    guidance = {
+        "WAITING_LLM_AGENT_HUMAN_GATE": (
+            "Next step: nothing is running — this run is waiting for YOU. Pick a "
+            "route in the Strategies panel and press its Continue button to run "
+            "the prover and reviewers."
+        ),
+        "WAITING_CLAIM_CLARIFICATION": (
+            "Next step: this run is parked on claim clarification. Open a new "
+            "page (New problem, top right) and state the claim more precisely."
+        ),
+        "WAITING_TIME_ALLOCATION_DECISION": (
+            "Next step: the scheduler stopped to ask whether to keep spending on "
+            "this route. Answer from a terminal: espresso answer-scheduler "
+            f"--run {run_dir} --route <route_id> --decision continue|stop "
+            "--reason <why>."
+        ),
+        "COMPLETED_MEMO": (
+            "This run is complete. For a new claim, open a new page with the "
+            "New problem button (top right)."
+        ),
+    }
+    line = guidance.get(state, "")
+    # A message that repeats the locked claim usually means "prove this" — say
+    # explicitly that this page is already that problem.
+    raw = str((claim or {}).get("raw_text") or "").strip().lower()
+    normalized_msg = msg.strip().lower().rstrip(".")
+    if raw and normalized_msg and (
+        normalized_msg in raw.lower() or raw.lower().rstrip(".") in normalized_msg
+    ):
+        prefix = (
+            "This page is already working on that claim, so your message was a "
+            "question about it, not a new run. "
+        )
+        line = prefix + (line or "For a different claim, use New problem (top right).")
+    return _safe(line) if line else ""
 
 
 def stream_chat(

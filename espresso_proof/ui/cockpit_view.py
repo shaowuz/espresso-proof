@@ -300,6 +300,32 @@ def _computations(checks: dict | None) -> list[dict]:
     return items
 
 
+def _literature_link(raw: dict) -> str:
+    """A clickable way IN to the source: the recorded https url, or a
+    deterministic scholar search over title+authors. A link is a convenience,
+    never support."""
+
+    from urllib.parse import quote_plus
+
+    url = str(raw.get("url") or "").strip()
+    if url.startswith("https://") or url.startswith("http://"):
+        return url[:300]
+    locator = raw.get("locator") or {}
+    value = str(locator.get("value") or "").strip()
+    if str(locator.get("kind") or "") == "arxiv_id" and value:
+        return f"https://arxiv.org/abs/{quote_plus(value)}"
+    if value.startswith("https://") or value.startswith("http://"):
+        return value[:300]
+    title = str(raw.get("title") or "").strip()
+    if not title:
+        return ""
+    authors = " ".join(str(a) for a in (raw.get("authors") or [])[:2])
+    # The query is rendered free text too: scrub it like every other field so a
+    # title cannot smuggle raw source-support vocabulary into the snapshot.
+    query = scrub_source_support_language(f"{title} {authors}".strip())
+    return "https://scholar.google.com/scholar?q=" + quote_plus(query)
+
+
 def _literature(review: dict | None, source_grounding: dict | None = None) -> list[dict]:
     items = []
     seen: set[tuple[str, str]] = set()
@@ -314,6 +340,12 @@ def _literature(review: dict | None, source_grounding: dict | None = None) -> li
     for raw in (review or {}).get("candidate_references", [])[:24]:
         status = raw.get("status")
         locator = raw.get("locator") or {}
+        # A reading-list row carries a per-item label only when a status was
+        # actually EARNED (or a source was misapplied). Stamping every candidate
+        # "Proposed, not checked" told the reader the same thing 24 times; the
+        # section-level note says it once, and absence of a label means exactly
+        # "nothing earned".
+        labelled = status not in {None, "", "candidate", "unverified", "not_found"}
         _append(
             {
                 "id": _clip(raw.get("id"), 80),
@@ -325,10 +357,9 @@ def _literature(review: dict | None, source_grounding: dict | None = None) -> li
                 },
                 "relevance": _clip(raw.get("relevance"), 40),
                 "why": _clip_scrubbed(raw.get("why_relevant")),
-                # a literature hit is metadata: its phrase/tone comes from the
-                # SOURCE status the kernel recorded, never from mere relevance.
-                "phrase": evidence_phrase(status),
-                "tone": _tone(status),
+                "url": _literature_link(raw),
+                "phrase": evidence_phrase(status) if labelled else "",
+                "tone": _tone(status) if labelled else "muted",
             }
         )
     for raw in (source_grounding or {}).get("source_refs", [])[:24]:

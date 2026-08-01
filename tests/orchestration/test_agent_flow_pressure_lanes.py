@@ -96,9 +96,11 @@ def test_pending_pressure_lanes_show_in_memo_and_keep_routes_preliminary(tmp_pat
     memo = build_concise_memo(run_dir)
 
     assert "Pressure lanes:" in memo
-    assert "Literature Review: Not started - pending; not counted as evidence" in memo
-    assert "Examples: Not started - pending; not counted as evidence" in memo
-    assert "Counterexamples: Not started - pending; not counted as evidence" in memo
+    # Idle lanes collapse into one honest line (repeating "not started" once per
+    # lane was noise); each lane is still NAMED and still not evidence.
+    assert "Not started - pending; not counted as evidence" in memo
+    for lane in ("Literature Review", "Examples", "Counterexamples"):
+        assert lane in memo
     assert "Top routes (PRELIMINARY" in memo
     summary = status_summary(run_dir)
     assert summary["routes_preliminary"] is True
