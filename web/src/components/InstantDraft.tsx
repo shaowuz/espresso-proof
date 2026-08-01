@@ -36,34 +36,37 @@ export function InstantDraft({
 }) {
   const [lines, setLines] = useState<string[]>([]);
   const [phase, setPhase] = useState<Phase>("working");
-  const [status, setStatus] = useState<InstantStatus>("draft");
-  const activeClaim = useRef<string | null>(null);
+  const [, setStatus] = useState<InstantStatus>("draft");
+  // Stream identity is a token, NOT the claim text: two streams for the SAME
+  // text are exactly the case that has to be told apart (a remount re-fires the
+  // effect while the first stream is still open), and comparing text let both
+  // of them append — the panel showed every line of the draft twice.
+  const streamToken = useRef(0);
 
   useEffect(() => {
     if (!claimText) return;
-    activeClaim.current = claimText;
+    const mine = ++streamToken.current;
     setLines([]);
     setPhase("working");
     setStatus("draft");
-    const mine = claimText;
     void streamer(claimText, {
       onAck: () => {
-        if (activeClaim.current === mine) setPhase("working");
+        if (streamToken.current === mine) setPhase("working");
       },
       onLine: (text) => {
-        if (activeClaim.current !== mine) return;
+        if (streamToken.current !== mine) return;
         setPhase("streaming");
         setLines((prev) => [...prev, text]);
       },
       onDone: (_ok, finalStatus) => {
-        if (activeClaim.current !== mine) return;
+        if (streamToken.current !== mine) return;
         setStatus(finalStatus);
         setPhase("done");
       },
     });
     return () => {
-      // a new claim invalidates this stream's late callbacks.
-      if (activeClaim.current === mine) activeClaim.current = null;
+      // Any later stream invalidates this one's in-flight callbacks.
+      if (streamToken.current === mine) streamToken.current += 1;
     };
   }, [claimText, streamer]);
 
@@ -98,8 +101,8 @@ export function InstantDraft({
         )}
         {unavailable && (
           <p className="text-stone-500">
-            A draft is not available right now — the evidence pipeline above is
-            still the source of truth.
+            No instant read for this claim — the pipeline above is doing the
+            real work.
           </p>
         )}
         {lines.length > 0 && (
@@ -117,11 +120,6 @@ export function InstantDraft({
               </FadeIn>
             ))}
           </div>
-        )}
-        {phase === "done" && !unavailable && status !== "draft" && (
-          <p className="mt-2 text-[12px] text-stone-400">
-            Drafted from a fast fallback; the evidence pipeline continues.
-          </p>
         )}
       </CardContent>
     </Card>

@@ -39,6 +39,11 @@ from espresso_proof.kernel.proof_language import (
 )
 
 INSTANT_FILE = "instant_conversation.yaml"
+# How long the lane may wait for the fast model before giving up on this draft.
+# Overridable per deployment; a CLI-backed adapter needs tens of seconds to
+# answer at all, and an empty panel for that long beats generic filler in two.
+INSTANT_BUDGET_ENV = "ESPRESSO_INSTANT_DRAFT_BUDGET_SECONDS"
+DEFAULT_MODEL_BUDGET_SECONDS = 90.0
 VISIBLE_LABEL = "Draft only — not checked"
 DEFAULT_SAFETY_NOTE = (
     "This draft is conversation, not proof. It earns no source-backed, checked, "
@@ -141,24 +146,60 @@ INSTANT_SYSTEM = (
 
 
 def _fallback_draft(claim_text: str) -> tuple[str, list[str], list[str]]:
-    """A friendly, always-fast, model-free draft. Honest and generic: it offers a
-    way to start without asserting anything about the specific claim."""
+    """No model text means nothing to say about THIS claim, so the lane says
+    nothing.
 
-    answer = (
-        "Quick read: I can start on this right away while the evidence pipeline "
-        "runs. Nothing below is checked — treat it as a sketch to react to."
-    )
-    routes = [
-        "Restate the claim precisely and pin every hypothesis before arguing.",
-        "Test small or extremal cases to build intuition and look for pressure.",
-        "Look for a standard theorem that applies — then it still needs an exact "
-        "locator and a hypothesis match before any source support is earned.",
-    ]
-    caveats = [
-        "Missing or implicit hypotheses can change the answer entirely.",
-        "Examples passing is not a proof; a counterexample check is still needed.",
-    ]
-    return answer, routes, caveats
+    It used to emit a fixed answer plus three routes ("restate the claim", "try
+    small cases", "look for a standard theorem") and two caveats. Every word of
+    that was true of every claim ever submitted, which is precisely why it
+    carried no information: a reader learns nothing about their own problem from
+    text that would be identical for someone else's. Worse, the boilerplate was
+    written in the vocabulary the scrubber rewrites, so it reached the page
+    mangled ("Nothing below [unverified]").
+
+    The rule now: the instant lane shows a fast model's read of the submitted
+    claim, or it shows nothing and the panel says so in one line.
+    """
+
+    return "", [], []
+
+
+def model_budget_seconds() -> float:
+    """The wait allowed for a fast draft, from the environment or the default.
+    A malformed or non-positive value falls back to the default rather than
+    disabling the lane silently."""
+
+    import os
+
+    raw = os.environ.get(INSTANT_BUDGET_ENV, "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_MODEL_BUDGET_SECONDS
+    return value if value > 0 else DEFAULT_MODEL_BUDGET_SECONDS
+
+
+def build_fast_client(provider: str) -> InstantDraftClient | None:
+    """A bounded, no-retry client for the preview lane, or None.
+
+    Separate from the pipeline's client on purpose: one attempt, its own
+    timeout, and no usage sink writing into a run. Returns None (never raises)
+    when nothing is configured — the lane then simply has no draft to show.
+    """
+
+    if not provider or provider == "stub":
+        return None
+    try:
+        from espresso_proof.agents.clients import ExternalCommandClient, OpenAIResponsesClient
+
+        budget = int(model_budget_seconds())
+        if provider == "external":
+            return ExternalCommandClient(model="", timeout=budget, max_retries=0)
+        if provider == "openai":
+            return OpenAIResponsesClient(model="", api_key_env="OPENAI_API_KEY")
+    except Exception:  # noqa: BLE001 — an unconfigured preview lane is not an error
+        return None
+    return None
 
 
 def _parse_client_draft(payload: dict) -> tuple[str, list[str], list[str]]:
@@ -238,15 +279,23 @@ def build_instant_draft(
 
 
 def draft_lines(draft: InstantConversation) -> list[str]:
-    """The ordered, already-scrubbed lines the lane shows. The label leads so the
-    'draft, not checked' framing is visible before any mathematical text."""
+    """The ordered, already-scrubbed lines the lane shows, or [] when the lane
+    has no model text about this claim.
 
+    The label leads so the 'draft, not checked' framing is visible before any
+    mathematical text. ``safety_note`` stays on the persisted record (it is the
+    contract this sidecar is stored under) but is not streamed: the panel's
+    permanent "Draft only — not checked" badge already says it, and repeating it
+    as a sentence per draft only crowds out the mathematics.
+    """
+
+    if not (draft.answer or draft.routes_preview):
+        return []
     lines = [f"{draft.visible_label}.", draft.answer]
     for i, route in enumerate(draft.routes_preview, start=1):
         lines.append(f"Route {i}: {route}")
     for caveat in draft.caveats:
         lines.append(f"Caveat: {caveat}")
-    lines.append(draft.safety_note)
     return [_scrub_text(ln, 400) for ln in lines if str(ln).strip()]
 
 
@@ -257,8 +306,6 @@ def stream_instant_draft(draft: InstantConversation) -> Iterator[str]:
         lines = draft_lines(draft)
     except Exception:  # noqa: BLE001 — the lane is a preview; never break the page
         lines = []
-    if not lines:
-        lines = [_scrub_text("Draft only — not checked. I could not draft this yet; the pipeline is still running.")]
     yield from lines
 
 

@@ -1036,8 +1036,10 @@ def _make_handler(workbench: Workbench):
             nothing. The caller has already sent the SSE response headers."""
 
             from espresso_proof.ui.instant_lane import (
+                build_fast_client,
                 build_instant_draft,
                 instant_lane_metrics,
+                model_budget_seconds,
                 stream_instant_draft,
                 write_instant_conversation,
             )
@@ -1054,11 +1056,17 @@ def _make_handler(workbench: Workbench):
             try:
                 emit("ack", {"label": "Draft only — not checked", "working": True})
                 ack_ms = monotonic_ms() - t0
-                # client=None → friendly deterministic fallback draft: instant and
-                # safe, and never the deep product adapter. A bounded fast-model
-                # profile can be injected here later without changing the contract.
+                # A bounded, single-attempt fast client — never the deep product
+                # adapter, and never the run's client. With nothing configured
+                # this is None and the lane shows no draft at all, which is the
+                # honest outcome: a model-free lane has nothing to say about
+                # this particular claim.
                 draft = build_instant_draft(
-                    message, run_id=run_dir.name if run_dir else "", created_at=now_iso()
+                    message,
+                    client=build_fast_client(workbench.provider),
+                    budget_seconds=model_budget_seconds(),
+                    run_id=run_dir.name if run_dir else "",
+                    created_at=now_iso(),
                 )
                 draft_ms = monotonic_ms() - t0
                 for line in stream_instant_draft(draft):

@@ -2,8 +2,10 @@
 
 These tests pin the safety/latency contract of the instant lane:
 
-- a draft is produced fast, labeled "Draft only — not checked", with intuition,
-  routes, and caveats;
+- a model-backed draft is labeled "Draft only — not checked" and carries
+  intuition, routes, and caveats about the submitted claim;
+- with no usable model the lane shows NOTHING rather than claim-independent
+  filler (see test_a_lane_with_no_model_says_nothing);
 - a deliberately SLOW fake model never blocks past the budget — the lane falls
   back and the (caller's) pipeline keeps running;
 - proof-complete language never reaches the user (scrubbed on the way in) and the
@@ -72,17 +74,44 @@ class _BrokenClient:
 # -- draft shape + labeling ---------------------------------------------------
 
 
-def test_fallback_draft_is_labeled_and_structured() -> None:
+def test_a_lane_with_no_model_says_nothing() -> None:
+    """Reported from the browser: the model-free draft was three routes
+    ("restate the claim", "try small cases", "look for a standard theorem") and
+    two caveats, all of which are true of every claim anyone could submit. Text
+    that would be byte-identical for a different problem tells the reader
+    nothing about theirs, so the lane now shows no draft instead."""
+
     draft = build_instant_draft("Show that |G| = p^2 implies G abelian.", created_at="t0")
-    assert draft.status == "fallback"  # no client → friendly fallback
+    assert draft.status == "fallback"  # no client configured
     assert draft.visible_label == VISIBLE_LABEL
-    assert draft.answer
-    assert 1 <= len(draft.routes_preview) <= 3
-    assert draft.caveats
+    assert draft.answer == "" and draft.routes_preview == [] and draft.caveats == []
     assert draft.advisory_only is True
     assert draft.writes_kernel_status is False
+    assert draft_lines(draft) == []
+    assert list(stream_instant_draft(draft)) == []
+
+
+def test_a_model_backed_draft_is_labeled_and_structured() -> None:
+    draft = build_instant_draft(
+        "Show that |G| = p^2 implies G abelian.",
+        client=_FastClient(
+            {
+                "answer": "The class equation forces a nontrivial center.",
+                "routes": ["Show |Z(G)| > 1, then G/Z(G) cyclic."],
+                "caveats": ["p must be prime for the class equation argument."],
+            }
+        ),
+        created_at="t0",
+    )
+    assert draft.status == "draft"
+    assert draft.visible_label == VISIBLE_LABEL
+    assert 1 <= len(draft.routes_preview) <= 3
     lines = draft_lines(draft)
     assert lines[0].startswith("Draft only — not checked")
+    # The label and the mathematics; the standing safety note lives on the
+    # persisted record and on the panel's badge, not in every stream.
+    assert draft.safety_note
+    assert not any(draft.safety_note[:30] in line for line in lines)
 
 
 def test_fast_client_draft_is_used_and_scrubbed() -> None:
@@ -116,14 +145,14 @@ def test_slow_model_falls_back_within_budget() -> None:
     elapsed = time.monotonic() - start
     assert elapsed < 2.5  # did NOT wait for the 5s model
     assert draft.status == "unavailable"
-    assert draft.answer  # a friendly fallback is still shown
+    assert draft.answer == ""  # nothing to say yet, and it does not pretend
     assert draft.visible_label == VISIBLE_LABEL
 
 
 def test_broken_model_falls_back_and_never_raises() -> None:
     draft = build_instant_draft("Claim Z.", client=_BrokenClient(), created_at="t0")
     assert draft.status == "failed"
-    assert draft.answer
+    assert draft.answer == ""
 
 
 # -- strict model: rejects proof language + status-upgrade fields -------------
