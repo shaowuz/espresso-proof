@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from espresso_proof.agents import codex_adapter
+from espresso_proof.agents.adapter_runtime import DEFAULT_EXTERNAL_TIMEOUT_SECONDS
 from espresso_proof.agents.agent_skill_catalog import select_agent_skills
 from espresso_proof.agents.llm_agents import (
     ExternalCommandClient,
@@ -505,8 +506,13 @@ def test_external_client_timeout_defaults_and_env_override(
     codex = tmp_path / "espresso_codex_agent.py"
     codex.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
 
+    # The generic default was raised from 120s after measurement: across 140
+    # successful calls the median was 54s, p90 91s, and the max was the 110s cap
+    # ITSELF, with 13 calls killed at exactly that boundary. A timeout catches a
+    # hang; it must not sit inside the natural duration distribution.
     monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_COMMAND", f"{sys.executable} {legacy}")
-    assert ExternalCommandClient(model="external").timeout == 120
+    assert ExternalCommandClient(model="external").timeout == DEFAULT_EXTERNAL_TIMEOUT_SECONDS
+    assert DEFAULT_EXTERNAL_TIMEOUT_SECONDS > 110
 
     monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_COMMAND", f"{sys.executable} {codex}")
     assert ExternalCommandClient(model="external").timeout == 360

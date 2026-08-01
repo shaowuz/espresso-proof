@@ -55,9 +55,12 @@ REPAIR_TARGET_FILENAME = "repair_target.yaml"
 # objections it was asked to address.
 # token_usage.jsonl joins the exclusions for the same reason as agent_events:
 # rolling back a failed stage must not erase the record of tokens already spent.
+# chat_transcript.jsonl joins them: it records what the HUMAN said to this run,
+# and a rolled-back stage must not erase a person's words.
 _SNAPSHOT_EXCLUDED_NAMES = frozenset(
     {EVENTS_FILENAME, AGENT_EVENTS_FILENAME, TIMINGS_FILENAME, LOCK_FILENAME,
-     ADVISORY_PROOF_SKETCH_FILENAME, REPAIR_TARGET_FILENAME, TOKEN_USAGE_FILENAME}
+     ADVISORY_PROOF_SKETCH_FILENAME, REPAIR_TARGET_FILENAME, TOKEN_USAGE_FILENAME,
+     "chat_transcript.jsonl"}
 )
 
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * Human-feeling progress. Pure, testable duration formatting plus a
@@ -37,11 +37,20 @@ export function timeAgo(iso: string | null | undefined, nowMs: number): string {
  */
 export function useElapsed(active: boolean): number {
   const [, setTick] = useState(0);
-  const [startMs] = useState(() => Date.now());
+  // The clock starts when the JOB starts, not when the component mounted.
+  // useState(() => Date.now()) fixed the origin at mount and never reset it, so
+  // a page left open for five minutes showed "running · 5m" the instant a job
+  // began (observed live). The ref is (re)armed on each idle->active edge.
+  const startRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      startRef.current = null;
+      return;
+    }
+    startRef.current = Date.now();
     const id = window.setInterval(() => setTick((t) => t + 1), 1000);
     return () => window.clearInterval(id);
   }, [active]);
-  return active ? Math.max(0, (Date.now() - startMs) / 1000) : 0;
+  if (!active || startRef.current === null) return 0;
+  return Math.max(0, (Date.now() - startRef.current) / 1000);
 }

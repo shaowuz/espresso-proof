@@ -30,6 +30,7 @@ from espresso_proof.agents.sanitize import (
 from espresso_proof.agents.adapter_runtime import (
     DEFAULT_CODEX_EXTERNAL_TIMEOUT_SECONDS,
     DEFAULT_EXTERNAL_TIMEOUT_SECONDS,
+    timeout_for_role,
     EXTERNAL_AGENT_TIMEOUT_ENV,
 )
 from espresso_proof.kernel.llm_client import LLMClient
@@ -393,6 +394,11 @@ class ExternalCommandClient:
         if _is_codex_external_command(self.command):
             self.model = CODEX_EXTERNAL_MODEL
         self.timeout = _resolve_external_timeout(self.command, requested_timeout=timeout)
+        # An explicit caller/env budget is honoured verbatim; only the DEFAULT
+        # scales per role.
+        self._timeout_was_requested = timeout is not None or bool(
+            os.environ.get(EXTERNAL_AGENT_TIMEOUT_ENV)
+        )
         self.max_retries = _resolve_external_retries(requested=max_retries)
         self.usage_sink = usage_sink
         self.last_call_meta: dict | None = None
@@ -466,6 +472,13 @@ class ExternalCommandClient:
 
     def _complete_json_once(self, *, system: str, prompt: str) -> dict:
         _t0 = time.monotonic()
+        # Per-role outer budget: the long-output roles legitimately run longer,
+        # and a single number for all of them clipped exactly those.
+        call_timeout = (
+            self.timeout
+            if self._timeout_was_requested
+            else timeout_for_role(system, default=self.timeout)
+        )
         request = {
             "system": system,
             "prompt": prompt,
@@ -480,7 +493,7 @@ class ExternalCommandClient:
             # Additive contract field: the outer timeout this client actually
             # enforces, so adapters derive their inner CLI timeout from the
             # same number instead of guessing (see agents/adapter_runtime.py).
-            "timeout_seconds": self.timeout,
+            "timeout_seconds": call_timeout,
         }
         # Run the external agent in its OWN process group
         # (start_new_session=True) so a timeout can reclaim the WHOLE group via
@@ -496,7 +509,7 @@ class ExternalCommandClient:
             start_new_session=True,
         )
         try:
-            stdout, stderr = proc.communicate(input=json.dumps(request), timeout=self.timeout)
+            stdout, stderr = proc.communicate(input=json.dumps(request), timeout=call_timeout)
         except subprocess.TimeoutExpired as exc:
             _kill_process_group(proc)
             try:

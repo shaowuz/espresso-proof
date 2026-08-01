@@ -151,6 +151,107 @@ def _looks_imprecise(
     return False
 
 
+_CLARIFIER_SCHEMA = {
+    "type": "object",
+    "required": ["normalized_statement", "objects", "hypotheses", "conclusion", "resolutions"],
+    "properties": {
+        "normalized_statement": {"type": "string"},
+        "objects": {"type": "array", "items": {"type": "string"}},
+        "hypotheses": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}, "status": {"type": "string"}},
+            },
+        },
+        "conclusion": {"type": "string"},
+        "resolutions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["gap", "assumption"],
+                "properties": {"gap": {"type": "string"}, "assumption": {"type": "string"}},
+            },
+        },
+    },
+}
+
+
+def _clarify_claim(
+    *,
+    client: LLMClient,
+    raw_text: str,
+    normalized: str,
+    missing_or_unclear: list,
+    ambiguous_terms: list,
+) -> dict | None:
+    """One completion attempt for an unclear claim, or None (fail closed).
+
+    The contract mirrors the simple-claim normalizer's safety posture: this can
+    only propose a PRECISE locked claim — it upgrades no status, and "precise"
+    does not mean "true" (an open or false statement clarified to a definite
+    reading is exactly as studyable as before). Each listed gap must be resolved
+    by an explicit assumption, and the (gap, assumption) pairs are returned so
+    the ledger records what was decided on the human's behalf.
+    """
+
+    payload = {
+        "task": "clarify_and_complete_claim",
+        "raw_claim": raw_text,
+        "current_normalized": normalized,
+        "gaps_to_resolve": [str(item) for item in (missing_or_unclear or [])][:8],
+        "ambiguous_terms": [str(item) for item in (ambiguous_terms or [])][:8],
+        "required_json_schema": _CLARIFIER_SCHEMA,
+        "rules": [
+            "produce ONE fully precise mathematical statement completing the claim",
+            "resolve every listed gap by choosing the STANDARD reading and stating it as an explicit assumption",
+            "'the truth value is unknown / the problem is open' is NOT a gap: precision is not truth; drop such items with assumption 'none needed: openness is not imprecision'",
+            "never weaken the claim to a triviality and never change what the user asked",
+            "do not mark human_confirmed; do not infer proof/source/evidence status",
+        ],
+    }
+    try:
+        raw = client.complete_json(
+            system=(
+                "You are Espresso Proof's claim clarifier. The understanding pass "
+                "found gaps in a claim; your job is to complete it into one precise "
+                "statement, resolving each gap with the standard reading, stated as "
+                "an explicit assumption. Return JSON only."
+            ),
+            prompt=json.dumps(payload, indent=2),
+        ) or {}
+    except Exception:  # noqa: BLE001 - clarification is best-effort; parking is the fallback
+        return None
+    statement = safe_text(raw.get("normalized_statement", ""))[:240].strip()
+    conclusion = safe_text(raw.get("conclusion", ""))[:240].strip()
+    objects = [safe_text(item)[:160] for item in safe_list(raw.get("objects")) if str(item).strip()]
+    hypotheses = raw.get("hypotheses") or []
+    resolutions: list[tuple[str, str]] = []
+    for item in raw.get("resolutions") or []:
+        if isinstance(item, dict):
+            gap = safe_text(item.get("gap", ""))[:200].strip()
+            assumption = safe_text(item.get("assumption", ""))[:200].strip()
+            if gap and assumption:
+                resolutions.append((gap, assumption))
+    # Fail closed on anything the safety floor would reject, on an empty
+    # completion, and on a reply that resolved nothing it was asked to resolve.
+    if not statement or not conclusion or not objects:
+        return None
+    if missing_or_unclear and not resolutions:
+        return None
+    if _looks_imprecise(
+        conclusion=conclusion, objects=objects, missing_or_unclear=[]
+    ):
+        return None
+    return {
+        "normalized_statement": statement,
+        "objects": objects,
+        "hypotheses": hypotheses,
+        "conclusion": conclusion,
+        "resolutions": resolutions,
+    }
+
+
 @register_stage("understanding_claim")
 def _understanding_claim(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     artifacts = context["manifest"]["artifacts"]
@@ -246,6 +347,45 @@ def _understanding_claim(*, run_dir: Path, client: LLMClient, context: dict) -> 
                 "(advisory; locks a precise claim only; no proof/source/evidence "
                 "status implied)"
             ]
+
+    # Auto-clarification: an unclear claim used to park the whole run at
+    # WAITING_CLAIM_CLARIFICATION and ask the human to rewrite it — observed
+    # live on "the Jacobian determinant claim", where one listed gap was a real
+    # ambiguity (polynomial inverse vs set-theoretic bijection) and the other
+    # was not a precision issue at all ("the conjecture is open": precision is
+    # not truth). The agent that FOUND the gaps can resolve them: one more call
+    # proposes the completed precise statement, resolving each gap with the
+    # standard reading recorded as an explicit assumption. The run proceeds and
+    # the completed statement is shown to the human, who can revise it; no
+    # feedback means continue. Fail closed: if the completion still trips the
+    # safety floor, the old parking behavior stands. Provenance is honest —
+    # raw_text is never overwritten, human_confirmed stays False, and every
+    # resolved gap is recorded next to the assumption that resolved it.
+    if claim_precision != "precise" or missing_or_unclear:
+        clarified = _clarify_claim(
+            client=client,
+            raw_text=raw_text,
+            normalized=normalized,
+            missing_or_unclear=missing_or_unclear,
+            ambiguous_terms=ambiguous_terms,
+        )
+        if clarified is not None:
+            normalized = clarified["normalized_statement"][:240]
+            objects = clarified["objects"]
+            conclusion = clarified["conclusion"]
+            hypotheses = normalize_ambient_object_hypotheses(
+                _normalize_hypotheses(clarified["hypotheses"], fallback=hypotheses)
+            )
+            notes = notes + [
+                "claim auto-clarified by the understanding agent "
+                "(agent-proposed completion; not human-confirmed; revise the run "
+                "to override)"
+            ] + [
+                f"auto-resolved: {gap} -> assumed: {assumption}"
+                for gap, assumption in clarified["resolutions"]
+            ]
+            missing_or_unclear = []
+            claim_precision = "precise"
 
     claim = {
         "id": current["id"],          # preserve id so downstream artifacts still resolve

@@ -176,3 +176,36 @@ def test_the_decision_writer_refuses_junk(tmp_path) -> None:
             record_human_scheduling_decision(
                 tmp_path, route_id="r1", decision=decision, reason=reason
             )
+
+
+# --- the answer must actually release the loop, end to end
+
+
+def test_answering_releases_every_lock_the_question_held() -> None:
+    """Three separate mechanisms held the run, and the first fix released one.
+
+    Found by driving a real run through the dead end: after the state fix the
+    CLI accepted the answer, and then (1) the applied-entry validator rejected
+    the rebuilt plan, because an applied reviewer_objection whose route had
+    moved off ask_human had no explanation; (2) the fresh inbox entry opened a
+    pending disclosure the existing final report predated; (3) prover_loop.yaml
+    still carried loop_decision=ask_human, so the driver broke before its first
+    round and the answered run did zero work. All three are released together
+    or the answer is theatre.
+    """
+
+    import inspect
+
+    from espresso_proof.kernel.validators import scheduling
+    from espresso_proof.orchestration import orchestrator
+
+    validator = inspect.getsource(scheduling._validate_update_inbox_applied_at_consumption)
+    assert "answered_routes" in validator
+    assert "human_scheduling_decision" in validator
+
+    answer = inspect.getsource(orchestrator.answer_scheduler_question)
+    assert "refresh_final_report_disclosures" in answer
+    assert 'loop.get("loop_decision") == "ask_human"' in answer
+    # And it never touches a mathematical status.
+    for forbidden in ("earned_status", "proof_language_status", "source_backed"):
+        assert forbidden not in answer

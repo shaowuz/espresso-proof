@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { BookOpen, FlaskConical, MessageSquare } from "lucide-react";
-import { fetchRuns } from "./lib/api";
+import { fetchChatLog, fetchRuns } from "./lib/api";
 import { streamChat } from "./lib/chat";
 import type { ActiveObject, RunListItem } from "./lib/types";
 import { useClaimPanel, useStatus, useStrategiesPanel } from "./hooks/useCockpit";
@@ -47,21 +47,31 @@ export default function App() {
   const strategies = useStrategiesPanel(selectedRunId);
   const hasRun = selectedRunId !== null;
 
-  const loadRuns = useCallback(async (selectLatest: boolean) => {
+  const loadRuns = useCallback(async () => {
     try {
       const list = await fetchRuns();
       setRuns(list);
-      if (selectLatest && list.length > 0) {
-        setSelectedRunId((current) => current ?? list[list.length - 1].run_id);
-      }
     } catch {
       /* run list is a convenience; the empty state handles its absence */
     }
   }, []);
 
+  // One page = one problem. The URL names the problem (?run=<id>); a bare URL
+  // is a fresh workspace for a new one. The old behavior auto-selected the
+  // latest run on load, which made "open a new page for a new problem"
+  // impossible — every page snapped back to the last problem.
   useEffect(() => {
-    void loadRuns(true);
+    void loadRuns();
+    const fromUrl = new URLSearchParams(window.location.search).get("run");
+    if (fromUrl) setSelectedRunId(fromUrl);
   }, [loadRuns]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (selectedRunId) url.searchParams.set("run", selectedRunId);
+    else url.searchParams.delete("run");
+    window.history.replaceState(null, "", url.toString());
+  }, [selectedRunId]);
 
   useEffect(() => {
     selectedRunRef.current = selectedRunId;
@@ -71,6 +81,20 @@ export default function App() {
     setChatStreaming(false);
     setActiveObject(null);
     activeSeededRunRef.current = null;
+    if (!selectedRunId) return;
+    // Opening a problem RESUMES its conversation. The transcript is persisted
+    // per run on the server; held only in browser memory it evaporated on
+    // every reload.
+    void fetchChatLog(selectedRunId).then((messages) => {
+      if (selectedRunRef.current !== selectedRunId || messages.length === 0) return;
+      const seeded = messages.map((m) => ({
+        id: chatNextId.current++,
+        role: m.role,
+        text: m.text,
+        activeObject: null,
+      }));
+      setChatMessages(seeded);
+    });
   }, [selectedRunId]);
 
   useEffect(() => {
@@ -116,7 +140,7 @@ export default function App() {
   const onRunCreated = useCallback(
     (runId: string) => {
       setSelectedRunId(runId);
-      void loadRuns(false);
+      void loadRuns();
     },
     [loadRuns],
   );

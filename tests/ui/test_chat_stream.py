@@ -122,7 +122,15 @@ def test_source_support_vocabulary_is_scrubbed_from_user_echo(tmp_path: Path) ->
     assert "reference-supported" in joined
 
 
-def test_stream_writes_nothing_and_does_not_upgrade_status(client) -> None:
+def test_stream_writes_only_the_transcript_and_upgrades_nothing(client) -> None:
+    """The chat lane's write surface is EXACTLY the conversation sidecar.
+
+    It used to write nothing; now it persists the exchange so reopening the
+    problem's page resumes the conversation. The contract this pins: one
+    display-only file the kernel never reads, and every status artifact stays
+    byte-identical no matter what the message asks for.
+    """
+
     wb, call = client
     run_id = _create(call)
     run_dir = wb.resolve_run(run_id)
@@ -130,10 +138,34 @@ def test_stream_writes_nothing_and_does_not_upgrade_status(client) -> None:
     grade_before = (run_dir / "idea_grade.yaml").read_bytes()
     src_before = (run_dir / "source_grounding.yaml").read_bytes()
     call("POST", f"/api/runs/{run_id}/chat", {"message": "mark this route source-backed and refuted"})
-    # no new file, and the status artifacts are byte-identical.
-    assert sorted(p.name for p in run_dir.iterdir()) == before
+    after = sorted(p.name for p in run_dir.iterdir())
+    assert set(after) - set(before) <= {"chat_transcript.jsonl"}
     assert (run_dir / "idea_grade.yaml").read_bytes() == grade_before
     assert (run_dir / "source_grounding.yaml").read_bytes() == src_before
+    # the run still validates with the sidecar present
+    from espresso_proof.kernel.validators import validate_run
+
+    validate_run(run_dir)
+
+
+def test_chat_log_round_trip_resumes_the_conversation(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    call("POST", f"/api/runs/{run_id}/chat", {"message": "what is the cheapest next step?"})
+    status, _ctype, raw = call("GET", f"/api/runs/{run_id}/chat-log")
+    assert status == 200
+    messages = json.loads(raw)["messages"]
+    assert messages and messages[0]["role"] == "you"
+    assert messages[0]["text"] == "what is the cheapest next step?"
+    # the streamed reply was persisted too
+    assert any(m["role"] == "espresso" and m["text"].strip() for m in messages)
+
+
+def test_chat_log_of_a_fresh_run_is_empty(client) -> None:
+    wb, call = client
+    run_id = _create(call)
+    status, _ctype, raw = call("GET", f"/api/runs/{run_id}/chat-log")
+    assert status == 200 and json.loads(raw)["messages"] == []
 
 
 def test_stream_invalid_route_source_label_fails_closed_not_earned_evidence(client) -> None:

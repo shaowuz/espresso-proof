@@ -168,6 +168,23 @@ export function postStrategyFeedback(
   return post(`/api/runs/${encodeURIComponent(runId)}/strategy-feedback`, feedback);
 }
 
+/** GET /api/runs/{id}/chat-log — the persisted conversation for this problem. */
+export async function fetchChatLog(
+  runId: string,
+): Promise<Array<{ role: "you" | "espresso"; text: string }>> {
+  try {
+    const data = await request<{ messages?: Array<{ role: string; text: string }> }>(
+      `/api/runs/${encodeURIComponent(runId)}/chat-log`,
+    );
+    return (data.messages ?? []).filter(
+      (m): m is { role: "you" | "espresso"; text: string } =>
+        m.role === "you" || m.role === "espresso",
+    );
+  } catch {
+    return []; // resuming is a convenience; a fresh page must still open
+  }
+}
+
 /** GET /api/jobs/{job_id} */
 export function fetchJob(jobId: string): Promise<JobInfo> {
   return request<JobInfo>(`/api/jobs/${encodeURIComponent(jobId)}`);

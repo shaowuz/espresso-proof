@@ -42,6 +42,16 @@ export function Header({
         </div>
       )}
 
+      {/* One page = one problem: a new problem opens in a NEW page with its own
+          folder of artifacts; this page (and its conversation) stays. */}
+      <button
+        type="button"
+        onClick={() => window.open(window.location.pathname, "_blank")}
+        className="shrink-0 rounded-md border border-stone-200 bg-white px-2.5 py-1 text-[13px] font-medium text-stone-600 hover:bg-stone-50"
+        aria-label="Open a new page for a new problem"
+      >
+        New problem
+      </button>
     </header>
   );
 }

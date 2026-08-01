@@ -299,7 +299,23 @@ def _validate_update_inbox_applied_at_consumption(
         for entry in time_allocation.entries
         if entry.route_id is not None
     }
+    # Routes whose scheduler question a human has answered. The answer is what
+    # releases the route from ask_human, so after it the route legitimately
+    # carries a normal action while its objection entries remain applied — the
+    # stamp still has an explanation, and that explanation is the person.
+    answered_routes = {
+        str(entry.route_id_or_step_id)
+        for entry in update_inbox.entries
+        if entry.type == "human_scheduling_decision"
+        and entry.route_id_or_step_id
+        and entry.effect == "scheduling_only"
+        and entry.advisory_only is True
+        and entry.validator_ok is True
+    }
     for entry in applied_entries:
+        if entry.type == "human_scheduling_decision":
+            # A recorded human answer is itself consumable by the rebuilt plan.
+            continue
         if entry.type != "reviewer_objection":
             raise KernelValidationError(
                 "update_inbox applied_at is currently valid only for reviewer_objection "
@@ -314,7 +330,9 @@ def _validate_update_inbox_applied_at_consumption(
             raise KernelValidationError(
                 "update_inbox applied_at requires matching time_allocation route"
             )
-        if allocation.action not in {"repair_attempt", "ask_human"}:
+        if allocation.action not in {"repair_attempt", "ask_human"} and (
+            str(entry.route_id_or_step_id) not in answered_routes
+        ):
             raise KernelValidationError(
                 "update_inbox applied_at requires a reviewer-objection time_allocation response"
             )

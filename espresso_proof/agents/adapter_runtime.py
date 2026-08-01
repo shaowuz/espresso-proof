@@ -40,12 +40,40 @@ import os
 from collections.abc import Mapping
 
 EXTERNAL_AGENT_TIMEOUT_ENV = "ESPRESSO_EXTERNAL_AGENT_TIMEOUT_SECONDS"
-DEFAULT_EXTERNAL_TIMEOUT_SECONDS = 120
+# A timeout exists to catch a HANG, not to clip a slow call. Measured across
+# 140 successful calls on the cheapest model: median 54s, p90 91s, max 110s —
+# and the max was the cap itself, with 13 calls killed at exactly 110s while 12
+# more finished within 15s of it. The old 120s default (110s inner) therefore
+# sat INSIDE the natural duration distribution and turned the slowest legitimate
+# calls into fallbacks: the observed "CLI timeouts" were not hung processes.
+DEFAULT_EXTERNAL_TIMEOUT_SECONDS = 420
 DEFAULT_CODEX_EXTERNAL_TIMEOUT_SECONDS = 360
 # The inner CLI call gets the outer budget minus this margin, so the adapter
 # can still parse output and print its reply before the outer killpg fires.
 INNER_TIMEOUT_MARGIN_SECONDS = 10
 MIN_INNER_TIMEOUT_SECONDS = 5
+
+
+# Roles whose prompts ask for the longest structured output get the longest
+# budget, mirroring the per-role output-token budgets. An unrecognized role
+# keeps the generous default rather than a tight one (fail open on time, closed
+# on evidence).
+_ROLE_TIMEOUT_SECONDS: tuple[tuple[str, int], ...] = (
+    ("line-numbered proof writer", 900),
+    ("proof gap resolver", 720),
+    ("prover", 600),
+    ("reviewer", 600),
+)
+
+
+def timeout_for_role(system: str, *, default: int = DEFAULT_EXTERNAL_TIMEOUT_SECONDS) -> int:
+    """The outer budget this role legitimately needs."""
+
+    text = (system or "").lower()
+    for marker, seconds in _ROLE_TIMEOUT_SECONDS:
+        if marker in text:
+            return seconds
+    return default
 
 
 def resolve_inner_timeout(

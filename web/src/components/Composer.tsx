@@ -61,12 +61,6 @@ export function Composer({
     startRun(trimmed);
   };
 
-  const submitNewRun = () => {
-    const trimmed = text.trim();
-    if (trimmed === "" || busy) return;
-    startRun(trimmed);
-  };
-
   return (
     <div className="w-full">
       {activeObject && (
@@ -101,9 +95,9 @@ export function Composer({
           placeholder={
             hasRun
               ? activeObject
-                ? `Ask about active ${activeObject.kind}: ${activeObject.title} (⌘↵ to send)`
-                : "Ask about this run — strategies, examples, literature, or next move (⌘↵ to send)"
-              : "Ask Espresso — state a mathematical claim to investigate (⌘↵ to send)"
+                ? `Continue about ${activeObject.kind}: ${activeObject.title} (⌘↵ to send)`
+                : "Continue this problem — strategies, examples, literature, next move (⌘↵ to send)"
+              : "State a mathematical claim to investigate (⌘↵ to send)"
           }
           rows={2}
           disabled={busy}
@@ -121,18 +115,8 @@ export function Composer({
             ) : (
               <Send className="h-3.5 w-3.5" aria-hidden />
             )}
-            <span>{hasRun ? "Ask" : "Send"}</span>
+            <span>Send</span>
           </Button>
-          {hasRun && (
-            <Button
-              variant="outline"
-              onClick={submitNewRun}
-              disabled={busy || text.trim() === ""}
-              aria-label="Start new run from command"
-            >
-              New run
-            </Button>
-          )}
           <JobChip phase={job.phase} error={job.error} doneLabel="run created" />
           {chatBusy && (
             <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[13px] font-medium leading-4 text-amber-800">

@@ -24,7 +24,9 @@ describe("active object UI", () => {
     );
     expect(html).toContain("Active strategy");
     expect(html).toContain("Lock the claim before deeper strategy work");
-    expect(html).toContain("Ask about active strategy");
+    // The composer is now a single Send lane bound to one problem;
+    // the active object shows in the placeholder as "Continue about ...".
+    expect(html).toContain("Continue about strategy");
   });
 
   it("records active context in the conversation preview", () => {

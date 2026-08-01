@@ -124,6 +124,56 @@ def _friendly_error(raw: str) -> str:
     )
 
 
+CHAT_TRANSCRIPT_FILENAME = "chat_transcript.jsonl"
+
+
+def _append_chat_transcript(run_dir: Path, message: str, reply_lines: list[str]) -> None:
+    """Append one exchange to the run's conversation sidecar (display only).
+
+    The page is bound to one problem, and reopening that problem must RESUME
+    the conversation — held only in browser memory, it evaporated on every
+    reload. Records are the already-scrubbed lines the user actually saw;
+    nothing here is evidence and the kernel never reads it. Best-effort by
+    contract: a transcript write must never break the stream that produced it.
+    """
+
+    try:
+        import time as _time
+
+        path = run_dir / CHAT_TRANSCRIPT_FILENAME
+        with path.open("a", encoding="utf-8") as handle:
+            if str(message).strip():
+                handle.write(json.dumps(
+                    {"role": "you", "text": str(message).strip()[:2000]},
+                    ensure_ascii=False,
+                ) + "\n")
+            reply = "\n".join(str(line) for line in reply_lines if str(line).strip())
+            if reply:
+                handle.write(json.dumps(
+                    {"role": "espresso", "text": reply[:8000]}, ensure_ascii=False
+                ) + "\n")
+    except Exception:  # noqa: BLE001 - never break the chat over its own log
+        return
+
+
+def _read_chat_transcript(run_dir: Path) -> list[dict]:
+    path = run_dir / CHAT_TRANSCRIPT_FILENAME
+    if not path.exists():
+        return []
+    out: list[dict] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict) and record.get("role") in {"you", "espresso"}:
+                out.append({"role": record["role"], "text": str(record.get("text", ""))})
+    except Exception:  # noqa: BLE001 - display only
+        return []
+    return out[-200:]
+
+
 class WorkbenchError(Exception):
     """A request-level error carrying an HTTP status code (fails closed)."""
 
@@ -951,8 +1001,10 @@ def _make_handler(workbench: Workbench):
                 self.wfile.write(chunk.encode("utf-8"))
                 self.wfile.flush()
 
+            reply_lines: list[str] = []
             try:
                 for line in stream_chat(run_dir, message, active_object):
+                    reply_lines.append(line)
                     emit("message", {"text": line})
                 emit("done", {"ok": True})
             except Exception:  # noqa: BLE001 — a broken pipe / read error ends safely
@@ -960,6 +1012,20 @@ def _make_handler(workbench: Workbench):
                     emit("done", {"ok": False})
                 except Exception:  # noqa: BLE001
                     pass
+            # Persist the exchange so opening this problem's page later RESUMES
+            # the conversation instead of starting blank. Display-only sidecar:
+            # already-scrubbed lines, never in the manifest, never read by the
+            # kernel, and excluded from stage snapshots so a rollback cannot
+            # erase what the human said.
+            _append_chat_transcript(run_dir, message, reply_lines)
+
+        def _get_chat_log(self, run_id: str) -> None:
+            try:
+                run_dir = workbench.resolve_run(run_id)
+            except WorkbenchError as exc:
+                self._send_json({"error": exc.message}, status=exc.status)
+                return
+            self._send_json({"messages": _read_chat_transcript(run_dir)})
 
         def _emit_instant_draft(self, message: str, run_dir: Path | None) -> None:
             """Shared SSE core for the instant lane: ack immediately,
@@ -1159,6 +1225,9 @@ def _make_handler(workbench: Workbench):
                     return
                 if len(parts) == 3 and parts[:2] == ["api", "jobs"]:
                     self._send_json(workbench.get_job(parts[2]))
+                    return
+                if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "chat-log":
+                    self._get_chat_log(parts[2])
                     return
                 if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "status":
                     self._send_json(workbench.status(parts[2]))

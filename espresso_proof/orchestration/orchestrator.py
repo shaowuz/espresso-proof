@@ -1279,6 +1279,24 @@ def _run_resume_prover_loop(
             human_choice=human_choice,
             resolved_by=resolver,
         )
+        # Release the persisted loop decision too. The route's allocation is
+        # released by the recorded answer, but prover_loop.yaml still carries the
+        # ask_human the scheduler wrote, and the driver breaks on that before it
+        # looks at anything else — the loop would run zero rounds and re-ask.
+        # Legal here: the human gate is already resolved, so the kernel's
+        # pending-gate constraint does not apply.
+        loop_rel = (read_yaml(run_dir / "run_manifest.yaml").get("optional_artifacts") or {}).get(
+            "prover_loop", "prover_loop.yaml"
+        )
+        loop = read_yaml(run_dir / loop_rel)
+        if loop.get("loop_decision") == "ask_human":
+            loop["loop_decision"] = "repair"
+            loop["decision_reason"] = (
+                f"Human answered the scheduler question for route {route_id}: continue. "
+                "Scheduling only — no objection was resolved and no status changed."
+            )
+            write_yaml(run_dir / loop_rel, loop)
+            validate_run(run_dir)
         result = continue_prover_loop(
             run_dir=run_dir,
             provider=prover_provider,
@@ -1340,6 +1358,12 @@ def answer_scheduler_question(
         recorded = record_human_scheduling_decision(
             run_dir, route_id=route_id, decision=decision, reason=reason
         )
+        # The answer is a fresh Update Inbox entry, so it opens a pending-signal
+        # disclosure the existing final report predates. Refresh before
+        # validating, exactly as every other writer of inbox entries does.
+        from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
+
+        refresh_final_report_disclosures(run_dir)
         validate_run(run_dir)
         if str(decision).strip().lower() == "stop":
             _set_state(run_dir, "COMPLETED_MEMO")
@@ -1352,6 +1376,24 @@ def answer_scheduler_question(
                 "stop_reason": "human_scheduling_stop",
                 "memo": memo,
             }
+        # Release the persisted loop decision too. The route's allocation is
+        # released by the recorded answer, but prover_loop.yaml still carries the
+        # ask_human the scheduler wrote, and the driver breaks on that before it
+        # looks at anything else — the loop would run zero rounds and re-ask.
+        # Legal here: the human gate is already resolved, so the kernel's
+        # pending-gate constraint does not apply.
+        loop_rel = (read_yaml(run_dir / "run_manifest.yaml").get("optional_artifacts") or {}).get(
+            "prover_loop", "prover_loop.yaml"
+        )
+        loop = read_yaml(run_dir / loop_rel)
+        if loop.get("loop_decision") == "ask_human":
+            loop["loop_decision"] = "repair"
+            loop["decision_reason"] = (
+                f"Human answered the scheduler question for route {route_id}: continue. "
+                "Scheduling only — no objection was resolved and no status changed."
+            )
+            write_yaml(run_dir / loop_rel, loop)
+            validate_run(run_dir)
         result = continue_prover_loop(
             run_dir=run_dir,
             provider=provider,
