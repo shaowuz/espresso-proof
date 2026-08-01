@@ -29,6 +29,10 @@ from espresso_proof.verification.theorem_applicability import (
 )
 
 
+# Two model calls per reviewed usage; this bounds the whole fan-out.
+_MAX_REVIEWED_USAGES = 8
+
+
 def review_theorem_applicability_with_llm(
     run_dir: Path,
     *,
@@ -95,7 +99,19 @@ def review_theorem_applicability_with_llm(
         )
         review_records: list[dict] = []
         usage_updates: dict[str, dict] = {}
-        for usage in report.get("usages", []):
+        # Cap the fan-out. This is the one place the model was called in a loop
+        # with no bound, and BOTH factors were model-controlled: two calls per
+        # theorem usage, one usage per source-grounding step, and the step list
+        # is minted from a model reply that nothing capped — while the gap
+        # resolver re-reviews every usage once per repair action. The repo's
+        # existing pattern (check_generator._MAX_PER_RUN = 8, the 4-request cap
+        # on verification_requests) applies here too: review the first
+        # _MAX_REVIEWED_USAGES and SAY what was left unreviewed rather than
+        # silently truncating.
+        all_usages = list(report.get("usages", []) or [])
+        reviewed_usages = all_usages[:_MAX_REVIEWED_USAGES]
+        skipped_usages = all_usages[_MAX_REVIEWED_USAGES:]
+        for usage in reviewed_usages:
             reviews = []
             for reviewer_id in ("source_match_reviewer", "hypothesis_reviewer"):
                 raw = client.complete_json(
@@ -112,6 +128,14 @@ def review_theorem_applicability_with_llm(
             if update:
                 usage.update(update)
         report["overall_status"] = _overall_status(report.get("usages", []), report.get("ledger_usages", []))
+        if skipped_usages:
+            # No silent cap: an unreviewed usage keeps whatever status it had
+            # and the artifact records that it was not reviewed here.
+            report["notes"] = list(report.get("notes", [])) + [
+                f"applicability review capped at {_MAX_REVIEWED_USAGES} usage(s); "
+                f"{len(skipped_usages)} usage(s) were NOT reviewed by this pass "
+                f"({', '.join(str(u.get('proof_step_id')) for u in skipped_usages[:6])})"
+            ]
         report["notes"] = list(report.get("notes", [])) + [
             "LLM theorem applicability reviewers ran source_match_reviewer and hypothesis_reviewer.",
             "Reviewer judgments do not upgrade source status; source-backed still requires source grounding validation.",

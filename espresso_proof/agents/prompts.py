@@ -213,6 +213,54 @@ def proof_gap_resolver_system_prompt() -> str:
     )
 
 
+# What each reviewer's rubric is actually about. All three used to receive the
+# byte-identical payload — the whole run context — so the only thing separating
+# them was a sentence in the system prompt, and each one had to hunt for its own
+# evidence inside everything. Scoping the payload to the artifacts a role is
+# asked to judge makes the three genuinely different reviews (and each call
+# smaller). Everything below is always included: it is the shared spine.
+_REVIEWER_CONTEXT_KEYS: dict[str, tuple[str, ...]] = {
+    "strategy_reviewer": ("strategy_brief", "idea_grade", "review", "prover_attempt"),
+    "evidence_reviewer": (
+        "examples",
+        "counterexamples",
+        "computation_checks",
+        "tests",
+        "source_grounding",
+        "literature_review",
+        "prover_attempt",
+    ),
+    "line_proof_reviewer": (
+        "prover_attempt",
+        "source_grounding",
+        "hypothesis_ledger",
+        "line_numbered_proof",
+    ),
+}
+# Never dropped for any role: the claim under review and the scheduling frame.
+_REVIEWER_SHARED_KEYS = ("claim", "hypothesis_ledger", "manifest", "time_allocation", "target_subgoal")
+
+
+def reviewer_context(context: dict, *, reviewer_role: str) -> dict:
+    """The slice of the run context THIS reviewer is asked to judge.
+
+    An unknown role gets the whole context unchanged (fail open: a new reviewer
+    must not silently see less than it needs).
+    """
+
+    keys = _REVIEWER_CONTEXT_KEYS.get(reviewer_role)
+    if not keys:
+        return context
+    wanted = set(keys) | set(_REVIEWER_SHARED_KEYS)
+    scoped = {key: value for key, value in context.items() if key in wanted}
+    scoped["context_scope_note"] = (
+        f"Payload scoped to the {reviewer_role} rubric: "
+        f"{', '.join(sorted(k for k in scoped if k != 'context_scope_note'))}. "
+        "Other run artifacts exist and are reviewed by the other reviewers."
+    )
+    return scoped
+
+
 def agent_prompt(context: dict, *, role: str) -> str:
     return json.dumps(
         {

@@ -44,6 +44,7 @@ def _command_matches_adapter(adapter: str, command_basename: str) -> bool:
 from espresso_proof.agents.prompts import (
     _reviewer_roles,
     agent_prompt,
+    reviewer_context,
     load_agent_context,
     prover_system_prompt,
     verifier_system_prompt,
@@ -400,7 +401,10 @@ def ask_reviewers_to_attack_candidate_route(
             call_diagnostics=agent_call_diagnostics,
             system=verifier_system_prompt(index, reviewer_role=reviewer_role),
             prompt=agent_prompt(
-                {**context, "prover_attempt": prover_attempt},
+                reviewer_context(
+                    {**context, "prover_attempt": prover_attempt},
+                    reviewer_role=reviewer_role,
+                ),
                 role=reviewer_role,
             ),
         )
@@ -564,6 +568,17 @@ def collect_open_reviewer_blockers(verifier_reviews: list[dict]) -> list[dict]:
     < plausible_direction), field class (objections < missing_hypotheses <
     source_requests), review emission order, item order. Dedupe by normalized
     text keeps the highest-priority slot.
+
+    The STRUCTURED lane counts too. Reviewers are asked for scoped_objections
+    with a severity, and a real run produced reviewers whose whole substantive
+    output was scoped-only (evidence_reviewer: 7 legacy objections, 4 scoped) —
+    but only the three legacy free-text fields were collected here, so a scoped
+    objection could not become a blocker, could not steer the next round, and
+    could not reach the surface warnings, the loop decision, or the Update
+    Inbox. Scoped objections at blocking severity (P0-P2) are now unioned in;
+    P3 stays non-blocking because the prompt defines it as a context note only,
+    and the existing prefix dedupe keeps legacy reviewers (whose scoped items
+    mirror their risks) idempotent.
     """
 
     keyed: list[tuple[tuple, dict]] = []
@@ -610,6 +625,39 @@ def collect_open_reviewer_blockers(verifier_reviews: list[dict]) -> list[dict]:
                         },
                     )
                 )
+        # Structured-lane objections that no legacy field already carries.
+        for item_index, objection in enumerate(review.get("scoped_objections") or []):
+            if not isinstance(objection, dict):
+                continue
+            text = str(objection.get("text", "")).strip()
+            if not text:
+                continue
+            severity = str(objection.get("severity") or "P2")
+            if severity not in _BLOCKER_SEVERITY_PRIORITY:
+                severity = "P2"
+            if severity == "P3":
+                continue  # context note by contract, never a blocker
+            keyed.append(
+                (
+                    (
+                        _BLOCKER_SEVERITY_PRIORITY[severity],
+                        verdict_rank,
+                        # After the legacy fields at equal severity: when both
+                        # lanes carry the same objection the legacy text wins
+                        # the slot and this one dedupes away.
+                        max(_BLOCKER_FIELD_PRIORITY.values()) + 1,
+                        review_index,
+                        item_index,
+                    ),
+                    {
+                        "text": text,
+                        "severity": severity,
+                        "kind": str(objection.get("kind") or "other"),
+                        "source_field": "scoped_objections",
+                        "verifier_id": str(review.get("verifier_id", "")),
+                    },
+                )
+            )
     keyed.sort(key=lambda pair: pair[0])
     seen: set[str] = set()
     records: list[dict] = []

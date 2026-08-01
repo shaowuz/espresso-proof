@@ -359,6 +359,13 @@ class ProverRoundReport(StrictBaseModel):
     status: Literal["candidate", "needs_repair", "blocked", "waiting_human", "stopped"]
     next_action: str
     safety_note: str
+    # Per-call provenance for THIS round's model calls, mirroring
+    # LLMAgentRunReport.agent_call_diagnostics. Appended rounds used to call the
+    # client directly, so a deep round's provider/adapter/fallback/verified
+    # record simply did not exist — a fallback round looked identical to a real
+    # one in the durable artifact. Defaulted, so artifacts written before this
+    # field existed still validate.
+    agent_call_diagnostics: list[LLMAgentCallDiagnostic] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_round_report(self) -> ProverRoundReport:

@@ -47,7 +47,9 @@ def _write_fake_claude(tmp_path: Path, *, message: str | None = None, return_cod
                 f"return_code = {return_code!r}",
                 "with open(argv_log, 'w', encoding='utf-8') as handle:",
                 "    json.dump(sys.argv, handle)",
-                "prompt = sys.argv[2] if len(sys.argv) > 2 else ''",
+                # The adapter feeds the prompt on STDIN (an unbounded prompt as
+                # a single argv element can exceed ARG_MAX); read it from there.
+                "prompt = sys.stdin.read()",
                 "with open(prompt_log, 'w', encoding='utf-8') as handle:",
                 "    handle.write(prompt)",
                 "print(message_text)",
@@ -126,9 +128,13 @@ def test_claude_adapter_injects_skills_goal_and_stays_schema_agnostic(tmp_path: 
     assert payload["objects"] == ["finite group of order p^2"]
     assert payload["stage_specific_key"] == [1, 2, 3]
     assert payload["verdict"] == "needs_sources"
-    # The claude CLI was invoked as `claude -p <full prompt>`.
+    # The claude CLI was invoked as `claude -p --model ... --output-format json`
+    # with the prompt on STDIN, never as an argv element (ARG_MAX).
     argv = json.loads((tmp_path / "claude_argv.json").read_text(encoding="utf-8"))
     assert argv[1] == "-p"
+    assert all("Skill:" not in str(part) for part in argv), (
+        "the prompt must not travel as an argv element"
+    )
     full_prompt = (tmp_path / "claude_prompt.txt").read_text(encoding="utf-8")
     assert "Active goal: test Claude external mode." in full_prompt
     assert "ESPRESSO SELECTED SKILLS" in full_prompt

@@ -450,6 +450,13 @@ class MemoryEntry(StrictBaseModel):
     project: str
     type: Literal["failed_attempt", "tested_example", "counterexample", "source_gap", "repaired_claim", "user_decision", "theorem_applicability_failure", "reviewer_objection", "human_example_feedback"]
     claim_id: str
+    # Which CLAIM this memory came from, as a hash of the normalized statement.
+    # `claim_id` is a per-run slot name and is "claim_001" in every run of every
+    # project, so comparing it told the retrieval layer that memory from an
+    # unrelated claim was same-claim material needing no revalidation. Optional
+    # for artifacts written before this field existed; absent means "unknown",
+    # which the guard treats as a different claim (fail closed).
+    claim_fingerprint: str = ""
     summary: str
     provenance: list[str]
     reusable_lesson: str
@@ -544,6 +551,7 @@ class MemoryIndexEntry(StrictBaseModel):
     id: str
     entry_path: str
     claim_id: str
+    claim_fingerprint: str = ""
     type: Literal["failed_attempt", "tested_example", "counterexample", "source_gap", "repaired_claim", "user_decision", "theorem_applicability_failure", "reviewer_objection", "human_example_feedback"]
     tags: list[str] = Field(default_factory=list)
     summary: str
@@ -611,6 +619,13 @@ class RunState(str, Enum):
     # a persisted run carrying it validates and resumes. It must NEVER be
     # spelled as a HUMAN_CHOICE_* state — that would lie about provenance.
     AUTO_CHOICE_CONTINUE_SELECTED = "AUTO_CHOICE_CONTINUE_SELECTED"
+    # The prover loop stopped to ASK the human a scheduling question (repeated
+    # reviewer objections on a route). The run is blocked on a person, not
+    # finished: finalizing it to COMPLETED_MEMO made the question terminal and
+    # forfeited the rest of the approved budget, because every re-entry path
+    # refuses a completed run. Sits after the choice states and before
+    # COMPLETED_MEMO; `espresso answer-scheduler` moves it forward.
+    WAITING_TIME_ALLOCATION_DECISION = "WAITING_TIME_ALLOCATION_DECISION"
     COMPLETED_MEMO = "COMPLETED_MEMO"
 
 class RunManifest(StrictBaseModel):

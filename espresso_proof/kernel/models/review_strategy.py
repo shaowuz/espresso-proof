@@ -228,6 +228,11 @@ UpdateInboxType = Literal[
     "strategy_brief",
     "human_preference",
     "reviewer_objection",
+    # A human's answer to a scheduler question ("the objections keep coming; do
+    # I keep spending?"). Scheduling-only like every other entry: it supersedes
+    # the reviewer_objection entries that raised the question so the rebuilt
+    # plan stops asking, and it can never touch a mathematical status.
+    "human_scheduling_decision",
     "prover_progress",
     "budget_signal",
     "advisory_memory_signal",

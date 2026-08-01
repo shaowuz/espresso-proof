@@ -1,0 +1,178 @@
+"""A scheduler question must be answerable, not terminal.
+
+Found by a fourth hostile review and observed live twice. When reviewer
+objections repeat on a route, the Time Allocation scheduler stops the loop with
+`ask_human` — the right call. But resume finalization then marked the run
+COMPLETED_MEMO unconditionally, and every re-entry path refuses a completed run
+(`_resume_idempotent_memo` says "already complete", `append_prover_loop_round`
+raises on `loop_decision=ask_human`, `resolve_agent_gate` raises "already
+resolved"). Even if re-entry had existed, the rebuilt plan would ask the same
+question forever: the objection-round count is deliberately monotone.
+
+Net effect: the machinery asked a question the human could not answer, and the
+unspent part of a purchased budget was forfeited — deep_exploration dead-ended
+after 2 of 3 new rounds, and the only way forward was to re-pay the entire
+13-call front half in a new run.
+
+The rule now: the terminal state records WHY the loop stopped. A run stopped to
+ask a human waits in WAITING_TIME_ALLOCATION_DECISION, and
+`espresso answer-scheduler` records the answer (scheduling-only) and spends the
+budget the question was holding.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from espresso_proof.kernel.models import RunState, UpdateInboxEntry
+from espresso_proof.kernel.time_allocation import (
+    _human_answered_routes,
+    _reviewer_objection_round_counts,
+    _route_action,
+)
+from espresso_proof.orchestration.orchestrator import (
+    ASK_HUMAN_STOP_REASONS,
+    ORCHESTRATION_STATES,
+    terminal_state_for_stop_reason,
+)
+
+
+def _objection(index: int, route: str = "strategy_route_001") -> dict:
+    return {
+        "id": f"obj_{index}",
+        "type": "reviewer_objection",
+        "effect": "scheduling_only",
+        "advisory_only": True,
+        "validator_ok": True,
+        "route_id_or_step_id": route,
+        "origin_artifact": "llm_agent_run.yaml",
+        "artifact_revision_or_hash": f"hash_{index}",
+    }
+
+
+def _answer(route: str = "strategy_route_001") -> dict:
+    return {
+        "id": "human_sched_1",
+        "type": "human_scheduling_decision",
+        "effect": "scheduling_only",
+        "advisory_only": True,
+        "validator_ok": True,
+        "route_id_or_step_id": route,
+        "origin_artifact": "human_choice.yaml",
+        "artifact_revision_or_hash": "hash_hc",
+    }
+
+
+# --- the state machine must distinguish "finished" from "waiting on you"
+
+
+def test_an_ask_human_stop_does_not_complete_the_run() -> None:
+    for reason in sorted(ASK_HUMAN_STOP_REASONS):
+        assert terminal_state_for_stop_reason(reason) == "WAITING_TIME_ALLOCATION_DECISION"
+
+
+@pytest.mark.parametrize(
+    "reason", ["clean", "budget_rounds", "budget_agent_calls", "no_progress", "validation_error"]
+)
+def test_a_real_finish_still_completes(reason: str) -> None:
+    assert terminal_state_for_stop_reason(reason) == "COMPLETED_MEMO"
+    assert terminal_state_for_stop_reason(None) == "COMPLETED_MEMO"
+
+
+def test_the_waiting_state_is_ordered_after_the_gate_and_before_completion() -> None:
+    # Resume's boundary checks are index comparisons; a state outside the
+    # ordered list returns -1 and would falsely read as "before the gate".
+    assert RunState.WAITING_TIME_ALLOCATION_DECISION.value in ORCHESTRATION_STATES
+    index = ORCHESTRATION_STATES.index("WAITING_TIME_ALLOCATION_DECISION")
+    assert index > ORCHESTRATION_STATES.index("WAITING_LLM_AGENT_HUMAN_GATE")
+    assert index > ORCHESTRATION_STATES.index("HUMAN_CHOICE_CONTINUE_SELECTED")
+    assert index < ORCHESTRATION_STATES.index("COMPLETED_MEMO")
+
+
+# --- the question must stop repeating once a human answers
+
+
+def test_repeated_objections_reach_the_scheduler_question() -> None:
+    inbox = {"entries": [_objection(i) for i in range(3)]}
+    counts = _reviewer_objection_round_counts(inbox)
+    assert counts["strategy_route_001"] == 3
+    action, _ = _route_action(
+        {"id": "strategy_route_001"},
+        source_support_missing=False,
+        reviewer_objection_rounds=counts["strategy_route_001"],
+    )
+    assert action == "ask_human"
+
+
+def test_a_recorded_answer_releases_the_route() -> None:
+    inbox = {"entries": [_objection(i) for i in range(3)] + [_answer()]}
+    assert _human_answered_routes(inbox) == {"strategy_route_001"}
+    counts = _reviewer_objection_round_counts(inbox)
+    assert counts["strategy_route_001"] == 0
+    action, _ = _route_action(
+        {"id": "strategy_route_001"},
+        source_support_missing=False,
+        reviewer_objection_rounds=counts["strategy_route_001"],
+    )
+    assert action != "ask_human"
+
+
+def test_an_answer_releases_only_its_own_route() -> None:
+    inbox = {
+        "entries": [_objection(i) for i in range(3)]
+        + [_objection(i, route="strategy_route_002") for i in range(3, 6)]
+        + [_answer("strategy_route_001")]
+    }
+    counts = _reviewer_objection_round_counts(inbox)
+    assert counts["strategy_route_001"] == 0
+    assert counts["strategy_route_002"] == 3
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        {"effect": "evidence"},
+        {"advisory_only": False},
+        {"validator_ok": False},
+        {"type": "human_preference"},
+    ],
+)
+def test_a_non_scheduling_answer_cannot_release_a_route(broken: dict) -> None:
+    # The release is a scheduling-only mechanism; anything that is not a
+    # validated scheduling-only entry must leave the question standing.
+    inbox = {"entries": [_objection(i) for i in range(3)] + [{**_answer(), **broken}]}
+    assert _human_answered_routes(inbox) == set()
+    assert _reviewer_objection_round_counts(inbox)["strategy_route_001"] == 3
+
+
+def test_the_answer_entry_is_schema_valid_and_carries_no_status() -> None:
+    entry = UpdateInboxEntry.model_validate(
+        {
+            **_answer(),
+            "origin_stage": "human_scheduling_answer",
+            "origin_artifact_id_or_path": "human_choice.yaml",
+            "locked_claim_id": "claim_001",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "dedupe_key": "human_scheduling_decision:strategy_route_001:x",
+            "applied_at": None,
+        }
+    )
+    assert entry.type == "human_scheduling_decision"
+    assert entry.effect == "scheduling_only" and entry.advisory_only is True
+    # No field on the entry can own a mathematical status.
+    assert not {"status", "proof_status", "verdict", "earned_status"} & set(
+        entry.model_dump()
+    )
+
+
+def test_the_decision_writer_refuses_junk(tmp_path) -> None:
+    from espresso_proof.kernel.update_inbox_service import (
+        UpdateInboxServiceError,
+        record_human_scheduling_decision,
+    )
+
+    for decision, reason in (("maybe", "x"), ("continue", "   "), ("proved", "x")):
+        with pytest.raises(UpdateInboxServiceError):
+            record_human_scheduling_decision(
+                tmp_path, route_id="r1", decision=decision, reason=reason
+            )

@@ -25,7 +25,7 @@ Large language models are strong mathematical *generators* and unreliable *grade
 
 Concretely:
 
-- Every run is a directory of ~30 schema-validated YAML artifacts (69 registered artifact models). Nothing important lives only in a chat transcript.
+- Every run is a directory of ~30 schema-validated YAML artifacts (68 registered artifact models). Nothing important lives only in a chat transcript.
 - Every mutation happens inside a transaction: snapshot → mutate → `validate_run` → advance, with rollback on failure. A run on disk is always in a valid state.
 - Agent output is scrubbed on entry: proof-claiming language is quarantined (English *and* Chinese completion phrases), and any status field an agent tries to attach is stripped. Log records that carry status-bearing keys are rejected outright — logs cannot impersonate evidence.
 - The phrases `fail closed` and `default-deny` appear **more than 200 times** in the source. That is the design temperament.
@@ -166,7 +166,7 @@ Provenance is honest by construction: executor identity is recorded from the age
 |---|---|
 | Kernel + orchestration | 174 Python modules, ~58k lines, across 13 subpackages |
 | Runtime dependencies | **3** (`pydantic`, `PyYAML`, `typer`) — the trust surface stays auditable |
-| Artifact schemas | 69 registered models, exported and drift-checked in CI |
+| Artifact schemas | 68 registered models, exported and drift-checked in CI |
 | CLI surface | 60+ subcommands, incl. the `verify-*` family of bounded machine verifiers |
 | Agent roles | 17 prompt-defined roles (prover, strategy attacker, adversarial gap reviewer, …) |
 | Tests | 1,876 Python test functions in 142 files, plus 80+ web tests |

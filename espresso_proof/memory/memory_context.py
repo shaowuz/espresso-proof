@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from espresso_proof.kernel.io import read_yaml, write_yaml
-from espresso_proof.memory.memory import _load_memory_entry, _rank_entries, _score_entry, _tokens, load_memory_index
+from espresso_proof.memory.memory import claim_fingerprint, _load_memory_entry, _rank_entries, _score_entry, _tokens, load_memory_index
 from espresso_proof.kernel.models import MemoryContext
 
 # type -> advisory recommended use. None of these change a trusted status.
@@ -41,6 +41,7 @@ def build_memory_context(run_dir: Path, *, generated_at: str | None = None) -> d
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])
     claim_id = claim["id"]
+    run_fingerprint = claim_fingerprint(claim)
     claim_text = " ".join(
         [
             str(claim.get("normalized_statement", "")),
@@ -71,7 +72,24 @@ def build_memory_context(run_dir: Path, *, generated_at: str | None = None) -> d
                 if shared
                 else "matches this claim on tags/metadata"
             )
-            same_claim = source_claim_id == claim_id
+            # Same MATHEMATICS, not same slot id: every run names its claim
+            # "claim_001", so the id comparison said "same claim" for memory
+            # from an entirely different problem and suppressed the
+            # revalidation flag. An entry without a fingerprint (written before
+            # the field existed) is treated as a different claim — fail closed.
+            source_fingerprint = str(getattr(index_entry, "claim_fingerprint", "") or "")
+            if mem is not None:
+                source_fingerprint = str(getattr(mem, "claim_fingerprint", "") or "") or source_fingerprint
+            same_claim = (
+                # Both sides fingerprinted: the real check.
+                source_fingerprint == run_fingerprint
+                if source_fingerprint and run_fingerprint
+                # The entry predates fingerprints, so the id is the only signal
+                # there is; keep the old comparison rather than flagging every
+                # historical entry. New entries always carry a fingerprint, so
+                # the guard becomes real as memory turns over.
+                else source_claim_id == claim_id
+            )
             recommended_use = _USE_BY_TYPE.get(index_entry.type, "note")
             if not same_claim:
                 recommended_use = "note"

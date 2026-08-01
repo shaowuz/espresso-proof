@@ -72,6 +72,23 @@ _GRADE_OUTPUT_SCHEMA = {
 }
 
 
+def _merge_kept_first(recomputed: list, model_added: list) -> list:
+    """Kernel-recomputed items first, then anything new the model added.
+
+    Never a replacement: recomputed audit text is derived from live artifacts
+    and must survive a stage that runs after it.
+    """
+
+    out = [str(item) for item in (recomputed or []) if str(item).strip()]
+    seen = {item.strip().lower() for item in out}
+    for item in model_added or []:
+        text = str(item).strip()
+        if text and text.lower() not in seen:
+            seen.add(text.lower())
+            out.append(text)
+    return out
+
+
 @register_stage("grade_memory_memo")
 def _grade_memory_memo(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
     artifacts = context["manifest"]["artifacts"]
@@ -80,14 +97,41 @@ def _grade_memory_memo(*, run_dir: Path, client: LLMClient, context: dict) -> di
     current = dict(context.get("idea_grade") or {})
     counterexamples = (context.get("counterexamples") or {}).get("tests", [])
 
+    # Ground the call in the evidence it is asked to summarize. The payload used
+    # to carry only the claim sentence and a status word, while the system
+    # prompt demanded an honest summary of the run's evidence across five
+    # fields — a call structurally unable to follow its own instruction, whose
+    # ungrounded output then REPLACED the regrade stage's recomputed text.
+    ledger = context.get("hypothesis_ledger") or {}
+    source_grounding = context.get("source_grounding") or {}
+    review = context.get("review") or {}
+    evidence = {
+        "counterexample_candidates": [
+            {"id": c.get("id"), "explanation": str(c.get("explanation", ""))[:300]}
+            for c in counterexamples[:8]
+            if isinstance(c, dict)
+        ],
+        "hypothesis_ledger_missing_or_unclear": list(ledger.get("missing_or_unclear") or [])[:8],
+        "source_grounding_steps": [
+            {"proof_step_id": step.get("proof_step_id"), "status": step.get("status")}
+            for step in (source_grounding.get("steps") or [])[:8]
+            if isinstance(step, dict)
+        ],
+        "review_verdict": review.get("verdict"),
+        "review_strongest_objection": str(review.get("strongest_objection", ""))[:300],
+        "recomputed_reasons": list(current.get("reasons") or [])[:6],
+        "recomputed_source_gaps": list(current.get("source_gaps") or [])[:6],
+    }
     payload = {
         "task": "summarize_grade_reasoning",
         "claim": {"normalized_statement": claim.get("normalized_statement", "")},
         "current_status": current.get("status", "unclear"),
+        "evidence": evidence,
         "required_json_schema": _GRADE_OUTPUT_SCHEMA,
         "rules": [
             "do not upgrade proof status or declare anything proved",
             "unverified examples are not evidence",
+            "summarize only what the evidence block shows; do not invent findings",
         ],
     }
     raw = client.complete_json(
@@ -104,15 +148,27 @@ def _grade_memory_memo(*, run_dir: Path, client: LLMClient, context: dict) -> di
         "status": current.get("status", "unclear"),
         "score": int(current.get("score", 0) or 0),
         "confidence": current.get("confidence", "low"),
-        "reasons": safe_list(raw.get("reasons")) or list(current.get("reasons") or ["candidate run; not verified"]),
+        # ADDITIVE, not replacing: the regrade stage recomputes reasons and
+        # source gaps from live artifacts, and this stage runs last. Letting
+        # model prose win the field silently dropped kernel-recomputed audit
+        # text (e.g. "No step is reference-supported yet.") from the artifact
+        # the human reads and from cross-run memory.
+        "reasons": _merge_kept_first(
+            current.get("reasons") or ["candidate run; not verified"],
+            safe_list(raw.get("reasons")),
+        ),
         "survived_tests": [],  # SAFETY: no checked evidence in the front half
         "failed_tests": [],    # SAFETY: no checked evidence in the front half
         "counterexample_candidates": [c["id"] for c in counterexamples],
-        "missing_hypotheses": safe_list(raw.get("missing_hypotheses"))
-        or list(current.get("missing_hypotheses") or []),
-        "source_gaps": safe_list(raw.get("source_gaps")) or list(current.get("source_gaps") or []),
-        "repair_options": safe_list(raw.get("repair_options"))
-        or list(current.get("repair_options") or []),
+        "missing_hypotheses": _merge_kept_first(
+            current.get("missing_hypotheses") or [], safe_list(raw.get("missing_hypotheses"))
+        ),
+        "source_gaps": _merge_kept_first(
+            current.get("source_gaps") or [], safe_list(raw.get("source_gaps"))
+        ),
+        "repair_options": _merge_kept_first(
+            current.get("repair_options") or [], safe_list(raw.get("repair_options"))
+        ),
         "next_cheapest_test": safe_text(raw.get("next_cheapest_test", ""))
         or current.get("next_cheapest_test", "Lock or pressure-test the claim."),
         "human_review_required": True,

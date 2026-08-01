@@ -8,6 +8,7 @@ consume those events into a valid scheduling plan.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -137,6 +138,69 @@ def validate_scheduling_update(
     if entry.artifact_revision_or_hash != current_hash:
         raise UpdateInboxServiceError("update inbox event origin artifact hash is stale")
     return entry
+
+
+def record_human_scheduling_decision(
+    run_dir: Path,
+    *,
+    route_id: str,
+    decision: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Record a human's answer to a scheduler question, then rebuild the plan.
+
+    The scheduler stops a route with ``ask_human`` once reviewer objections
+    repeat, and the objection count is deliberately monotone. That is right for
+    automated rounds and wrong once a person answers: without this entry the
+    rebuilt plan asked the same question forever and the rest of the approved
+    budget was unreachable (the run was finalized as complete).
+
+    Scheduling-only, like every Update Inbox entry: it records THAT a human
+    answered and what they chose, and it can never grant, raise, or resolve a
+    mathematical status — the objections themselves stay open in the reviewer
+    artifacts and on every surface.
+    """
+
+    from espresso_proof.kernel.pressure_status import artifact_revision_hash
+
+    run_dir = Path(run_dir)
+    decision = str(decision).strip().lower()
+    if decision not in {"continue", "stop"}:
+        raise UpdateInboxServiceError(
+            "human scheduling decision must be 'continue' or 'stop'"
+        )
+    if not str(reason).strip():
+        raise UpdateInboxServiceError(
+            "human scheduling decision requires a reason (it is recorded, not inferred)"
+        )
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])
+    origin_rel = manifest["artifacts"]["human_choice"]
+    created_at = datetime.now(UTC).isoformat()
+    entry = {
+        "id": f"human_sched_{route_id}_{created_at}",
+        "type": "human_scheduling_decision",
+        "origin_stage": "human_scheduling_answer",
+        "origin_artifact": origin_rel,
+        "origin_artifact_id_or_path": origin_rel,
+        "locked_claim_id": claim["id"],
+        "route_id_or_step_id": str(route_id),
+        "artifact_revision_or_hash": artifact_revision_hash(run_dir, Path(origin_rel)),
+        "validator_ok": True,
+        "created_at": created_at,
+        "dedupe_key": f"human_scheduling_decision:{route_id}:{created_at}",
+        "applied_at": None,
+        "effect": "scheduling_only",
+        "advisory_only": True,
+    }
+    append_scheduling_update(run_dir, entry)
+    plan = write_time_allocation_plan(run_dir)
+    return {
+        "entry_id": entry["id"],
+        "route_id": str(route_id),
+        "decision": decision,
+        "plan_written": plan is not None,
+    }
 
 
 def write_time_allocation_from_update_inbox(run_dir: Path):

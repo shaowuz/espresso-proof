@@ -220,6 +220,39 @@ class StubLLMClient:
         }
 
 
+# Output budget per role family. One flat 1200-token cap for every call
+# truncated the roles whose prompts explicitly ask for long structured output
+# (a prover's justified steps, a whole line-numbered proof), so the transport —
+# not the model, and not the kernel — decided the reply was finished.
+_OUTPUT_TOKEN_BUDGETS: tuple[tuple[str, int], ...] = (
+    ("line-numbered proof writer", 6000),
+    ("proof gap resolver", 4000),
+    ("prover", 4000),
+    ("reviewer", 2400),
+)
+_DEFAULT_OUTPUT_TOKENS = 1200
+
+# Exponential backoff with a small deterministic offset per attempt. Deliberately
+# not random: a run must stay reproducible, and the point is to not re-hit a
+# transient condition immediately, not to decorrelate a fleet.
+_RETRY_BASE_SECONDS = 1.5
+_RETRY_MAX_SECONDS = 20.0
+
+
+def _retry_backoff_seconds(attempt: int) -> float:
+    return min(_RETRY_BASE_SECONDS * (2 ** attempt), _RETRY_MAX_SECONDS)
+
+
+def _max_output_tokens_for(system: str) -> int:
+    """The output budget this role's prompt actually asks for."""
+
+    text = (system or "").lower()
+    for marker, budget in _OUTPUT_TOKEN_BUDGETS:
+        if marker in text:
+            return budget
+    return _DEFAULT_OUTPUT_TOKENS
+
+
 class OpenAIResponsesClient:
     provider = "openai"
 
@@ -249,7 +282,11 @@ class OpenAIResponsesClient:
             "instructions": system,
             "input": prompt,
             "store": False,
-            "max_output_tokens": 1200,
+            # Per-role budget. A single 1200-token cap applied to every call
+            # while the prompts ask a prover for up to 12 justified steps and a
+            # proof writer for a whole line-numbered proof — the reply was
+            # truncated by the transport, not by the model's judgement.
+            "max_output_tokens": _max_output_tokens_for(system),
             "text": {
                 "format": {
                     "type": "json_schema",
@@ -379,6 +416,13 @@ class ExternalCommandClient:
                 return result
             except (ExternalAgentTimeoutError, RuntimeError) as exc:
                 last_error = exc
+                if attempt < self.max_retries:
+                    # Back off before an identical re-attempt. An immediate
+                    # retry re-hits whatever transient condition caused the
+                    # failure (a loaded machine, a rate limit, a CLI still
+                    # releasing resources) and spends the retry for nothing —
+                    # the observed timeouts came in bursts under parallel load.
+                    time.sleep(_retry_backoff_seconds(attempt))
         self.last_attempts = self.max_retries + 1
         assert last_error is not None  # loop ran at least once
         raise last_error
@@ -427,6 +471,11 @@ class ExternalCommandClient:
             "prompt": prompt,
             "provider": self.provider,
             "model": self.model,
+            # Caller-DECLARED role for this call. The adapter selects the role's
+            # skill from it instead of scanning the prompt text, which embeds the
+            # whole run context and therefore matched almost every skill on
+            # almost every call.
+            "role": str((getattr(self._usage_context, "value", {}) or {}).get("role") or ""),
             "required_json_schema": _required_json_schema_for_system(system),
             # Additive contract field: the outer timeout this client actually
             # enforces, so adapters derive their inner CLI timeout from the

@@ -102,6 +102,10 @@ ORCHESTRATION_STATES: list[str] = [
     # ``orchestrate_run(auto_continue=True)`` just before the same-process
     # resume, so a crash mid-loop leaves the truthful state behind.
     "AUTO_CHOICE_CONTINUE_SELECTED",
+    # The loop stopped to ask the human a scheduling question. After the choice
+    # states (the gate is already resolved) and before COMPLETED_MEMO (the run
+    # is blocked on a person, not finished).
+    "WAITING_TIME_ALLOCATION_DECISION",
     "COMPLETED_MEMO",
 ]
 
@@ -1059,6 +1063,13 @@ def _resume_run_locked(
     state = manifest.get("current_state", "")
     if state == "COMPLETED_MEMO":
         return _resume_idempotent_memo(run_dir=run_dir)
+    if state == "WAITING_TIME_ALLOCATION_DECISION":
+        # The loop asked a scheduling question. Re-resuming does NOT answer it:
+        # rebuilding the plan would return ask_human again (objection rounds are
+        # deliberately monotone), and re-entering the choice path would trip
+        # "human gate is already resolved". Re-render the question instead; the
+        # answer arrives through `espresso answer-scheduler`.
+        return _resume_pending_scheduler_question(run_dir=run_dir)
     if _state_index(state) < _state_index("WAITING_LLM_AGENT_HUMAN_GATE"):
         raise ValueError(
             f"run is not at the human gate (state={state!r}); finish the agent pass first"
@@ -1129,6 +1140,53 @@ def _resume_idempotent_memo(*, run_dir: Path) -> str:
         "to do more work, start a new run or approve a larger effort on a "
         "route before the loop finishes."
     )
+
+
+def _resume_pending_scheduler_question(*, run_dir: Path) -> str:
+    """A run waiting on a human scheduling answer: re-render the question.
+
+    Not an error and not a completion: the loop asked something and the budget
+    it did not spend is still available once the answer arrives.
+    """
+
+    from espresso_proof.ui.memo import build_concise_memo
+
+    write_timings(run_dir)
+    register_observability_artifacts(run_dir)
+    write_run_dashboard(run_dir)
+    question = pending_scheduler_question(run_dir)
+    routes = ", ".join(question["routes"]) if question["routes"] else "the selected route"
+    return build_concise_memo(run_dir) + (
+        "\n\nProver loop: waiting on your scheduling decision for "
+        f"{routes}. The reviewers kept objecting, so the scheduler stopped "
+        "rather than spend another automated round on the same objections. "
+        "Answer it with:\n"
+        f"  espresso answer-scheduler --run {run_dir} --route <route_id> "
+        "--decision <continue|stop> --reason <why>\n"
+        "The unspent part of the approved budget is still available."
+    )
+
+
+def pending_scheduler_question(run_dir: Path) -> dict:
+    """Which routes the scheduler is waiting on, and why (display only)."""
+
+    plan_path = run_dir / "time_allocation.yaml"
+    routes: list[str] = []
+    reasons: list[str] = []
+    if plan_path.exists():
+        try:
+            plan = read_yaml(plan_path) or {}
+        except Exception:  # noqa: BLE001 - display only
+            plan = {}
+        for entry in plan.get("routes") or []:
+            if isinstance(entry, dict) and entry.get("action") == "ask_human":
+                route_id = str(entry.get("route_id") or "").strip()
+                if route_id:
+                    routes.append(route_id)
+                reason = str(entry.get("reason") or "").strip()
+                if reason:
+                    reasons.append(reason)
+    return {"routes": routes, "reasons": reasons}
 
 
 def _record_resume_human_choice(
@@ -1243,6 +1301,80 @@ def _run_resume_prover_loop(
     return loop_summary
 
 
+def answer_scheduler_question(
+    *,
+    run_dir: Path,
+    route_id: str,
+    decision: str,
+    reason: str,
+    provider: str = "stub",
+    model: str = "gpt-4.1",
+    api_key_env: str = "OPENAI_API_KEY",
+    external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+    reviewer_set: str = "espresso",
+    rounds: int | None = None,
+    client=None,
+) -> dict:
+    """Answer the scheduler's question and spend the budget it was holding.
+
+    The counterpart to the WAITING_TIME_ALLOCATION_DECISION state: without an
+    answer path the question was terminal, because the objection count that
+    raised it never resets and every other re-entry point refuses. This records
+    the human's answer as a scheduling-only Update Inbox entry, rebuilds the
+    plan (the route stops asking), and — on "continue" — drives the remaining
+    approved rounds. It grants no mathematical status: the objections stay open.
+    """
+
+    from espresso_proof.kernel.run_lock import run_writer_lock
+    from espresso_proof.kernel.update_inbox_service import record_human_scheduling_decision
+    from espresso_proof.orchestration.prover_loop_driver import continue_prover_loop
+    from espresso_proof.ui.memo import build_concise_memo
+
+    run_dir = Path(run_dir)
+    with run_writer_lock(run_dir, action="answer scheduler question"):
+        state = read_yaml(run_dir / "run_manifest.yaml").get("current_state", "")
+        if state != "WAITING_TIME_ALLOCATION_DECISION":
+            raise ValueError(
+                f"run is not waiting on a scheduling decision (state={state!r})"
+            )
+        recorded = record_human_scheduling_decision(
+            run_dir, route_id=route_id, decision=decision, reason=reason
+        )
+        validate_run(run_dir)
+        if str(decision).strip().lower() == "stop":
+            _set_state(run_dir, "COMPLETED_MEMO")
+            _run_resume_advisory_layers(run_dir=run_dir)
+            memo = build_concise_memo(run_dir)
+            write_run_dashboard(run_dir)
+            return {
+                **recorded,
+                "rounds_run": 0,
+                "stop_reason": "human_scheduling_stop",
+                "memo": memo,
+            }
+        result = continue_prover_loop(
+            run_dir=run_dir,
+            provider=provider,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+            reviewer_set=reviewer_set,
+            max_rounds=rounds,
+            client=client,
+        )
+        _run_resume_advisory_layers(run_dir=run_dir)
+        memo = _finalize_resume_memo(
+            run_dir=run_dir,
+            loop_summary=(result["rounds_run"], result["stop_reason"]),
+        )
+        return {
+            **recorded,
+            "rounds_run": result["rounds_run"],
+            "stop_reason": result["stop_reason"],
+            "memo": memo,
+        }
+
+
 def _run_resume_advisory_layers(*, run_dir: Path) -> None:
     """Advisory layers (judgment / failure-pattern / memory / subgoal graph); each re-validates."""
     # Mathematical Judgment Layer (advisory): record conservative risk findings
@@ -1291,10 +1423,34 @@ def _run_resume_advisory_layers(*, run_dir: Path) -> None:
         validate_run(run_dir)
 
 
+# Loop stop reasons that mean "the machinery is ASKING the human something",
+# not "the work is finished". A run stopped for one of these is blocked on a
+# person and must stay resumable: marking it COMPLETED_MEMO made the question
+# terminal (every re-entry path refuses a completed run) and forfeited the rest
+# of the approved budget.
+ASK_HUMAN_STOP_REASONS = frozenset(
+    {"loop_decision_ask_human", "time_allocation_ask_human"}
+)
+
+
+def terminal_state_for_stop_reason(stop_reason: str | None) -> str:
+    """Which lifecycle state a finished resume should record."""
+
+    if stop_reason and str(stop_reason) in ASK_HUMAN_STOP_REASONS:
+        return "WAITING_TIME_ALLOCATION_DECISION"
+    return "COMPLETED_MEMO"
+
+
 def _finalize_resume_memo(*, run_dir: Path, loop_summary: tuple[int, str] | None) -> str:
-    """Mark COMPLETED_MEMO, refresh dashboards, build the concise memo."""
+    """Record the terminal state, refresh dashboards, build the concise memo.
+
+    The memo and dashboards are written either way — a question the human cannot
+    read is not a question — but the STATE distinguishes "finished" from
+    "waiting on your answer".
+    """
     from espresso_proof.ui.memo import build_concise_memo
-    _set_state(run_dir, "COMPLETED_MEMO")
+    stop_reason = loop_summary[1] if loop_summary is not None else None
+    _set_state(run_dir, terminal_state_for_stop_reason(stop_reason))
     record_agent_flow_stage_status(run_dir)
     write_timings(run_dir)
     register_observability_artifacts(run_dir)

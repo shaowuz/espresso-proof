@@ -107,7 +107,9 @@ def main() -> int:
 
     envelope_meta: dict | None = None
     try:
-        selection = _select_skills(system=system, prompt=prompt)
+        selection = _select_skills(
+            system=system, prompt=prompt, role=str(request.get("role") or "") or None
+        )
         _emit_status(selection=selection)
         full_prompt = _build_full_prompt(
             system=system, prompt=prompt, selection=selection, output_schema=output_schema
@@ -169,15 +171,32 @@ def _run_claude(prompt: str, *, timeout: int) -> tuple[str, dict | None]:
     # made. The CLI self-reports the resolved model id in its JSON envelope, so
     # provenance records what actually ran regardless of this knob.
     claude_model = os.environ.get("ESPRESSO_CLAUDE_MODEL", "haiku")
-    proc = subprocess.run(
-        [claude_cli, "-p", prompt, "--model", claude_model, "--output-format", "json"],
+    # The prompt goes on STDIN, not argv. As a single argv element it was
+    # unbounded — role skill text + system prompt + the indent=2 JSON dump of the
+    # whole run context — and a long enough claim or a fat context would exceed
+    # ARG_MAX and fail with E2BIG before the model ever saw it. The codex adapter
+    # already feeds its child on stdin; this makes the two consistent.
+    #
+    # start_new_session=True puts the CLI in its OWN process group so a timeout
+    # can reclaim the WHOLE group. subprocess.run(timeout=) kills only the direct
+    # child, so a CLI that forks (observed: it does) left descendants running and
+    # holding the pipe after a timeout — exactly the case the client-side group
+    # reclamation was built for, structurally bypassed here.
+    proc = subprocess.Popen(
+        [claude_cli, "-p", "--model", claude_model, "--output-format", "json"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        capture_output=True,
-        timeout=timeout,
+        start_new_session=True,
     )
+    try:
+        stdout, stderr = proc.communicate(prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _reclaim_process_group(proc)
+        raise
     if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip() or "claude CLI returned non-zero")
-    stdout = proc.stdout
+        raise RuntimeError((stderr or "").strip() or "claude CLI returned non-zero")
     try:
         envelope = json.loads(stdout)
     except json.JSONDecodeError:
@@ -212,7 +231,34 @@ def _extract_json(text: str) -> dict:
     return json.loads(match.group(0))
 
 
-def _select_skills(*, system: str, prompt: str):
+def _reclaim_process_group(proc) -> None:
+    """Kill the CLI's whole process group, then reap it.
+
+    A forking CLI outlives a plain kill of the direct child: the descendants
+    keep the pipe open and the worker thread stays blocked. Signalling the group
+    is what makes the timeout real. Best-effort by construction — the process
+    may already be gone.
+    """
+
+    import signal
+
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            break
+        try:
+            proc.wait(timeout=2)
+            return
+        except Exception:  # noqa: BLE001 - escalate to SIGKILL
+            continue
+    try:
+        proc.kill()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _select_skills(*, system: str, prompt: str, role: str | None = None):
     """Same role-skill selection the Codex adapter uses (skill text + active
     goal). Lazily imported so a broken install fails inside the fallback guard
     instead of crashing the adapter process."""
@@ -226,6 +272,7 @@ def _select_skills(*, system: str, prompt: str):
         cwd=Path.cwd(),
         active_goal_file=os.environ.get("ESPRESSO_ACTIVE_GOAL_FILE"),
         request_type=os.environ.get("ESPRESSO_REQUEST_TYPE"),
+        role=role,
     )
 
 

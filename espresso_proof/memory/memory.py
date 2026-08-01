@@ -54,6 +54,25 @@ _MEMORY_INDEX_REQUIRED_ENTRY_FIELDS = {
 }
 
 
+def claim_fingerprint(claim: dict | str | None) -> str:
+    """Stable identity of the MATHEMATICS, independent of the run's slot id.
+
+    Every run names its claim "claim_001", so a slot-id comparison cannot tell
+    two different claims apart. Hashing the normalized statement can.
+    """
+
+    import hashlib
+
+    if isinstance(claim, dict):
+        text = str(claim.get("normalized_statement") or claim.get("raw_text") or "")
+    else:
+        text = str(claim or "")
+    text = " ".join(text.split()).lower()
+    if not text:
+        return ""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
+
+
 def load_memory_index(project_dir: Path | str) -> MemoryIndex:
     """Load and validate a project's memory index.
 
@@ -128,7 +147,14 @@ def _adapt_legacy_memory_index(project_dir: Path, raw: object) -> MemoryIndex:
 
 
 def summarize_memory(project_dir: Path | str, claim_text: str | None = None) -> str:
-    """Return a grouped, provenance-aware memory summary for prompt context."""
+    """A grouped, provenance-aware memory summary for DISPLAY.
+
+    Honest scope: nothing in the package feeds this text to a model. The only
+    consumer is the `inspect` diagnostic view (cli_dev.py); the influence that
+    prior runs do have on a live run flows through `memory_context.py`, which
+    writes an advisory artifact the surfaces render. The docstring used to say
+    "for prompt context", which described an integration that does not exist.
+    """
 
     project_path = Path(project_dir)
     index = load_memory_index(project_path)
@@ -259,10 +285,18 @@ def write_run_memory(
 
     def emit(suffix: str, entry: dict) -> None:
         filename = f"{run_id}.yaml" if not suffix else f"{run_id}_{suffix}.yaml"
+        entry.setdefault("claim_fingerprint", fingerprint)
         written.append(write_memory_entry(project_path, entry, filename=filename))
 
     idea_grade = read_yaml(run_path / "idea_grade.yaml")
     claim_id = idea_grade["claim_id"]
+    # Identity of the MATHEMATICS this run was about. claim_id is "claim_001"
+    # in every run, so it cannot distinguish claims; the retrieval layer needs
+    # something that can.
+    locked_claim_path = run_path / "locked_claim.yaml"
+    fingerprint = (
+        claim_fingerprint(read_yaml(locked_claim_path)) if locked_claim_path.exists() else ""
+    )
     timestamp = datetime.now(UTC).isoformat()
 
     strategy_brief = read_yaml(run_path / "strategy_brief.yaml")
@@ -503,6 +537,7 @@ def _build_updated_memory_index(
             "id": entry["id"],
             "entry_path": f"projects/{project_id}/memory/{entry_filename}",
             "claim_id": entry["claim_id"],
+            "claim_fingerprint": str(entry.get("claim_fingerprint") or ""),
             "type": entry["type"],
             "tags": entry_tags,
             "summary": entry["summary"],

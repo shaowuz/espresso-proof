@@ -15,7 +15,7 @@ from typer.testing import CliRunner
 from espresso_proof.cli import app
 
 EXPECTED_COMMANDS = {
-    "add-bank-item", "agent-doctor", "audit-patterns",
+    "add-bank-item", "agent-doctor", "answer-scheduler", "audit-patterns",
     "audit-theorem-applicability", "auto-wire-verifications", "benchmark",
     "build-subgoal-graph", "calibration", "choose-strategy",
     "classify-failures", "discover-literature", "eval", "export-schemas",

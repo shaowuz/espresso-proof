@@ -652,6 +652,56 @@ def choose_strategy(
 
 
 
+@app.command("answer-scheduler")
+def answer_scheduler(
+    run: Path = typer.Option(..., "--run", exists=True, file_okay=False),
+    route: str = typer.Option(..., "--route", help="route id the scheduler asked about"),
+    decision: str = typer.Option(..., "--decision", help="continue | stop"),
+    reason: str = typer.Option(..., "--reason", help="recorded verbatim; never inferred"),
+    provider: str = typer.Option("stub", "--provider"),
+    model: str = typer.Option("gpt-4.1", "--model"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
+    external_agent_command_env: str = typer.Option(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND", "--external-agent-command-env"
+    ),
+    reviewer_set: str = typer.Option("espresso", "--reviewer-set"),
+    rounds: int | None = typer.Option(None, "--rounds"),
+) -> None:
+    """Answer the scheduler's question on a route and spend the held budget.
+
+    When reviewer objections repeat, the scheduler stops the loop and asks
+    whether to keep spending. That question used to be terminal — the run was
+    finalized as complete and the rest of the approved budget was unreachable.
+    This records the answer (scheduling-only: it never resolves an objection or
+    grants any status) and, on `continue`, drives the remaining rounds.
+    """
+
+    if decision not in {"continue", "stop"}:
+        raise typer.BadParameter("decision must be continue or stop")
+    from espresso_proof.orchestration.orchestrator import answer_scheduler_question
+
+    result = answer_scheduler_question(
+        run_dir=run,
+        route_id=route,
+        decision=decision,
+        reason=reason,
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        reviewer_set=reviewer_set,
+        rounds=rounds,
+    )
+    typer.echo(
+        f"Recorded scheduling decision {result['decision']!r} for route "
+        f"{result['route_id']} (advisory/scheduling only; no objection was resolved "
+        "and no status changed)."
+    )
+    typer.echo(result["memo"])
+    typer.echo(f"Prover loop: ran {result['rounds_run']} round(s); {result['stop_reason']}.")
+    typer.echo(f"Dashboard: {write_run_dashboard(run)}")
+
+
 @app.command("resolve-agent-gate")
 def resolve_agent_gate(
     run: Path = typer.Option(..., "--run", exists=True, file_okay=False),

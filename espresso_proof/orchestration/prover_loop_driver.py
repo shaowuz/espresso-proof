@@ -256,6 +256,34 @@ def continue_prover_loop(
         )
 
 
+def _wire_agent_proposed_checks(run_dir: Path, notes: list[str], *, when: str) -> None:
+    """Merge agent-proposed verification requests and run the trusted backend.
+
+    Both helpers are idempotent, id-deduplicated and kernel-re-validating, so
+    calling them between rounds is safe; the loop already holds the run writer
+    lock and the lock is re-entrant per thread. Fail closed to a NOTE rather
+    than aborting the loop: a wiring problem must not destroy rounds the human
+    already paid for.
+    """
+
+    from espresso_proof.verification.proof_verification import (
+        auto_wire_scoped_verifications,
+        merge_agent_proposed_requests,
+    )
+
+    try:
+        merged = merge_agent_proposed_requests(run_dir)
+        summary = auto_wire_scoped_verifications(run_dir)
+        validate_run(run_dir)
+        if merged.get("merged") or summary.get("appended"):
+            notes.append(
+                f"machine-check wiring {when}: {merged.get('merged', 0)} request(s) "
+                f"merged, {len(summary.get('appended') or [])} executed"
+            )
+    except Exception as exc:  # noqa: BLE001 - advisory wiring never breaks the loop
+        notes.append(f"machine-check wiring {when} skipped: {exc}")
+
+
 def _continue_prover_loop_locked(
     *,
     run_dir: Path,
@@ -283,6 +311,12 @@ def _continue_prover_loop_locked(
     rounds_run = 0
     stop_reason = "clean"
     escalated = False  # Goals 44-53 option A: at most one budget-granted repair round
+    # Harvest + execute agent-proposed machine checks BEFORE round 1, so the
+    # first deep round already sees the initial pass's proposals as trusted
+    # evidence. This lane existed but ran only pre-gate, so a request a reviewer
+    # made at the gate was never executed and the next round re-derived the same
+    # objection instead of reading the machine's answer.
+    _wire_agent_proposed_checks(run_dir, notes, when="before round 1")
 
     while True:
         loop = read_yaml(run_dir / loop_path)
@@ -462,6 +496,11 @@ def _continue_prover_loop_locked(
         )
         append_event(run_dir, "agent_call_finished", stage="prover_loop_round", detail=f"round {round_index}")
         rounds_run += 1
+        # And again after each accepted round, so THIS round's reviewer requests
+        # are machine-answered before the next round runs. Outside the
+        # snapshot/restore bracket on purpose: merge writes run_manifest.yaml,
+        # which the bracket would roll back into an unregistered state.
+        _wire_agent_proposed_checks(run_dir, notes, when=f"after round {round_index}")
         summary = _failure_summary(run_dir)
         if summary:
             notes.append(summary)

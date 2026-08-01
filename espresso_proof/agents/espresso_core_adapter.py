@@ -51,6 +51,14 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# AFTER the sys.path bootstrap: this file is also executed as a standalone
+# script (by path, not -m), where the package is not importable until ROOT is
+# on the path.
+from espresso_proof.agents.adapter_runtime import (  # noqa: E402
+    fallback_is_schema_valid,
+    resolve_inner_timeout,
+)
+
 try:  # PyYAML is a hard dependency of espresso_proof itself.
     import yaml
 except Exception:  # noqa: BLE001 - the adapter must still emit fallback JSON
@@ -613,7 +621,9 @@ def _prop_statement(core: dict, prop_id: str) -> str:
 # ---------------------------------------------------------------------------
 # Backends
 # ---------------------------------------------------------------------------
-def _run_core_backend(role: str, prompt: str, meta: dict) -> dict:
+def _run_core_backend(
+    role: str, prompt: str, meta: dict, *, request: dict | None = None
+) -> dict:
     mode = os.environ.get(MODE_ENV, "off").strip().lower()
     meta["mode"] = mode
     if mode == "mock":
@@ -622,7 +632,7 @@ def _run_core_backend(role: str, prompt: str, meta: dict) -> dict:
             raise ValueError(f"{MODE_ENV}=mock requires {FIXTURE_RUN_ENV}")
         core = load_core_run(Path(fixture))
     elif mode == "live":
-        core = _run_core_live(prompt, meta)
+        core = _run_core_live(prompt, meta, request=request)
     else:
         raise ValueError(f"unsupported {MODE_ENV}: {mode!r}")
     meta["core_run_dir"] = core["run_dir"]
@@ -631,7 +641,7 @@ def _run_core_backend(role: str, prompt: str, meta: dict) -> dict:
     return translate_prover_round(core)
 
 
-def _run_core_live(prompt: str, meta: dict) -> dict:
+def _run_core_live(prompt: str, meta: dict, *, request: dict | None = None) -> dict:
     """Phase A live-mode stub: builds the input bundle and the EXACT pinned
     subprocess commands. Execution only happens when ESPRESSO_CORE_MODE=live is
     explicitly set (never in tests). Long runs: raise
@@ -648,7 +658,16 @@ def _run_core_live(prompt: str, meta: dict) -> dict:
 
     solve_command = build_solve_command(problem_path, run_dir)
     meta["solve_command"] = solve_command
-    timeout = int(os.environ.get(CORE_TIMEOUT_ENV, DEFAULT_CORE_TIMEOUT_SECONDS))
+    # Derive the inner budget from the SAME outer contract every other adapter
+    # uses (request["timeout_seconds"] > env > default). A static inner budget
+    # is the bug class adapter_runtime was created to remove: it can outlive the
+    # caller's own timeout, so the client gives up while this process keeps
+    # running, or it can cut a call the caller was still willing to wait for.
+    timeout = resolve_inner_timeout(
+        request=request or {}, default_outer=int(
+            os.environ.get(CORE_TIMEOUT_ENV, DEFAULT_CORE_TIMEOUT_SECONDS)
+        )
+    )
     solve = subprocess.run(  # guarded: only reachable with ESPRESSO_CORE_MODE=live
         solve_command,
         capture_output=True,
@@ -727,7 +746,7 @@ def main() -> int:
     try:
         if role in {"prover", "proof_writer"} and mode in {"mock", "live"}:
             meta["backend"] = "espresso-core"
-            result = _run_core_backend(role, prompt, meta)
+            result = _run_core_backend(role, prompt, meta, request=request)
             meta["parse_status"] = "ok"
         else:
             delegated = _delegate_to_fallback(raw_request, meta)
@@ -739,10 +758,27 @@ def main() -> int:
                 f"no backend for role {role!r} (mode={mode!r}, "
                 f"{FALLBACK_COMMAND_ENV} unset)"
             )
-    except Exception as exc:  # noqa: BLE001 - fail closed, never crash the round
+    except Exception as exc:  # noqa: BLE001 - fallback where safe, else fail closed
+        reason = str(exc)[:500]
+        if not fallback_is_schema_valid(request, _FALLBACK):
+            # Back-half authoritative-schema role (line-numbered proof writer,
+            # consensus/gap reviewers): the prover-shaped fallback would be
+            # schema-invalid downstream, and exiting 0 with it handed the caller
+            # a well-formed-looking answer for a call that never produced one.
+            # Same rule the codex adapter already applies: exit non-zero so the
+            # caller's transactional rollback takes over.
+            meta["parse_status"] = "error_propagated"
+            meta["fallback_used"] = False
+            meta["fallback_reason"] = reason
+            print(
+                f"[espresso-core] FATAL: espresso-core adapter could not produce "
+                f"usable JSON: {reason}"[:300],
+                file=sys.stderr,
+            )
+            return 1
         meta["parse_status"] = "fallback"
         meta["fallback_used"] = True
-        meta["fallback_reason"] = str(exc)[:500]
+        meta["fallback_reason"] = reason
         result = dict(_FALLBACK)
         result["summary"] = (
             f"espresso-core adapter could not produce usable JSON: {meta['fallback_reason']}"

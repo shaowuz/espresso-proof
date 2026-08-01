@@ -14,6 +14,7 @@ from espresso_proof.agents.agent_pass import (
     INPUT_ARTIFACTS,
     collect_open_reviewer_blockers,
     _agent_input_artifacts,
+    _complete_agent_json,
     _append_reviewer_objection_events,
     _apply_missing_context_notes,
     _machine_answer_note,
@@ -26,6 +27,7 @@ from espresso_proof.agents.clients import build_client
 from espresso_proof.agents.prompts import (
     _reviewer_roles,
     agent_prompt,
+    reviewer_context,
     load_agent_context,
     prover_system_prompt,
     verifier_system_prompt,
@@ -247,6 +249,7 @@ def _write_prover_round_artifact(
     prover_attempt: dict,
     verifier_reviews: list[dict],
     source: str,
+    agent_call_diagnostics: list[dict] | None = None,
 ) -> dict:
     report = {
         "schema_version": 1,
@@ -274,6 +277,10 @@ def _write_prover_round_artifact(
             "This round artifact does not upgrade proof status, source support status, "
             "checked evidence, or human preference into verification."
         ),
+        # Per-call provenance for this round (provider/adapter/parse status /
+        # fallback / verified_real_provider). Empty for the initial-pass mirror,
+        # whose diagnostics live on llm_agent_run.yaml.
+        "agent_call_diagnostics": list(agent_call_diagnostics or []),
     }
     ProverRoundReport.model_validate(report)
     path = run_dir / _round_artifact_rel_path(attempt)
@@ -529,7 +536,16 @@ def append_prover_loop_round(
         time_context=time_context,
     )
     created_at = datetime.now(UTC).isoformat()
-    prover_raw = client.complete_json(
+    # Deep rounds go through the SAME wrapper the initial pass uses. Calling the
+    # client directly meant an appended round produced no agent_call_diagnostics
+    # (so a fallback round was indistinguishable from a real one in the durable
+    # artifact) and left no declared role on the client — which the adapter now
+    # needs to select the round's skill instead of scanning the prompt.
+    round_diagnostics: list[dict] = []
+    prover_raw = _complete_agent_json(
+        client=client,
+        role="prover",
+        call_diagnostics=round_diagnostics,
         system=prover_system_prompt(),
         prompt=agent_prompt(round_context, role="prover_loop_round"),
     )
@@ -547,10 +563,16 @@ def append_prover_loop_round(
     reviewer_roles = _reviewer_roles(reviewer_set, 3)
     verifier_reviews = []
     for index, reviewer_role in enumerate(reviewer_roles, start=1):
-        verifier_raw = client.complete_json(
+        verifier_raw = _complete_agent_json(
+            client=client,
+            role=reviewer_role,
+            call_diagnostics=round_diagnostics,
             system=verifier_system_prompt(index, reviewer_role=reviewer_role),
             prompt=agent_prompt(
-                {**round_context, "prover_attempt": prover},
+                reviewer_context(
+                    {**round_context, "prover_attempt": prover},
+                    reviewer_role=reviewer_role,
+                ),
                 role=f"round_{next_round}_{reviewer_role}",
             ),
         )
@@ -651,6 +673,7 @@ def append_prover_loop_round(
         prover_attempt=prover,
         verifier_reviews=verifier_reviews,
         source="appended_prover_loop_round",
+        agent_call_diagnostics=round_diagnostics,
     )
     refresh_prover_round_index(run_dir=run_dir, loop_report=loop_report)
     manifest.setdefault("optional_artifacts", {})["prover_round_index"] = "prover_rounds/index.yaml"

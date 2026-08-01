@@ -318,11 +318,15 @@ def eval(
 ) -> None:
     """Run deterministic P0 evals."""
     if schemas_only:
+        # Exit NON-ZERO: this flag ran no check, and a check that silently
+        # succeeds is worse than one that is missing — it was presented as a
+        # real gate while validating nothing.
         typer.echo(
-            "Schema-only validation now lives in the test suite "
-            "(tests/kernel). Run: uv run python -m pytest tests/kernel -q"
+            "--schemas-only no longer runs here: schema validation lives in the "
+            "test suite. Run: uv run python -m pytest tests/kernel -q",
+            err=True,
         )
-        return
+        raise typer.Exit(code=2)
     if mode != "mock":
         raise typer.BadParameter("P0 eval only supports --mode mock")
     fixture_dirs = [fixture] if fixture else sorted(Path("tests/fixtures").iterdir())

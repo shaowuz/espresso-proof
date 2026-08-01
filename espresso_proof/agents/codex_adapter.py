@@ -96,12 +96,16 @@ def main() -> int:
     # auto-inject repository maintenance context; a product mathematical
     # run must not (a past injection bug).
     request_type = os.environ.get("ESPRESSO_REQUEST_TYPE")
+    # Caller-declared role: selects the role's skill directly instead of
+    # scanning the prompt (which embeds run context and over-matched).
+    role = str(request.get("role") or "") or None
     selection = select_agent_skills(
         system=system,
         prompt=prompt,
         cwd=cwd,
         active_goal_file=active_goal_file,
         request_type=request_type,
+        role=role,
     )
     full_prompt = _build_full_prompt(
         system=system,

@@ -164,16 +164,50 @@ def _pressure_missing(pressure_status: dict[str, Any] | None, kind: str) -> bool
     return True
 
 
+def _human_answered_routes(update_inbox: dict[str, Any] | None) -> set[str]:
+    """Routes whose scheduler question a human has answered.
+
+    The objection count is deliberately monotone — consumption is not
+    resolution — which is correct for automated rounds and wrong once a person
+    has actually answered. Without this, a route that reached ask_human could
+    never leave it: the rebuilt plan asked the same question forever and the
+    remaining approved budget was unreachable. A recorded
+    ``human_scheduling_decision`` supersedes the objection rounds for its route
+    (scheduling only; it can never touch a mathematical status).
+    """
+
+    if not update_inbox:
+        return set()
+    answered: set[str] = set()
+    for entry in update_inbox.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("type") != "human_scheduling_decision":
+            continue
+        if (
+            entry.get("effect") != "scheduling_only"
+            or entry.get("advisory_only") is not True
+            or entry.get("validator_ok") is not True
+        ):
+            continue
+        route = entry.get("route_id_or_step_id")
+        if route:
+            answered.add(str(route))
+    return answered
+
+
 def _reviewer_objection_round_counts(update_inbox: dict[str, Any] | None) -> dict[str, int]:
     """Count distinct reviewer-objection rounds per route from Update Inbox.
 
     Multiple reviewer entries from the same round still represent one scheduling
     round. The objection prose is not copied into the inbox and is not inspected
-    here; only validator-approved scheduling pointers count.
+    here; only validator-approved scheduling pointers count. A route the human
+    has answered restarts at zero — see :func:`_human_answered_routes`.
     """
 
     if not update_inbox:
         return {}
+    answered = _human_answered_routes(update_inbox)
     rounds_by_route: dict[str, set[tuple[str, str]]] = {}
     for entry in update_inbox.get("entries") or []:
         if not isinstance(entry, dict):
@@ -196,7 +230,10 @@ def _reviewer_objection_round_counts(update_inbox: dict[str, Any] | None) -> dic
                 str(entry.get("artifact_revision_or_hash", "")),
             )
         )
-    return {route: len(rounds) for route, rounds in rounds_by_route.items()}
+    return {
+        route: (0 if route in answered else len(rounds))
+        for route, rounds in rounds_by_route.items()
+    }
 
 
 def _consumed_reviewer_objection_entry_ids(
