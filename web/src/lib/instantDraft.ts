@@ -1,11 +1,11 @@
 /**
- * Instant-draft client. The instant lane answers a claim FAST with a
- * labeled DRAFT ("Draft only — not checked") while the slow artifact/kernel
- * pipeline runs in the background. Like the chat stream, it is a PREVIEW —
- * never evidence; every line was already proof-language-scrubbed server-side.
+ * Instant-draft client. The instant lane answers a claim FAST with a DRAFT
+ * while the slow artifact/kernel pipeline runs in the background. Like the
+ * chat stream, it is a PREVIEW — never evidence; every line was already
+ * proof-language-scrubbed server-side.
  *
  * It reads a POST + Server-Sent-Events body with three event kinds:
- *   - `ack`   {label, working}              — emitted immediately
+ *   - `ack`   {working}                     — emitted immediately
  *   - `draft` {text}                        — one already-scrubbed draft line
  *   - `done`  {ok, instant_lane_metrics, advisory}
  *

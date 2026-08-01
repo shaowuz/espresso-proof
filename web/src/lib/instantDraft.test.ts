@@ -22,8 +22,8 @@ describe("streamInstantDraft", () => {
       "fetch",
       vi.fn().mockResolvedValue(
         sseResponse([
-          'event: ack\ndata: {"label":"Draft only — not checked","working":true}\n\n',
-          'event: draft\ndata: {"text":"Draft only — not checked."}\n\n',
+          'event: ack\ndata: {"working":true}\n\n',
+          'event: draft\ndata: {"text":"A first read of the claim."}\n\n',
           'event: draft\ndata: {"text":"Route 1: restate the claim precisely."}\n\n',
           'event: done\ndata: {"ok":true,"instant_lane_metrics":{"instant_lane_status":"fallback"},"advisory":true}\n\n',
         ]),
@@ -42,7 +42,7 @@ describe("streamInstantDraft", () => {
       },
     });
     expect(acked).toBe(true);
-    expect(lines[0]).toBe("Draft only — not checked.");
+    expect(lines[0]).toBe("A first read of the claim.");
     expect(lines).toHaveLength(2);
     expect(done).toEqual({ ok: true, status: "fallback" });
   });
@@ -63,7 +63,7 @@ describe("streamInstantDraft", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       sseResponse([
         'event: ack\ndata: {"working":true}\n\n',
-        'event: draft\ndata: {"text":"Draft only — not checked."}\n\n',
+        'event: draft\ndata: {"text":"A first read of the claim."}\n\n',
         'event: done\ndata: {"ok":true,"instant_lane_metrics":{"instant_lane_status":"fallback"}}\n\n',
       ]),
     );
@@ -77,7 +77,7 @@ describe("streamInstantDraft", () => {
       },
     });
     expect(fetchMock.mock.calls[0][0]).toBe("/api/instant-draft");
-    expect(lines).toEqual(["Draft only — not checked."]);
+    expect(lines).toEqual(["A first read of the claim."]);
     expect(done).toEqual({ ok: true, status: "fallback" });
   });
 

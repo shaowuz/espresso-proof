@@ -1054,7 +1054,7 @@ def _make_handler(workbench: Workbench):
                 self.wfile.flush()
 
             try:
-                emit("ack", {"label": "Draft only — not checked", "working": True})
+                emit("ack", {"working": True})
                 ack_ms = monotonic_ms() - t0
                 # A bounded, single-attempt fast client — never the deep product
                 # adapter, and never the run's client. With nothing configured

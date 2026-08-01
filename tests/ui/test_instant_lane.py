@@ -2,8 +2,9 @@
 
 These tests pin the safety/latency contract of the instant lane:
 
-- a model-backed draft is labeled "Draft only — not checked" and carries
-  intuition, routes, and caveats about the submitted claim;
+- a model-backed draft streams intuition, routes, and caveats about the
+  submitted claim, and nothing else: the advisory framing lives on the stored
+  record and in the panel it appears in, not in a sentence repeated per draft;
 - with no usable model the lane shows NOTHING rather than claim-independent
   filler (see test_a_lane_with_no_model_says_nothing);
 - a deliberately SLOW fake model never blocks past the budget — the lane falls
@@ -107,10 +108,11 @@ def test_a_model_backed_draft_is_labeled_and_structured() -> None:
     assert draft.visible_label == VISIBLE_LABEL
     assert 1 <= len(draft.routes_preview) <= 3
     lines = draft_lines(draft)
-    assert lines[0].startswith("Draft only — not checked")
-    # The label and the mathematics; the standing safety note lives on the
-    # persisted record and on the panel's badge, not in every stream.
-    assert draft.safety_note
+    # Mathematics only. The record still carries the locked label and the
+    # standing safety note; neither is streamed as a line.
+    assert lines[0].startswith("The class equation")
+    assert draft.visible_label == VISIBLE_LABEL and draft.safety_note
+    assert not any(VISIBLE_LABEL in line for line in lines)
     assert not any(draft.safety_note[:30] in line for line in lines)
 
 
