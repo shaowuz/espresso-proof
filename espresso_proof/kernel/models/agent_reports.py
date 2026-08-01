@@ -250,7 +250,14 @@ class ProverLoopBlocker(StrictBaseModel):
     text: str
     severity: Literal["P0", "P1", "P2", "P3"] = "P2"
     kind: str = "other"
-    source_field: Literal["objections", "missing_hypotheses", "source_requests"]
+    # Which reviewer lane the blocker came from. "scoped_objections" is the
+    # STRUCTURED lane: reviewers are asked for objections carrying a scope, a
+    # kind and a P0-P3 severity, and until that lane could produce a blocker it
+    # could not steer a round at all — a reviewer whose whole substantive output
+    # was scoped (observed live) contributed nothing to the loop.
+    source_field: Literal[
+        "objections", "missing_hypotheses", "source_requests", "scoped_objections"
+    ]
     verifier_id: str
 
 class ProverLoopAttempt(StrictBaseModel):

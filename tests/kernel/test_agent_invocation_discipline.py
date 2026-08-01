@@ -186,3 +186,37 @@ def test_appended_rounds_carry_per_call_diagnostics() -> None:
     # role and collects the adapter envelope), not straight to the client.
     assert "_complete_agent_json" in source
     assert "client.complete_json(" not in source
+
+
+def test_a_scoped_blocker_record_survives_the_kernel_model() -> None:
+    """The regression the unit tests missed and a real run caught.
+
+    Collecting scoped objections into the blocker list is only useful if the
+    resulting record validates: ProverLoopBlocker.source_field was a Literal of
+    the three legacy lanes, so the first real run after the change died in
+    validation with `Input should be 'objections', 'missing_hypotheses' or
+    'source_requests'`. Every source_field the collector can emit must be a
+    value the model accepts.
+    """
+
+    from espresso_proof.agents.agent_pass import collect_open_reviewer_blockers
+    from espresso_proof.kernel.models import ProverLoopBlocker
+
+    reviews = [
+        {
+            "verifier_id": "evidence_reviewer_002",
+            "verdict": "needs_sources",
+            "objections": ["a legacy objection"],
+            "missing_hypotheses": ["a missing hypothesis"],
+            "source_requests": ["a source request"],
+            "scoped_objections": [
+                {"text": "a scoped-only objection", "severity": "P1", "kind": "missing_source"}
+            ],
+        }
+    ]
+    records = collect_open_reviewer_blockers(reviews)
+    assert {r["source_field"] for r in records} == {
+        "objections", "missing_hypotheses", "source_requests", "scoped_objections",
+    }
+    for record in records:
+        ProverLoopBlocker.model_validate(record)
