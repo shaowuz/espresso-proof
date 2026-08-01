@@ -68,6 +68,7 @@ _LITERATURE_OUTPUT_SCHEMA = {
             "relevance": "core|background|example_source|counterexample_source|possible_theorem_source",
             "status": "candidate|unverified|not_found",
             "why_relevant": "string",
+            "url": "https link to the paper/arXiv/DOI when known, else empty",
         }
     ],
     "known_examples": ["string"],
@@ -83,6 +84,18 @@ def _candidate_status(value: object) -> str:
         return value
     # source_backed / misapplied / anything unknown -> downgraded to candidate.
     return "candidate"
+
+
+def _normalize_url(value: object) -> str:
+    """A display link, or empty. https only — an agent cannot plant a scheme
+    the browser would execute (javascript:, data:, file:)."""
+
+    text = str(value or "").strip()
+    if len(text) > 300:
+        return ""
+    if text.startswith("https://") or text.startswith("http://"):
+        return text
+    return ""
 
 
 def _normalize_literature_items(raw_items: object) -> list[dict]:
@@ -107,6 +120,7 @@ def _normalize_literature_items(raw_items: object) -> list[dict]:
                 "relevance": relevance,
                 "status": _candidate_status(raw.get("status")),
                 "why_relevant": safe_text(raw.get("why_relevant", "")) or "candidate reference",
+                "url": _normalize_url(raw.get("url")),
                 "found_by": "literature_review",  # agent attribution; never user/source
             }
         )

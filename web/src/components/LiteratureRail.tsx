@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BookOpen } from "lucide-react";
+import { BookOpen, ExternalLink } from "lucide-react";
 import { useLiteraturePanel } from "../hooks/useCockpit";
 import { ToneBadge } from "./ToneBadge";
 import { DetailRow, ExpandableCard, PanelPlaceholder } from "./ExpandableCard";
@@ -130,7 +130,7 @@ export function LiteratureRail({
                         <span className="truncate">{ref.locator.value}</span>
                       </span>
                     )}
-                    <ToneBadge tone={ref.tone} phrase={ref.phrase} />
+                    {ref.phrase !== "" && <ToneBadge tone={ref.tone} phrase={ref.phrase} />}
                   </span>
                 </span>
               }
@@ -143,6 +143,17 @@ export function LiteratureRail({
                     <DetailRow label="Relevance"><MathText>{ref.relevance}</MathText></DetailRow>
                   )}
                   {ref.why !== "" && <DetailRow label="Why relevant"><MathText>{ref.why}</MathText></DetailRow>}
+                  {ref.url && (
+                    <a
+                      href={ref.url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="inline-flex w-fit items-center gap-1 rounded-md border border-sage-200 bg-sage-50 px-2 py-1 text-[13px] font-medium text-sage-800 hover:bg-sage-100"
+                    >
+                      <ExternalLink className="h-3 w-3" aria-hidden />
+                      {ref.url.includes("scholar.google") ? "Search on Google Scholar" : "Open source"}
+                    </a>
+                  )}
                 </div>
               }
             />

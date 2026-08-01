@@ -45,7 +45,9 @@ describe("active object UI", () => {
         ]}
       />,
     );
-    expect(html).toContain("Context requested: active strategy");
+    // Codex-style bubble: context renders as a compact "re:" chip inside
+    // the user message, not an uppercase banner.
+    expect(html).toContain("re: strategy");
     expect(html).toContain("Lock the claim before deeper strategy work");
     expect(html).toContain("Note on active object");
     expect(html).not.toContain("text-sage");

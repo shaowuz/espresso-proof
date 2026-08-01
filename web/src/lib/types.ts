@@ -165,6 +165,8 @@ export interface LiteratureView {
   locator: { kind: string; value: string };
   relevance: string;
   why: string;
+  /** A way IN to the source (recorded url or a scholar search) — display only. */
+  url?: string;
   phrase: string;
   tone: Tone;
   related_strategy_ids?: string[];

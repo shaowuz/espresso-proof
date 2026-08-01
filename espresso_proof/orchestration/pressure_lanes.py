@@ -110,10 +110,24 @@ def pressure_lane_memo_lines(run_dir: Path) -> list[str]:
     lanes = build_pressure_lane_view(run_dir)
     if not lanes:
         return []
+    # One line per lane that has something of its OWN to report; every idle
+    # lane shares one collapsed line. The section itself stays — pending
+    # pressure is exactly why routes render PRELIMINARY.
+    def _idle(lane: dict) -> bool:
+        return "not started" in str(lane.get("status_word", "")).lower()
+
     lines = ["Pressure lanes:"]
+    idle_titles: list[str] = []
     for lane in lanes:
+        if _idle(lane):
+            idle_titles.append(str(lane["title"]))
+            continue
         lines.append(
             f"  - {lane['title']}: {lane['status_word']} - {lane['evidence_note']}"
+        )
+    if idle_titles:
+        lines.append(
+            "  - " + ", ".join(idle_titles) + ": Not started - pending; not counted as evidence"
         )
     return lines
 
