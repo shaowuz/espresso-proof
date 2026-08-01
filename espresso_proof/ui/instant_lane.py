@@ -282,16 +282,22 @@ def draft_lines(draft: InstantConversation) -> list[str]:
     """The ordered, already-scrubbed lines the lane shows, or [] when the lane
     has no model text about this claim.
 
-    The label leads so the 'draft, not checked' framing is visible before any
-    mathematical text. ``safety_note`` stays on the persisted record (it is the
-    contract this sidecar is stored under) but is not streamed: the panel's
-    permanent "Draft only — not checked" badge already says it, and repeating it
-    as a sentence per draft only crowds out the mathematics.
+    Mathematics only. ``visible_label`` and ``safety_note`` stay on the
+    persisted record — it is the contract this sidecar is stored under — but
+    neither is streamed as text. The framing is carried by where the draft
+    appears: its own card, titled "Instant draft", in neutral amber that the
+    UI never uses for earned evidence. Saying the same sentence a third and
+    fourth time crowded out the only part a reader came for.
+
+    None of this touches what the draft may CLAIM: ``advisory_only`` stays
+    locked true, ``writes_kernel_status`` locked false, the sidecar stays out
+    of the run manifest, and every field is still scrubbed of proof-complete
+    and earned-status language on the way in.
     """
 
     if not (draft.answer or draft.routes_preview):
         return []
-    lines = [f"{draft.visible_label}.", draft.answer]
+    lines = [draft.answer]
     for i, route in enumerate(draft.routes_preview, start=1):
         lines.append(f"Route {i}: {route}")
     for caveat in draft.caveats:

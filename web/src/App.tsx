@@ -250,7 +250,7 @@ export default function App() {
               agents={status.data?.agents ?? []}
             />
           ) : (
-            <ShellPlaceholder />
+            <ShellPlaceholder title="Examples" />
           )}
         </aside>
 
@@ -310,7 +310,7 @@ export default function App() {
               agents={status.data?.agents ?? []}
             />
           ) : (
-            <ShellPlaceholder />
+            <ShellPlaceholder title="Literature Review" />
           )}
         </aside>
       </main>
@@ -338,11 +338,12 @@ export default function App() {
   );
 }
 
-function ShellPlaceholder() {
+function ShellPlaceholder({ title }: { title: string }) {
+  // Before a run exists a rail has no content, so it names what it is FOR.
+  // "This panel fills in once a run is selected" described the mechanism and
+  // left both rails looking interchangeable while waiting.
   return (
-    <div className="p-4 text-[14px] text-stone-400">
-      This panel fills in once a run is selected.
-    </div>
+    <div className="p-4 text-[14px] font-medium text-stone-400">{title}</div>
   );
 }
 

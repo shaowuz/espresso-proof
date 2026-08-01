@@ -1,6 +1,6 @@
 """The instant-draft SSE endpoint is fast, scrubbed, and advisory.
 
-It acks immediately, streams a labeled DRAFT, persists only an advisory sidecar
+It acks immediately, streams the DRAFT, persists only an advisory sidecar
 (never a kernel artifact), upgrades no status, is CSRF-guarded, and validate_run
 still passes after the draft is written.
 """
@@ -114,7 +114,7 @@ def test_instant_draft_acks_then_streams_labeled_draft(client, fast_model) -> No
     assert events[0]["event"] == "ack"  # acknowledged first
     drafts = [e["data"]["text"] for e in events if e["event"] == "draft"]
     assert drafts, "the lane streams draft lines"
-    assert drafts[0].startswith("Draft only — not checked")
+    assert drafts[0].startswith("First read of")  # the model's text, first
 
     done = events[-1]
     assert done["event"] == "done" and done["data"]["ok"] is True
@@ -135,7 +135,7 @@ def test_transient_instant_draft_needs_no_run_and_persists_nothing(client, fast_
     events = _parse_sse(raw)
     assert events[0]["event"] == "ack"
     drafts = [e["data"]["text"] for e in events if e["event"] == "draft"]
-    assert drafts and drafts[0].startswith("Draft only — not checked")
+    assert drafts and drafts[0].startswith("First read of")
     done = events[-1]
     assert done["event"] == "done" and done["data"]["ok"] is True
     # no run was created/touched: background_run_started is False and the runs

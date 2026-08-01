@@ -6,18 +6,18 @@ import { MathText } from "./MathText";
 import { streamInstantDraftTransient, type InstantStatus } from "../lib/instantDraft";
 import { cn } from "../lib/cn";
 
-const LABEL = "Draft only — not checked";
-
 type Phase = "working" | "streaming" | "done";
 
 /**
  * The instant conversation lane panel. It fires the moment a claim is
  * submitted — DECOUPLED from run creation — so a slow workflow can never delay
- * or blank the draft. It shows a fast, labeled DRAFT while the evidence pipeline
- * runs in the background. The draft is conversation, NOT evidence:
+ * or blank the draft. It shows a fast DRAFT while the evidence pipeline runs in
+ * the background. The draft is conversation, NOT evidence:
  *
- * - it is visibly labeled "Draft only — not checked" and styled neutral
- *   (amber/stone) — NEVER the earned evidence-green;
+ * - it lives in its own card titled "Instant draft", in neutral amber/stone —
+ *   NEVER the earned evidence-green. (A repeated "Draft only — not checked"
+ *   badge and stream line said the same thing twice more and were removed; the
+ *   advisory contract lives in the record and the server, not in signage.)
  * - every line was proof-language-scrubbed server-side before it arrived;
  * - it updates no evidence panel and upgrades no status;
  * - once the run has earned evidence the panels are authoritative, so the draft
@@ -86,9 +86,6 @@ export function InstantDraft({
           <Sparkles className="h-4 w-4 text-amber-500" aria-hidden />
           Instant draft
         </CardTitle>
-        <span className="rounded-full border border-amber-300 bg-amber-100/70 px-2 py-0.5 text-[12px] font-medium text-amber-800">
-          {LABEL}
-        </span>
       </CardHeader>
       <CardContent className="pt-0 text-[14px] leading-relaxed text-stone-700">
         {superseded && (

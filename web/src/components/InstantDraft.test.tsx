@@ -11,11 +11,13 @@ describe("InstantDraft", () => {
     expect(renderToStaticMarkup(<InstantDraft claimText="" />)).toBe("");
   });
 
-  it("shows the locked draft label and neutral styling, never earned-green", () => {
+  it("shows the draft's own card and neutral styling, never earned-green", () => {
     const html = renderToStaticMarkup(
       <InstantDraft claimText="Show |G|=p^2 implies abelian." />,
     );
-    expect(html).toContain("Draft only — not checked");
+    // The card's title is what separates a draft from the evidence panels; a
+    // repeated "Draft only — not checked" badge said it a second time and was
+    // removed. The advisory contract itself is server-side and unchanged.
     expect(html).toContain("Instant draft");
     // neutral amber/stone — never the earned evidence green.
     expect(html).not.toContain("bg-green");
