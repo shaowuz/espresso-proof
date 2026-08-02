@@ -140,6 +140,62 @@ def validate_scheduling_update(
     return entry
 
 
+def record_auto_scheduling_decision(
+    run_dir: Path,
+    *,
+    route_id: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Answer a scheduler question without a human, so the run does not park.
+
+    The scheduler asks "the objections keep repeating; do I keep spending?".
+    Blocking on that made the run wait for a person who may never come, while
+    the question is about BUDGET, not about mathematics — and the budget is
+    already bounded by max_rounds / max_agent_calls, which is what actually
+    stops a runaway loop.
+
+    Recorded as its own type so it can never read as a person's answer, and it
+    is overridable: a later ``human_scheduling_decision`` on the same route is
+    the person's word and supersedes this.
+    """
+
+    from espresso_proof.kernel.pressure_status import artifact_revision_hash
+
+    run_dir = Path(run_dir)
+    if not str(reason).strip():
+        raise UpdateInboxServiceError("an auto scheduling decision requires a reason")
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    claim = read_yaml(run_dir / manifest["artifacts"]["locked_claim"])
+    # The question was raised by the reviewers' repeated objections, so the
+    # answer cites the artifact those objections live in. It must not cite a
+    # scheduling artifact: the inbox refuses entries that originate from the
+    # scheduling layer itself, which is what keeps the scheduler from feeding
+    # its own decisions back in as fresh signal.
+    origin_rel = (manifest.get("optional_artifacts") or {}).get(
+        "llm_agent_run"
+    ) or manifest["artifacts"]["human_choice"]
+    created_at = datetime.now(UTC).isoformat()
+    entry = {
+        "id": f"auto_sched_{route_id}_{created_at}",
+        "type": "auto_scheduling_decision",
+        "origin_stage": "auto_scheduling_answer",
+        "origin_artifact": origin_rel,
+        "origin_artifact_id_or_path": origin_rel,
+        "locked_claim_id": claim["id"],
+        "route_id_or_step_id": str(route_id),
+        "artifact_revision_or_hash": artifact_revision_hash(run_dir, Path(origin_rel)),
+        "validator_ok": True,
+        "created_at": created_at,
+        "dedupe_key": f"auto_scheduling_decision:{route_id}:{created_at}",
+        "applied_at": None,
+        "effect": "scheduling_only",
+        "advisory_only": True,
+    }
+    append_scheduling_update(run_dir, entry)
+    plan = write_time_allocation_plan(run_dir)
+    return {"entry_id": entry["id"], "route_id": str(route_id), "plan": plan}
+
+
 def record_human_scheduling_decision(
     run_dir: Path,
     *,

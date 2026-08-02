@@ -825,6 +825,7 @@ def run_output_block(run_dir: Path) -> str:
     loop = load(optional.get("prover_loop") or "prover_loop.yaml")
     proof = load(optional.get("line_numbered_proof"))
     counterexamples = load_counterexamples(artifacts.get("counterexamples"))
+    update_inbox = load(optional.get("update_inbox") or "update_inbox.yaml")
 
     lines: list[str] = []
     routes = _items(brief.get("top_strategies"))
@@ -881,6 +882,26 @@ def run_output_block(run_dir: Path) -> str:
             f"Counterexample pressure: {len(candidates)} candidate(s) proposed and not "
             f"yet checked ({ids}). Each one is a proposed refutation of the claim; "
             "whether any is admissible against the locked hypotheses is undecided here."
+        )
+    # Questions the scheduler answered on its own. The run no longer parks on
+    # them — spending is bounded by the round budget, not by a person being
+    # present — but a decision made because nobody was waiting is exactly the
+    # kind a person may want to revisit, so it is said out loud and named as
+    # overridable rather than buried in the inbox.
+    auto_answered = sorted(
+        {
+            str(entry.get("route_id_or_step_id") or "")
+            for entry in _items(update_inbox.get("entries"))
+            if entry.get("type") == "auto_scheduling_decision"
+            and str(entry.get("route_id_or_step_id") or "")
+        }
+    )
+    if auto_answered:
+        lines.append(
+            "Scheduling decided without you: the scheduler asked whether to keep "
+            f"spending on {', '.join(auto_answered)} and machinery answered so the "
+            "run could continue. Override it with `espresso answer-scheduler` on "
+            "that route, or direct another round from the cockpit."
         )
     if proof.get("lines"):
         lines.append(
