@@ -1375,3 +1375,25 @@ def test_counterexample_example_id_not_fabricated(tmp_path: Path) -> None:
     matched = next(t for t in rows if t is not unmatched)
     assert unmatched["example_id"] == "The symmetric group S_3"
     assert matched["example_id"] == first_example["id"]
+
+
+def test_scaffold_placeholders_never_ride_along_with_real_gaps() -> None:
+    """A live run graded the harmonic-sum claim with missing hypotheses
+    "objects, hypotheses, conclusion, <two real mathematical gaps>".
+
+    The first three are the generic scaffold's field NAMES, not gaps. They used
+    to be cleared only when the whole list was placeholders, so any run that
+    found a real gap kept the noise beside it and a reader could not tell which
+    entries named anything.
+    """
+
+    from espresso_proof.front_half.stages.grade import _without_generic_missing_hypotheses
+
+    real = "Precise claim that the largest prime p <= n divides denom(H_n)."
+    assert _without_generic_missing_hypotheses(
+        ["objects", "hypotheses", "conclusion", real]
+    ) == [real]
+    # All-placeholder stays empty, and a real-only list is untouched.
+    assert _without_generic_missing_hypotheses(["objects", "Hypotheses"]) == []
+    assert _without_generic_missing_hypotheses([real]) == [real]
+    assert _without_generic_missing_hypotheses(None) == []

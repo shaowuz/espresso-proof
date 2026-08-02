@@ -61,6 +61,7 @@ from espresso_proof.agents.adapter_runtime import (  # noqa: E402 - needs ROOT o
     fallback_is_schema_valid,
     resolve_inner_timeout,
 )
+from espresso_proof.agents.json_repair import loads_forgiving  # noqa: E402 - same
 
 # Conservative fallback. Includes the Prover/Reviewer keys so that path stays
 # safe even on failure; front-half normalizers ignore unknown keys and fall back
@@ -115,12 +116,18 @@ def main() -> int:
             system=system, prompt=prompt, selection=selection, output_schema=output_schema
         )
         text, envelope_meta = _run_claude(full_prompt, timeout=inner_timeout)
-        data = _extract_json(text)
+        data, repaired = _extract_json(text)
         if not isinstance(data, dict):
             raise ValueError("claude output was not a JSON object")
         result = _scrub_candidate(data)  # neutralize any status smuggle in prose
-        parse_status = "ok"
-        fallback_reason = ""
+        # "repaired" is not "ok": the reply needed its own escaping fixed before
+        # it would parse. The content is the model's; the record says so.
+        parse_status = "repaired" if repaired else "ok"
+        fallback_reason = (
+            "invalid escapes/control characters inside JSON strings were repaired"
+            if repaired
+            else ""
+        )
     except Exception as exc:  # noqa: BLE001 - fallback where safe, else fail closed
         reason = f"claude adapter could not produce usable JSON: {exc}"[:300]
         if not fallback_is_schema_valid(request, _FALLBACK):
@@ -219,16 +226,20 @@ def _run_claude(prompt: str, *, timeout: int) -> tuple[str, dict | None]:
     return envelope["result"], meta
 
 
-def _extract_json(text: str) -> dict:
+def _extract_json(text: str) -> tuple[dict, bool]:
+    """Return (object, repaired). See json_repair: a model writing LaTeX into a
+    JSON string ("\\frac", "\\le") produces text strict JSON rejects, and
+    losing the whole call to that was costing real reviewer feedback."""
+
     text = text.strip()
     # Prefer a fenced ```json block if present, else the first balanced object.
     fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if fence is not None:
-        return json.loads(fence.group(1))
+        return loads_forgiving(fence.group(1))
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match is None:
         raise ValueError("no JSON object found in claude output")
-    return json.loads(match.group(0))
+    return loads_forgiving(match.group(0))
 
 
 def _reclaim_process_group(proc) -> None:

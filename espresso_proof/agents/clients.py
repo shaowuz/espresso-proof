@@ -33,6 +33,7 @@ from espresso_proof.agents.adapter_runtime import (
     timeout_for_role,
     EXTERNAL_AGENT_TIMEOUT_ENV,
 )
+from espresso_proof.agents.json_repair import loads_forgiving
 from espresso_proof.kernel.llm_client import LLMClient
 
 
@@ -337,7 +338,9 @@ class OpenAIResponsesClient:
                 pass
         text = extract_response_text(data)
         try:
-            return json.loads(strip_code_fence(text))
+            # Forgiving on the model's own escaping only (see json_repair):
+            # LaTeX backslashes in mathematical prose are the normal case.
+            return loads_forgiving(strip_code_fence(text))[0]
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"OpenAI response was not valid agent JSON: {text[:500]}") from exc
 
