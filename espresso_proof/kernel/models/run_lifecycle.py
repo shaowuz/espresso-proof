@@ -723,6 +723,12 @@ class FrontHalfStageResult(StrictBaseModel):
     validation: Literal["ok", "error", "not_run"] = "not_run"
     unsafe_language: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    # What the stage actually WROTE, in its own words (item counts). "ok" only
+    # means the stage did not fail: a live run recorded ten green rows while two
+    # of those stages spent four minutes of model time and produced an empty
+    # counterexample artifact. The stages already computed this note and then
+    # discarded it. Free text, counts only, never a mathematical status.
+    produced: str = ""
 
     @model_validator(mode="after")
     def validate_stage_result(self) -> FrontHalfStageResult:

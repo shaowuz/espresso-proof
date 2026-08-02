@@ -122,6 +122,14 @@ def run_front_half_agent_pass(
                 "validation": "ok",
                 "errors": [],
                 "unsafe_language": list(outcome.get("unsafe_language", [])),
+                # The stage's own count of what it wrote. Every stage already
+                # returns this and the runner used to drop it, so a reader
+                # could not tell a productive "ok" from an empty one.
+                "produced": "; ".join(
+                    str(note).strip()
+                    for note in (outcome.get("notes") or [])
+                    if str(note).strip()
+                )[:300],
             }
         )
 

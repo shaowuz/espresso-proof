@@ -1397,3 +1397,67 @@ def test_scaffold_placeholders_never_ride_along_with_real_gaps() -> None:
     assert _without_generic_missing_hypotheses(["objects", "Hypotheses"]) == []
     assert _without_generic_missing_hypotheses([real]) == [real]
     assert _without_generic_missing_hypotheses(None) == []
+
+
+def test_a_stage_row_records_what_it_produced_not_only_that_it_ran(tmp_path) -> None:
+    """A live run recorded ten green "ok" rows while the counterexamples stage
+    wrote an empty artifact and the attacker added nothing to it — together
+    about four minutes of model time. Each stage already returned its own count
+    of what it wrote; the runner dropped it, so "ok" meant only "did not fail".
+    """
+
+    from espresso_proof.kernel.models import FrontHalfStageResult
+
+    row = FrontHalfStageResult.model_validate(
+        {
+            "stage": "counterexamples",
+            "status": "ok",
+            "validation": "ok",
+            "produced": "counterexamples wrote 0 agent candidate(s), 0 machine probe(s)",
+        }
+    )
+    assert "0 agent candidate(s)" in row.produced
+    # Absent on older records, and never a mathematical status.
+    assert FrontHalfStageResult.model_validate(
+        {"stage": "examples", "status": "ok", "validation": "ok"}
+    ).produced == ""
+    import pytest as _pytest
+
+    with _pytest.raises(Exception):
+        FrontHalfStageResult.model_validate(
+            {"stage": "x", "status": "ok", "validation": "ok", "proof_status": "proved"}
+        )
+
+
+def test_a_locator_that_cannot_locate_is_recorded_as_unknown() -> None:
+    """Across two live runs, nine references carried locators like "Chapters on
+    Borsuk-Ulam and applications" and "exact location not recalled" — three of
+    them declared kind "section", asserting a specificity the value never had.
+    Reviewers then spent objections asking for the exact locator the artifact
+    appeared to already carry."""
+
+    from espresso_proof.front_half.safety import _normalize_locator
+
+    # Prose that names no number and no identifier: kind drops to unknown, and
+    # the model's own words are kept so nothing is lost.
+    for prose in (
+        "Chapters on Borsuk-Ulam and applications",
+        "Unknown section; harmonic sums discussed in context of divisibility",
+        "Classical theorem in number theory; statements vary by source",
+    ):
+        out = _normalize_locator({"kind": "section", "value": prose})
+        assert out == {"kind": "unknown", "value": prose}
+
+    # Anything that can actually locate keeps its kind.
+    for kind, value in (
+        ("section", "Chapter 1 on homotopy"),
+        ("section", "Theorem 4.3, p. 112"),
+        ("arxiv_id", "2202.08222"),
+        ("url", "https://example.org/paper"),
+    ):
+        assert _normalize_locator({"kind": kind, "value": value})["kind"] == kind
+
+    assert _normalize_locator({"kind": "section", "value": ""}) == {
+        "kind": "unknown",
+        "value": "not specified",
+    }

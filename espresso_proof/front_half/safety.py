@@ -7,6 +7,8 @@ import any stage module).
 
 from __future__ import annotations
 
+import re
+
 from espresso_proof.agents.llm_agents import safe_text
 from espresso_proof.kernel.models import Review
 
@@ -32,6 +34,26 @@ _IDEA_STATUSES = {"promising", "fragile", "likely_false", "refuted", "unclear"}
 _EXPLORATION_MODES = {"quick_test", "normal_pass", "deep_exploration", "long_watch"}
 
 
+# A locator has to locate. Across two live runs, nine references carried
+# locators like "Chapters on Borsuk-Ulam and applications", "Unknown section",
+# and "exact location not recalled" — three of them declared kind "section",
+# which asserts a specificity the value does not have. Reviewers then spent
+# objections asking for the exact locator the artifact appeared to already
+# have. A value that names no number and no identifier is a description of
+# where something might be, so it is recorded as kind "unknown" and the
+# description is kept verbatim.
+_LOCATABLE = re.compile(
+    r"\d"                                   # any theorem/section/page/chapter number
+    r"|arxiv[:\s]|doi[:\s]|https?://"       # or a resolvable identifier
+    r"|10\.\d{4}",                           # or a bare DOI prefix
+    re.IGNORECASE,
+)
+
+
+def _locator_can_locate(value: str) -> bool:
+    return bool(_LOCATABLE.search(value))
+
+
 def _normalize_locator(raw: object) -> dict:
     if isinstance(raw, dict):
         kind = raw.get("kind")
@@ -40,6 +62,9 @@ def _normalize_locator(raw: object) -> dict:
             kind = "unknown"
         if not value:
             kind, value = "unknown", "not specified"
+        elif kind != "unknown" and not _locator_can_locate(value):
+            # Keep the words the model wrote; stop calling them a section/page.
+            kind = "unknown"
         return {"kind": kind, "value": value}
     return {"kind": "unknown", "value": "not specified"}
 

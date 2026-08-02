@@ -107,6 +107,11 @@ def main() -> int:
     )
 
     envelope_meta: dict | None = None
+    # Which half of the call failed, so the recorded reason names the real
+    # cause. A live run recorded "could not produce usable JSON" for a call
+    # where the CLI exited non-zero and no reply existed to parse — the record
+    # blamed the model for an infrastructure failure.
+    phase = "run the claude CLI"
     try:
         selection = _select_skills(
             system=system, prompt=prompt, role=str(request.get("role") or "") or None
@@ -116,6 +121,7 @@ def main() -> int:
             system=system, prompt=prompt, selection=selection, output_schema=output_schema
         )
         text, envelope_meta = _run_claude(full_prompt, timeout=inner_timeout)
+        phase = "produce usable JSON"
         data, repaired = _extract_json(text)
         if not isinstance(data, dict):
             raise ValueError("claude output was not a JSON object")
@@ -129,7 +135,7 @@ def main() -> int:
             else ""
         )
     except Exception as exc:  # noqa: BLE001 - fallback where safe, else fail closed
-        reason = f"claude adapter could not produce usable JSON: {exc}"[:300]
+        reason = f"claude adapter could not {phase}: {exc}"[:300]
         if not fallback_is_schema_valid(request, _FALLBACK):
             # Back-half authoritative-schema role: the prover-shaped fallback
             # would be normalized into garbage downstream (e.g. lines=[]).
