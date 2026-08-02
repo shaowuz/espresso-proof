@@ -277,7 +277,11 @@ def test_claude_adapter_returns_safe_fallback_when_cli_fails(tmp_path: Path) -> 
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
     assert payload["verdict"] == "needs_revision"
-    assert "claude adapter could not produce usable JSON" in payload["summary"]
+    # The reason names the half that failed: nothing was returned to parse, so
+    # blaming the model for unusable JSON pointed a live investigation at the
+    # wrong component.
+    assert "claude adapter could not run the claude CLI" in payload["summary"]
+    assert "usable JSON" not in payload["summary"]
 
 
 # ---------------------------------------------------------------------------
@@ -400,7 +404,7 @@ def test_claude_adapter_prover_fallback_unchanged_on_cli_failure(tmp_path: Path)
     )
     assert completed.returncode == 0
     payload = json.loads(completed.stdout)
-    assert "could not produce usable JSON" in payload["summary"]
+    assert "could not run the claude CLI" in payload["summary"]
     assert payload["verdict"] == "needs_revision"
 
 

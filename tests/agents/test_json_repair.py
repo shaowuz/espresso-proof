@@ -127,3 +127,42 @@ def test_a_repaired_call_still_counts_as_a_real_provider_call() -> None:
     assert diagnostic("ok", False)["verified_real_provider"] is True
     assert diagnostic("repaired", False)["verified_real_provider"] is True
     assert diagnostic("fallback", True)["verified_real_provider"] is False
+
+
+def test_a_failed_cli_is_not_reported_as_unusable_json(monkeypatch, capsys) -> None:
+    """A live round recorded "could not produce usable JSON" for a call whose
+    CLI exited non-zero: there was no reply to parse at all, and the record
+    blamed the model for an infrastructure failure."""
+
+    import io
+    import json as _json
+
+    from espresso_proof.agents import claude_adapter
+
+    def boom(prompt, *, timeout):
+        raise RuntimeError("claude CLI returned non-zero")
+
+    monkeypatch.setattr(claude_adapter, "_run_claude", boom)
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO(_json.dumps({"system": "s", "prompt": "p", "role": "prover"}))
+    )
+    assert claude_adapter.main() == 0
+    out = _json.loads(capsys.readouterr().out)
+    reason = out["_espresso_adapter"]["fallback_reason"]
+    assert "could not run the claude CLI" in reason
+    assert "usable JSON" not in reason
+
+
+def test_an_unparseable_reply_still_says_so(monkeypatch, capsys) -> None:
+    import io
+    import json as _json
+
+    from espresso_proof.agents import claude_adapter
+
+    monkeypatch.setattr(claude_adapter, "_run_claude", lambda prompt, *, timeout: ("not json", None))
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO(_json.dumps({"system": "s", "prompt": "p", "role": "prover"}))
+    )
+    assert claude_adapter.main() == 0
+    reason = _json.loads(capsys.readouterr().out)["_espresso_adapter"]["fallback_reason"]
+    assert "could not produce usable JSON" in reason
