@@ -216,10 +216,19 @@ class Workbench:
     a human-readable error). It is never persisted as proof/evidence status.
     """
 
-    def __init__(self, runs_root: Path, *, provider: str = "external") -> None:
+    def __init__(
+        self, runs_root: Path, *, provider: str = "external", auto_continue: bool = False
+    ) -> None:
         self.root = Path(runs_root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.provider = provider
+        # Whether a newly created run continues ITSELF past the prover gate.
+        # ``serve()`` turns this on: in the product a run should get as far as it
+        # can and let the person intervene when they want. It defaults OFF so a
+        # caller that wants a quiescent run after creation — every existing test
+        # fixture — keeps exactly that, instead of every assertion becoming a
+        # race against a background round.
+        self.auto_continue_new_runs = bool(auto_continue)
         self._jobs: dict[str, dict[str, Any]] = {}
         self._jobs_lock = threading.Lock()
         self._run_locks: dict[str, threading.Lock] = {}
@@ -402,9 +411,49 @@ class Workbench:
         job_id = self._new_job(run_id=None, action="create", agent=None)
 
         def work() -> dict[str, Any]:
-            return self._do_create_run(text, project, provider)
+            # Run to completion by default. A browser-started run used to stop
+            # at the prover gate and wait for a click while the CLI ran the same
+            # work to a finished memo, so the two front ends disagreed about
+            # whether a person was required. Nothing about the trust boundary
+            # moves: the choice is recorded selected_by='auto' with
+            # human_confirmed=false, and no amount of running reaches a human
+            # status. This is only safe because a finished run can still be
+            # STEERED — a person naming a route appends another round (see
+            # reopen_with_human_round) — so automation adds reach without
+            # taking control away.
+            created = self._do_create_run(text, project, provider)
+            run_id = str(created.get("run_id") or "")
+            if run_id and self.auto_continue_new_runs:
+                self.auto_continue(run_id)
+            return created
 
         threading.Thread(target=self._run_job, args=(job_id, work), daemon=True).start()
+        return {"job_id": job_id}
+
+    def auto_continue(self, run_id: str) -> dict[str, Any]:
+        """Continue a run past its prover gate with no human, as its own job.
+
+        Started automatically after run creation. Kept as a separate job so the
+        first paint stays fast (the run appears as soon as the fast core is
+        written) and so the person can stop it from the cockpit at any moment.
+        Fail-closed inside ``auto_continue_run``: a run that is NOT at a pending
+        prover gate is left untouched.
+        """
+
+        run_dir = self.resolve_run(run_id)
+        job_id = self._new_job(run_id=run_id, action="auto_continue", agent=None)
+
+        def work() -> dict[str, Any]:
+            from espresso_proof.orchestration.orchestrator import auto_continue_run
+
+            outcome = auto_continue_run(run_dir=run_dir, provider=self.provider)
+            outcome.pop("memo", None)  # the memo is read from the run, not echoed
+            return outcome
+
+        threading.Thread(
+            target=self._run_job, args=(job_id, work),
+            kwargs={"lock": self._run_lock(run_id)}, daemon=True,
+        ).start()
         return {"job_id": job_id}
 
     def _do_create_run(self, text: str, project: str, provider: str | None = None) -> dict[str, Any]:
@@ -784,15 +833,33 @@ class Workbench:
             cached = self._status_cache.get(run_id)
             if cached is not None and cached[0] == digest:
                 summary = json.loads(cached[1])  # deep copy via JSON round-trip
-                # Stalled/lost is recomputed live (depends on in-memory
-                # job state), never cached, so a process death surfaces immediately.
+                # Stalled/lost and the active job are recomputed live (both
+                # depend on in-memory job state), never cached, so a process
+                # death — or a job starting on an unchanged run — surfaces
+                # immediately. Caching either one would freeze the cockpit's
+                # only signal that the run is moving.
                 summary["stalled"] = self._run_stalled(run_id, run_dir)
+                summary["active_job"] = self.active_job_for(run_id)
                 return summary
         try:
             validate_run(run_dir)
         except Exception as exc:
-            # the run no longer validates: never serve a stale fragment for it,
-            # and surface honest product copy instead of a generic error.
+            # A run being WRITTEN is not a broken run. Now that a run continues
+            # itself, a poll can land between two stages of a transaction, and
+            # reporting "this run no longer passes safety validation" for a run
+            # that is simply mid-round would tell a person their work broke when
+            # it is working. With a job in flight, serve the last valid view and
+            # say it is busy; with no job in flight the run really is broken and
+            # the honest 409 stands.
+            active = self.active_job_for(run_id)
+            if active is not None:
+                with self._status_cache_lock:
+                    cached = self._status_cache.get(run_id)
+                if cached is not None:
+                    summary = json.loads(cached[1])
+                    summary["active_job"] = active
+                    summary["stalled"] = None
+                    return summary
             with self._status_cache_lock:
                 self._status_cache.pop(run_id, None)
             raise WorkbenchError(
@@ -810,7 +877,28 @@ class Workbench:
         # Attach the live stalled/lost signal AFTER caching, so it is
         # recomputed on every poll and never frozen into the cache.
         summary["stalled"] = self._run_stalled(run_id, run_dir)
+        # And what is running on this run right now. A run that continues
+        # itself is only acceptable if the person can see it working and stop
+        # it; without this the cockpit could not tell "thinking" from "done".
+        summary["active_job"] = self.active_job_for(run_id)
         return summary
+
+    def active_job_for(self, run_id: str) -> dict[str, Any] | None:
+        """The queued/running job on this run, or None. Process state only."""
+
+        with self._jobs_lock:
+            for job in self._jobs.values():
+                if job.get("run_id") == run_id and job.get("state") in ("queued", "running"):
+                    # Read defensively: this is display state, and a job row
+                    # that is missing a field must not break the status poll
+                    # the cockpit depends on.
+                    return {
+                        "job_id": job.get("job_id", ""),
+                        "action": job.get("action", ""),
+                        "state": job.get("state", ""),
+                        "started_at": job.get("started_at"),
+                    }
+        return None
 
     def _run_stalled(self, run_id: str, run_dir: Path) -> dict[str, Any] | None:
         """Report when a run has an agent call that recorded ``started``
@@ -1383,7 +1471,7 @@ def serve(runs_root: Path, *, host: str = "127.0.0.1", port: int = 8765, provide
             "The React cockpit build (web/dist) was not found; there is no "
             f"fallback UI. Build it first:\n  {_BUILD_COMMANDS}"
         )
-    workbench = Workbench(runs_root, provider=provider)
+    workbench = Workbench(runs_root, provider=provider, auto_continue=True)
     httpd = ThreadingHTTPServer((host, port), _make_handler(workbench))
     url = f"http://{host}:{port}/"
     print(f"Espresso Workbench on {url}  (runs root: {workbench.root})")

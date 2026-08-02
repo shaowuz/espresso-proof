@@ -40,3 +40,29 @@ def wait_for_job(
             return job
         time.sleep(POLL_INTERVAL_SECONDS)
     raise AssertionError(f"background job did not finish before the deadline: {job}")
+
+
+def wait_for_run_idle(call, run_id: str, *, deadline_seconds: float = JOB_DEADLINE_SECONDS) -> None:
+    """Block until no job is queued/running on ``run_id``.
+
+    A run now continues itself past the prover gate, so "the create job
+    finished" no longer means "the run has stopped changing". Tests that poke a
+    run's endpoints need it quiescent; the cockpit uses the same signal to show
+    that it is working and to offer Stop.
+    """
+
+    deadline = time.time() + deadline_seconds
+    last: object = None
+    while time.time() < deadline:
+        status, summary = call("GET", f"/api/runs/{run_id}/status")
+        # A non-200 is NOT idleness: reading an error body as "no active job"
+        # is how this helper silently returned while the run was still being
+        # written, which is exactly the race it exists to prevent.
+        if status != 200 or not isinstance(summary, dict):
+            last = f"status {status}"
+        else:
+            last = summary.get("active_job")
+            if not last:
+                return
+        time.sleep(POLL_INTERVAL_SECONDS)
+    raise AssertionError(f"run {run_id} never went idle; last active job: {last}")

@@ -27,7 +27,7 @@ from espresso_proof.orchestration.run_dashboard import render_run_dashboard
 from espresso_proof.server import Workbench, WorkbenchError, _make_handler
 from espresso_proof.kernel.validators import validate_run
 
-from tests.support_jobs import JOB_DEADLINE_SECONDS
+from tests.support_jobs import JOB_DEADLINE_SECONDS, wait_for_run_idle
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 UNCLEAR_CLAIM = "Prove the thing about the nice mirror object."
@@ -77,7 +77,9 @@ def _create_text(call, text: str) -> str:
     assert status == 202, d
     job = _await_job(call, d["job_id"])
     assert job["state"] == "done", job
-    return job["result"]["run_id"]
+    run_id = job["result"]["run_id"]
+    wait_for_run_idle(call, run_id)  # the run then continues itself; let it settle
+    return run_id
 
 
 def _create(call) -> str:
@@ -520,3 +522,26 @@ def test_g66_prime_order_group_claim_clears_via_api(client) -> None:
     assert manifest["current_state"] != "WAITING_CLAIM_CLARIFICATION"
     # claim precision only — no earned math status
     assert read_yaml(run_dir / "locked_claim.yaml")["human_confirmed"] is False
+
+
+def test_status_reports_the_job_running_on_this_run(client) -> None:
+    """A run that continues itself is only acceptable if the person can see it
+    working and stop it. Process state only — no mathematical status."""
+
+    wb, call, _ = client
+    run_id = _create(call)
+    assert wb.status(run_id).get("active_job") is None
+
+    with wb._jobs_lock:
+        wb._jobs["job-live"] = {
+            "job_id": "job-live", "run_id": run_id, "action": "auto_continue",
+            "state": "running", "started_at": "t0",
+        }
+    active = wb.status(run_id)["active_job"]
+    assert active["job_id"] == "job-live" and active["action"] == "auto_continue"
+    # Nothing about the claim's status rides along.
+    assert not {"proof_status", "verdict", "earned_status"} & set(active)
+
+    with wb._jobs_lock:
+        wb._jobs["job-live"]["state"] = "done"
+    assert wb.status(run_id).get("active_job") is None

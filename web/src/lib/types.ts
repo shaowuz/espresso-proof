@@ -68,6 +68,10 @@ export interface StatusView {
   continue_available?: boolean;
   /** Non-null when the server detected a dead worker mid-call. */
   stalled?: StalledInfo | null;
+  /** The job currently queued/running on this run, or null when idle. Process
+   * state only — it carries no mathematical status. Present so a person can
+   * see the run working and stop it, instead of guessing. */
+  active_job?: { job_id: string; action: string; state: string } | null;
   completed: boolean;
   routes_preliminary: boolean;
   selected_route: { id: string; title: string } | null;

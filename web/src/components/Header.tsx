@@ -1,7 +1,8 @@
-import { FlaskConical } from "lucide-react";
+import { FlaskConical, Loader2, Square } from "lucide-react";
 import { MathText } from "./MathText";
 import type { ClaimView, StatusView } from "../lib/types";
 import { analyzeClaimText } from "../lib/claimText";
+import { cancelJob } from "../lib/api";
 
 /**
  * App header: brand, claim summary, run state, evidence readout. The run picker
@@ -39,6 +40,36 @@ export function Header({
           <span className="rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5">
             {status.state}
           </span>
+        </div>
+      )}
+
+      {/* Working + Stop. A person should be able to see the run moving and end
+          it whenever they want, rather than only being able to start things.
+          Stopping is best-effort by contract: an in-flight model call is not
+          cooperatively interruptible, so the kernel still validates whatever
+          that call finishes and nothing is left in an unsafe state. */}
+      {status?.active_job && (
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-[13px] text-stone-500">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            {status.active_job.action === "auto_continue"
+              ? "continuing"
+              : status.active_job.action}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const jobId = status.active_job?.job_id;
+              if (jobId) void cancelJob(jobId).catch(() => undefined);
+            }}
+            className="rounded-md border border-stone-300 bg-white px-2.5 py-1 text-[13px] font-medium text-stone-700 hover:bg-stone-50"
+            aria-label="Stop the running job"
+          >
+            <span className="inline-flex items-center gap-1">
+              <Square className="h-3 w-3" aria-hidden />
+              Stop
+            </span>
+          </button>
         </div>
       )}
 

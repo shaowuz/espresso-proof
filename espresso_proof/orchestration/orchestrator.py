@@ -977,18 +977,62 @@ def _auto_continue_from_gate(
     in the returned summary — machinery never answers a question that was
     addressed to a human.
     """
+    outcome = auto_continue_run(
+        run_dir=run_dir,
+        gate_status=(summary.get("human_gate") or {}).get("status"),
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        reviewer_set=reviewer_set,
+        rounds=rounds,
+    )
+    if not outcome["attempted"]:
+        summary["auto_continue"] = outcome
+        return summary
+    summary = write_dashboard_and_return_run_summary(run_dir=run_dir)
+    summary["memo"] = outcome.pop("memo", None)
+    summary["auto_continue"] = outcome
+    return summary
+
+
+def auto_continue_run(
+    *,
+    run_dir: Path,
+    gate_status: str | None = None,
+    provider: str,
+    model: str = "gpt-4.1",
+    api_key_env: str = "OPENAI_API_KEY",
+    external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+    reviewer_set: str = "espresso",
+    rounds: int | None = None,
+) -> dict:
+    """Continue a run past its prover gate with no human, honestly recorded.
+
+    One implementation, two callers: the CLI's ``--auto-continue`` and the
+    workbench server, which used to leave every browser-started run parked at
+    the gate forever. Fail closed: it continues ONLY from a PENDING prover
+    gate. Any other state — an earlier human question, a resolved gate, a
+    finished run — is left exactly as it is, because machinery must not answer
+    a question that was addressed to a person.
+
+    The decision is recorded as ``selected_by='auto'`` with
+    ``human_confirmed=false``; no amount of running can reach a human status.
+    """
+
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     state = str(manifest.get("current_state", ""))
-    gate_status = (summary.get("human_gate") or {}).get("status")
+    if gate_status is None:
+        gate = read_yaml(run_dir / "llm_agent_run.yaml").get("human_gate") or {}
+        gate_status = gate.get("status")
     if state != "WAITING_LLM_AGENT_HUMAN_GATE" or gate_status != "pending":
-        summary["auto_continue"] = {
+        return {
             "attempted": False,
             "reason": (
                 f"run is not at a pending prover human gate "
                 f"(state={state or 'unknown'!r}, gate={gate_status!r})"
             ),
         }
-        return summary
     choice = auto_select_strategy(run_dir=run_dir)
     decision = "stop" if choice["selected_strategy"] == "none" else "continue"
     append_event(
@@ -1019,14 +1063,13 @@ def _auto_continue_from_gate(
         reviewer_set=reviewer_set,
         selected_by="auto",
     )
-    summary = write_dashboard_and_return_run_summary(run_dir=run_dir)
-    summary["memo"] = memo
-    summary["auto_continue"] = {
+    return {
         "attempted": True,
         "selected_strategy": choice["selected_strategy"],
         "effort": choice["effort"],
         "decision": decision,
         "selected_by": "auto",
+        "memo": memo,
     }
     return summary
 
@@ -1083,6 +1126,25 @@ def _resume_run_locked(
     ensure_claim_clear_for_downstream(run_dir, require_recorded_clear_gate=True)
     state = manifest.get("current_state", "")
     if state == "COMPLETED_MEMO":
+        # A person naming a route on a finished run is DIRECTING it, not
+        # re-reading it. Without this, the cockpit's "Continue this route"
+        # click on a finished run reported success and did nothing (verified
+        # live: the job reaches done, the memo is re-rendered, no round runs) —
+        # so a run that finished by itself could not be steered at all.
+        if selected_by == "human" and selected_strategy and selected_strategy != "none":
+            return reopen_with_human_round(
+                run_dir=run_dir,
+                selected_strategy=selected_strategy,
+                effort=effort,
+                taste_judgment=taste_judgment,
+                rounds=rounds or 1,
+                prover_provider=prover_provider,
+                model=model,
+                api_key_env=api_key_env,
+                external_agent_command_env=external_agent_command_env,
+                reviewer_set=reviewer_set,
+                prover_client=prover_client,
+            )
         return _resume_idempotent_memo(run_dir=run_dir)
     if state == "WAITING_TIME_ALLOCATION_DECISION":
         # The loop asked a scheduling question. Re-resuming does NOT answer it:
@@ -1123,6 +1185,109 @@ def _resume_run_locked(
     )
     _run_resume_advisory_layers(run_dir=run_dir)
     return _finalize_resume_memo(run_dir=run_dir, loop_summary=loop_summary)
+
+
+def reopen_with_human_round(
+    *,
+    run_dir: Path,
+    selected_strategy: str,
+    effort: str | None = None,
+    taste_judgment: str = "",
+    rounds: int = 1,
+    prover_provider: str = "stub",
+    model: str = "gpt-4.1",
+    api_key_env: str = "OPENAI_API_KEY",
+    external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+    reviewer_set: str = "espresso",
+    prover_client=None,
+) -> str:
+    """One more Prover<->Reviewer round on a FINISHED run, directed by a person.
+
+    This is the intervention half of "the run goes on by itself": a finished run
+    must still be steerable, or automation has taken control away instead of
+    giving it. It APPENDS to the existing loop — it never rebuilds it, because
+    rebuilding would re-resolve an already-resolved gate and discard the rounds
+    already paid for.
+
+    Three things are deliberately explicit:
+
+    - the human's choice is recorded through the same validated path as any
+      other choice (``selected_by='human'``), so provenance is unchanged;
+    - the round budget is EXTENDED, and the extension is recorded in the loop's
+      audit note. A person asking for another round is authorizing the spend,
+      and pretending the budget was always that size would hide it;
+    - a loop that had stopped or was waiting on a scheduling question is moved
+      to ``repair``, because the person's direction is the answer to it.
+
+    It upgrades no status: the ceiling is exactly what it was before.
+    """
+
+    from espresso_proof.agents.prover_loop import append_prover_loop_round
+
+    run_dir = Path(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    state = str(manifest.get("current_state", ""))
+    if state not in {"COMPLETED_MEMO", "WAITING_TIME_ALLOCATION_DECISION"}:
+        raise ValueError(
+            f"reopen expects a finished or waiting run (state={state!r})"
+        )
+    rounds = max(1, int(rounds))
+
+    human_choice, continue_decision = _record_resume_human_choice(
+        run_dir=run_dir,
+        manifest=manifest,
+        selected_strategy=selected_strategy,
+        effort=effort,
+        taste_judgment=taste_judgment,
+        selected_by="human",
+    )
+    if continue_decision != "continue":
+        return _resume_idempotent_memo(run_dir=run_dir)
+
+    optional = manifest.get("optional_artifacts", {})
+    loop_path = run_dir / optional["prover_loop"]
+    loop_report = read_yaml(loop_path)
+    budget = loop_report["budget"]
+    budget["max_rounds"] = int(budget["max_rounds"]) + rounds
+    budget["max_agent_calls"] = int(budget["max_agent_calls"]) + rounds * 4
+    if loop_report.get("loop_decision") in {"stop", "ask_human"}:
+        loop_report["loop_decision"] = "repair"
+        loop_report["decision_reason"] = (
+            "a person directed another round on this route; their direction "
+            "supersedes the loop's own stop"
+        )
+    loop_report["selected_strategy_id"] = selected_strategy
+    loop_report["audit_note"] = (
+        str(loop_report.get("audit_note") or "").strip()
+        + f" [a person authorized {rounds} more round(s) on {selected_strategy}]"
+    ).strip()[:2000]
+    ProverLoopReport.model_validate(loop_report)
+    write_yaml(loop_path, loop_report)
+
+    _set_state(run_dir, "HUMAN_CHOICE_CONTINUE_SELECTED")
+    validate_run(run_dir)
+    append_event(
+        run_dir,
+        "human_directed_round",
+        stage="prover_loop",
+        detail=(
+            f"a person directed {rounds} more round(s) on {selected_strategy!r} "
+            "after the run had finished; budget extended, no status upgraded"
+        ),
+    )
+
+    for _ in range(rounds):
+        append_prover_loop_round(
+            run_dir=run_dir,
+            provider=prover_provider,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+            reviewer_set=reviewer_set,
+            client=prover_client,
+        )
+    _run_resume_advisory_layers(run_dir=run_dir)
+    return _finalize_resume_memo(run_dir=run_dir, loop_summary=None)
 
 
 def _resume_idempotent_memo(*, run_dir: Path) -> str:
