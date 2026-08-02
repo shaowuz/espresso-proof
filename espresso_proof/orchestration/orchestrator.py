@@ -27,6 +27,7 @@ from espresso_proof.claim.claim_clear import (
 )
 from espresso_proof.claim.persisted_claim_normalization import normalize_persisted_claim_ledger
 from espresso_proof.front_half import run_front_half_agent_pass, write_front_half_run
+from espresso_proof.front_half.registry import FRONT_HALF_STAGES
 from espresso_proof.front_half.runner import front_half_stage_ok
 from espresso_proof.validation.front_half import validate_front_half_run
 from espresso_proof.kernel.io import read_text, read_yaml, write_yaml
@@ -514,36 +515,56 @@ def build_front_half_context_artifacts(
 ) -> None:
     # Stage 1 — front-half agents (S1–S8). Skipped when front_half == "mock".
     if not _reached(run_dir, "FRONT_HALF_DONE"):
-        def _front_half() -> None:
-            pass_report = None
-            if front_half != "mock" or front_half_client is not None:
-                client = front_half_client or build_client(
-                    provider=front_half,
-                    model=model,
-                    api_key_env=api_key_env,
-                    external_agent_command_env=external_agent_command_env,
-                    usage_sink=usage_sink_for_run(run_dir),
-                )
-                pass_report = run_front_half_agent_pass(
-                    run_dir=run_dir, client=client, stages=front_half_stages
-                )
-            # Persist the durable audit-only front_half_run.yaml inside the
-            # transaction (rolled back with the stage if validation fails).
-            write_front_half_run(
-                run_dir, pass_report=pass_report, provider=front_half, model=model
-            )
-
         def _validate_front_half() -> None:
             validate_run(run_dir)
             validate_front_half_run(run_dir)
 
-        # Whole-run snapshot: the front-half pass may rewrite many artifacts.
-        runner.run(
-            name="front_half",
-            mutate=_front_half,
-            validate=_validate_front_half,
-            state_after="FRONT_HALF_DONE",
+        if front_half == "mock" and front_half_client is None:
+            def _mock_front_half() -> None:
+                write_front_half_run(
+                    run_dir, pass_report=None, provider=front_half, model=model
+                )
+
+            runner.run(
+                name="front_half",
+                mutate=_mock_front_half,
+                validate=_validate_front_half,
+                state_after="FRONT_HALF_DONE",
+            )
+            return
+
+        client = front_half_client or build_client(
+            provider=front_half,
+            model=model,
+            api_key_env=api_key_env,
+            external_agent_command_env=external_agent_command_env,
+            usage_sink=usage_sink_for_run(run_dir),
         )
+        # ONE TRANSACTION PER STAGE, not one for the whole pass. As a single
+        # transaction, a failure in the last stage rolled back all ten agent
+        # calls and exited the run non-zero — observed twice in one live run,
+        # both times over a sentence in an optional artifact. Per stage, a late
+        # failure keeps every earlier stage's paid work on disk, and the stage
+        # rows in front_half_run.yaml record exactly how far the pass got.
+        stages = list(front_half_stages or FRONT_HALF_STAGES)
+        for index, stage in enumerate(stages):
+            if front_half_stage_ok(run_dir, stage):
+                continue  # already done by an earlier attempt at this run
+
+            def _one_stage(stage: str = stage) -> None:
+                pass_report = run_front_half_agent_pass(
+                    run_dir=run_dir, client=client, stages=[stage]
+                )
+                write_front_half_run(
+                    run_dir, pass_report=pass_report, provider=front_half, model=model
+                )
+
+            runner.run(
+                name=f"front_half:{stage}",
+                mutate=_one_stage,
+                validate=_validate_front_half,
+                state_after="FRONT_HALF_DONE" if index == len(stages) - 1 else None,
+            )
 
 
 def collect_candidate_literature(

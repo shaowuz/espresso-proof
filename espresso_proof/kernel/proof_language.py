@@ -349,6 +349,21 @@ _BARE_PROOF_VERBS = re.compile(r"\b(?:proved|proven|proves|verified|refuted)\b",
 _DENIED_MARKER = "\u00abdenied\u00bb"
 
 
+def is_denied_occurrence(text: str, start: int) -> bool:
+    """True when a denial or condition immediately governs the token at ``start``.
+
+    The single shared rule. Three guards used to answer "does this text assert a
+    status?" with their own pattern lists, and they disagreed: relaxing one in
+    round 4 killed a live run in round 5 because a second had not heard about
+    it, and a third erased honest disclaimers ("a literature candidate is not
+    evidence for this step") for the same reason. Whatever the verb set a
+    caller cares about, the question of whether an occurrence is denied is
+    answered here.
+    """
+
+    return bool(_DENIAL_CONTEXT.search(text[:start]))
+
+
 def neutralize_denied_verbs(text: str) -> str:
     """Blank out bare proof verbs that a denial or condition governs.
 
@@ -361,7 +376,7 @@ def neutralize_denied_verbs(text: str) -> str:
     """
 
     def _sub(match: re.Match[str]) -> str:
-        return _DENIED_MARKER if _DENIAL_CONTEXT.search(text[: match.start()]) else match.group(0)
+        return _DENIED_MARKER if is_denied_occurrence(text, match.start()) else match.group(0)
 
     return _BARE_PROOF_VERBS.sub(_sub, text)
 

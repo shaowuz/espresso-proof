@@ -220,3 +220,51 @@ def test_no_counterexamples_means_no_pressure_line(tmp_path) -> None:
     )
     write_yaml(tmp_path / "counterexamples.yaml", {"tests": []})
     assert "Counterexample pressure" not in run_output_block(tmp_path)
+
+
+def test_the_residual_says_what_would_close_what_is_open() -> None:
+    """Every audited run ended with tens of open blockers and no way to tell a
+    run that got far from one that got nowhere. Grouping the same blockers by
+    the ACTION that would close them is the difference between a list and a
+    next step. Display only: every count comes from a warning already listed."""
+
+    from espresso_proof.kernel.surface_warnings import (
+        EXAMPLES_PENDING,
+        PROVER_REVIEWER_BLOCKERS,
+        SOURCE_GAPS,
+        residual_block,
+    )
+
+    block = residual_block(
+        [
+            {"category": SOURCE_GAPS, "text": "x", "ids": ["g1", "g2"]},
+            {"category": EXAMPLES_PENDING, "text": "y", "ids": ["ex_001"]},
+            {"category": PROVER_REVIEWER_BLOCKERS, "text": "z", "ids": ["b1", "b2", "b3"]},
+        ]
+    )
+    assert "1 item(s) waiting on a machine check the kernel can run." in block
+    assert "2 item(s) waiting on an exact source locator" in block
+    assert "3 item(s) waiting on a human decision." in block
+    # Cheapest first: compute before reading before a person's time.
+    assert "Cheapest next step: supply a machine check" in block
+    assert residual_block([]) == ""
+
+
+def test_one_gap_cannot_redact_the_others() -> None:
+    """Observed live: the whole "Source gaps still open" line rendered as
+    "[withheld advisory status phrase]". One gap said "candidate source needed"
+    and a different one said "no step is reference-supported"; joined into a
+    single line they matched the advisory-projection guard together, and four
+    honest gap descriptions were erased by a pair of words that never appeared
+    in the same sentence."""
+
+    from espresso_proof.kernel.surface_warnings import render_warning_lines
+
+    joined = (
+        "Source gaps still open: No step is reference-supported yet, Cyclic "
+        "structure of (Z/p^2Z)*: exact statement (candidate source needed)."
+    )
+    [line] = render_warning_lines([{"category": "source_gaps", "text": joined}])
+    assert "withheld advisory status phrase" not in line
+    assert "candidate source needed" in line
+    assert "No step is reference-supported yet" in line

@@ -93,7 +93,17 @@ class LLMAgentVerifierReview(StrictBaseModel):
     provider: Literal["openai", "stub", "external"]
     model: str
     created_at: str
-    verdict: Literal["plausible_direction", "needs_revision", "needs_sources", "blocked"]
+    # "no_reply" is not a verdict, it is the ABSENCE of one: the call failed and
+    # the adapter's schema-valid fallback stood in for a review. That fallback
+    # used to arrive as verdict "needs_revision" with zero objections, which is
+    # exactly what a real reviewer with nothing to say looks like — a live round
+    # lost an entire reviewer that way and the loop scheduler counted the empty
+    # shell as a pass. Making it a distinct value is what stops a consumer from
+    # having to remember to check a separate flag.
+    verdict: Literal[
+        "plausible_direction", "needs_revision", "needs_sources", "blocked", "no_reply"
+    ]
+    degraded_reason: str = ""
     objections: list[str] = Field(default_factory=list)
     missing_hypotheses: list[str] = Field(default_factory=list)
     source_requests: list[str] = Field(default_factory=list)
@@ -223,7 +233,11 @@ class LLMAgentRunReport(StrictBaseModel):
 
 class ProverLoopReviewPointer(StrictBaseModel):
     verifier_id: str
-    verdict: Literal["plausible_direction", "needs_revision", "needs_sources", "blocked"]
+    # Mirrors LLMAgentVerifierReview: a failed call is recorded as the absence
+    # of a verdict, never as one.
+    verdict: Literal[
+        "plausible_direction", "needs_revision", "needs_sources", "blocked", "no_reply"
+    ]
     objection_count: int = Field(ge=0)
     recommended_human_action: Literal["continue", "revise", "stop"]
     # A reviewer pointer DECLARES its scope; "route" is the honest

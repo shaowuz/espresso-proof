@@ -49,9 +49,16 @@ _CHECK_GENERATOR_OUTPUT_SCHEMA = {
 
 _BACKEND_CATALOG = [
     {
+        # A capability the model does not know about is a capability nobody uses:
+        # the modular forms below were unexecutable until this repair batch, and
+        # every congruence check a run proposed was therefore dropped.
         "kind": "exact_arithmetic",
-        "format": {"expression": "integer/rational arithmetic", "expected": "integer/rational arithmetic"},
+        "format": {
+            "expression": "integer/rational arithmetic, including % and pow(a, b, m)",
+            "expected": "integer/rational arithmetic",
+        },
         "example": {"expression": "2**5", "expected": "32"},
+        "modular_example": {"expression": "pow(2, 10, 121)", "expected": "56"},
     },
     {
         "kind": "permutation_order",
@@ -77,6 +84,13 @@ _BACKEND_CATALOG = [
         "kind": "finite_enumeration",
         "format": {"expression": "@n[a:b] body", "expected": "@n[a:b] body"},
         "example": {"expression": "@n[1:20] sum(1,n)", "expected": "@n[1:20] n*(n+1)/2"},
+        # The shape that makes a congruence checkable over a whole residue
+        # range; it confirms Fermat's little theorem for p = 11 and refutes the
+        # p^2 lift with the witness a = 2.
+        "modular_example": {
+            "expression": "@a[1:10] pow(a, 10, 11)",
+            "expected": "@a[1:10] 1",
+        },
     },
 ]
 
@@ -152,7 +166,7 @@ def _check_generator(*, run_dir: Path, client: LLMClient, context: dict) -> dict
     existing_checks = [
         check for check in existing.get("checks", []) if isinstance(check, dict)
     ]
-    generated, dropped = _normalize_generated_checks(
+    generated, dropped, drop_reasons = _normalize_generated_checks(
         raw.get("checks"),
         claim_id=claim_id,
         default_example_id=default_example_id,
@@ -162,7 +176,10 @@ def _check_generator(*, run_dir: Path, client: LLMClient, context: dict) -> dict
     if not generated:
         return {
             "unsafe_language": [],
-            "notes": [f"check_generator appended 0 candidate machine check(s); dropped {dropped}"],
+            "notes": [
+                "check_generator appended 0 candidate machine check(s); "
+                + _drop_summary(dropped, drop_reasons)
+            ],
         }
 
     updated = {"claim_id": claim_id, "checks": existing_checks + generated}
@@ -172,9 +189,26 @@ def _check_generator(*, run_dir: Path, client: LLMClient, context: dict) -> dict
         "unsafe_language": [],
         "notes": [
             f"check_generator appended {len(generated)} candidate machine check(s) "
-            f"(status human_needed); dropped {dropped}"
+            f"(status human_needed); " + _drop_summary(dropped, drop_reasons)
         ],
     }
+
+
+def _count_drop(reasons: dict[str, int], reason: str) -> None:
+    key = reason or "unspecified"
+    reasons[key] = reasons.get(key, 0) + 1
+
+
+def _drop_summary(dropped: int, reasons: dict[str, int]) -> str:
+    """"dropped 4" told a live investigation nothing; the breakdown told it that
+    every proposal named an operation the verifier could not execute."""
+
+    if not dropped:
+        return "dropped 0"
+    detail = ", ".join(
+        f"{count} {reason}" for reason, count in sorted(reasons.items(), key=lambda kv: -kv[1])
+    )
+    return f"dropped {dropped} ({detail})" if detail else f"dropped {dropped}"
 
 
 def _normalize_generated_checks(
@@ -184,11 +218,12 @@ def _normalize_generated_checks(
     default_example_id: str,
     step_ids: set[str],
     existing_checks: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
     generated: list[dict[str, Any]] = []
+    reasons: dict[str, int] = {}
     dropped = 0
     if not isinstance(raw_checks, list):
-        return generated, 0
+        return generated, 0, reasons
 
     seen = {
         dedupe_key(check.get("machine_check") or {})
@@ -207,18 +242,22 @@ def _normalize_generated_checks(
     next_index = _next_generated_index(existing_checks)
     for raw in raw_checks:
         if len(generated) >= _MAX_PER_RUN:
+            _count_drop(reasons, "run_cap")
             dropped += 1
             continue
-        spec = _normalize_spec(raw, claim_id=claim_id, step_ids=step_ids)
+        spec, reason = _normalize_spec(raw, claim_id=claim_id, step_ids=step_ids)
         if spec is None:
+            _count_drop(reasons, reason)
             dropped += 1
             continue
         target = str(spec["target_step_id"])
         if per_step.get(target, 0) >= _MAX_PER_STEP:
+            _count_drop(reasons, "per_step_cap")
             dropped += 1
             continue
         key = dedupe_key(spec)
         if key in seen:
+            _count_drop(reasons, "duplicate")
             dropped += 1
             continue
         generated.append(
@@ -241,7 +280,7 @@ def _normalize_generated_checks(
         per_step[target] = per_step.get(target, 0) + 1
         seen.add(key)
 
-    return generated, dropped
+    return generated, dropped, reasons
 
 
 def _normalize_spec(
@@ -249,21 +288,29 @@ def _normalize_spec(
     *,
     claim_id: str,
     step_ids: set[str],
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, str]:
+    """Return (spec, reason). ``reason`` names why a proposal was refused.
+
+    Eight distinct refusals used to collapse into one number in the stage note
+    ("dropped 4"), so the record could not say whether the model had proposed
+    nonsense, targeted a step that does not exist, or written a check the
+    verifier simply cannot execute — which is what was actually happening.
+    """
+
     if not isinstance(raw, dict):
-        return None
+        return None, "not_an_object"
     if _STATUS_FIELDS & set(raw):
-        return None
+        return None, "carried_status_field"
     kind = raw.get("kind")
     if kind not in RAIL_A_KINDS:
-        return None
+        return None, "unsupported_kind"
     expression = safe_text(raw.get("expression", "")).strip()
     expected = safe_text(raw.get("expected", "")).strip()
     target_step_id = safe_text(raw.get("target_step_id", "")).strip()
     if not expression or not expected or _SENTINEL in {expression, expected}:
-        return None
+        return None, "empty_expression"
     if target_step_id not in step_ids:
-        return None
+        return None, "unknown_target_step"
     spec = {
         "kind": kind,
         "expression": expression,
@@ -272,10 +319,10 @@ def _normalize_spec(
         "notes": safe_text(raw.get("notes", "")),
     }
     if not is_non_vacuous_machine_check(spec):
-        return None
+        return None, "vacuous"
     if not is_executable_machine_check(spec, claim_id=claim_id):
-        return None
-    return spec
+        return None, "not_executable"
+    return spec, ""
 
 
 def _next_generated_index(existing_checks: list[dict[str, Any]]) -> int:

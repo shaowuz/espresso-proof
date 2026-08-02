@@ -4,7 +4,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from espresso_proof.kernel.proof_language import scrub_source_support_language
+from espresso_proof.kernel.proof_language import (
+    is_denied_occurrence,
+    scrub_source_support_language,
+)
 
 
 SOURCE_GAPS = "source_gaps"
@@ -81,10 +84,15 @@ def _display_text(value: Any) -> str:
         r"approv(?:e|es|ed|ing))\b",
         re.IGNORECASE,
     )
-    if (
-        any(term in text.lower() for term in advisory_context_terms)
-        and status_projection.search(text)
-    ):
+    # A DENIED projection is the sentence this guard exists to allow: "a
+    # literature candidate is not evidence for this step" says exactly what the
+    # trust boundary says, and wiping it left the reader with nothing. Only an
+    # undenied projection counts as attributing evidence to advisory context.
+    projections = [
+        match for match in status_projection.finditer(text)
+        if not is_denied_occurrence(text, match.start())
+    ]
+    if any(term in text.lower() for term in advisory_context_terms) and projections:
         text = "[withheld advisory status phrase]"
     text = re.sub(
         (
@@ -419,6 +427,28 @@ def collect_surface_warnings(
         )
     if prover_attempts:
         latest = max(prover_attempts, key=lambda a: int(a.get("round_index") or 0))
+        # A reviewer whose call failed did not review. Saying so is the whole
+        # point of the no_reply verdict: the round looked fully reviewed while
+        # one of three reviewers had produced nothing.
+        silent = [
+            str(pointer.get("verifier_id") or "?")
+            for pointer in _items(latest.get("reviewer_objections"))
+            if str(pointer.get("verdict") or "") == "no_reply"
+        ]
+        if silent:
+            warnings.append(
+                {
+                    "category": REVIEWER_BLOCKERS,
+                    "title": "A reviewer did not reply",
+                    "text": (
+                        f"A reviewer did not reply: {', '.join(silent)} in round "
+                        f"{latest.get('round_index')} returned no review (the model "
+                        "call failed); that round was reviewed by fewer reviewers "
+                        "than it appears."
+                    ),
+                    "ids": silent,
+                }
+            )
         open_blockers = [str(b) for b in (latest.get("blockers") or []) if str(b).strip()]
         if open_blockers:
             reviewer_count = len(latest.get("reviewer_ids") or [])
@@ -651,7 +681,24 @@ def render_blocker_ranking(ranking: dict[str, Any]) -> list[str]:
 
 
 def render_warning_lines(warnings: list[dict[str, Any]]) -> list[str]:
-    return [_display_text(warning.get("text")) for warning in warnings if warning.get("text")]
+    """Render one line per warning, WITHOUT re-running the advisory-projection
+    guard over the joined text.
+
+    That guard asks whether a sentence attributes evidence to advisory context,
+    and its verdict is only meaningful sentence by sentence. Applied to a line
+    that joins six source gaps, one gap's "candidate source needed" and a
+    different gap's "no step is reference-supported" combined into a match and
+    the whole disclosure was replaced by "[withheld advisory status phrase]" —
+    four honest gap descriptions erased by a pair of words that never appeared
+    together. Every constituent item was already scrubbed where it was built,
+    so the remaining job here is only proof-language.
+    """
+
+    return [
+        scrub_source_support_language(str(warning.get("text") or "")).strip()
+        for warning in warnings
+        if warning.get("text")
+    ]
 
 
 def final_report_missing_disclosures(
@@ -666,9 +713,17 @@ def final_report_missing_disclosures(
             return []
         return [str(warning.get("category") or "") for warning in warnings if warning.get("category")]
     missing: list[str] = []
+    # Compare against what the renderer WRITES. The two used different text
+    # processing for a moment and every run failed validation for "missing"
+    # disclosures that were present verbatim: whatever render_warning_lines
+    # produces is the only thing the report can be expected to contain.
+    rendered = {
+        str(warning.get("category") or ""): line
+        for warning, line in zip(warnings, render_warning_lines(warnings), strict=False)
+    }
     for warning in warnings:
         category = str(warning.get("category") or "")
-        required = " ".join(_display_text(warning.get("text")).lower().split())
+        required = " ".join(rendered.get(category, "").lower().split())
         if required and required not in lowered:
             missing.append(category)
     return missing
@@ -838,6 +893,56 @@ def run_output_block(run_dir: Path) -> str:
     return "\n\nWhat this run produced:\n" + body + "\n"
 
 
+# What would actually close each kind of blocker. Every run so far ended with
+# tens of open blockers and no way to tell a run that got far from one that got
+# nowhere; grouping them by the ACTION that would close them is the difference
+# between a list and a next step.
+_CLOSED_BY = {
+    SOURCE_GAPS: "an exact source locator (author, year, theorem/page)",
+    THEOREM_BLOCKERS: "an exact source locator (author, year, theorem/page)",
+    EXAMPLES_PENDING: "a machine check the kernel can run",
+    COUNTEREXAMPLES_PENDING: "a machine check the kernel can run",
+    AGENT_PROPOSED_CHECKS_PENDING: "a machine check the kernel can run",
+    REVIEWER_BLOCKERS: "a human decision",
+    PROVER_REVIEWER_BLOCKERS: "a human decision",
+    UPDATE_INBOX_PENDING: "a human decision",
+}
+# Cheapest first: a machine check costs nothing but compute, a locator costs
+# reading, a human decision costs the one resource the system cannot spend.
+_RESIDUAL_ORDER = [
+    "a machine check the kernel can run",
+    "an exact source locator (author, year, theorem/page)",
+    "a human decision",
+]
+
+
+def residual_block(warnings: list[dict[str, Any]]) -> str:
+    """The open blockers restated by what would close them.
+
+    Display only: it introduces no status and invents no blocker — every count
+    comes from a warning already listed below it.
+    """
+
+    by_action: dict[str, int] = {}
+    for warning in warnings:
+        action = _CLOSED_BY.get(str(warning.get("category") or ""))
+        if not action:
+            continue
+        ids = [str(item) for item in (warning.get("ids") or []) if str(item).strip()]
+        by_action[action] = by_action.get(action, 0) + (len(ids) or 1)
+    if not by_action:
+        return ""
+    lines = [
+        f"- {count} item(s) waiting on {action}."
+        for action in _RESIDUAL_ORDER
+        if (count := by_action.get(action))
+    ]
+    cheapest = next((action for action in _RESIDUAL_ORDER if action in by_action), "")
+    if cheapest:
+        lines.append(f"- Cheapest next step: supply {cheapest}.")
+    return "\n\nWhat would close what is open:\n" + "\n".join(lines) + "\n"
+
+
 def final_report_disclosure_block(warnings: list[dict[str, Any]]) -> str:
     lines = render_warning_lines(warnings)
     if not lines:
@@ -950,13 +1055,16 @@ def refresh_final_report_disclosures(run_dir: Path) -> None:
         text = text[: consensus_match.start()]
     base = _sanitize_legacy_final_body(
         text.split("\n\nWhat this run produced:", 1)[0]
+        .split("\n\nWhat would close what is open:", 1)[0]
         .split("\n\nOpen blockers / pending checks:", 1)[0]
         .rstrip()
     )
+    warnings = collect_surface_warnings_from_run(run_dir)
     write_text(
         path,
         base
         + run_output_block(run_dir)
-        + final_report_disclosure_block(collect_surface_warnings_from_run(run_dir))
+        + final_report_disclosure_block(warnings)
+        + residual_block(warnings)
         + consensus_block,
     )
