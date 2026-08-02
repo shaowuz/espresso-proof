@@ -402,9 +402,44 @@ class Workbench:
         job_id = self._new_job(run_id=None, action="create", agent=None)
 
         def work() -> dict[str, Any]:
+            # NOT auto-continued yet, deliberately. Running a browser-started
+            # run to completion is only an improvement if the person can still
+            # redirect it afterwards, and today they cannot: resume_run on a
+            # COMPLETED_MEMO run takes the idempotent-memo branch, so a
+            # "Continue this route" click on a finished run re-renders the memo
+            # and does no work. Turning auto-continue on before that is fixed
+            # would trade a run that waits for you for a run you cannot steer.
+            # The enabling change is a human-directed new round on a completed
+            # run; ``auto_continue`` below is ready for it.
             return self._do_create_run(text, project, provider)
 
         threading.Thread(target=self._run_job, args=(job_id, work), daemon=True).start()
+        return {"job_id": job_id}
+
+    def auto_continue(self, run_id: str) -> dict[str, Any]:
+        """Continue a run past its prover gate with no human, as its own job.
+
+        Started automatically after run creation. Kept as a separate job so the
+        first paint stays fast (the run appears as soon as the fast core is
+        written) and so the person can stop it from the cockpit at any moment.
+        Fail-closed inside ``auto_continue_run``: a run that is NOT at a pending
+        prover gate is left untouched.
+        """
+
+        run_dir = self.resolve_run(run_id)
+        job_id = self._new_job(run_id=run_id, action="auto_continue", agent=None)
+
+        def work() -> dict[str, Any]:
+            from espresso_proof.orchestration.orchestrator import auto_continue_run
+
+            outcome = auto_continue_run(run_dir=run_dir, provider=self.provider)
+            outcome.pop("memo", None)  # the memo is read from the run, not echoed
+            return outcome
+
+        threading.Thread(
+            target=self._run_job, args=(job_id, work),
+            kwargs={"lock": self._run_lock(run_id)}, daemon=True,
+        ).start()
         return {"job_id": job_id}
 
     def _do_create_run(self, text: str, project: str, provider: str | None = None) -> dict[str, Any]:
@@ -784,9 +819,13 @@ class Workbench:
             cached = self._status_cache.get(run_id)
             if cached is not None and cached[0] == digest:
                 summary = json.loads(cached[1])  # deep copy via JSON round-trip
-                # Stalled/lost is recomputed live (depends on in-memory
-                # job state), never cached, so a process death surfaces immediately.
+                # Stalled/lost and the active job are recomputed live (both
+                # depend on in-memory job state), never cached, so a process
+                # death — or a job starting on an unchanged run — surfaces
+                # immediately. Caching either one would freeze the cockpit's
+                # only signal that the run is moving.
                 summary["stalled"] = self._run_stalled(run_id, run_dir)
+                summary["active_job"] = self.active_job_for(run_id)
                 return summary
         try:
             validate_run(run_dir)
@@ -810,7 +849,28 @@ class Workbench:
         # Attach the live stalled/lost signal AFTER caching, so it is
         # recomputed on every poll and never frozen into the cache.
         summary["stalled"] = self._run_stalled(run_id, run_dir)
+        # And what is running on this run right now. A run that continues
+        # itself is only acceptable if the person can see it working and stop
+        # it; without this the cockpit could not tell "thinking" from "done".
+        summary["active_job"] = self.active_job_for(run_id)
         return summary
+
+    def active_job_for(self, run_id: str) -> dict[str, Any] | None:
+        """The queued/running job on this run, or None. Process state only."""
+
+        with self._jobs_lock:
+            for job in self._jobs.values():
+                if job.get("run_id") == run_id and job.get("state") in ("queued", "running"):
+                    # Read defensively: this is display state, and a job row
+                    # that is missing a field must not break the status poll
+                    # the cockpit depends on.
+                    return {
+                        "job_id": job.get("job_id", ""),
+                        "action": job.get("action", ""),
+                        "state": job.get("state", ""),
+                        "started_at": job.get("started_at"),
+                    }
+        return None
 
     def _run_stalled(self, run_id: str, run_dir: Path) -> dict[str, Any] | None:
         """Report when a run has an agent call that recorded ``started``

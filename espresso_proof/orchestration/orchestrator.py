@@ -977,18 +977,62 @@ def _auto_continue_from_gate(
     in the returned summary — machinery never answers a question that was
     addressed to a human.
     """
+    outcome = auto_continue_run(
+        run_dir=run_dir,
+        gate_status=(summary.get("human_gate") or {}).get("status"),
+        provider=provider,
+        model=model,
+        api_key_env=api_key_env,
+        external_agent_command_env=external_agent_command_env,
+        reviewer_set=reviewer_set,
+        rounds=rounds,
+    )
+    if not outcome["attempted"]:
+        summary["auto_continue"] = outcome
+        return summary
+    summary = write_dashboard_and_return_run_summary(run_dir=run_dir)
+    summary["memo"] = outcome.pop("memo", None)
+    summary["auto_continue"] = outcome
+    return summary
+
+
+def auto_continue_run(
+    *,
+    run_dir: Path,
+    gate_status: str | None = None,
+    provider: str,
+    model: str = "gpt-4.1",
+    api_key_env: str = "OPENAI_API_KEY",
+    external_agent_command_env: str = "ESPRESSO_EXTERNAL_AGENT_COMMAND",
+    reviewer_set: str = "espresso",
+    rounds: int | None = None,
+) -> dict:
+    """Continue a run past its prover gate with no human, honestly recorded.
+
+    One implementation, two callers: the CLI's ``--auto-continue`` and the
+    workbench server, which used to leave every browser-started run parked at
+    the gate forever. Fail closed: it continues ONLY from a PENDING prover
+    gate. Any other state — an earlier human question, a resolved gate, a
+    finished run — is left exactly as it is, because machinery must not answer
+    a question that was addressed to a person.
+
+    The decision is recorded as ``selected_by='auto'`` with
+    ``human_confirmed=false``; no amount of running can reach a human status.
+    """
+
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     state = str(manifest.get("current_state", ""))
-    gate_status = (summary.get("human_gate") or {}).get("status")
+    if gate_status is None:
+        gate = read_yaml(run_dir / "llm_agent_run.yaml").get("human_gate") or {}
+        gate_status = gate.get("status")
     if state != "WAITING_LLM_AGENT_HUMAN_GATE" or gate_status != "pending":
-        summary["auto_continue"] = {
+        return {
             "attempted": False,
             "reason": (
                 f"run is not at a pending prover human gate "
                 f"(state={state or 'unknown'!r}, gate={gate_status!r})"
             ),
         }
-        return summary
     choice = auto_select_strategy(run_dir=run_dir)
     decision = "stop" if choice["selected_strategy"] == "none" else "continue"
     append_event(
@@ -1019,14 +1063,13 @@ def _auto_continue_from_gate(
         reviewer_set=reviewer_set,
         selected_by="auto",
     )
-    summary = write_dashboard_and_return_run_summary(run_dir=run_dir)
-    summary["memo"] = memo
-    summary["auto_continue"] = {
+    return {
         "attempted": True,
         "selected_strategy": choice["selected_strategy"],
         "effort": choice["effort"],
         "decision": decision,
         "selected_by": "auto",
+        "memo": memo,
     }
     return summary
 
