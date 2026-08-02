@@ -817,10 +817,15 @@ def run_output_block(run_dir: Path) -> str:
     candidates = _items(counterexamples.get("tests"))
     if candidates:
         ids = ", ".join(str(test.get("id")) for test in candidates[:6] if test.get("id"))
+        # Wording that survives being quoted out of context. An earlier draft
+        # ended "...the claim is false", which reads as a verdict the moment the
+        # conditional in front of it is dropped — and the memory boundary, which
+        # sees clauses rather than sentences, refused to store it and rolled a
+        # whole front half back.
         lines.append(
             f"Counterexample pressure: {len(candidates)} candidate(s) proposed and not "
-            f"yet checked ({ids}). If any one of them is confirmed admissible against "
-            "the locked hypotheses, the claim is false."
+            f"yet checked ({ids}). Each one is a proposed refutation of the claim; "
+            "whether any is admissible against the locked hypotheses is undecided here."
         )
     if proof.get("lines"):
         lines.append(

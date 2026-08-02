@@ -271,3 +271,33 @@ def test_multi_word_proof_claims_are_never_exempt() -> None:
 
     assert "[withheld" in safe_text("If we have proved the theorem, we are done.")
     assert "[withheld" in safe_text("It is not the case that the proof is complete.")
+
+
+def test_the_redactor_and_the_memory_boundary_agree(tmp_path) -> None:
+    """Round 4 relaxed the redactor; round 5's live run died because the memory
+    boundary had not heard about it. The honest gap "If proved, a foundational
+    source ... would need to be located and verified" survived redaction, was
+    read at the boundary as a proof claim, and rolled back an entire front half
+    that had already been paid for. One rule, two users."""
+
+    from espresso_proof.kernel.models.run_lifecycle import _memory_forbidden_text_reason
+    from espresso_proof.kernel.proof_language import safe_text
+
+    honest = [
+        "If proved, a foundational source would need to be located and verified.",
+        "No step is verified.",
+        "This has never been proven for n >= 3.",
+        "The bound is yet to be proved.",
+    ]
+    for text in honest:
+        assert safe_text(text) == text
+        assert _memory_forbidden_text_reason(text) is None, text
+
+    claims = [
+        "We proved the theorem.",
+        "The route is verified.",
+        "The counterexample refuted the claim.",
+    ]
+    for text in claims:
+        assert "[withheld" in safe_text(text) or _memory_forbidden_text_reason(text)
+        assert _memory_forbidden_text_reason(text) is not None, text

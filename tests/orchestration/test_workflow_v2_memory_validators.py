@@ -1004,33 +1004,34 @@ def test_run_memory_omits_status_like_strategy_title(
     assert "The theorem applies here" not in summary
 
 
-def test_grade_memory_failure_does_not_mutate_grade_manifest_or_memory(
+def test_a_status_asserting_grade_sentence_is_dropped_not_stored(
     tmp_path: Path,
 ) -> None:
+    """The model wrote "The theorem applies to this step." into the grade's
+    next-cheapest-test field.
+
+    That assertion must never be stored — but it used to be stopped by the
+    memory boundary RAISING, which rolled the entire front half back and exited
+    the run non-zero. A live round-5 run died exactly that way, discarding ten
+    agent calls that had already been paid for, over one sentence in an
+    advisory artifact. The sentence is now dropped where it appears: it reaches
+    neither the grade nor memory, the drop is recorded, and the run continues.
+    """
+
     run_dir = _run(tmp_path)
-    manifest_path = run_dir / "run_manifest.yaml"
     grade_path = run_dir / "idea_grade.yaml"
     memory_dir = _project(run_dir) / "memory"
-    before_manifest = manifest_path.read_text(encoding="utf-8")
-    before_grade = grade_path.read_text(encoding="utf-8")
-    before_memory = {
-        path.name: path.read_text(encoding="utf-8")
-        for path in sorted(memory_dir.glob("*.yaml"))
-    }
 
-    with pytest.raises(Exception, match="current mathematical status"):
-        run_front_half_agent_pass(
-            run_dir=run_dir,
-            client=UnsafeGradeClient(),
-            stages=["grade_memory_memo"],
-        )
+    run_front_half_agent_pass(
+        run_dir=run_dir,
+        client=UnsafeGradeClient(),
+        stages=["grade_memory_memo"],
+    )
 
-    assert manifest_path.read_text(encoding="utf-8") == before_manifest
-    assert grade_path.read_text(encoding="utf-8") == before_grade
-    assert {
-        path.name: path.read_text(encoding="utf-8")
-        for path in sorted(memory_dir.glob("*.yaml"))
-    } == before_memory
+    grade_text = grade_path.read_text(encoding="utf-8")
+    assert "The theorem applies to this step" not in grade_text
+    for path in memory_dir.glob("*.yaml"):
+        assert "The theorem applies to this step" not in path.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(

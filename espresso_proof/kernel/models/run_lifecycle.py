@@ -14,6 +14,7 @@ from typing import Literal
 import re
 
 from espresso_proof.kernel.models.foundations import FlexibleBaseModel, StrictBaseModel
+from espresso_proof.kernel.proof_language import neutralize_denied_verbs
 
 
 def _parse_stage_status_timestamp(value: str, field_name: str) -> datetime:
@@ -395,6 +396,10 @@ def _memory_forbidden_text_reason(text: str) -> str | None:
             clause = " ".join(segments)
         if any(token in clause for token in _MEMORY_FORBIDDEN_FIELD_TOKENS):
             return "trusted status field token"
+        # "not verified" / "if proved" state the absence of a status. The
+        # redactor already draws this line; the boundary draws it the same way
+        # or the two disagree and honest prose rolls a run back.
+        clause = neutralize_denied_verbs(clause)
         status_patterns = [
             (r"\b(?:proved|proven|proves|verified|refuted)\b", "proof/refutation status"),
             (r"\b(?:complete proof|proof complete|proof-close)\b", "proof-complete status"),

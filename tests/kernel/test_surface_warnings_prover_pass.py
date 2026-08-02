@@ -196,9 +196,18 @@ def test_counterexample_pressure_is_stated_in_words_a_reader_recognizes(tmp_path
     assert "cex_001, cex_002" in block
     # Conditional, because admissibility is the kernel's decision, not this
     # sentence's: it never says the claim IS false.
-    assert "If any one of them is confirmed admissible" in block
-    assert "the claim is false." in block
+    assert "Each one is a proposed refutation of the claim" in block
+    assert "undecided here" in block
+    # Never a verdict, and never a sentence that becomes one when the
+    # conditional in front of it is dropped by a quote.
     assert "is refuted" not in block
+    assert "claim is false" not in block
+    # And the memory boundary must accept it: an earlier wording was refused
+    # there and rolled an entire front half back.
+    from espresso_proof.kernel.models.run_lifecycle import _memory_forbidden_text_reason
+
+    for line in block.splitlines():
+        assert _memory_forbidden_text_reason(line) is None, line
 
 
 def test_no_counterexamples_means_no_pressure_line(tmp_path) -> None:
