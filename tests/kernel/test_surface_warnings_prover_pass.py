@@ -79,7 +79,10 @@ def test_prover_pass_with_no_open_blockers_emits_no_over_warning() -> None:
     assert not any(FRONT_HALF_REVIEW_PENDING_NOTE in w["text"] for w in warnings)
 
 
-def test_real_reviewer_summary_gets_placeholder_suffix() -> None:
+def test_a_front_half_reviewer_that_objected_is_still_reported() -> None:
+    # A row carrying a real verdict survives the scaffold filter: it reviewed
+    # something. No "placeholder" suffix is needed any more, because rows that
+    # reviewed nothing no longer reach the line at all.
     review = {
         "reviewers": [{"reviewer_id": "front_half_reviewer", "verdict": "fail"}],
         "downgrade_reasons": ["a real front-half downgrade"],
@@ -89,4 +92,82 @@ def test_real_reviewer_summary_gets_placeholder_suffix() -> None:
         review=review, prover_loop=_loop(["one blocker"]), **_base_kwargs()
     )
     front = [w for w in warnings if w["category"] == "reviewer_blockers"]
-    assert front and "front-half placeholder; prover-pass reviewers have since run" in front[0]["text"]
+    assert front and "front_half_reviewer: blocking objection" in front[0]["text"]
+    assert "front-half placeholder" not in front[0]["text"]
+
+
+def test_unrun_scaffold_reviewers_are_not_open_blockers() -> None:
+    """Observed on a live run: the report listed all three scaffold reviewers as
+    "needs more review" and then admitted in the same sentence that prover-pass
+    reviewers had superseded them. A row with verdict "unclear" and zero
+    objections is an unrun reviewer, not a blocker."""
+
+    review = {
+        "reviewers": [
+            {"reviewer_id": name, "verdict": "unclear", "objections": []}
+            for name in ("strategy_reviewer", "evidence_reviewer", "line_proof_reviewer")
+        ],
+    }
+    warnings = collect_surface_warnings(
+        review=review, prover_loop=_loop(["one blocker"]), **_base_kwargs()
+    )
+    assert not [w for w in warnings if w["category"] == "reviewer_blockers"]
+    # ...and the real prover-pass blockers are still reported.
+    assert [w for w in warnings if w["category"] == PROVER_REVIEWER_BLOCKERS]
+
+
+def test_the_report_says_what_the_run_produced_not_only_what_is_missing(tmp_path) -> None:
+    """A live run selected a correct route, ran two rounds and collected 28
+    reviewer objections, and its whole report was eight lines of what was
+    missing. The reader could not tell whether anything had been produced."""
+
+    from espresso_proof.kernel.io import write_yaml
+    from espresso_proof.kernel.surface_warnings import run_output_block
+
+    write_yaml(
+        tmp_path / "run_manifest.yaml",
+        {
+            "artifacts": {"strategy_brief": "strategy_brief.yaml"},
+            "optional_artifacts": {"prover_loop": "prover_loop.yaml"},
+        },
+    )
+    write_yaml(
+        tmp_path / "strategy_brief.yaml",
+        {
+            "top_strategies": [
+                {"id": "r1", "title": "Discrete telescoping with a sign change"},
+                {"id": "r2", "title": "Integral comparison"},
+            ]
+        },
+    )
+    write_yaml(
+        tmp_path / "prover_loop.yaml",
+        {
+            "selected_strategy_id": "r1",
+            "attempts": [
+                {
+                    "round_index": 1,
+                    "reviewer_objections": [{"verifier_id": "a"}, {"verifier_id": "b"}],
+                },
+                {"round_index": 2, "reviewer_objections": [{"verifier_id": "a"}]},
+            ],
+        },
+    )
+
+    block = run_output_block(tmp_path)
+    assert "Discrete telescoping with a sign change" in block
+    assert "Routes proposed: 2" in block
+    # Rounds and attempts are different facts and are not conflated.
+    assert "Prover rounds run: 2 (2 route attempt(s))" in block
+    assert "reviewer passes recorded: 3" in block
+    # And it claims nothing: no proof/source/checked status anywhere.
+    for forbidden in ("proved", "source-backed", "source_backed", "checked", "proof-close"):
+        assert forbidden not in block
+
+
+def test_a_run_with_nothing_to_report_adds_no_section(tmp_path) -> None:
+    from espresso_proof.kernel.io import write_yaml
+    from espresso_proof.kernel.surface_warnings import run_output_block
+
+    write_yaml(tmp_path / "run_manifest.yaml", {"artifacts": {}, "optional_artifacts": {}})
+    assert run_output_block(tmp_path) == ""

@@ -206,7 +206,7 @@ def theorem_blocker_ids(
     return list(dict.fromkeys(blocked))
 
 
-def reviewer_blocker_summary(review: dict[str, Any]) -> str:
+def _reviewer_row_pieces(review: dict[str, Any]) -> list[str]:
     pieces: list[str] = []
     for reviewer in _items(review.get("reviewers")):
         verdict = reviewer.get("verdict")
@@ -214,6 +214,11 @@ def reviewer_blocker_summary(review: dict[str, Any]) -> str:
             pieces.append(f"{reviewer.get('reviewer_id')}: blocking objection")
         elif verdict == "unclear":
             pieces.append(f"{reviewer.get('reviewer_id')}: needs more review")
+    return pieces
+
+
+def _review_field_pieces(review: dict[str, Any]) -> list[str]:
+    pieces: list[str] = []
     for label, key in (
         ("theorem drift", "theorem_drift"),
         ("missing hypotheses", "missing_hypotheses"),
@@ -224,7 +229,11 @@ def reviewer_blocker_summary(review: dict[str, Any]) -> str:
         values = _text_items(review.get(key))
         if values:
             pieces.append(f"{label}: {', '.join(values[:2])}")
-    return "; ".join(pieces)
+    return pieces
+
+
+def reviewer_blocker_summary(review: dict[str, Any]) -> str:
+    return "; ".join(_reviewer_row_pieces(review) + _review_field_pieces(review))
 
 
 def pending_update_inbox_ids(update_inbox: dict[str, Any]) -> list[str]:
@@ -304,6 +313,20 @@ def collect_surface_warnings(
         ]
         if str(review.get("strongest_objection") or "").strip() == FRONT_HALF_REVIEW_PENDING_NOTE:
             review["strongest_objection"] = "none"
+        # Same supersession for the scaffold's reviewer ROWS. A row with verdict
+        # "unclear" and zero objections is an unrun reviewer, not an open
+        # blocker; once prover-pass reviewers exist, listing all three as
+        # "needs more review" and then admitting in the same sentence that they
+        # have been superseded says nothing a reader can act on, while the very
+        # next warning reports the real prover-pass blockers.
+        review["reviewers"] = [
+            reviewer
+            for reviewer in _items(review.get("reviewers"))
+            if not (
+                str(reviewer.get("verdict") or "") == "unclear"
+                and not _items(reviewer.get("objections"))
+            )
+        ]
     source_gaps = _source_gap_items(grade, source_grounding or {})
     if source_gaps:
         warnings.append(
@@ -359,7 +382,17 @@ def collect_surface_warnings(
                 "ids": theorem_blockers,
             }
         )
-    reviewer_summary = reviewer_blocker_summary(review)
+    # Two different facts under one heading: what an individual reviewer said,
+    # and the review artifact's own aggregate fields. When no reviewer row
+    # survives, the heading names what is actually left — a line that opened
+    # "Reviewer blockers still open: downgrade reasons: ..." attributed the
+    # artifact's summary to a reviewer who never said it.
+    row_pieces = _reviewer_row_pieces(review)
+    field_pieces = _review_field_pieces(review)
+    reviewer_summary = "; ".join(row_pieces + field_pieces)
+    reviewer_title = (
+        "Reviewer blockers still open" if row_pieces else "Review-level blockers still open"
+    )
     if reviewer_summary:
         # An agent-granted consensus used to DELETE this disclosure. It is amber
         # by construction — three language models agreeing, never machine-checked
@@ -373,16 +406,14 @@ def collect_surface_warnings(
             if (agent_consensus_review or {}).get("consensus") is True
             else ""
         )
-        suffix = (
-            " (front-half placeholder; prover-pass reviewers have since run)"
-            if prover_attempts
-            else ""
-        ) + consensus_note
+        # No placeholder suffix any more: an unrun scaffold row is filtered out
+        # above, so whatever reaches here is a reviewer that actually objected.
+        suffix = consensus_note
         warnings.append(
             {
                 "category": REVIEWER_BLOCKERS,
-                "title": "Reviewer blockers still open",
-                "text": f"Reviewer blockers still open: {reviewer_summary}.{suffix}",
+                "title": reviewer_title,
+                "text": f"{reviewer_title}: {reviewer_summary}.{suffix}",
                 "ids": [reviewer_summary],
             }
         )
@@ -691,6 +722,83 @@ def collect_surface_warnings_from_run(run_dir: Path) -> list[dict[str, Any]]:
     )
 
 
+def run_output_block(run_dir: Path) -> str:
+    """What this run actually produced, in the same honest register as the gaps.
+
+    Observed on a live run: two rounds executed, a correct discrete-telescoping
+    route was selected, three reviewers raised 28 substantive points — and the
+    whole report was eight lines of what was missing. A reader could not tell
+    whether the system had produced anything at all.
+
+    Every line here is copied from a validated artifact and carries no status:
+    it says which route was selected and what the prover attempted, never that
+    any of it is proved, sourced, or checked. Rebuilt on each refresh, so it
+    cannot go stale against the artifacts it summarizes.
+    """
+
+    from espresso_proof.kernel.io import read_yaml
+
+    run_dir = Path(run_dir)
+    manifest = read_yaml(run_dir / "run_manifest.yaml")
+    artifacts = dict(manifest.get("artifacts") or {})
+    optional = dict(manifest.get("optional_artifacts") or {})
+
+    def load(rel: str | None) -> dict[str, Any]:
+        if not rel:
+            return {}
+        path = run_dir / rel
+        return read_yaml(path) if path.exists() else {}
+
+    brief = load(artifacts.get("strategy_brief"))
+    loop = load(optional.get("prover_loop") or "prover_loop.yaml")
+    proof = load(optional.get("line_numbered_proof"))
+
+    lines: list[str] = []
+    routes = _items(brief.get("top_strategies"))
+    selected = next(
+        (route for route in routes if route.get("selected")),
+        None,
+    ) or next(
+        (
+            route
+            for route in routes
+            if route.get("id") == loop.get("selected_strategy_id")
+        ),
+        None,
+    )
+    if selected:
+        lines.append(
+            "Route under work: " + _display_text(selected.get("title")).rstrip(".") + "."
+        )
+    if routes:
+        lines.append(f"Routes proposed: {len(routes)}.")
+
+    attempts = _items(loop.get("attempts"))
+    if attempts:
+        # A round can carry several attempts (one per route), so the two counts
+        # are different facts and are reported as such.
+        rounds = {
+            attempt.get("round_index")
+            for attempt in attempts
+            if attempt.get("round_index") is not None
+        }
+        reviews = sum(len(_items(attempt.get("reviewer_objections"))) for attempt in attempts)
+        lines.append(
+            f"Prover rounds run: {len(rounds) or len(attempts)} "
+            f"({len(attempts)} route attempt(s)); reviewer passes recorded: {reviews}. "
+            "Each attempt and the objections against it are in the prover loop record."
+        )
+    if proof.get("lines"):
+        lines.append(
+            f"A line-numbered proof object exists with {len(_items(proof.get('lines')))} line(s); "
+            "its status is whatever the kernel recorded for it, and it is not certified here."
+        )
+    if not lines:
+        return ""
+    body = "\n".join(f"- {scrub_source_support_language(line)}" for line in lines)
+    return "\n\nWhat this run produced:\n" + body + "\n"
+
+
 def final_report_disclosure_block(warnings: list[dict[str, Any]]) -> str:
     lines = render_warning_lines(warnings)
     if not lines:
@@ -802,11 +910,14 @@ def refresh_final_report_disclosures(run_dir: Path) -> None:
         consensus_block = consensus_match.group(0).rstrip() + "\n"
         text = text[: consensus_match.start()]
     base = _sanitize_legacy_final_body(
-        text.split("\n\nOpen blockers / pending checks:", 1)[0].rstrip()
+        text.split("\n\nWhat this run produced:", 1)[0]
+        .split("\n\nOpen blockers / pending checks:", 1)[0]
+        .rstrip()
     )
     write_text(
         path,
         base
+        + run_output_block(run_dir)
         + final_report_disclosure_block(collect_surface_warnings_from_run(run_dir))
         + consensus_block,
     )
