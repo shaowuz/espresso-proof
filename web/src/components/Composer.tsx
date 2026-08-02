@@ -1,17 +1,29 @@
-import { useState } from "react";
-import { Loader2, Send, Target, X } from "lucide-react";
-import { createRun } from "../lib/api";
+import { useEffect, useState } from "react";
+import { ArrowUp, Loader2, Target, X, Zap } from "lucide-react";
+import { createRun, request } from "../lib/api";
 import { useJob } from "../hooks/useJob";
-import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
 import { JobChip } from "./JobChip";
 import { MathText } from "./MathText";
+import { cn } from "../lib/cn";
 import type { ActiveObject } from "../lib/types";
+
+/** The kernel's effort enum, with the words a person uses for it. */
+export const EFFORTS = [
+  { value: "quick_test", label: "Quick" },
+  { value: "normal_pass", label: "Normal" },
+  { value: "deep_exploration", label: "Deep" },
+] as const;
 
 /**
  * Bottom composer: state a claim / ask Espresso. Submitting starts a run
  * when no run is selected, or sends a conversational preview message to the
  * selected run. This is the cockpit's single command layer.
+ *
+ * The footer row carries only controls that DO something: the executor this
+ * server is configured to call (read-only — the model's own identity is known
+ * per call, not up front), and the effort the next route continuation runs at.
+ * A control that changed nothing would be worse than no control.
  */
 export function Composer({
   runId,
@@ -21,6 +33,8 @@ export function Composer({
   chatBusy,
   activeObject,
   onClearActiveObject,
+  effort,
+  onEffortChange,
 }: {
   runId: string | null;
   onRunCreated: (runId: string) => void;
@@ -29,11 +43,29 @@ export function Composer({
   chatBusy: boolean;
   activeObject: ActiveObject;
   onClearActiveObject: () => void;
+  effort: string;
+  onEffortChange: (effort: string) => void;
 }) {
   const [text, setText] = useState("");
+  const [executor, setExecutor] = useState("");
   const job = useJob();
   const busy = job.busy || chatBusy;
   const hasRun = runId !== null;
+
+  useEffect(() => {
+    let live = true;
+    request<{ executor?: string }>("/api/info")
+      .then((info) => {
+        // Show the last segment of the configured command: the whole module
+        // path does not fit a chip and adds nothing a reader wants.
+        const raw = info.executor ?? "";
+        if (live) setExecutor(raw.split(".").pop() ?? raw);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const startRun = (trimmed: string) => {
     // Fire the instant draft NOW, before run creation, so it is never
@@ -82,7 +114,8 @@ export function Composer({
           </button>
         </div>
       )}
-      <div className="flex w-full items-end gap-2">
+
+      <div className="rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:border-stone-400">
         <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -95,35 +128,69 @@ export function Composer({
           placeholder={
             hasRun
               ? activeObject
-                ? `Continue about ${activeObject.kind}: ${activeObject.title} (⌘↵ to send)`
-                : "Continue this problem — strategies, examples, literature, next move (⌘↵ to send)"
-              : "State a mathematical claim to investigate (⌘↵ to send)"
+                ? `Continue about ${activeObject.kind}: ${activeObject.title}`
+                : "Continue this problem — strategies, examples, literature, next move"
+              : "State a mathematical claim to investigate"
           }
           rows={2}
           disabled={busy}
-          className="min-h-[44px] flex-1 resize-y"
+          className="min-h-[52px] w-full resize-none border-0 bg-transparent px-3.5 pb-1 pt-3 text-[15px] shadow-none focus-visible:ring-0"
           aria-label="Command Espresso"
         />
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <Button
-            onClick={submit}
-            disabled={busy || text.trim() === ""}
-            aria-label="Send command to Espresso"
-          >
-            {chatBusy ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-            ) : (
-              <Send className="h-3.5 w-3.5" aria-hidden />
-            )}
-            <span>Send</span>
-          </Button>
-          <JobChip phase={job.phase} error={job.error} doneLabel="run created" />
-          {chatBusy && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[13px] font-medium leading-4 text-amber-800">
-              <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-              streaming preview…
+
+        <div className="flex items-center gap-2 px-2.5 pb-2 pt-0.5">
+          {executor && (
+            <span
+              className="inline-flex items-center gap-1 text-[13px] font-medium text-stone-700"
+              title="The agent command this server is configured to call"
+            >
+              <Zap className="h-3.5 w-3.5" aria-hidden />
+              {executor}
             </span>
           )}
+          <label className="inline-flex items-center gap-1 text-[13px] text-stone-500">
+            <span className="sr-only">Effort for the next route continuation</span>
+            <select
+              value={effort}
+              onChange={(e) => onEffortChange(e.target.value)}
+              className="cursor-pointer rounded border-0 bg-transparent py-0.5 pl-0.5 pr-4 text-[13px] text-stone-500 hover:text-stone-700 focus:outline-none focus-visible:ring-1 focus-visible:ring-stone-300"
+              title="Effort used when you continue a route"
+            >
+              {EFFORTS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="ml-auto flex items-center gap-2">
+            <JobChip phase={job.phase} error={job.error} doneLabel="run created" />
+            {chatBusy && (
+              <span className="inline-flex items-center gap-1 text-[13px] text-stone-500">
+                <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                streaming
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={submit}
+              disabled={busy || text.trim() === ""}
+              aria-label="Send command to Espresso"
+              className={cn(
+                "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                busy || text.trim() === ""
+                  ? "bg-stone-200 text-stone-400"
+                  : "bg-stone-800 text-white hover:bg-stone-700",
+              )}
+            >
+              {chatBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              ) : (
+                <ArrowUp className="h-4 w-4" aria-hidden />
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -20,6 +20,8 @@ describe("active object UI", () => {
         chatBusy={false}
         activeObject={activeObject}
         onClearActiveObject={() => undefined}
+        effort="normal_pass"
+        onEffortChange={() => undefined}
       />,
     );
     expect(html).toContain("Active strategy");

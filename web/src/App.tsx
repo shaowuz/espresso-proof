@@ -36,6 +36,9 @@ export default function App() {
   // send so the instant draft streams immediately — before (and decoupled from)
   // run creation, so a slow workflow never blanks the page.
   const [pendingClaim, setPendingClaim] = useState("");
+  // The composer picks the effort; the route Continue buttons use it when
+  // the route allows that effort. One place to set it, one meaning.
+  const [effort, setEffort] = useState("normal_pass");
   const chatNextId = useRef(0);
   const selectedRunRef = useRef<string | null>(null);
   const activeSeededRunRef = useRef<string | null>(null);
@@ -284,6 +287,7 @@ export default function App() {
                   chatLastNote={chatLastNote}
                   activeObject={activeObject}
                   onActiveObjectChange={setActiveObject}
+                  effort={effort}
                 />
               ) : (
                 <p className="px-1 text-[14px] text-stone-500">
@@ -331,6 +335,8 @@ export default function App() {
             chatBusy={chatStreaming}
             activeObject={activeObject}
             onClearActiveObject={() => setActiveObject(null)}
+            effort={effort}
+            onEffortChange={setEffort}
           />
         </div>
       </div>

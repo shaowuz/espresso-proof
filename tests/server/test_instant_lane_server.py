@@ -222,3 +222,26 @@ def test_instant_draft_rejects_bad_run_id(client) -> None:
     wb, call = client
     status, _, _ = call("POST", "/api/runs/%2e%2e%2fx/instant-draft", {"message": "x"})
     assert status in (400, 403, 404)
+
+
+def test_info_reports_the_configured_executor_not_a_guess(client, monkeypatch) -> None:
+    """The panel printed "codex" for every external provider, which was wrong
+    whenever a different adapter was configured. It now reports the command
+    this server would actually run — a fact about configuration, never a claim
+    about which model answered a call."""
+
+    from espresso_proof.server import _configured_executor
+
+    monkeypatch.setenv(
+        "ESPRESSO_EXTERNAL_AGENT_COMMAND", "python3 -m espresso_proof.agents.claude_adapter"
+    )
+    assert _configured_executor("external").endswith("claude_adapter")
+    monkeypatch.setenv("ESPRESSO_EXTERNAL_AGENT_COMMAND", "")
+    assert _configured_executor("external") == "external (unset)"
+    assert _configured_executor("stub") == "stub"
+
+    wb, call = client  # provider=stub in this fixture
+    status, _, raw = call("GET", "/api/info")
+    assert status == 200
+    info = json.loads(raw)
+    assert info["provider"] == "stub" and info["executor"] == "stub"

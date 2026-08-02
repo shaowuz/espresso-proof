@@ -546,6 +546,21 @@ function StrategySynthesisCard({ summary }: { summary: StrategySummary | undefin
   );
 }
 
+/**
+ * The effort a Continue click sends: the person's choice when this route
+ * allows it, else the route's own first allowed effort. Some routes are
+ * restricted by the kernel (the lock-claim route is quick-only), so sending
+ * the preference blindly would be silently rewritten server-side and the UI
+ * would show an effort the run never used.
+ */
+export function effortForRoute(
+  preferred: string | undefined,
+  allowed: string[] | undefined,
+): string | undefined {
+  if (preferred && allowed?.includes(preferred)) return preferred;
+  return allowed?.[0];
+}
+
 // ─── StrategyCard ─────────────────────────────────────────────────────────────
 
 function CompactResearchMemo({ memo }: { memo: string | undefined }) {
@@ -570,6 +585,7 @@ export function StrategyCard({
   activeObject,
   onSetActiveObject,
   continueAvailable,
+  effort,
 }: {
   strategy: StrategyView;
   runId: string;
@@ -577,6 +593,7 @@ export function StrategyCard({
   activeObject: ActiveObject;
   onSetActiveObject: (activeObject: ActiveObject) => void;
   continueAvailable: boolean;
+  effort?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const job = useJob();
@@ -675,8 +692,15 @@ export function StrategyCard({
           }
           onClick={() =>
             job.start(
-              // send an effort the kernel actually allows for this route.
-              () => continueRoute(runId, strategy.id, strategy.allowed_efforts?.[0]),
+              // The composer's choice, but only when this route allows it —
+              // the kernel restricts some routes (the lock-claim route is
+              // quick-only) and would coerce it anyway.
+              () =>
+                continueRoute(
+                  runId,
+                  strategy.id,
+                  effortForRoute(effort, strategy.allowed_efforts),
+                ),
               () => onChanged(),
             )
           }
@@ -710,6 +734,7 @@ export function Workspace({
   chatLastNote,
   activeObject,
   onActiveObjectChange,
+  effort,
 }: {
   runId: string;
   status: StatusView | undefined;
@@ -718,6 +743,7 @@ export function Workspace({
   chatLastNote: string;
   activeObject: ActiveObject;
   onActiveObjectChange: (activeObject: ActiveObject) => void;
+  effort?: string;
 }) {
   const claim = useClaimPanel(runId);
   const strat = useStrategiesPanel(runId);
@@ -801,6 +827,7 @@ export function Workspace({
                 // absent on older servers → keep the button live (kernel still
                 // rejects honestly; the chip shows its error).
                 continueAvailable={status?.continue_available ?? true}
+                effort={effort}
               />
             )}
           </AnimatedList>
