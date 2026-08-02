@@ -212,3 +212,62 @@ def test_proof_language_guard_still_strict(tmp_path: Path) -> None:
     for phrase in ("proof-close", "proof complete", "the theorem is proved"):
         assert phrase not in memo
         assert phrase not in html
+
+
+# ---------------------------------------------------------------------------
+# A denial is not a claim (found by driving a false claim through a live run)
+# ---------------------------------------------------------------------------
+
+
+def test_a_conditional_or_denied_verb_survives_redaction() -> None:
+    """The run recorded this honest gap:
+
+        "If proved, a foundational source ... would need to be located and
+         verified."
+
+    and published it as "If [withheld proof-like phrase], ... located and
+    [withheld proof-like phrase]" — destroying the only sentence that said what
+    was missing, while withholding nothing: "if proved" and "would need to be
+    verified" assert the opposite of a finished proof.
+    """
+
+    from espresso_proof.kernel.proof_language import safe_text
+
+    for honest in (
+        "If proved, a foundational source would need to be located and verified.",
+        "No step is verified.",
+        "It cannot be verified without a locator.",
+        "whether the bound is proved remains open",
+        "This has never been proven for n >= 3.",
+        "The lemma is yet to be proved.",
+    ):
+        assert safe_text(honest) == honest
+
+
+def test_an_assertion_is_still_redacted() -> None:
+    from espresso_proof.kernel.proof_language import safe_text
+
+    for assertion in (
+        "We proved the theorem.",
+        "Espresso has proven the claim.",
+        "This step is proved and the result follows.",
+        "The lemma is proven.",
+        "The argument is verified and the route is closed.",
+    ):
+        assert "[withheld" in safe_text(assertion), assertion
+
+
+def test_a_distant_denial_does_not_launder_an_assertion() -> None:
+    # The exemption reaches back a few words, not across a whole sentence: a
+    # denial early in a sentence must not license a claim at the end of it.
+    from espresso_proof.kernel.proof_language import safe_text
+
+    laundered = "There is no reason to doubt it, and the theorem is proved."
+    assert "[withheld" in safe_text(laundered)
+
+
+def test_multi_word_proof_claims_are_never_exempt() -> None:
+    from espresso_proof.kernel.proof_language import safe_text
+
+    assert "[withheld" in safe_text("If we have proved the theorem, we are done.")
+    assert "[withheld" in safe_text("It is not the case that the proof is complete.")

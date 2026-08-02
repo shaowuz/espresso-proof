@@ -324,22 +324,46 @@ _SAFE_TEXT_MAX = 1200
 _TRUNCATION_MARKER = " …[truncated]"
 
 
+# A bare verb inside a CONDITION or a DENIAL is not a status claim. A live run
+# recorded the honest gap "If proved, a foundational source ... would need to be
+# located and verified" as "If [withheld proof-like phrase], ... located and
+# [withheld proof-like phrase]" — the redaction destroyed the only sentence that
+# said what was missing, while withholding nothing, because "if proved" and
+# "would need to be verified" assert the opposite of a completed proof.
+#
+# Only these left contexts are exempt, and only for the bare single-word verbs.
+# Every multi-word phrase ("we proved the theorem", "proof is complete") is
+# still redacted wherever it appears: those cannot be turned into a denial by
+# what precedes them.
+_CONDITIONAL_VERBS = frozenset({"proved", "proven", "proves", "verified"})
+_DENIAL_CONTEXT = re.compile(
+    r"(?:\bif\b|\bnot\b|\bno\b|\bnever\b|\bunless\b|\bcannot\s+be\b|"
+    r"\bmust\s+be\b|\bneed(?:s|ed)?\s+to\s+be\b|\bto\s+be\b|\bwould\s+be\b|"
+    r"\byet\s+to\s+be\b|\bwhether\b|\bonce\b)"
+    r"(?:\s+\w+){0,3}\s*$",
+    re.IGNORECASE,
+)
+
+
+def _redact_phrase(text: str, phrase: str, replacement: str) -> str:
+    """Redact one phrase, leaving conditional/denial uses of a bare verb intact."""
+
+    exempt = phrase.lower() in _CONDITIONAL_VERBS
+
+    def _sub(match: re.Match[str]) -> str:
+        if exempt and _DENIAL_CONTEXT.search(text[: match.start()]):
+            return match.group(0)
+        return replacement
+
+    return re.sub(forbidden_pattern(phrase), _sub, text, flags=re.IGNORECASE)
+
+
 def safe_text(value: object) -> str:
     text = re.sub(r"\s+", " ", str(value)).strip()
     for phrase in sorted(RESERVED_STATUS_LANGUAGE, key=len, reverse=True):
-        text = re.sub(
-            forbidden_pattern(phrase),
-            "[withheld status phrase]",
-            text,
-            flags=re.IGNORECASE,
-        )
+        text = _redact_phrase(text, phrase, "[withheld status phrase]")
     for phrase in sorted(FORBIDDEN_LANGUAGE, key=len, reverse=True):
-        text = re.sub(
-            forbidden_pattern(phrase),
-            "[withheld proof-like phrase]",
-            text,
-            flags=re.IGNORECASE,
-        )
+        text = _redact_phrase(text, phrase, "[withheld proof-like phrase]")
     # Empty in, empty out: callers own their fallbacks (`... or None` etc.).
     # Manufacturing placeholder prose here defeated every such fallback and
     # leaked "No usable agent text returned." into optional artifact fields.
