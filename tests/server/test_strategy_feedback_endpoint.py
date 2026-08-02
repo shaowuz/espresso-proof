@@ -24,7 +24,7 @@ import pytest
 from espresso_proof.kernel.io import read_yaml
 from espresso_proof.server import Workbench, _make_handler
 
-from tests.support_jobs import wait_for_job
+from tests.support_jobs import wait_for_job, wait_for_run_idle
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
 
@@ -57,7 +57,11 @@ def _create(call) -> str:
     status, d = call("POST", "/api/runs", {"text": CLAIM})
     assert status == 202
     job = wait_for_job(lambda: call("GET", f"/api/jobs/{d['job_id']}")[1])
-    return job["result"]["run_id"]
+    run_id = job["result"]["run_id"]
+    # A run continues ITSELF past the prover gate now, so "created" no longer
+    # means "finished changing"; these tests need it quiescent.
+    wait_for_run_idle(call, run_id)
+    return run_id
 
 
 def _first_strategy(call, run_id: str) -> str:

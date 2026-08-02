@@ -54,9 +54,15 @@ def wait_for_run_idle(call, run_id: str, *, deadline_seconds: float = JOB_DEADLI
     deadline = time.time() + deadline_seconds
     last: object = None
     while time.time() < deadline:
-        _, summary = call("GET", f"/api/runs/{run_id}/status")
-        last = summary.get("active_job") if isinstance(summary, dict) else summary
-        if not last:
-            return
+        status, summary = call("GET", f"/api/runs/{run_id}/status")
+        # A non-200 is NOT idleness: reading an error body as "no active job"
+        # is how this helper silently returned while the run was still being
+        # written, which is exactly the race it exists to prevent.
+        if status != 200 or not isinstance(summary, dict):
+            last = f"status {status}"
+        else:
+            last = summary.get("active_job")
+            if not last:
+                return
         time.sleep(POLL_INTERVAL_SECONDS)
     raise AssertionError(f"run {run_id} never went idle; last active job: {last}")

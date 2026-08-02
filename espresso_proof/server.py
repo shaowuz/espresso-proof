@@ -216,10 +216,19 @@ class Workbench:
     a human-readable error). It is never persisted as proof/evidence status.
     """
 
-    def __init__(self, runs_root: Path, *, provider: str = "external") -> None:
+    def __init__(
+        self, runs_root: Path, *, provider: str = "external", auto_continue: bool = False
+    ) -> None:
         self.root = Path(runs_root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.provider = provider
+        # Whether a newly created run continues ITSELF past the prover gate.
+        # ``serve()`` turns this on: in the product a run should get as far as it
+        # can and let the person intervene when they want. It defaults OFF so a
+        # caller that wants a quiescent run after creation — every existing test
+        # fixture — keeps exactly that, instead of every assertion becoming a
+        # race against a background round.
+        self.auto_continue_new_runs = bool(auto_continue)
         self._jobs: dict[str, dict[str, Any]] = {}
         self._jobs_lock = threading.Lock()
         self._run_locks: dict[str, threading.Lock] = {}
@@ -402,16 +411,21 @@ class Workbench:
         job_id = self._new_job(run_id=None, action="create", agent=None)
 
         def work() -> dict[str, Any]:
-            # NOT auto-continued yet, deliberately. Running a browser-started
-            # run to completion is only an improvement if the person can still
-            # redirect it afterwards, and today they cannot: resume_run on a
-            # COMPLETED_MEMO run takes the idempotent-memo branch, so a
-            # "Continue this route" click on a finished run re-renders the memo
-            # and does no work. Turning auto-continue on before that is fixed
-            # would trade a run that waits for you for a run you cannot steer.
-            # The enabling change is a human-directed new round on a completed
-            # run; ``auto_continue`` below is ready for it.
-            return self._do_create_run(text, project, provider)
+            # Run to completion by default. A browser-started run used to stop
+            # at the prover gate and wait for a click while the CLI ran the same
+            # work to a finished memo, so the two front ends disagreed about
+            # whether a person was required. Nothing about the trust boundary
+            # moves: the choice is recorded selected_by='auto' with
+            # human_confirmed=false, and no amount of running reaches a human
+            # status. This is only safe because a finished run can still be
+            # STEERED — a person naming a route appends another round (see
+            # reopen_with_human_round) — so automation adds reach without
+            # taking control away.
+            created = self._do_create_run(text, project, provider)
+            run_id = str(created.get("run_id") or "")
+            if run_id and self.auto_continue_new_runs:
+                self.auto_continue(run_id)
+            return created
 
         threading.Thread(target=self._run_job, args=(job_id, work), daemon=True).start()
         return {"job_id": job_id}
@@ -830,8 +844,22 @@ class Workbench:
         try:
             validate_run(run_dir)
         except Exception as exc:
-            # the run no longer validates: never serve a stale fragment for it,
-            # and surface honest product copy instead of a generic error.
+            # A run being WRITTEN is not a broken run. Now that a run continues
+            # itself, a poll can land between two stages of a transaction, and
+            # reporting "this run no longer passes safety validation" for a run
+            # that is simply mid-round would tell a person their work broke when
+            # it is working. With a job in flight, serve the last valid view and
+            # say it is busy; with no job in flight the run really is broken and
+            # the honest 409 stands.
+            active = self.active_job_for(run_id)
+            if active is not None:
+                with self._status_cache_lock:
+                    cached = self._status_cache.get(run_id)
+                if cached is not None:
+                    summary = json.loads(cached[1])
+                    summary["active_job"] = active
+                    summary["stalled"] = None
+                    return summary
             with self._status_cache_lock:
                 self._status_cache.pop(run_id, None)
             raise WorkbenchError(
@@ -1443,7 +1471,7 @@ def serve(runs_root: Path, *, host: str = "127.0.0.1", port: int = 8765, provide
             "The React cockpit build (web/dist) was not found; there is no "
             f"fallback UI. Build it first:\n  {_BUILD_COMMANDS}"
         )
-    workbench = Workbench(runs_root, provider=provider)
+    workbench = Workbench(runs_root, provider=provider, auto_continue=True)
     httpd = ThreadingHTTPServer((host, port), _make_handler(workbench))
     url = f"http://{host}:{port}/"
     print(f"Espresso Workbench on {url}  (runs root: {workbench.root})")
