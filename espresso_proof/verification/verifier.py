@@ -31,7 +31,13 @@ from espresso_proof.kernel.models import ComputationChecks, ComputationVerificat
 
 BACKEND = "espresso-stdlib-verifier"
 
-_ARITH_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow)
+# Mod joins the closed arithmetic operators. Without it the evaluator could
+# not express a congruence, so every machine check proposed for a claim about
+# residues was dropped and the one lane that can earn a status automatically
+# produced nothing on any number-theoretic claim (observed live: a claim about
+# a^(p-1) mod p^2 generated four checks and kept none). Integer-only, exact,
+# and total once a zero modulus is rejected.
+_ARITH_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.Mod)
 _ARITH_UNARY = (ast.UAdd, ast.USub)
 
 
@@ -81,6 +87,12 @@ def _eval_node(
             if right == 0:
                 raise VerifierError("division by zero")
             return left / right
+        if isinstance(node.op, ast.Mod):
+            if left.denominator != 1 or right.denominator != 1:
+                raise VerifierError("modulus is defined here for integers only")
+            if right == 0:
+                raise VerifierError("modulus by zero")
+            return Fraction(int(left) % int(right))
         # Pow
         if right.denominator != 1:
             raise VerifierError("only integer exponents are supported")
@@ -100,6 +112,28 @@ def _eval_node(
         return Fraction(node.value)
     if env is not None and isinstance(node, ast.Name) and node.id in env:
         return env[node.id]
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "pow"
+        and len(node.args) == 3
+        and not node.keywords
+    ):
+        # pow(a, b, m) is how a modular power is written, and the only form that
+        # keeps a large exponent inside the result-size bound: a**b would be
+        # rejected as too large long before the reduction happened.
+        base, exponent, modulus = (
+            _eval_node(arg, env, enum_budget) for arg in node.args
+        )
+        if any(value.denominator != 1 for value in (base, exponent, modulus)):
+            raise VerifierError("pow(a, b, m) is defined here for integers only")
+        if exponent < 0:
+            raise VerifierError("pow(a, b, m) requires a non-negative exponent")
+        if int(modulus) == 0:
+            raise VerifierError("modulus by zero")
+        if abs(int(exponent)) > _MAX_EXPONENT:
+            raise VerifierError("exponent too large for safe verification")
+        return Fraction(pow(int(base), int(exponent), int(modulus)))
     if (
         env is not None
         and isinstance(node, ast.Call)
@@ -132,8 +166,8 @@ def _eval_node(
                 raise VerifierError("prod result too large for safe verification")
         return result
     raise VerifierError(
-        "unsupported expression element; allow only integers and + - * / ** "
-        "(write fractions as a/b)"
+        "unsupported expression element; allow only integers, + - * / ** %, "
+        "and pow(a, b, m) (write fractions as a/b)"
     )
 
 

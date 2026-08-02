@@ -220,3 +220,77 @@ def test_a_scoped_blocker_record_survives_the_kernel_model() -> None:
     }
     for record in records:
         ProverLoopBlocker.model_validate(record)
+
+
+# --- a failed call must not enter the record shaped like a judgement --------
+
+
+def test_a_substituted_reply_is_recorded_as_no_reply_not_as_a_verdict() -> None:
+    """Round 1 of the live audit lost a whole reviewer to a parse failure. The
+    adapter's fallback arrived as verdict "needs_revision" with zero objections
+    — indistinguishable from a reviewer who found nothing — and the loop counted
+    it as a reviewer pass. The absence of a review is now its own value."""
+
+    from espresso_proof.agents.agent_pass import make_verifier_review
+    from espresso_proof.kernel.models import LLMAgentVerifierReview
+
+    class _Client:
+        provider = "external"
+        model = "claude-haiku-4-5-20251001"
+
+    degraded = make_verifier_review(
+        {
+            "_espresso_adapter": {
+                "parse_status": "fallback",
+                "fallback_used": True,
+                "fallback_reason": "could not run the claude CLI",
+            },
+            "verdict": "needs_revision",
+            "risks": [],
+        },
+        client=_Client(), created_at="t", index=1, reviewer_role="strategy_reviewer",
+    )
+    assert degraded["verdict"] == "no_reply"
+    assert "could not run the claude CLI" in degraded["degraded_reason"]
+    LLMAgentVerifierReview.model_validate(degraded)
+
+    real = make_verifier_review(
+        {"verdict": "needs_sources", "risks": ["a real objection"]},
+        client=_Client(), created_at="t", index=2, reviewer_role="evidence_reviewer",
+    )
+    assert real["verdict"] == "needs_sources" and real["degraded_reason"] == ""
+    # A repaired parse is a real reply: the model's words, re-quoted.
+    repaired = make_verifier_review(
+        {
+            "_espresso_adapter": {"parse_status": "repaired", "fallback_used": False},
+            "verdict": "needs_sources",
+            "risks": ["an objection written in LaTeX"],
+        },
+        client=_Client(), created_at="t", index=3, reviewer_role="evidence_reviewer",
+    )
+    assert repaired["verdict"] == "needs_sources"
+
+
+def test_the_report_says_a_reviewer_did_not_reply() -> None:
+    from espresso_proof.kernel.surface_warnings import collect_surface_warnings
+
+    warnings = collect_surface_warnings(
+        grade={}, review={}, examples={}, counterexamples={}, tests={},
+        source_grounding={},
+        prover_loop={
+            "attempts": [
+                {
+                    "round_index": 1,
+                    "blockers": ["a real blocker"],
+                    "reviewer_ids": ["a", "b", "c"],
+                    "reviewer_objections": [
+                        {"verifier_id": "strategy_reviewer_001", "verdict": "no_reply"},
+                        {"verifier_id": "evidence_reviewer_002", "verdict": "needs_sources"},
+                    ],
+                }
+            ]
+        },
+    )
+    text = " ".join(w["text"] for w in warnings)
+    assert "A reviewer did not reply: strategy_reviewer_001" in text
+    assert "fewer reviewers than it appears" in text

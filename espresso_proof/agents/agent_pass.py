@@ -980,8 +980,16 @@ def make_verifier_review(
     verifier_id: str | None = None,
 ) -> dict:
     unsafe_language = collect_unsafe_language(raw)
-    verdict = normalize_verdict(raw.get("verdict", "needs_revision"))
-    action = normalize_action(raw.get("recommended_human_action", "revise"))
+    # A reply the adapter had to substitute for is not a review. The adapter
+    # already says so in its own envelope; reading it here is what keeps the
+    # empty shell from entering the record shaped like a judgement.
+    degraded_reason = _degraded_reason(raw)
+    if degraded_reason:
+        verdict = "no_reply"
+        action = "revise"
+    else:
+        verdict = normalize_verdict(raw.get("verdict", "needs_revision"))
+        action = normalize_action(raw.get("recommended_human_action", "revise"))
     # Same rule as the prover attempt: the identity must be final BEFORE
     # normalization mints request/objection ids from it.
     if verifier_id is None:
@@ -992,6 +1000,7 @@ def make_verifier_review(
         "model": client.model,
         "created_at": created_at,
         "verdict": verdict,
+        "degraded_reason": degraded_reason,
         "objections": safe_list(raw.get("risks", [])),
         "missing_hypotheses": safe_list(raw.get("missing_hypotheses", [])),
         "source_requests": safe_list(raw.get("source_requests", [])),
@@ -1003,6 +1012,19 @@ def make_verifier_review(
         "recommended_human_action": action,
         "status": "needs_human" if verdict != "blocked" else "blocked",
     }
+
+
+def _degraded_reason(raw: dict) -> str:
+    """The adapter's own account of a substituted reply, or ""."""
+
+    meta = _adapter_meta(raw)
+    if not isinstance(meta, dict):
+        return ""
+    parse_status = str(meta.get("parse_status") or "")
+    if parse_status in {"", "ok", "repaired"} and meta.get("fallback_used") is not True:
+        return ""
+    reason = str(meta.get("fallback_reason") or "").strip()
+    return (reason or f"adapter reported parse_status={parse_status or 'unknown'}")[:300]
 
 
 def make_human_gate(verifier_reviews: list[dict]) -> dict:

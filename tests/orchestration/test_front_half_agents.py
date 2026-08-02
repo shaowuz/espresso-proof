@@ -1485,3 +1485,46 @@ def test_advisory_memory_cannot_fail_a_run(tmp_path, monkeypatch) -> None:
     source = inspect.getsource(grade_stage)
     assert "advisory grade memory entry skipped" in source
     assert "advisory run memory skipped" in source
+
+
+def test_a_late_stage_failure_keeps_the_earlier_paid_work(tmp_path, monkeypatch) -> None:
+    """The front half used to be ONE transaction: a failure in the last stage
+    rolled back all ten agent calls and exited the run non-zero. A live round-5
+    run died that way twice, both times over a sentence in an optional
+    artifact, discarding work that had already been paid for."""
+
+    import espresso_proof.front_half.registry as registry
+    from espresso_proof.kernel.io import read_yaml
+    from espresso_proof.kernel.stage_runner import StageError
+    from espresso_proof.orchestration.orchestrator import orchestrate_run
+
+    stages = list(registry.FRONT_HALF_STAGES)
+    doomed = stages[-1]
+    real = registry._STAGE_REGISTRY[doomed]
+
+    def explode(**kwargs):
+        raise RuntimeError("forced failure in the last front-half stage")
+
+    monkeypatch.setitem(registry._STAGE_REGISTRY, doomed, explode)
+
+    claim = tmp_path / "claim.md"
+    claim.write_text("Every group of order 3 is cyclic.\n", encoding="utf-8")
+    try:
+        orchestrate_run(
+            project="late_failure", input_path=claim, output_root=tmp_path,
+            provider="stub", front_half="stub",
+        )
+    except Exception:
+        pass  # the run fails; what matters is what survives on disk
+
+    runs = sorted((tmp_path / "projects" / "late_failure" / "runs").glob("*"))
+    assert runs, "the run directory must survive a late failure"
+    run_dir = runs[-1]
+    report = read_yaml(run_dir / "front_half_run.yaml")
+    recorded = [row["stage"] for row in report["stages"]]
+    # Every stage before the doomed one kept its row (and its artifacts).
+    assert recorded, "earlier stages must not be rolled back with the failed one"
+    assert doomed not in recorded
+    for earlier in stages[: len(recorded)]:
+        assert earlier in recorded
+    monkeypatch.setitem(registry._STAGE_REGISTRY, doomed, real)

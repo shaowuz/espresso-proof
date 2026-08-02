@@ -150,6 +150,33 @@ def run_front_half_agent_pass(
 FRONT_HALF_RUN_FILENAME = "front_half_run.yaml"
 
 
+def _existing_stage_rows(run_dir: Path) -> list[dict]:
+    """Stage rows already recorded for this run, or []. Never raises: a missing
+    or unreadable audit file simply means nothing has been recorded yet."""
+
+    path = Path(run_dir) / FRONT_HALF_RUN_FILENAME
+    if not path.is_file():
+        return []
+    try:
+        raw = read_yaml(path) or {}
+        return [row for row in (raw.get("stages") or []) if isinstance(row, dict)]
+    except Exception:  # noqa: BLE001 - audit only; a bad file is not a run gate
+        return []
+
+
+def _merge_stage_rows(existing: list[dict], fresh: list[dict]) -> list[dict]:
+    merged: list[dict] = []
+    index: dict[str, int] = {}
+    for row in [*existing, *fresh]:
+        stage = str(row.get("stage") or "")
+        if stage in index:
+            merged[index[stage]] = row
+            continue
+        index[stage] = len(merged)
+        merged.append(row)
+    return merged
+
+
 def build_front_half_run_report(
     run_dir: Path,
     *,
@@ -187,7 +214,14 @@ def build_front_half_run_report(
             "Process audit only; never upgrades source/evidence/proof status.",
         ]
     else:
-        stages = pass_report["stages"]
+        # The pass may cover a single stage (the orchestrator runs one
+        # transaction per stage so a late failure cannot discard earlier paid
+        # work), so this report MERGES with what is already on disk instead of
+        # replacing it. A re-run of the same stage replaces its own row; the
+        # order of first appearance is kept, which is the order they ran in.
+        stages = _merge_stage_rows(
+            _existing_stage_rows(run_dir), list(pass_report["stages"])
+        )
         generated_at = pass_report.get("generated_at", datetime.now(UTC).isoformat())
         notes = pass_report.get("notes", [])
 
