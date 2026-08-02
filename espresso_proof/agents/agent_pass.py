@@ -189,9 +189,13 @@ def _agent_call_diagnostic(
         # every SHIPPED self-reporting adapter — and bound to the RESOLVED
         # command, because the envelope string alone is whatever the executed
         # process chose to write about itself.
+        # "repaired" counts as parsed: the repair only fixes how the model
+        # escaped its OWN text inside a JSON string (LaTeX backslashes, wrapped
+        # prose) and can neither invent a field nor change a provider. A
+        # fallback, which replaces the reply wholesale, still does not count.
         verified = (
             _command_matches_adapter(adapter, command_basename)
-            and parse_status == "ok"
+            and parse_status in {"ok", "repaired"}
             and not fallback_used
         )
         return {

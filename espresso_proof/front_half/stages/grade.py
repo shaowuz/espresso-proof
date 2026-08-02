@@ -160,8 +160,11 @@ def _grade_memory_memo(*, run_dir: Path, client: LLMClient, context: dict) -> di
         "survived_tests": [],  # SAFETY: no checked evidence in the front half
         "failed_tests": [],    # SAFETY: no checked evidence in the front half
         "counterexample_candidates": [c["id"] for c in counterexamples],
-        "missing_hypotheses": _merge_kept_first(
-            current.get("missing_hypotheses") or [], safe_list(raw.get("missing_hypotheses"))
+        "missing_hypotheses": _without_generic_missing_hypotheses(
+            _merge_kept_first(
+                current.get("missing_hypotheses") or [],
+                safe_list(raw.get("missing_hypotheses")),
+            )
         ),
         "source_gaps": _merge_kept_first(
             current.get("source_gaps") or [], safe_list(raw.get("source_gaps"))
@@ -303,8 +306,10 @@ def _regrade(*, run_dir: Path, client: LLMClient, context: dict) -> dict:
         "survived_tests": [],  # SAFETY: no checked evidence in the front half
         "failed_tests": [],
         "counterexample_candidates": [c["id"] for c in counterexamples],
-        "missing_hypotheses": list(current.get("missing_hypotheses") or [])
-        or list(ledger.get("missing_or_unclear") or []),
+        "missing_hypotheses": _without_generic_missing_hypotheses(
+            list(current.get("missing_hypotheses") or [])
+            or list(ledger.get("missing_or_unclear") or [])
+        ),
         "source_gaps": list(current.get("source_gaps") or [])
         or (["No step is reference-supported yet."] if source_gap else []),
         "repair_options": list(current.get("repair_options") or []),
@@ -360,6 +365,26 @@ def _only_generic_missing_hypotheses(items: object) -> bool:
     return bool(values) and values.issubset(_GENERIC_MISSING_HYPOTHESES)
 
 
+def _without_generic_missing_hypotheses(items: object) -> list[str]:
+    """Drop the scaffold's field-name placeholders, keep everything real.
+
+    The generic scaffold seeds missing_hypotheses with the literal field names
+    "objects" / "hypotheses" / "conclusion". Clearing them only when the whole
+    list was placeholders left the mixed case untouched, and a live run showed
+    the result: a grade whose missing hypotheses read "objects, hypotheses,
+    conclusion, <two real mathematical gaps>". A reader cannot tell which of
+    those name a real gap, and the first three name nothing at all.
+    """
+
+    out: list[str] = []
+    for item in items or []:
+        text = str(item).strip()
+        if not text or text.lower() in _GENERIC_MISSING_HYPOTHESES:
+            continue
+        out.append(text)
+    return out
+
+
 def _reconcile_precise_claim_scaffold_artifacts(run_dir: Path, artifacts: dict) -> int:
     """Clear stale generic scaffold text after a live claim-clear decision.
 
@@ -402,8 +427,9 @@ def _reconcile_precise_claim_scaffold_artifacts(run_dir: Path, artifacts: dict) 
     review_path = run_dir / artifacts["review"]
     if review_path.exists():
         review = read_yaml(review_path) or {}
-        if _only_generic_missing_hypotheses(review.get("missing_hypotheses")):
-            review["missing_hypotheses"] = []
+        kept = _without_generic_missing_hypotheses(review.get("missing_hypotheses"))
+        if kept != list(review.get("missing_hypotheses") or []):
+            review["missing_hypotheses"] = kept
             Review.model_validate(review)
             write_yaml(review_path, review)
             changed += 1

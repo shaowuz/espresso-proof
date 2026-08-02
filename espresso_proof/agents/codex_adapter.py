@@ -50,6 +50,7 @@ from espresso_proof.agents.agent_logging import (
     utc_timestamp,
 )
 from espresso_proof.agents.agent_skill_catalog import select_agent_skills
+from espresso_proof.agents.json_repair import loads_forgiving
 
 
 # Overridable so a caller can pick a cheaper model for exploratory runs
@@ -453,14 +454,17 @@ def _last_text_from_json_events(stdout: str) -> str:
 
 
 def _extract_json(text: str) -> dict:
+    """Same LaTeX-in-JSON repair as the claude adapter (see json_repair): the
+    failure is a property of models writing mathematics, not of one CLI."""
+
     text = text.strip()
     fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if fence is not None:
-        return json.loads(fence.group(1))
+        return loads_forgiving(fence.group(1))[0]
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match is None:
         raise ValueError("no JSON object found in Codex output")
-    return json.loads(match.group(0))
+    return loads_forgiving(match.group(0))[0]
 
 
 def _log_start(
