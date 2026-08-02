@@ -124,6 +124,32 @@ def _friendly_error(raw: str) -> str:
     )
 
 
+def _configured_executor(provider: str) -> str:
+    """Which executor this server is CONFIGURED to call, for display.
+
+    A fact about configuration, never a claim about which model answered a
+    given call: for an external adapter only the command is knowable up front
+    (the executor's own identity arrives per call, in its envelope). The panel
+    used to print "codex" for every external provider, which was simply wrong
+    whenever the configured command was a different adapter.
+    """
+
+    if provider != "external":
+        return provider or "unknown"
+    try:
+        from espresso_proof.agents.clients import (
+            _external_command_basename,
+            _normalize_external_command,
+            _split_external_command,
+        )
+
+        raw = os.environ.get("ESPRESSO_EXTERNAL_AGENT_COMMAND", "")
+        command = _normalize_external_command(_split_external_command(raw))
+        return _external_command_basename(command) if command else "external (unset)"
+    except Exception:  # noqa: BLE001 — display only; never break the info route
+        return "external"
+
+
 CHAT_TRANSCRIPT_FILENAME = "chat_transcript.jsonl"
 
 
@@ -1211,7 +1237,8 @@ def _make_handler(workbench: Workbench):
                     # display-only server info for the settings panel — no paths.
                     self._send_json(
                         {
-                            "provider": "codex" if workbench.provider == "external" else workbench.provider,
+                            "provider": workbench.provider,
+                            "executor": _configured_executor(workbench.provider),
                             "runs": len(workbench.list_runs()),
                         }
                     )
