@@ -171,3 +171,43 @@ def test_a_run_with_nothing_to_report_adds_no_section(tmp_path) -> None:
 
     write_yaml(tmp_path / "run_manifest.yaml", {"artifacts": {}, "optional_artifacts": {}})
     assert run_output_block(tmp_path) == ""
+
+
+def test_counterexample_pressure_is_stated_in_words_a_reader_recognizes(tmp_path) -> None:
+    """A live run on a FALSE claim (every proper subgroup abelian => G abelian)
+    proposed S_3 and Q_8 — both correct — and never told the reader their claim
+    looked false. The only mention was "Counterexample checks pending ... no
+    counterexample pressure is not established", which describes missing support
+    FOR the claim and reads backwards."""
+
+    from espresso_proof.kernel.io import write_yaml
+    from espresso_proof.kernel.surface_warnings import run_output_block
+
+    write_yaml(
+        tmp_path / "run_manifest.yaml",
+        {"artifacts": {"counterexamples": "counterexamples.yaml"}, "optional_artifacts": {}},
+    )
+    write_yaml(
+        tmp_path / "counterexamples.yaml",
+        {"tests": [{"id": "cex_001"}, {"id": "cex_002"}]},
+    )
+    block = run_output_block(tmp_path)
+    assert "Counterexample pressure: 2 candidate(s)" in block
+    assert "cex_001, cex_002" in block
+    # Conditional, because admissibility is the kernel's decision, not this
+    # sentence's: it never says the claim IS false.
+    assert "If any one of them is confirmed admissible" in block
+    assert "the claim is false." in block
+    assert "is refuted" not in block
+
+
+def test_no_counterexamples_means_no_pressure_line(tmp_path) -> None:
+    from espresso_proof.kernel.io import write_yaml
+    from espresso_proof.kernel.surface_warnings import run_output_block
+
+    write_yaml(
+        tmp_path / "run_manifest.yaml",
+        {"artifacts": {"counterexamples": "counterexamples.yaml"}, "optional_artifacts": {}},
+    )
+    write_yaml(tmp_path / "counterexamples.yaml", {"tests": []})
+    assert "Counterexample pressure" not in run_output_block(tmp_path)

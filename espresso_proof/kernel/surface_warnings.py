@@ -747,11 +747,29 @@ def run_output_block(run_dir: Path) -> str:
         if not rel:
             return {}
         path = run_dir / rel
-        return read_yaml(path) if path.exists() else {}
+        return read_yaml(path) if path.is_file() else {}
+
+    def load_counterexamples(rel: str | None) -> dict[str, Any]:
+        """Counterexamples may be a single file OR a materialized bank
+        directory; the bank loader handles both, and read_yaml on a directory
+        raises."""
+
+        if not rel:
+            return {}
+        path = run_dir / rel
+        if not path.exists():
+            return {}
+        try:
+            from espresso_proof.kernel.research_bank import load_counterexamples_artifact
+
+            return load_counterexamples_artifact(path).model_dump(mode="json")
+        except Exception:  # noqa: BLE001 — a display block never breaks a run
+            return read_yaml(path) if path.is_file() else {}
 
     brief = load(artifacts.get("strategy_brief"))
     loop = load(optional.get("prover_loop") or "prover_loop.yaml")
     proof = load(optional.get("line_numbered_proof"))
+    counterexamples = load_counterexamples(artifacts.get("counterexamples"))
 
     lines: list[str] = []
     routes = _items(brief.get("top_strategies"))
@@ -787,6 +805,22 @@ def run_output_block(run_dir: Path) -> str:
             f"Prover rounds run: {len(rounds) or len(attempts)} "
             f"({len(attempts)} route attempt(s)); reviewer passes recorded: {reviews}. "
             "Each attempt and the objections against it are in the prover loop record."
+        )
+    # Counterexample pressure, said in words a reader recognizes. A live run on
+    # a FALSE claim proposed S_3 and Q_8 — both correct — selected a route
+    # titled "Counterexample verification via S_3", and never told the reader
+    # their claim looked false: the only mention was under "Counterexample
+    # checks pending/unavailable ... no-counterexample pressure is not
+    # established", which describes missing support FOR the claim and reads
+    # backwards. The conditional is what keeps this honest: whether a candidate
+    # is admissible is the kernel's decision, not this sentence's.
+    candidates = _items(counterexamples.get("tests"))
+    if candidates:
+        ids = ", ".join(str(test.get("id")) for test in candidates[:6] if test.get("id"))
+        lines.append(
+            f"Counterexample pressure: {len(candidates)} candidate(s) proposed and not "
+            f"yet checked ({ids}). If any one of them is confirmed admissible against "
+            "the locked hypotheses, the claim is false."
         )
     if proof.get("lines"):
         lines.append(
