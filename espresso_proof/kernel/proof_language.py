@@ -345,6 +345,27 @@ _DENIAL_CONTEXT = re.compile(
 )
 
 
+_BARE_PROOF_VERBS = re.compile(r"\b(?:proved|proven|proves|verified|refuted)\b", re.IGNORECASE)
+_DENIED_MARKER = "\u00abdenied\u00bb"
+
+
+def neutralize_denied_verbs(text: str) -> str:
+    """Blank out bare proof verbs that a denial or condition governs.
+
+    The same rule the redactor uses, exported so a guard downstream reaches the
+    same verdict. Without it the two disagreed and a live run died: once "If
+    proved, a foundational source ... would need to be located and verified"
+    stopped being redacted, it reached the memory boundary as literal words, was
+    read there as a proof claim, and rolled back an entire front half that had
+    already been paid for.
+    """
+
+    def _sub(match: re.Match[str]) -> str:
+        return _DENIED_MARKER if _DENIAL_CONTEXT.search(text[: match.start()]) else match.group(0)
+
+    return _BARE_PROOF_VERBS.sub(_sub, text)
+
+
 def _redact_phrase(text: str, phrase: str, replacement: str) -> str:
     """Redact one phrase, leaving conditional/denial uses of a bare verb intact."""
 

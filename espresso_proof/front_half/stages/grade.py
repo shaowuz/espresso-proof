@@ -178,28 +178,51 @@ def _grade_memory_memo(*, run_dir: Path, client: LLMClient, context: dict) -> di
         # SAFETY: never upgrade the proof-language status from the front half.
         "proof_language_status": current.get("proof_language_status", "idea_sketch"),
     }
+    # Free text the model wrote can assert a mathematical status ("the theorem
+    # applies to this step"). That text used to be stopped downstream, by the
+    # memory boundary raising and rolling the ENTIRE front half back — ten paid
+    # agent calls discarded over one sentence in an optional artifact. Drop the
+    # sentence here instead: the status assertion never reaches the grade, the
+    # memory entry built from the grade is clean, and the run continues.
+    grade, dropped_text = _drop_status_bearing_free_text(grade)
     IdeaGrade.model_validate(grade)
     project_dir = run_dir.parents[1]
     run_id = context["manifest"]["run_id"]
-    MemoryEntry.model_validate(
-        build_grade_memory_entry(
-            grade,
-            read_yaml(run_dir / artifacts["strategy_brief"]),
-            project_id=project_dir.name,
-            run_id=run_id,
+    # Advisory memory must never be able to fail a run. Its entries carry model
+    # prose (the grade's "next cheapest test" among them), and the memory
+    # boundary refuses any clause that reads as a current mathematical status —
+    # correctly. Raising here rolled the WHOLE front half back and exited
+    # non-zero, discarding ten agent calls that had already been paid for,
+    # because of a sentence in an optional convenience artifact. The entry is
+    # dropped instead, and the drop is recorded in the stage note.
+    memory_note = dropped_text
+    try:
+        MemoryEntry.model_validate(
+            build_grade_memory_entry(
+                grade,
+                read_yaml(run_dir / artifacts["strategy_brief"]),
+                project_id=project_dir.name,
+                run_id=run_id,
+            )
         )
-    )
+    except Exception as exc:  # noqa: BLE001 — advisory artifact, never a run gate
+        memory_note = f"advisory grade memory entry skipped: {str(exc).splitlines()[0][:160]}"
     load_memory_index(project_dir)
     write_yaml(run_dir / artifacts["idea_grade"], grade)
 
     # 21 Memory: refresh advisory memory from the (now live) artifacts. Every
     # entry is advisory-only (MemoryEntry has no status field).
-    write_run_memory(
-        project_dir,
-        run_dir,
-        project_id=project_dir.name,
-        run_id=run_id,
-    )
+    try:
+        write_run_memory(
+            project_dir,
+            run_dir,
+            project_id=project_dir.name,
+            run_id=run_id,
+        )
+    except Exception as exc:  # noqa: BLE001 — same contract: advisory, never a gate
+        memory_note = (
+            memory_note + "; " if memory_note else ""
+        ) + f"advisory run memory skipped: {str(exc).splitlines()[0][:160]}"
     from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosures
 
     refresh_final_report_disclosures(run_dir)
@@ -212,7 +235,9 @@ def _grade_memory_memo(*, run_dir: Path, client: LLMClient, context: dict) -> di
         "unsafe_language": [],
         "notes": [
             "grade refreshed reasons/source_gaps from live content (status/score "
-            "preserved, no upgrade); advisory memory written; memo renders"
+            "preserved, no upgrade); "
+            + (memory_note or "advisory memory written")
+            + "; memo renders"
         ],
     }
 
@@ -451,6 +476,39 @@ def _reconcile_precise_claim_scaffold_artifacts(run_dir: Path, artifacts: dict) 
             changed += 1
 
     return changed
+
+
+_SAFE_NEXT_TEST = "Lock or pressure-test the claim."
+
+
+def _drop_status_bearing_free_text(grade: dict) -> tuple[dict, str]:
+    """Remove grade free text that asserts a current mathematical status.
+
+    The boundary used is the one the memory layer already enforces, so the two
+    cannot disagree. Only free-text fields are touched; nothing about the
+    grade's status, score, or ids changes. Returns the grade and a note naming
+    what was dropped — silent removal of a model's sentence is not acceptable
+    either.
+    """
+
+    from espresso_proof.kernel.models.run_lifecycle import _memory_forbidden_text_reason
+
+    dropped: list[str] = []
+    out = dict(grade)
+    for field in ("reasons", "source_gaps", "repair_options", "missing_hypotheses"):
+        items = list(out.get(field) or [])
+        kept = [item for item in items if not _memory_forbidden_text_reason(str(item))]
+        if len(kept) != len(items):
+            dropped.append(f"{len(items) - len(kept)} {field}")
+            out[field] = kept
+    next_test = str(out.get("next_cheapest_test") or "")
+    if next_test and _memory_forbidden_text_reason(next_test):
+        dropped.append("next_cheapest_test")
+        out["next_cheapest_test"] = _SAFE_NEXT_TEST
+    note = (
+        "dropped status-asserting free text (" + ", ".join(dropped) + ")" if dropped else ""
+    )
+    return out, note
 
 
 def _has_theorem_applicability_failure(run_dir: Path, context: dict) -> bool:

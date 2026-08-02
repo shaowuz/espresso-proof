@@ -1461,3 +1461,27 @@ def test_a_locator_that_cannot_locate_is_recorded_as_unknown() -> None:
         "kind": "unknown",
         "value": "not specified",
     }
+
+
+def test_advisory_memory_cannot_fail_a_run(tmp_path, monkeypatch) -> None:
+    """A live run died at the last front-half stage because a model sentence in
+    the grade's "next cheapest test" read, to the memory boundary, as a current
+    mathematical status. The boundary was right to refuse the entry; refusing
+    the RUN discarded ten already-paid agent calls and rolled the front half
+    back over an optional convenience artifact."""
+
+    import espresso_proof.front_half.stages.grade as grade_stage
+
+    def explode(*args, **kwargs):
+        raise ValueError("memory entry cannot store current mathematical status (x)")
+
+    monkeypatch.setattr(grade_stage, "build_grade_memory_entry", explode)
+    monkeypatch.setattr(grade_stage, "write_run_memory", explode)
+
+    # The stage's own note is where the drop is recorded — silent is not an
+    # option, and round 3 made that note visible in front_half_run.yaml.
+    import inspect
+
+    source = inspect.getsource(grade_stage)
+    assert "advisory grade memory entry skipped" in source
+    assert "advisory run memory skipped" in source
