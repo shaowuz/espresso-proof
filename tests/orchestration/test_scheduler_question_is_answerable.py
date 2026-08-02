@@ -22,6 +22,8 @@ budget the question was holding.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from espresso_proof.kernel.models import RunState, UpdateInboxEntry
@@ -209,3 +211,112 @@ def test_answering_releases_every_lock_the_question_held() -> None:
     # And it never touches a mathematical status.
     for forbidden in ("earned_status", "proof_language_status", "source_backed"):
         assert forbidden not in answer
+
+
+# --- the question must not PARK the run either -------------------------------
+
+
+def test_an_auto_answer_releases_the_route_but_is_not_a_human_answer() -> None:
+    """The scheduler's question is about SPENDING, and spending is already
+    bounded by max_rounds / max_agent_calls — parking the run until someone ran
+    a CLI command added waiting, not safety. Machinery answers it now, in its
+    own entry type, so no reader can mistake it for a person's decision."""
+
+    inbox = {
+        "entries": [_objection(i) for i in range(3)]
+        + [{**_answer(), "type": "auto_scheduling_decision", "id": "auto_sched_1"}]
+    }
+    # Released for scheduling...
+    assert _reviewer_objection_round_counts(inbox)["strategy_route_001"] == 0
+    action, _ = _route_action(
+        {"id": "strategy_route_001"},
+        source_support_missing=False,
+        reviewer_objection_rounds=0,
+    )
+    assert action != "ask_human"
+    # ...but it is NOT recorded as a human having answered.
+    assert _human_answered_routes(inbox) == set()
+
+
+def test_the_driver_answers_instead_of_parking_and_says_so() -> None:
+    import inspect
+
+    from espresso_proof.orchestration import prover_loop_driver
+
+    source = inspect.getsource(prover_loop_driver._auto_answer_scheduler_question)
+    assert "record_auto_scheduling_decision" in source
+    # Fail closed: a failure to record leaves the question standing.
+    assert "parking" in source
+
+    loop = inspect.getsource(prover_loop_driver._continue_prover_loop_locked)
+    assert "_auto_answer_scheduler_question" in loop
+
+
+def test_the_report_says_the_scheduler_decided_without_you(tmp_path) -> None:
+    from espresso_proof.kernel.io import write_yaml
+    from espresso_proof.kernel.surface_warnings import run_output_block
+
+    write_yaml(
+        tmp_path / "run_manifest.yaml",
+        {"artifacts": {}, "optional_artifacts": {"update_inbox": "update_inbox.yaml"}},
+    )
+    write_yaml(
+        tmp_path / "update_inbox.yaml",
+        {
+            "entries": [
+                {"type": "auto_scheduling_decision", "route_id_or_step_id": "strategy_route_001"},
+                {"type": "reviewer_objection", "route_id_or_step_id": "strategy_route_002"},
+            ]
+        },
+    )
+    block = run_output_block(tmp_path)
+    assert "Scheduling decided without you" in block
+    assert "strategy_route_001" in block and "strategy_route_002" not in block
+    assert "answer-scheduler" in block
+
+
+def test_the_auto_answer_lands_on_a_real_run_and_releases_it(tmp_path) -> None:
+    """End to end on real artifacts: record the answer, and the route the
+    scheduler was stuck on stops asking. The four-round live run never reached
+    the ask_human threshold, so this is where the release is actually proven."""
+
+    from espresso_proof.kernel.io import read_yaml
+    from espresso_proof.kernel.time_allocation import _reviewer_objection_round_counts
+    from espresso_proof.kernel.update_inbox_service import record_auto_scheduling_decision
+    from espresso_proof.orchestration.orchestrator import orchestrate_run
+
+    claim = tmp_path / "claim.md"
+    claim.write_text("Every group of order 3 is cyclic.\n", encoding="utf-8")
+    result = orchestrate_run(
+        project="sched", input_path=claim, output_root=tmp_path,
+        provider="stub", front_half="stub", auto_continue=True,
+    )
+    run_dir = Path(result["run_dir"])
+
+    from espresso_proof.kernel.io import write_yaml
+
+    route = read_yaml(run_dir / "prover_loop.yaml").get("selected_strategy_id") or "r1"
+    claim_id = read_yaml(run_dir / "locked_claim.yaml")["id"]
+    origin = "llm_agent_run.yaml"
+    inbox = read_yaml(run_dir / "update_inbox.yaml")
+    for index in range(3):
+        inbox.setdefault("entries", []).append({
+            **_objection(index, route),
+            "origin_stage": "llm_prover_reviewers",
+            "origin_artifact_id_or_path": origin,
+            "locked_claim_id": claim_id,
+            "created_at": f"2026-01-0{index + 1}T00:00:00+00:00",
+            "dedupe_key": f"reviewer_objection:{route}:{index}",
+            "applied_at": None,
+        })
+    write_yaml(run_dir / "update_inbox.yaml", inbox)
+    # Three distinct objection ROUNDS on this route: the threshold that makes
+    # the scheduler ask.
+    assert _reviewer_objection_round_counts(inbox)[route] >= 3
+
+    record_auto_scheduling_decision(
+        run_dir, route_id=route, reason="answered so the run could continue"
+    )
+    inbox = read_yaml(run_dir / "update_inbox.yaml")
+    assert _reviewer_objection_round_counts(inbox)[route] == 0  # released
+    assert _human_answered_routes(inbox) == set()  # and not by a person

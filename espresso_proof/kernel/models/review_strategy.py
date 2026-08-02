@@ -233,6 +233,12 @@ UpdateInboxType = Literal[
     # the reviewer_objection entries that raised the question so the rebuilt
     # plan stops asking, and it can never touch a mathematical status.
     "human_scheduling_decision",
+    # The SAME question, answered by machinery because nobody was waiting. It
+    # releases the route exactly as a human's answer does, and is a separate
+    # type so no reader can mistake it for one: an auto answer is a decision
+    # about SPENDING, never about mathematics, and it is overridable — a later
+    # human_scheduling_decision on the same route is the person's word.
+    "auto_scheduling_decision",
     "prover_progress",
     "budget_signal",
     "advisory_memory_signal",

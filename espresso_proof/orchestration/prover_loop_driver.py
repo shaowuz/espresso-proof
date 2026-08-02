@@ -204,6 +204,42 @@ def _selected_route_allocation_stop(
     return None
 
 
+def _auto_answer_scheduler_question(
+    run_dir: Path, *, route_id: str, reason: str, notes: list[str]
+) -> bool:
+    """Answer the scheduler's question so the run keeps going. True if answered.
+
+    Fail closed: any problem recording the answer leaves the question standing
+    and the loop parks exactly as it did before, because a run that waits is
+    better than a run that quietly ignores its own scheduler.
+    """
+
+    if not route_id:
+        return False
+    try:
+        from espresso_proof.kernel.update_inbox_service import (
+            record_auto_scheduling_decision,
+        )
+
+        record_auto_scheduling_decision(
+            run_dir,
+            route_id=route_id,
+            reason=(
+                "answered without a human so the run could continue; the question "
+                f"was: {reason}"
+            )[:400],
+        )
+    except Exception as exc:  # noqa: BLE001 - park rather than ignore the scheduler
+        notes.append(f"could not auto-answer the scheduler question ({exc}); parking")
+        return False
+    notes.append(
+        f"scheduler asked about {route_id} ({reason}); answered automatically to keep "
+        "going. The remaining budget still bounds this, and a person can override "
+        "the answer on this route at any time."
+    )
+    return True
+
+
 def _record_time_allocation_stop(
     run_dir: Path, *, loop_path: str, action: str, reason: str
 ) -> None:
@@ -413,6 +449,17 @@ def _continue_prover_loop_locked(
         )
         if allocation_stop is not None:
             action, reason = allocation_stop
+            # "ask_human" used to park the run until a person ran a CLI command.
+            # The question is about SPENDING ("the objections keep repeating; do
+            # I keep going?"), and spending is already bounded by max_rounds /
+            # max_agent_calls — the pause added waiting, not safety. Answer it
+            # automatically, record WHO answered, and leave it overridable: a
+            # person's later answer on the same route supersedes this one.
+            if action == "ask_human" and _auto_answer_scheduler_question(
+                run_dir, route_id=str(loop.get("selected_strategy_id") or ""),
+                reason=reason, notes=notes,
+            ):
+                continue
             _record_time_allocation_stop(
                 run_dir, loop_path=loop_path, action=action, reason=reason
             )

@@ -164,7 +164,17 @@ def _pressure_missing(pressure_status: dict[str, Any] | None, kind: str) -> bool
     return True
 
 
-def _human_answered_routes(update_inbox: dict[str, Any] | None) -> set[str]:
+# Both kinds of answer release a route's objection count. They are different
+# TYPES so provenance stays visible everywhere else; for the purpose of "has
+# this question been answered", machinery answering it counts.
+_SCHEDULING_ANSWER_TYPES = {"human_scheduling_decision", "auto_scheduling_decision"}
+
+
+def _answered_routes(
+    update_inbox: dict[str, Any] | None,
+    *,
+    types: frozenset[str] = frozenset(_SCHEDULING_ANSWER_TYPES),
+) -> set[str]:
     """Routes whose scheduler question a human has answered.
 
     The objection count is deliberately monotone — consumption is not
@@ -182,7 +192,7 @@ def _human_answered_routes(update_inbox: dict[str, Any] | None) -> set[str]:
     for entry in update_inbox.get("entries") or []:
         if not isinstance(entry, dict):
             continue
-        if entry.get("type") != "human_scheduling_decision":
+        if entry.get("type") not in types:
             continue
         if (
             entry.get("effect") != "scheduling_only"
@@ -207,7 +217,7 @@ def _reviewer_objection_round_counts(update_inbox: dict[str, Any] | None) -> dic
 
     if not update_inbox:
         return {}
-    answered = _human_answered_routes(update_inbox)
+    answered = _answered_routes(update_inbox)
     rounds_by_route: dict[str, set[tuple[str, str]]] = {}
     for entry in update_inbox.get("entries") or []:
         if not isinstance(entry, dict):
@@ -505,3 +515,13 @@ __all__ = [
     "time_allocation_prompt_payload",
     "write_time_allocation_plan",
 ]
+
+
+def _human_answered_routes(update_inbox: dict[str, Any] | None) -> set[str]:
+    """Routes a PERSON answered. Distinct from :func:`_answered_routes`, which
+    also counts machinery's answer: both release the objection count, but only
+    one of them is somebody's decision, and no surface may confuse the two."""
+
+    return _answered_routes(
+        update_inbox, types=frozenset({"human_scheduling_decision"})
+    )
