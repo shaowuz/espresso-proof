@@ -42,6 +42,3 @@ security-relevant and we want to hear about them.
 ## Scope
 
 In scope: this repository's `main` branch.
-
-Out of scope: the `v2` branch (experimental, not a supported product), and
-never executed).

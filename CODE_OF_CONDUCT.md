@@ -61,7 +61,9 @@ representative at an online or offline event.
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leader responsible for enforcement:
 
-**@shaowuz — [email removed]**
+**the maintainer, [@shaowuz](https://github.com/shaowuz)** — report privately
+via the repository's Security tab ("Report a vulnerability") or any private
+channel listed on the maintainer's GitHub profile.
 
 All complaints will be reviewed and investigated promptly and fairly.
 

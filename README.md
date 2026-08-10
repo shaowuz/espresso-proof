@@ -291,10 +291,8 @@ status from their recorded evidence.
 | `web/` | React 19 + TypeScript + Vite cockpit |
 | `tests/` | Contract, hard-negative, regression, and UI tests |
 | `examples/quickstart.sh` | Deterministic offline smoke test |
-| `docs/reference/` | Frozen comparison material; never imported or executed by the runtime |
 
-`main` is the supported product line. The `v2` branch is an experimental future
-architecture and is not release-ready.
+`main` is the supported product line.
 
 ## Development
 
@@ -326,9 +324,9 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md) and
 ## Team
 
 Espresso Proof is developed by [@shaowuz](https://github.com/shaowuz),
-@yangjunjie0320, and @w-ruizhe ([@w-ruizhe](https://github.com/w-ruizhe)).
-The literature subsystem was started with @w-ruizhe. @yangjunjie0320 contributed
-to the product philosophy and the Claude-centric comparison route.
+[@yangjunjie0320](https://github.com/yangjunjie0320), and
+[@w-ruizhe](https://github.com/w-ruizhe). The literature subsystem was started
+with [@w-ruizhe](https://github.com/w-ruizhe).
 
 ## License
 

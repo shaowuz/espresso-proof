@@ -37,11 +37,9 @@ While developing, run only what you touched:
 uv run python -m pytest tests/<subsystem> -q
 ```
 
-> **The CI workflows are currently disabled.** They are still in
-> `.github/workflows/`, unchanged, but switched off in the repository's Actions
-> settings while this is a single-maintainer project. **Nothing runs on a pull
-> request and nothing runs on merge — run the full suite yourself before
-> merging.** They are re-enabled before the repository goes public; see
+> **Check the repository's Actions settings for the current CI status.** If the
+> workflows are switched off, nothing runs on a pull request or on merge — run
+> the full suite yourself before merging.
 
 When they are on: the full suite runs when a PR targets `main` and again on the
 merge commit, and a documentation-only change skips it and gets a fast hygiene
@@ -113,12 +111,6 @@ area of mathematics can earn checked evidence — has a full walkthrough:
 
 Keep documentation, UI text, and artifact wording consistent with the status
 ladder: a status may only say what its evidence actually established.
-
-## Reference material is not runtime
-
-comparison. It is never executed and product code must not import from it. Do
-not merge it into `espresso_proof/`. Porting a narrow piece of it is fine as its
-own PR, with an owner, a contract, and tests.
 
 ## Conduct
 

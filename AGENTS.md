@@ -57,12 +57,6 @@ fix the document or fix the code, and say which one you did.
 Prefer the smallest coherent change that solves the actual problem. Match the
 conventions already in the file you are editing.
 
-## Reference material is not runtime
-
-comparison. It is never executed. Product code must not import from it, and it
-must not be merged into `espresso_proof/`. Porting a narrow piece is fine as its
-own change, with tests.
-
 ## Tests
 
 Run scoped tests while working:

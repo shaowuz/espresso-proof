@@ -69,47 +69,5 @@ def test_local_artifact_outputs_are_ignored() -> None:
         "runs/",
         "reports/",
         "tmp/",
-        "espresso-proof-artifacts/",
     ):
         assert pattern in ignore
-
-
-SKILL_CENTRIC_SOURCE_COMMIT = "32462abccc40d4aa0e78105cf2cd1f345c456c5e"
-
-
-def test_claude_skill_comparison_is_inert_reference_material() -> None:
-    readme = (comparison / "README.md").read_text(encoding="utf-8")
-    assert SKILL_CENTRIC_SOURCE_COMMIT in readme
-    # Each boundary must still be STATED; the wording is free (the negative
-    # "What this is not" framing was replaced by a positive Status section), so
-    # pin the claim, not one phrasing of it.
-    boundaries = {
-        "the product runtime is elsewhere": (
-            "not the current product runtime",
-            "the product runtime is `espresso_proof/`",
-        ),
-        "not loaded as an installed skill": (
-            "not an installed Claude skill or Codex skill",
-            "no agent loads it as an installed skill",
-        ),
-        "product code must not import it": ("must not import",),
-        "not to be merged wholesale": ("Do not merge this directory wholesale",),
-    }
-    lowered = readme.lower()
-    for claim, phrasings in boundaries.items():
-        assert any(phrase.lower() in lowered for phrase in phrasings), (
-            f"comparison README lost its boundary claim: {claim}"
-        )
-    assert not (REPO / ".claude" / "skills" / "espresso-proof").exists()
-
-
-def test_product_code_does_not_reference_the_comparison_directory() -> None:
-    sources = list((REPO / "espresso_proof").rglob("*.py"))
-    for suffix in ("*.ts", "*.tsx", "*.js", "*.jsx"):
-        sources.extend((REPO / "web" / "src").rglob(suffix))
-    assert sources, "no product sources found to scan"
-    for source in sources:
-        text = source.read_text(encoding="utf-8")
-        assert COMPARISON_DIR not in text, (
-            f"{source.relative_to(REPO)} references the inert comparison directory"
-        )
