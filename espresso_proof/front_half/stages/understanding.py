@@ -349,11 +349,11 @@ def _understanding_claim(*, run_dir: Path, client: LLMClient, context: dict) -> 
             ]
 
     # Auto-clarification: an unclear claim used to park the whole run at
-    # WAITING_CLAIM_CLARIFICATION and ask the human to rewrite it — observed
-    # live on "the Jacobian determinant claim", where one listed gap was a real
-    # ambiguity (polynomial inverse vs set-theoretic bijection) and the other
-    # was not a precision issue at all ("the conjecture is open": precision is
-    # not truth). The agent that FOUND the gaps can resolve them: one more call
+    # WAITING_CLAIM_CLARIFICATION and ask the human to rewrite it — even when
+    # one listed gap is a real ambiguity (say, polynomial inverse vs
+    # set-theoretic bijection) and the other is not a precision issue at all
+    # ("the conjecture is open": precision is not truth). The agent that FOUND
+    # the gaps can resolve them: one more call
     # proposes the completed precise statement, resolving each gap with the
     # standard reading recorded as an explicit assumption. The run proceeds and
     # the completed statement is shown to the human, who can revise it; no

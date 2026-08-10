@@ -6,7 +6,7 @@ import { MathText } from "./MathText";
 import { cn } from "../lib/cn";
 
 /**
- * Codex-style bottom-left control. The main workspace stays minimal; the
+ * Compact bottom-left control. The main workspace stays minimal; the
  * verbose run details (latest-round ledger) and run controls (which run,
  * provider) live here, hidden until opened. Display-only — nothing here
  * changes any mathematical status.

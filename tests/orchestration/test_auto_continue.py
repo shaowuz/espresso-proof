@@ -26,7 +26,7 @@ from espresso_proof.orchestration.orchestrator import (
 )
 
 CLEAR_CLAIM = "Every group of order p^2, where p is prime, is abelian."
-UNCLEAR_CLAIM = "The Mathieu group M23 is realizable as a Galois group over Q."
+UNCLEAR_CLAIM = "No odd perfect number exists."
 
 
 def _orchestrate(tmp_path: Path, claim_text: str, name: str, **kwargs) -> dict:

@@ -38,10 +38,10 @@ _MAX_CANDIDATE_SUBGOALS = 4
 _MAX_EXTERNAL_TOOL_SUBGOALS = 4
 # How many theorem-condition ledger repair subgoals to surface.
 _MAX_LEDGER_SUBGOALS = 4
-# How many reviewer-named route/global objection blocked nodes to surface (56E).
+# How many reviewer-named route/global objection blocked nodes to surface.
 _MAX_OBJECTION_SUBGOALS = 4
 
-# 56E (G56E-001): map a route/global scoped-objection ``kind`` to a typed
+# Map a route/global scoped-objection ``kind`` to a typed
 # BlockReason ONLY where it names a typed dead route. ``counterexample_pressure``
 # is deliberately absent: it is unchecked pressure, not a typed dead route, so it
 # stays a blocked node with no block_reason and can never read as a refutation.
@@ -251,8 +251,8 @@ def _scoped_objection_reviews(run_dir: Path, llm_agent_run: dict | None) -> list
 
 def _step_only_counterexample_pressure(run_dir: Path, artifacts: dict) -> list[str]:
     """Residual: advisory pressure text for each TRUSTED step-only CHECKED
-    counterexample in the counterexamples artifact (e.g. the 57C polynomial
-    witness).
+    counterexample in the counterexamples artifact (e.g. a polynomial witness
+    refuting one proof step).
 
     A test qualifies only when it refutes a proof STEP and explicitly NOT the claim
     (``refutes_step_only is True`` and ``refutes_claim is False``) and was actually
@@ -357,7 +357,7 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
 
     # --- Residual: surface step-only checked counterexamples ---------
     # In ADDITION to idea_grade.counterexample_candidates, read the counterexamples
-    # artifact (e.g. the 57C polynomial witness) and surface each TRUSTED step-only
+    # artifact (e.g. a step-refuting polynomial witness) and surface each TRUSTED step-only
     # CHECKED counterexample as advisory pressure text on the main node, clearly
     # labelled as refuting ONLY a proof step, never the claim.
     #
@@ -564,7 +564,7 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
     # --- Theorem-condition ledger repair subgoals ------------------
     # The ledger is the SINGLE WRITER of theorem-condition repair nodes: their ids
     # come from the ledger's ``repair_subgoal_id`` (``subgoal_tcl_*``), disjoint
-    # from 57B's ``subgoal_block_*`` blocker nodes, so the two paths never create a
+    # from the ``subgoal_block_*`` blocker nodes, so the two paths never create a
     # duplicate node for the same obligation. A ledger node is advisory SEARCH
     # state only: it never carries ``supported_by_*`` (so it can never earn
     # source_backed/checked), never sets/refutes any status. ``match_status`` is
@@ -642,7 +642,7 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
                 if tag not in existing:
                     existing.append(tag)
 
-    # --- 56E (G56E-001): reviewer-named route gaps become blocked nodes ---
+    # --- Reviewer-named route gaps become blocked nodes ------------------
     # A reviewer's NAMED route-scoped failed step (a gap in the CURRENT route, not
     # the whole claim) previously only landed as advisory text on subgoal_main
     # (or was dropped), so a route-death finding never became its own actionable
@@ -670,9 +670,10 @@ def assemble_subgoal_graph(run_dir: Path) -> dict:
             if not isinstance(so, dict):
                 continue
             if so.get("scope") != "route":
-                # 54B owns scope=="subgoal"; a "global" concern is about the whole
-                # claim and stays advisory on the main goal (it is not a named
-                # route-death step); proof_step scope is provenance-only. Only a
+                # A scope=="subgoal" objection is attached to its named node
+                # above; a "global" concern is about the whole claim and stays
+                # advisory on the main goal (it is not a named route-death
+                # step); proof_step scope is provenance-only. Only a
                 # route-scoped named gap becomes its own first-class blocked node.
                 continue
             text = str(so.get("text") or "").strip()

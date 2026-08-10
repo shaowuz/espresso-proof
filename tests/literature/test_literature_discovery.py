@@ -201,9 +201,9 @@ def test_live_search_parsers_return_candidate_references() -> None:
     """
     ads_payload = b"""{
       "response": {"docs": [{
-        "bibcode": "2026arXiv260304518G",
+        "bibcode": "2026arXiv260100001E",
         "title": ["On the diagonalizability of square matrices"],
-        "author": ["Guere, Jeremy"],
+        "author": ["Example, Ada"],
         "abstract": "Theorem statements for square matrices."
       }]}
     }"""
@@ -211,7 +211,7 @@ def test_live_search_parsers_return_candidate_references() -> None:
       "message": {"items": [{
         "DOI": "10.1000/example",
         "title": ["Coherent cohomology and base change"],
-        "author": [{"given": "A.", "family": "Grothendieck"}],
+        "author": [{"given": "A.", "family": "Mathematician"}],
         "abstract": "A base change theorem."
       }]}
     }"""

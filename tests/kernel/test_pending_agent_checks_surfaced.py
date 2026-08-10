@@ -1,6 +1,6 @@
 """An agent-proposed machine check that never ran must be visible, not silent.
 
-Found by inspecting a live Sz(8) run. The general proposal channel worked — a
+Found by inspecting a live run. The general proposal channel worked — a
 reviewer recorded a `verification_requests` entry asking for a finite-group
 lookup — but the stage that harvests proposals into
 `scoped_verification_requests.yaml` runs BEFORE the prover/reviewer pass and its
@@ -164,9 +164,9 @@ def test_the_real_run_shape_is_covered(tmp_path) -> None:
              "verification_requests": [
                  {"id": "strategy_reviewer_001_req_00",
                   "kind": "named_finite_witness",
-                  "witness": "minimal faithful representation degree",
+                  "witness": "smallest counterexample bound",
                   "identity": "",
-                  "target": "minimal_faithful_representation_degree_of_Sz8"}]},
+                  "target": "smallest_counterexample_bound_for_odd_perfect_numbers"}]},
             {"verifier_id": "evidence_reviewer_002"},
             {"verifier_id": "line_proof_reviewer_003"},
         ],

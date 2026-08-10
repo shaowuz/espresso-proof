@@ -70,7 +70,7 @@ export function ChatPanel({
           ) : (
             messages.map((m) =>
               m.role === "you" ? (
-                // Codex-style: the user's message is a compact right-aligned
+                // The user's message is a compact right-aligned
                 // bubble; context is a small muted chip inside it, not a
                 // shouting uppercase banner above it.
                 <FadeIn key={m.id} motionKey={`${m.id}-${m.text.length}`}>

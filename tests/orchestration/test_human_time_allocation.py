@@ -228,8 +228,8 @@ def test_appended_attempt_allocation_reflects_priority_deterministically(tmp_pat
 
 def test_clean_continuation_reduce_route_gets_cheap_check(tmp_path: Path, monkeypatch) -> None:
     # When a continuation round has NO reviewer blockers, the selected route's
-    # human priority drives the allocation: 'reduce' -> 'cheap_check' (distinct
-    # from the pre-54C hardcoded 'expand'). Keep round 1 (the gate) with its real
+    # human priority drives the allocation: 'reduce' -> 'cheap_check' (not a
+    # hardcoded 'expand'). Keep round 1 (the gate) with its real
     # blockers so the loop continues, then force the CONTINUATION review clean.
     import espresso_proof.agents.llm_agents as la
 

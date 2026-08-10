@@ -24,7 +24,7 @@ from espresso_proof.orchestration.genesis import run_mock_critique
 from espresso_proof.kernel.validators import validate_run
 
 ARBITRARY_CLAIM = (
-    "The Mathieu group M23 is realizable as a Galois group over Q.\n\n"
+    "No odd perfect number exists.\n\n"
     "Please attempt to prove this."
 )
 
@@ -163,8 +163,8 @@ def test_literature_review_downgrades_source_backed_to_candidate(tmp_path: Path)
             "query_summary": "M23 inverse Galois candidates.",
             "candidate_references": [
                 {
-                    "title": "Topics in Galois Theory (Serre)",
-                    "authors": ["J.-P. Serre"],
+                    "title": "Inverse Galois Methods (A. Mathematician)",
+                    "authors": ["A. Mathematician"],
                     "locator": {"kind": "theorem", "value": "Thm 3.2.1"},
                     "relevance": "core",
                     "status": "source_backed",  # must be downgraded
@@ -510,8 +510,8 @@ def test_source_theorem_cannot_self_certify_source_backed(tmp_path: Path) -> Non
             "source_refs": [
                 {
                     "type": "book",
-                    "title": "Serre, Topics in Galois Theory",
-                    "authors": ["J.-P. Serre"],
+                    "title": "A. Mathematician, Inverse Galois Methods",
+                    "authors": ["A. Mathematician"],
                     "locator": {"kind": "theorem", "value": "Thm 3.2.1"},
                     "statement_or_summary": "rigidity gives realizability",
                     "hypothesis_match_note": "matches exactly",
@@ -1299,8 +1299,8 @@ def test_local_discovery_merges_beside_agent_literature(tmp_path: Path) -> None:
             "query_summary": "M23 inverse Galois candidates.",
             "candidate_references": [
                 {
-                    "title": "Topics in Galois Theory (Serre)",
-                    "authors": ["J.-P. Serre"],
+                    "title": "Inverse Galois Methods (A. Mathematician)",
+                    "authors": ["A. Mathematician"],
                     "locator": {"kind": "theorem", "value": "Thm 3.2.1"},
                     "relevance": "core",
                     "status": "candidate",
@@ -1325,7 +1325,7 @@ def test_local_discovery_merges_beside_agent_literature(tmp_path: Path) -> None:
     # the run-agent compute path (the second historical overwrite surface)
     merged = _compute_literature(run_dir)
     titles = [item["title"] for item in merged["candidate_references"]]
-    assert "Topics in Galois Theory (Serre)" in titles
+    assert "Inverse Galois Methods (A. Mathematician)" in titles
     assert all(item["id"] != "local_ref_not_found" for item in merged["candidate_references"])
 
 

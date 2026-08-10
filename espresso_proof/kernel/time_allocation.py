@@ -148,7 +148,7 @@ def _human_preference_missing(human_choice: dict[str, Any]) -> bool:
 
 
 def _source_support_missing(source_grounding: dict[str, Any]) -> bool:
-    # Task 04 has no explicit route -> earned source-grounding step binding.
+    # There is no explicit route -> earned source-grounding step binding.
     # Source support is step-local, so neither a route label nor an unrelated
     # source_backed step can suppress the source-pinning allocation.
     return True

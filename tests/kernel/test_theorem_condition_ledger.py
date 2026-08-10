@@ -264,7 +264,7 @@ def test_entry_requires_at_least_one_condition() -> None:
 
 # ---------------------------------------------------------------------------
 # theorem applicability audit is default-deny against the ledger
-# (fixes the 56C dogfood bug: an empty grounding-derived audit defaulted
+# (regression: an empty grounding-derived audit defaulted
 # all_applicable, hiding an inapplicable theorem).
 # ---------------------------------------------------------------------------
 def _audit_with_ledger(run_dir: Path, *, condition_overrides=None, locator=None) -> dict:

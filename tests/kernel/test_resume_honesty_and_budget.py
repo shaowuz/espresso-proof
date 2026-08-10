@@ -1,8 +1,8 @@
 """Three defects found by running a real open problem, not by unit tests.
 
-Sz(8) is simple, so no one-round route exists and the loop has to iterate. Four
-resumes of that run produced four apparently-successful commands, and every one
-of the three problems below was invisible from the command output.
+A hard claim admits no one-round route, so the loop has to iterate. Four
+resumes of such a run produced four apparently-successful commands, and every
+one of the three problems below was invisible from the command output.
 """
 
 from __future__ import annotations
@@ -29,8 +29,9 @@ def test_no_declared_budget_keeps_the_old_behaviour() -> None:
 def test_budget_opens_headroom_above_the_estimate() -> None:
     ceiling = _declared_effort_ceiling({"token_budget": 3_200_000})
     assert ceiling == "deep_exploration"
-    # This is the Sz(8) case: a route the grader estimated at quick_test was
-    # capped at one prover round, which cannot iterate on an open problem.
+    # This is the hard-claim case with no one-round route: a route the grader
+    # estimated at quick_test was capped at one prover round, which cannot
+    # iterate on an open problem.
     assert _effort_options_for("quick_test", ceiling) == [
         "quick_test",
         "normal_pass",

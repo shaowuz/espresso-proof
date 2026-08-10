@@ -7,6 +7,13 @@ Everything here was verified against the espresso-core source checkout
 (`src/strategy_prover/cli.py`, `engine/solve.py`, `schemas/*.yaml`, example configs)
 and against this repo's `espresso_proof/agents/` runtime (clients.py / agent_pass.py; llm_agents.py is the compatibility facade).
 
+**Availability.** The espresso-core backend is not publicly distributed. Without
+a local source checkout (`ESPRESSO_CORE_ROOT`) the adapter stays inert
+(`ESPRESSO_CORE_MODE` defaults to `off` = passthrough), and the checked-in
+"claude"/"gemini" providers fall back to the FAKE provider (§4). This document
+describes the integration contract only; nothing else in this repo depends on a
+core installation.
+
 ## 1. Why this pairing
 
 espresso-core declares, as a design principle, that it is NOT autonomous proof

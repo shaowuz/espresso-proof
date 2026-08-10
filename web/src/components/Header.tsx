@@ -6,7 +6,7 @@ import { cancelJob } from "../lib/api";
 
 /**
  * App header: brand, claim summary, run state, evidence readout. The run picker
- * lives in the bottom-left settings control (Codex-style minimal header).
+ * lives in the bottom-left settings control (minimal header).
  * All sentences are server copy; the evidence counts come from the status
  * query (computed server-side from validated artifacts).
  */

@@ -1141,8 +1141,9 @@ class PressureLateMarker(StrictBaseModel):
     """Local late-pressure marker for later Update Inbox conversion.
 
     This is not an Update Inbox entry. It is deterministic scheduling metadata
-    only: ``dedupe_key`` lets Task 05 convert it into exactly one inbox event
-    without changing proof/source/evidence/refutation/grade ownership here.
+    only: ``dedupe_key`` lets the later Update Inbox conversion emit exactly
+    one inbox event without changing proof/source/evidence/refutation/grade
+    ownership here.
     """
 
     id: str

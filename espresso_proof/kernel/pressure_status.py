@@ -326,7 +326,7 @@ def _markers(
                 "update_inbox_entry": False,
                 "notes": [
                     "Local late-pressure marker for future Update Inbox conversion.",
-                    "This marker has no direct scheduling effect in Task 03.",
+                    "This marker has no direct scheduling effect.",
                 ],
             }
         )

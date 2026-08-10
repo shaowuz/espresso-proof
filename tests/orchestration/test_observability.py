@@ -193,7 +193,7 @@ def test_no_observability_record_carries_status_upgrade(tmp_path: Path):
         assert not (set(rec) & set(forbidden))
 
 
-# --- deep paths: prover pass + resume rounds are instrumented too (54A coverage) ---
+# --- deep paths: prover pass + resume rounds are instrumented too ---
 
 def test_orchestrate_prover_pass_emits_agent_event(tmp_path: Path):
     run_dir = _stub_run(tmp_path)

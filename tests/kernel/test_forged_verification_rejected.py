@@ -153,7 +153,7 @@ def test_a_public_hash_cannot_be_borrowed_for_an_arbitrary_target() -> None:
     assert canonical and canonical.startswith("solvability of")
     # A forged target does not start with what the adapter reports, which is
     # exactly what the validator now rejects.
-    assert not "Sz(8) is a Galois group over Q".startswith(canonical)
+    assert not "No odd perfect number exists".startswith(canonical)
 
 
 def test_every_registered_adapter_reports_what_it_checked() -> None:
@@ -271,7 +271,7 @@ def test_every_shipped_builder_survives_its_own_binding_rule() -> None:
             "claim_001", entry_id="p",
             generators=[[1, 2, 3, 4, 0], [1, 2, 0, 3, 4]],
             expected_order=60, expected_solvable=False,
-            target="Sz(8) is a Galois group over Q",
+            target="No odd perfect number exists",
         )[0]
     )
     built.append(

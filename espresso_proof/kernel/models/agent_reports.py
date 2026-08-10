@@ -393,7 +393,7 @@ class ProverRoundReport(StrictBaseModel):
         if self.prover_attempt.role != "prover":
             raise ValueError("prover_attempt must have role=prover")
         if len(self.verifier_reviews) < 3:
-            raise ValueError("proof-close-style prover round requires at least three verifier reviews")
+            raise ValueError("multi-reviewer prover round requires at least three verifier reviews")
         reviewer_ids = [review.verifier_id for review in self.verifier_reviews]
         if len(reviewer_ids) != len(set(reviewer_ids)):
             raise ValueError("prover round verifier ids must be unique")

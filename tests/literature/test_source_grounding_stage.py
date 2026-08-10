@@ -53,8 +53,8 @@ def test_stage_earns_source_backed_with_attribution(tmp_path: Path) -> None:
         run_dir=run_dir,
         ground_source=_src(run_dir, THM),
         source_id="src_real",
-        title="Topics in Galois Theory",
-        authors=["J.-P. Serre"],
+        title="A Note on Spectral Methods",
+        authors=["A. Mathematician"],
     )
     validate_run(run_dir)
     sg = _sg(run_dir)
@@ -108,7 +108,7 @@ def test_stage_does_not_change_idea_grade(tmp_path: Path) -> None:
     prepare_source_grounding(
         run_dir=run_dir,
         ground_source=_src(run_dir, THM),
-        title="Topics in Galois Theory",
-        authors=["J.-P. Serre"],
+        title="A Note on Spectral Methods",
+        authors=["A. Mathematician"],
     )
     assert read_yaml(run_dir / "idea_grade.yaml") == grade_before

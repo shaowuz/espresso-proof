@@ -571,7 +571,7 @@ def _validate_llm_loop_artifacts(
     reviews_by_id = {review.verifier_id: review for review in llm_agent_run.verifier_reviews}
     known_reviewer_ids = set(reviews_by_id)
     if len(known_reviewer_ids) < 3:
-        raise KernelValidationError("proof-close-style prover loop requires at least three reviewer roles")
+        raise KernelValidationError("multi-reviewer prover loop requires at least three reviewer roles")
     known_attempt_ids = {attempt.attempt_id for attempt in prover_loop.attempts}
     for attempt in prover_loop.attempts:
         if attempt.parent_attempt_id is not None:

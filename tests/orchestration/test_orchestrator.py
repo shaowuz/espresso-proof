@@ -18,7 +18,7 @@ from espresso_proof.kernel.validators import KernelValidationError, validate_run
 # and a clearly-false claim. None match a mock scenario, so each scaffolds to the
 # honest "unclear/needs_human" skeleton and must run end to end.
 CLAIMS = {
-    "m23": "The Mathieu group M23 is realizable as a Galois group over Q.",
+    "open": "No odd perfect number exists.",
     "true": "Every prime greater than two is odd.",
     "false": "Every continuous function on the reals is differentiable everywhere.",
 }
@@ -212,15 +212,15 @@ def test_orchestrate_resume_rejects_unknown_strategy(tmp_path: Path) -> None:
 def test_orchestrate_resume_before_gate_is_blocked(tmp_path: Path) -> None:
     # A scaffold-only run (no agent pass) is not at the human gate.
     claim_path = tmp_path / "claim.md"
-    claim_path.write_text(CLAIMS["m23"], encoding="utf-8")
+    claim_path.write_text(CLAIMS["open"], encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
     with pytest.raises((ValueError, ClaimClearBlockedError)):
         resume_run(run_dir=run_dir, selected_strategy="none")
 
 
 def test_orchestrate_is_resumable_and_idempotent(tmp_path: Path) -> None:
-    claim_path = tmp_path / "m23.md"
-    claim_path.write_text(CLAIMS["m23"], encoding="utf-8")
+    claim_path = tmp_path / "open.md"
+    claim_path.write_text(CLAIMS["open"], encoding="utf-8")
     first = orchestrate_run(
         project="agent_runtime_demo",
         input_path=claim_path,
@@ -248,8 +248,8 @@ def test_orchestrate_blocks_on_invalid_artifact_and_does_not_advance(tmp_path: P
     # the orchestrator. It must fail closed (raise) and NOT advance the lifecycle.
     from espresso_proof.kernel.io import write_yaml
 
-    claim_path = tmp_path / "m23.md"
-    claim_path.write_text(CLAIMS["m23"], encoding="utf-8")
+    claim_path = tmp_path / "open.md"
+    claim_path.write_text(CLAIMS["open"], encoding="utf-8")
     run_dir = run_mock_critique("agent_runtime_demo", claim_path, tmp_path)
     # mark it scaffolded so the orchestrator resumes from an existing run.
     manifest = read_yaml(run_dir / "run_manifest.yaml")

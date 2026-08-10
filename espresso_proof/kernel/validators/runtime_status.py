@@ -461,11 +461,11 @@ def _validate_pressure_status(
             if marker.effect != "scheduling_only" or not marker.advisory_only:
                 raise KernelValidationError("late pressure marker must be scheduling-only/advisory")
             if marker.update_inbox_entry is not False:
-                raise KernelValidationError("Task 03 pressure marker must not be an Update Inbox entry")
+                raise KernelValidationError("late pressure marker must not be an Update Inbox entry")
             if marker.artifact_revision_or_hash != artifact_hash:
                 raise KernelValidationError("late pressure marker artifact_revision_or_hash is stale")
             if marker.scope != "whole_claim" or marker.route_id_or_step_id != "whole_claim":
-                raise KernelValidationError("Task 03 late pressure marker must be scoped to whole_claim")
+                raise KernelValidationError("late pressure marker must be scoped to whole_claim")
             if marker.late_after_strategy is not True:
                 raise KernelValidationError("late pressure marker must record late_after_strategy=true")
             if marker.origin_stage != entry.kind:

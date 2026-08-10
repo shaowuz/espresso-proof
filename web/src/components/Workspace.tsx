@@ -788,7 +788,7 @@ export function Workspace({
       />
 
       {/* The latest-round ledger now lives in the bottom-left settings control
-          (Codex-style minimal workspace); see SettingsButton. */}
+          (minimal workspace); see SettingsButton. */}
 
       <PanelSection
         icon={Route}

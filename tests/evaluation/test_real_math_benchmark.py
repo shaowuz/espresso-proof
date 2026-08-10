@@ -147,7 +147,7 @@ def _ground_matrix_source(run_dir: Path) -> None:
         source=str(src),
         source_id="src_real",
         title="Real Source",
-        authors=["J.-P. Serre"],
+        authors=["A. Mathematician"],
         source_type="paper",
     )
     manifest.setdefault("optional_artifacts", {})["theorem_extraction"] = (

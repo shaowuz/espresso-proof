@@ -200,7 +200,7 @@ Matrix2 = tuple[int, int, int, int]
 
 
 # Enumeration guard for generator-defined groups. Generous for anything an
-# agent legitimately proposes (Sz(8) is 29120), small enough that a hostile
+# agent legitimately proposes (|A_9| = 181440), small enough that a hostile
 # request cannot make the verifier enumerate forever.
 MAX_GENERATED_GROUP_ORDER = 200_000
 

@@ -21,7 +21,7 @@ FIXTURES = Path("tests/fixtures")
 
 # An arbitrary claim that matches no mock scenario, so it scaffolds to the generic
 # unclear/needs_human run and stops consistently at the claim-clear gate.
-CLAIM_TEXT = "The Mathieu group M23 is realizable as a Galois group over Q.\n"
+CLAIM_TEXT = "No odd perfect number exists.\n"
 
 # A precise seeded scenario used when a test needs to reach downstream stages.
 CLEAR_CLAIM_TEXT = "Every group of order p^2, where p is prime, is abelian.\n"

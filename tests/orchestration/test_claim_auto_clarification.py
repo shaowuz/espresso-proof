@@ -1,16 +1,16 @@
 """An unclear claim gets completed and the run proceeds; parking is the fallback.
 
-Observed live from the browser UI: "There exists a polynomial map f: C^3 -> C^3
-with Jacobian determinant a nonzero constant such that f is not invertible"
-parked the run at WAITING_CLAIM_CLARIFICATION with two listed gaps — one a real
-ambiguity (polynomial inverse vs set-theoretic bijection), and one that is not a
-precision issue at all ("the Jacobian Conjecture in dimension 3 is open":
-precision is not truth, by this codebase's own stated principle).
+Behavioral spec. A claim such as "There exists a polynomial map f: R^2 -> R^2
+that is injective but not invertible" would park the run at
+WAITING_CLAIM_CLARIFICATION with two listed gaps — one a real ambiguity
+(polynomial inverse vs set-theoretic bijection), and one that is not a
+precision issue at all ("whether such a map exists is open": precision is not
+truth, by this codebase's own stated principle).
 
-The owner's requested behavior: the agent that found the gaps resolves them —
-one more call proposes the completed precise statement with each gap resolved by
-an explicit recorded assumption, the run continues, and the human sees the
-completion and can revise; silence means continue.
+Required behavior: the agent that found the gaps resolves them — one more call
+proposes the completed precise statement with each gap resolved by an explicit
+recorded assumption, the run continues, and the human sees the completion and
+can revise; silence means continue.
 
 Safety contract pinned here: raw_text is never overwritten, human_confirmed
 stays False, every resolution is recorded in the ledger notes, and a completion
@@ -43,15 +43,15 @@ class _Client:
 
 GOOD_REPLY = {
     "normalized_statement": (
-        "There exists a polynomial map f: C^3 -> C^3 whose Jacobian determinant "
-        "is a nonzero constant and which has no polynomial inverse."
+        "There exists a polynomial map f: R^2 -> R^2 that is injective "
+        "and has no polynomial inverse."
     ),
-    "objects": ["f: polynomial map C^3 -> C^3", "det Jf: a nonzero constant"],
+    "objects": ["f: polynomial map R^2 -> R^2", "the candidate inverse of f"],
     "hypotheses": [
-        {"name": "f is a polynomial map C^3 -> C^3", "status": "explicit"},
-        {"name": "det Jf is a nonzero constant", "status": "explicit"},
+        {"name": "f is a polynomial map R^2 -> R^2", "status": "explicit"},
+        {"name": "f is injective", "status": "explicit"},
         {
-            "name": "invertible means: admits a polynomial inverse (classical Jacobian formulation)",
+            "name": "invertible means: admits a polynomial inverse",
             "status": "inferred",
         },
     ],
@@ -59,10 +59,10 @@ GOOD_REPLY = {
     "resolutions": [
         {
             "gap": "polynomial inverse or set-theoretic bijection?",
-            "assumption": "polynomial inverse (classical Jacobian Conjecture formulation)",
+            "assumption": "polynomial inverse (the standard reading for polynomial maps)",
         },
         {
-            "gap": "the Jacobian Conjecture in dimension 3 is an open problem",
+            "gap": "whether such a map exists is an open question",
             "assumption": "none needed: openness is not imprecision",
         },
     ],
@@ -70,7 +70,7 @@ GOOD_REPLY = {
 
 GAPS = [
     "polynomial inverse or set-theoretic bijection?",
-    "the Jacobian Conjecture in dimension 3 is an open problem",
+    "whether such a map exists is an open question",
 ]
 
 
@@ -168,12 +168,12 @@ def test_the_stage_records_honest_provenance(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setattr(understanding, "_clarify_claim", fake_clarify)
     claim_file = tmp_path / "c.md"
     raw = (
-        "There exists a polynomial map f: C^3 -> C^3 with Jacobian determinant "
-        "a nonzero constant such that f is not invertible."
+        "There exists a polynomial map f: R^2 -> R^2 that is injective "
+        "but not invertible."
     )
     claim_file.write_text(raw + "\n", encoding="utf-8")
     result = orchestrate_run(
-        project="jacobian", input_path=claim_file, output_root=tmp_path,
+        project="polymap", input_path=claim_file, output_root=tmp_path,
         provider="stub", front_half="stub",
     )
     run_dir = Path(result["run_dir"])

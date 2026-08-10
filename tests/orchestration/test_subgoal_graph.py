@@ -857,7 +857,7 @@ def test_dropped_hypothesis_counterexample_does_not_close_the_claim(tmp_path: Pa
 
 def _add_step_only_counterexample(run_dir: Path, *, explanation: str) -> None:
     """Append a TRUSTED step-only checked counterexample to the counterexamples
-    artifact (mirrors the 57C polynomial witness scope: refutes a proof step, not
+    artifact (mirrors the polynomial-witness scoping: refutes a proof step, not
     the claim)."""
     path = run_dir / "counterexamples.yaml"
     bank = read_yaml(path)
@@ -1189,7 +1189,7 @@ def test_ledger_repair_node_objection_attaches_to_that_node(tmp_path: Path) -> N
     ledger = read_yaml(run_dir / "theorem_condition_ledger.yaml")
     target_id = ledger["entries"][0]["repair_subgoal_id"]
 
-    # a reviewer scoped objection naming the ledger repair node (54B attach path)
+    # a reviewer scoped objection naming the ledger repair node (attach path)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     agent_path = run_dir / manifest["optional_artifacts"]["llm_agent_run"]
     agent = read_yaml(agent_path)
@@ -1259,8 +1259,8 @@ def test_ledger_entries_prevent_open_blocked_collapse(tmp_path: Path) -> None:
 
 
 def test_no_double_repair_node_from_blocker_and_ledger(tmp_path: Path) -> None:
-    """The ledger is the single writer of subgoal_tcl_* nodes; 57B's blocker path
-    only writes subgoal_block_* ids, so the two never collide."""
+    """The ledger is the single writer of subgoal_tcl_* nodes; the reviewer-blocker
+    path only writes subgoal_block_* ids, so the two never collide."""
     run_dir = _ledger_run(tmp_path)
     _inject_blocker(run_dir, "Need a source/theorem for the class equation")
     graph = assemble_subgoal_graph(run_dir)
@@ -1273,7 +1273,7 @@ def test_no_double_repair_node_from_blocker_and_ledger(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 56E (G56E-001): reviewer-named route/global gaps become blocked nodes
+# reviewer-named route/global gaps become blocked nodes
 # ---------------------------------------------------------------------------
 def _inject_scoped_objections(run_dir: Path, scoped: list[dict]) -> None:
     """Append scoped_objections to the gate-time llm_agent_run's first verifier
@@ -1390,7 +1390,7 @@ def test_route_objections_become_blocked_nodes(tmp_path: Path) -> None:
     assert "block_reason" not in logical  # logical_gap is not a typed dead route
     assert logical["role"] == "lemma"
 
-    # the subgoal-scoped objection still attaches to its node (54B) and does NOT
+    # the subgoal-scoped objection still attaches to its node and does NOT
     # also create a subgoal_obj_* duplicate
     node_by_id = {n["id"]: n for n in graph["nodes"]}
     assert any(
@@ -1405,7 +1405,7 @@ def test_route_objections_become_blocked_nodes(tmp_path: Path) -> None:
 
 def test_global_objection_does_not_become_a_blocked_node(tmp_path: Path) -> None:
     # A "global" concern is about the whole claim, not a named route-death step:
-    # it stays advisory (54B / main goal) and never becomes its own subgoal_obj_*
+    # it stays advisory (attached to the main goal) and never becomes its own subgoal_obj_*
     # node. Only route-scoped named gaps are materialized.
     run_dir = _resumed_run(tmp_path)
     _inject_scoped_objections(

@@ -62,7 +62,7 @@ def _matrix_run(tmp_path: Path) -> Path:
 def test_step_earns_source_backed_with_attribution(tmp_path: Path) -> None:
     run_dir = _matrix_run(tmp_path)
     grade_before = read_yaml(run_dir / read_yaml(run_dir / "run_manifest.yaml")["artifacts"]["idea_grade"])
-    ext = _ingest(run_dir, THM, authors=["J.-P. Serre"], title="Topics in Galois Theory")
+    ext = _ingest(run_dir, THM, authors=["A. Mathematician"], title="A Note on Spectral Methods")
     ground_run(run_dir=run_dir, theorem_extraction_path=ext)
     validate_run(run_dir)
     sg = read_yaml(run_dir / "source_grounding.yaml")
@@ -81,7 +81,7 @@ def test_step_earns_source_backed_with_attribution(tmp_path: Path) -> None:
     memo = CliRunner().invoke(app, ["memo", "--run", str(run_dir)]).output
     assert "Proof-route steps:" in memo
     assert "Reference supports this stated claim" in memo
-    assert "J.-P. Serre" in memo
+    assert "A. Mathematician" in memo
     lower = memo.lower()
     for phrase in ("proof-close", "proof complete", "we proved", "espresso proved"):
         assert phrase not in lower
@@ -113,7 +113,7 @@ def test_source_conclusion_mismatch_stays_candidate_and_preserves_requested_step
         "Theorem 1.2. Exact literature statement about Spectral structures over "
         "base field C for square matrices."
     )
-    ext = _ingest(run_dir, text, authors=["J.-P. Serre"], title="Topics in Galois Theory")
+    ext = _ingest(run_dir, text, authors=["A. Mathematician"], title="A Note on Spectral Methods")
     ground_run(run_dir=run_dir, theorem_extraction_path=ext)
     validate_run(run_dir)
 
@@ -204,7 +204,7 @@ def test_no_exact_locator_stays_candidate(tmp_path: Path) -> None:
 
 def test_grounding_run_stays_kernel_valid_and_registers_audit(tmp_path: Path) -> None:
     run_dir = _matrix_run(tmp_path)
-    ext = _ingest(run_dir, THM, authors=["J.-P. Serre"], title="Topics in Galois Theory")
+    ext = _ingest(run_dir, THM, authors=["A. Mathematician"], title="A Note on Spectral Methods")
     ground_run(run_dir=run_dir, theorem_extraction_path=ext)
     validate_run(run_dir)  # fail-closed: full kernel gate after grounding
     manifest = read_yaml(run_dir / "run_manifest.yaml")
@@ -296,8 +296,8 @@ def test_orchestrate_ground_source_cli_earns_source_backed(tmp_path: Path) -> No
         [
             "orchestrate", "--resume", str(run_dir), "--select-strategy", selected,
             "--effort", effort, "--provider", "stub",
-            "--ground-source", str(src), "--source-author", "J.-P. Serre",
-            "--source-title", "Topics in Galois Theory",
+            "--ground-source", str(src), "--source-author", "A. Mathematician",
+            "--source-title", "A Note on Spectral Methods",
         ],
     )
     assert resumed.exit_code == 0, resumed.output
@@ -317,7 +317,7 @@ def test_tampered_hypothesis_match_blocked_by_independent_audit(tmp_path: Path) 
     from espresso_proof.kernel.validators import KernelValidationError
 
     run_dir = _matrix_run(tmp_path)
-    ext = _ingest(run_dir, THM, authors=["J.-P. Serre"], title="Topics in Galois Theory")
+    ext = _ingest(run_dir, THM, authors=["A. Mathematician"], title="A Note on Spectral Methods")
     ground_run(run_dir=run_dir, theorem_extraction_path=ext)
     validate_run(run_dir)
     sg = read_yaml(run_dir / "source_grounding.yaml")
@@ -351,7 +351,7 @@ def test_independent_audit_confirms_honest_grounding(tmp_path: Path) -> None:
     from espresso_proof.verification.theorem_applicability import audit_theorem_applicability
 
     run_dir = _matrix_run(tmp_path)
-    ext = _ingest(run_dir, THM, authors=["J.-P. Serre"], title="Topics in Galois Theory")
+    ext = _ingest(run_dir, THM, authors=["A. Mathematician"], title="A Note on Spectral Methods")
     ground_run(run_dir=run_dir, theorem_extraction_path=ext)
     audit_theorem_applicability(run_dir)  # re-run audit standalone
     validate_run(run_dir)

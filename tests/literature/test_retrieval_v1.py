@@ -122,7 +122,7 @@ def test_candidate_with_locator_and_attribution_is_handed_to_grounding(tmp_path:
     claim = read_yaml(run_dir / "locked_claim.yaml")
     report = ingest_source_for_theorems(
         claim_id=claim["id"], source=str(src), source_id="src_real",
-        title="Real Source", authors=["J.-P. Serre"], source_type="paper",
+        title="Real Source", authors=["A. Mathematician"], source_type="paper",
     )
     write_yaml(run_dir / "theorem_extraction.yaml", report)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
@@ -162,7 +162,7 @@ def test_retrieval_does_not_upgrade_grade_or_proof_status(tmp_path: Path) -> Non
     claim = read_yaml(run_dir / "locked_claim.yaml")
     report = ingest_source_for_theorems(
         claim_id=claim["id"], source=str(src), source_id="src_real",
-        title="Real Source", authors=["J.-P. Serre"], source_type="paper",
+        title="Real Source", authors=["A. Mathematician"], source_type="paper",
     )
     write_yaml(run_dir / "theorem_extraction.yaml", report)
     manifest = read_yaml(run_dir / "run_manifest.yaml")

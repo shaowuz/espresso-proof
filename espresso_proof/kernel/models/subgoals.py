@@ -116,8 +116,8 @@ class SubgoalNode(StrictBaseModel):
     reviewer_objections: list[str] = Field(default_factory=list)
     counterexample_pressure: list[str] = Field(default_factory=list)
     remaining_risk: str = ""
-    # Advisory blocked/conditional typing. Optional + default so every
-    # pre-57B graph still validates unchanged.
+    # Advisory blocked/conditional typing. Optional + default so every graph
+    # written before these fields existed still validates unchanged.
     block_reason: BlockReason | None = None
     suggested_next_action: str = ""
 
