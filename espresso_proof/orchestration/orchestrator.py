@@ -1319,7 +1319,7 @@ def _resume_idempotent_memo(*, run_dir: Path) -> str:
     # The last of the four silent no-op paths. This branch is idempotent by
     # design, but its output used to be indistinguishable from a resume that
     # actually drove rounds — three consecutive no-op resumes of a completed
-    # Sz(8) run each printed a full memo and exited 0. State it instead.
+    # run each printed a full memo and exited 0. State it instead.
     return build_concise_memo(run_dir) + (
         "\n\nProver loop: no round ran — this run is already complete "
         "(state COMPLETED_MEMO). Resuming again only refreshes dashboards; "
@@ -1476,9 +1476,12 @@ def _run_resume_prover_loop(
         )
         loop = read_yaml(run_dir / loop_rel)
         if loop.get("loop_decision") == "ask_human":
+            # The scheduler's question is about the selected route; the rebuilt
+            # payload names it (the same derivation the driver uses).
+            route_id = str(loop.get("selected_strategy_id") or selected_strategy)
             loop["loop_decision"] = "repair"
             loop["decision_reason"] = (
-                f"Human answered the scheduler question for route {route_id}: continue. "
+                f"{resolver} answered the scheduler question for route {route_id}: continue. "
                 "Scheduling only — no objection was resolved and no status changed."
             )
             write_yaml(run_dir / loop_rel, loop)

@@ -453,3 +453,81 @@ def test_appended_round_carries_matching_blocker_details(tmp_path: Path) -> None
                 and d["source_field"] in {"objections", "missing_hypotheses", "source_requests"}
                 for d in details
             )
+
+
+# ---------------------------------------------------------------------------
+# Resume must release a persisted ask_human (route named from the payload)
+# ---------------------------------------------------------------------------
+
+
+def test_resume_releases_persisted_ask_human_and_names_the_route(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The ask_human release inside `_run_resume_prover_loop` once interpolated
+    an unbound `route_id` (NameError as soon as the branch ran). The route the
+    scheduler asks about is the selected one; the loop payload names it."""
+    import espresso_proof.orchestration.orchestrator as orch
+
+    claim = tmp_path / "claim.md"
+    claim.write_text("Every group of order p^2, where p is a prime, is abelian.\n", encoding="utf-8")
+    result = orchestrate_run(
+        project="pml",
+        input_path=claim,
+        output_root=tmp_path,
+        provider="stub",
+        front_half="stub",
+        front_half_client=FakeClaude(precision="precise"),
+    )
+    run_dir = result["run_dir"]
+    artifacts = read_yaml(run_dir / "run_manifest.yaml")["artifacts"]
+    selected = read_yaml(run_dir / artifacts["strategy_brief"])["top_strategies"][0]["id"]
+    human_choice = {
+        "claim_id": read_yaml(run_dir / artifacts["locked_claim"])["id"],
+        "status": "selected",
+        "selected_strategy": selected,
+        "effort": "normal_pass",
+        "taste_judgment": "",
+        "continue_decision": "continue",
+        "human_confirmed": True,
+    }
+    write_yaml(run_dir / artifacts["human_choice"], human_choice)
+
+    real_resolve = orch._resolve_and_build_loop
+
+    def resolve_then_reseed_ask_human(run_dir, **kwargs):
+        # Simulate the scheduler's persisted ask surviving into the rebuilt loop.
+        real_resolve(run_dir, **kwargs)
+        loop = read_yaml(run_dir / "prover_loop.yaml")
+        loop["loop_decision"] = "ask_human"
+        write_yaml(run_dir / "prover_loop.yaml", loop)
+        validate_run(run_dir)
+
+    released: dict = {}
+    real_continue = orch.continue_prover_loop
+
+    def spy_continue(*, run_dir, **kwargs):
+        released.update(read_yaml(run_dir / "prover_loop.yaml"))
+        return real_continue(run_dir=run_dir, **kwargs)
+
+    monkeypatch.setattr(orch, "_resolve_and_build_loop", resolve_then_reseed_ask_human)
+    monkeypatch.setattr(orch, "continue_prover_loop", spy_continue)
+    summary = orch._run_resume_prover_loop(
+        run_dir=run_dir,
+        human_choice=human_choice,
+        continue_decision="continue",
+        selected_strategy=selected,
+        prover_provider="stub",
+        model="stub-prover",
+        api_key_env="OPENAI_API_KEY",
+        external_agent_command_env="ESPRESSO_EXTERNAL_AGENT_COMMAND",
+        reviewer_set="espresso",
+        rounds=None,
+        prover_client=_ProverClient(objections=[]),
+        selected_by="human",
+    )
+    # The ask was released (not parked): the driver saw "repair" and ran rounds.
+    assert released["loop_decision"] == "repair"
+    assert selected in released["decision_reason"]
+    assert released["decision_reason"].startswith("human answered the scheduler question")
+    assert summary is not None and summary[0] >= 1
+    validate_run(run_dir)
