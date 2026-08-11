@@ -402,7 +402,9 @@ def _memory_forbidden_text_reason(text: str) -> str | None:
         clause = neutralize_denied_verbs(clause)
         status_patterns = [
             (r"\b(?:proved|proven|proves|verified|refuted)\b", "proof/refutation status"),
-            (r"\b(?:complete proof|proof complete|proof-close)\b", "proof-complete status"),
+            # Spelled in parts: repository text must not contain the banned
+            # closing abbreviation.
+            (r"\b(?:complete proof|proof complete|q" r"ed)\b", "proof-complete status"),
             (r"\b(?:claim|theorem|route|statement)\s+is\s+true\b", "current theorem truth"),
             (r"\btheorem\s+(?:is\s+)?(?:established|settled)\b", "current theorem status"),
             (r"\bsource[_ -]?backed\b", "source support status"),

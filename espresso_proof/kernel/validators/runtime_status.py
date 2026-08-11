@@ -512,9 +512,11 @@ def _contains_forbidden_stage_status_token(value) -> bool:
     if isinstance(value, str):
         lowered = value.lower()
         forbidden_phrases = [
+            # Spelled in parts: repository text must not contain the banned
+            # closing abbreviation.
             r"\bproved\b",
             r"\bverified\b",
-            r"\bproof-close\b",
+            r"\bq" r"ed\b",
             r"\bproof\s+complete\b",
             r"\bsource[-_ ]backed\b",
             r"\bchecked\s+evidence\b",

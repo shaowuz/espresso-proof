@@ -138,7 +138,7 @@ def test_dogfood_replay_fails_on_proof_complete_memo(tmp_path: Path, monkeypatch
     import espresso_proof.evaluation.scorecard as scorecard_mod
 
     monkeypatch.setattr(
-        memo_mod, "build_concise_memo", lambda run_dir: "We proved the theorem. proof-close."
+        memo_mod, "build_concise_memo", lambda run_dir: "We proved the theorem. Q" "ED."
     )
     probe = scorecard_mod._probe_dogfood_replay(tmp_path)
     assert probe["memo_honest"] is False

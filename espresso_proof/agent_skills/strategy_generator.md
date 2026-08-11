@@ -34,7 +34,8 @@ Knowing this tells you where effort matters:
   single lock-the-claim route. The only honest output then is one route recommending
   claim locking, plus a `question_for_mathematician` naming the exact ambiguity.
 - Proof-completion promises: blocklisted phrases ("full proof", "complete proof",
-  "proof-close", "proved") are redacted to `[withheld proof-like phrase]` in every field, and
+  "proved", and the classical Latin proof-closing abbreviation) are redacted to
+  `[withheld proof-like phrase]` in every field, and
   proof-like markers ("complete the proof", "prove the claim", "finish the proof",
   "line-by-line proof") in a title, `why_this_route`, or `next_loop_plan` void the
   ENTIRE route list whenever any reviewer in the run has failed — the kernel swaps in

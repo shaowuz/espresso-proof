@@ -113,7 +113,7 @@ def test_finite_group_bridge_earns_instance_checked_not_proved(tmp_path: Path) -
     # the memo shows scoped machine checks but never asserts a proof
     memo = build_concise_memo(run_dir).lower()
     assert "machine-verified instances (scoped" in memo
-    for phrase in ("proof-close", "proof complete", "we proved the", "this establishes the theorem"):
+    for phrase in ("q" "ed", "proof complete", "we proved the", "this establishes the theorem"):
         assert phrase not in memo
 
 
@@ -178,7 +178,7 @@ def test_failed_verifier_fails_closed_to_unverified(tmp_path: Path) -> None:
     grade = _grade(run_dir)
     assert grade["proof_language_status"] != "proved"
     memo = build_concise_memo(run_dir).lower()
-    for phrase in ("proof-close", "proof complete", "we proved the"):
+    for phrase in ("q" "ed", "proof complete", "we proved the"):
         assert phrase not in memo
 
 

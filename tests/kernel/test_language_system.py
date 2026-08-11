@@ -209,7 +209,7 @@ def test_proof_language_guard_still_strict(tmp_path: Path) -> None:
     run_dir = _run(tmp_path)
     memo = build_concise_memo(run_dir).lower()
     html = render_run_dashboard(run_dir).lower()
-    for phrase in ("proof-close", "proof complete", "the theorem is proved"):
+    for phrase in ("q" "ed", "proof complete", "the theorem is proved"):
         assert phrase not in memo
         assert phrase not in html
 

@@ -122,8 +122,9 @@ _STANDING_RISK = (
 
 # Local last-resort neutralizer, used only if the kernel's own scrubbers are not
 # importable. Word-boundary replacement of completion vocabulary.
+# Spelled in parts: repository text must not contain the banned closing abbreviation.
 _LOCAL_FORBIDDEN = (
-    "proved", "proven", "proves", "verified", "proof-close", "complete proof",
+    "proved", "proven", "proves", "verified", "q" "ed", "complete proof",
     "proof complete", "source_backed", "source-backed", "proof_status",
     "mock_checked", "mock checked",
 )

@@ -346,7 +346,7 @@ def test_p2_grounding_earns_reference_support_after_normalization(tmp_path: Path
     assert "Why it applies:" in memo
     assert '"G is a group" matched "Let G be a group"' in memo
     lower = memo.lower()
-    for phrase in ("proof-close", "proof complete", "we proved", "proved the claim"):
+    for phrase in ("q" "ed", "proof complete", "we proved", "proved the claim"):
         assert phrase not in lower
 
 

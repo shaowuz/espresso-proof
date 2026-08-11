@@ -210,5 +210,5 @@ def test_cli_auto_wire_verifications(tmp_path: Path) -> None:
     assert "instance_checked" in out.output
     assert "NOT a universal proof" in out.output
     lower = out.output.lower()
-    for phrase in ("proof-close", "proof complete", "we proved"):
+    for phrase in ("q" "ed", "proof complete", "we proved"):
         assert phrase not in lower

@@ -177,5 +177,5 @@ def test_memo_and_inspect_render_machine_checked(tmp_path: Path) -> None:
     assert "Checked by computation for the stated finite/computational scope" in memo
     assert "machine-checked" in inspected.lower()
     for surface in (memo.lower(), inspected.lower()):
-        for phrase in ("proof-close", "proof complete", "we proved", "proved the claim"):
+        for phrase in ("q" "ed", "proof complete", "we proved", "proved the claim"):
             assert phrase not in surface

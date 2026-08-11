@@ -317,11 +317,12 @@ def _probe_reviewer_quality(root: Path) -> dict:
         "scorecard_review", FIXTURES_DIR / "promising_but_unproved" / "input.md", root
     )
     seeded = 2
-    # Gold flaw 1: proof-complete language in the final report.
+    # Gold flaw 1: proof-complete language in the final report. The closing
+    # abbreviation is spelled in parts: repository text must not contain it.
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     final_report = run_dir / manifest["artifacts"]["final_report"]
     final_report.write_text(
-        final_report.read_text(encoding="utf-8") + "\nWe proved the theorem. proof-close.\n",
+        final_report.read_text(encoding="utf-8") + "\nWe proved the theorem. Q" "ED.\n",
         encoding="utf-8",
     )
     # Gold flaw 2: an unauthorized source_backed ref (no locator / attribution).

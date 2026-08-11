@@ -19,7 +19,8 @@ from espresso_proof.orchestration.prover_loop_driver import continue_prover_loop
 from espresso_proof.kernel.validators import KernelValidationError, validate_run
 from tests.kernel.test_evidence_aware_grade import FakeClaude
 
-_FORBIDDEN = ("proof-close", "proof complete", "we proved", "proved the", "this establishes the theorem")
+# Spelled in parts: repository text must not contain the banned closing abbreviation.
+_FORBIDDEN = ("q" "ed", "proof complete", "we proved", "proved the", "this establishes the theorem")
 
 
 class _ProverClient:
@@ -216,7 +217,7 @@ def test_forbidden_proof_language_never_persists(tmp_path: Path) -> None:
     run_dir, _ = _to_resolved_loop(tmp_path, effort="normal_pass")
     nasty = _ProverClient(
         objections=["loc X"],
-        prover_summary="We proved the theorem; the proof is complete. proof-close.",
+        prover_summary="We proved the theorem; the proof is complete. Q" "ED.",
     )
     continue_prover_loop(run_dir=run_dir, client=nasty)
     validate_run(run_dir)

@@ -632,7 +632,7 @@ def test_memo_no_proof_complete_language_for_weak_artifacts(tmp_path: Path) -> N
     # Check only the memo-GENERATED verdict section (everything from "Verdict:"),
     # so the assertion does not depend on what the echoed claim text contains.
     verdict_section = out.split("Verdict:", 1)[1].lower()
-    for forbidden in ("proof complete", "verified", "proof-close", "proved"):
+    for forbidden in ("proof complete", "verified", "q" "ed", "proved"):
         assert forbidden not in verdict_section
 
 

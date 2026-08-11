@@ -405,7 +405,7 @@ def test_real_math_benchmark_overclaim_trap_does_not_become_solution(
     run_dir = _basic_run(tmp_path)
     manifest = read_yaml(run_dir / "run_manifest.yaml")
     final_path = run_dir / manifest["artifacts"]["final_report"]
-    write_text(final_path, final_path.read_text(encoding="utf-8") + "\nWe proved the theorem. proof-close.\n")
+    write_text(final_path, final_path.read_text(encoding="utf-8") + "\nWe proved the theorem. Q" "ED.\n")
 
     report = build_real_math_capability_report([_case(run_dir, "overclaim_trap")])
     row = _row(report)

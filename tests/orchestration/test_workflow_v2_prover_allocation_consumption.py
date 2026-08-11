@@ -197,10 +197,10 @@ def test_prover_proof_complete_language_is_downgraded_or_rejected(tmp_path: Path
         [agent["prover_attempt"]["output_summary"], *agent["prover_attempt"]["proposed_steps"]]
     ).lower()
 
-    assert "proof-close" not in leaked
+    assert "q" "ed" not in leaked
     assert "proof is complete" not in leaked
 
-    _append_prover_step(run_dir, "This proof is complete. proof-close.")
+    _append_prover_step(run_dir, "This proof is complete. Q" "ED.")
     with pytest.raises(KernelValidationError, match="forbidden proof language"):
         validate_run(run_dir)
 

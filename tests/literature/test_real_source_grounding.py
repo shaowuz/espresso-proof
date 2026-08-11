@@ -83,7 +83,7 @@ def test_step_earns_source_backed_with_attribution(tmp_path: Path) -> None:
     assert "Reference supports this stated claim" in memo
     assert "A. Mathematician" in memo
     lower = memo.lower()
-    for phrase in ("proof-close", "proof complete", "we proved", "espresso proved"):
+    for phrase in ("q" "ed", "proof complete", "we proved", "espresso proved"):
         assert phrase not in lower
 
 

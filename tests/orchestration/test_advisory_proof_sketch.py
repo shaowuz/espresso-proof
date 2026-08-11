@@ -63,7 +63,7 @@ def test_scrub_keeps_clean_mathematics():
 @pytest.mark.parametrize(
     "raw",
     [
-        "This completes the proof. proof-close.",
+        "This completes the proof. Q" "ED.",
         "Therefore the theorem is proved and source_backed.",
         "checked_evidence = yes; the result is now verified.",
         "evidence_status: confirmed and the claim is refuted.",

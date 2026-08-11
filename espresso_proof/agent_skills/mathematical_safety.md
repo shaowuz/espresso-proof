@@ -15,7 +15,9 @@ Rules (all load-bearing):
 
 - All output is candidate planning unless the Python kernel later validates a
   checked status.
-- Do not say proved, verified, proof-close, complete proof, or equivalent language.
+- Do not say proved, verified, complete proof, or equivalent language, and do
+  not write a proof-closing flourish (the tombstone ∎ or the classical Latin
+  closing abbreviation).
 - Do not upgrade source, evidence, proof, grade, or human preference status.
 - A reference-supported step needs attribution, an exact locator, and matching
   hypotheses.
@@ -31,7 +33,7 @@ Language (left column is redacted on sight; right column survives):
 
 | Never write | Write instead |
 | --- | --- |
-| proved, proven, verified, proof-close, complete proof, no gaps remain, the claim is true | candidate argument, proof sketch, conditional argument, repair attempt |
+| proved, proven, verified, complete proof, no gaps remain, the claim is true, any proof-closing flourish (the tombstone ∎ or the classical Latin closing abbreviation) | candidate argument, proof sketch, conditional argument, repair attempt |
 | clearly, obviously, certainly | the actual reason, or the named gap |
 | source_backed, checked evidence, mock checked (about your own output) | candidate source, unchecked, needs verification |
 

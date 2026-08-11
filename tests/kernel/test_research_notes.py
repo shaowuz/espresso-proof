@@ -85,7 +85,7 @@ def test_note_text_is_scrubbed(tmp_path: Path) -> None:
         tmp_path,
         ResearchNote(
             note_id="n", run_id="r", target_kind="example", target_id="ex1",
-            text="this basically proves the theorem, proof-close",
+            text="this basically proves the theorem, Q" "ED",
             created_at="2026-06-13T00:00:00Z",
         ),
     )

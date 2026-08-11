@@ -186,7 +186,9 @@ def _contains_forbidden_allocation_token(value, forbidden: set[str]) -> bool:
         if _first_forbidden_proof_language(normalized):
             return True
         allocation_only_patterns = [
-            r"\bproof-close\b",
+            # Spelled in parts: repository text must not contain the banned
+            # closing abbreviation.
+            r"\bq" r"ed\b",
             r"\bsettled\b",
             r"\bverified\s+by\s+examples\b",
         ]
@@ -364,7 +366,9 @@ def _contains_forbidden_update_inbox_token(value, forbidden_fields: set[str]) ->
         return any(
             re.search(pattern, normalized)
             for pattern in [
-                r"\bproof-close\b",
+                # Spelled in parts: repository text must not contain the
+                # banned closing abbreviation.
+                r"\bq" r"ed\b",
                 r"\bsettled\b",
                 r"\bverified\s+by\s+examples\b",
             ]

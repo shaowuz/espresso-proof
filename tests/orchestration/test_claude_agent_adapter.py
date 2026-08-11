@@ -225,7 +225,7 @@ def test_claude_adapter_scrubs_prose_fields_with_kernel_detectors(tmp_path: Path
     untouched."""
     smuggled = json.dumps(
         {
-            "summary": "The claim is proved. proof-close.",
+            "summary": "The claim is proved. Q" "ED.",
             "steps": ["Cite the lemma with an exact locator."],
             "verdict": "needs_sources",
         }
@@ -241,7 +241,7 @@ def test_claude_adapter_scrubs_prose_fields_with_kernel_detectors(tmp_path: Path
 
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
-    assert "proof-close" not in payload["summary"]
+    assert "Q" "ED" not in payload["summary"]
     assert "proved" not in payload["summary"]
     assert payload["steps"] == ["Cite the lemma with an exact locator."]
     assert payload["verdict"] == "needs_sources"

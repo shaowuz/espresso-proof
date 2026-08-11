@@ -474,7 +474,7 @@ def test_update_inbox_forbidden_ownership_fields_fail_validation(
 @pytest.mark.parametrize(
     "phrase",
     [
-        "proof-close",
+        "Q" "ED",
         "complete proof",
         "source_backed",
         "checked_evidence",

@@ -137,7 +137,7 @@ def test_route_table_in_memo_sanitizes_proof_complete_free_text(tmp_path: Path) 
     sg = read_yaml(run / artifacts["source_grounding"])
     sg.setdefault("steps", []).append({
         "proof_step_id": "s_evil",
-        "needed_theorem": "This completes the proof. proof-close. We proved the theorem.",
+        "needed_theorem": "This completes the proof. Q" "ED. We proved the theorem.",
         "status": "candidate", "source_refs": [],
         "hypothesis_match": {"matches": "unclear", "mismatches": []},
         "note": "",

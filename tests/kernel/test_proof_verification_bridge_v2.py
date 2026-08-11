@@ -211,7 +211,7 @@ def test_memo_renders_scoped_identity_never_proved(tmp_path: Path) -> None:
     assert "machine-verified instances (scoped" in lower
     assert "finite/computational" in lower
     assert "do not prove the universal claim" in lower
-    for phrase in ("proof-close", "proof complete", "we proved the", "this establishes the theorem"):
+    for phrase in ("q" "ed", "proof complete", "we proved the", "this establishes the theorem"):
         assert phrase not in lower
 
 

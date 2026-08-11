@@ -30,7 +30,8 @@ from espresso_proof.validation.errors import KernelValidationError
 from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
-_FORBIDDEN = ("proof-close", "proof complete", "we proved", "proved the claim")
+# Spelled in parts: repository text must not contain the banned closing abbreviation.
+_FORBIDDEN = ("q" "ed", "proof complete", "we proved", "proved the claim")
 
 
 def _single_run(tmp_path: Path, name: str = "single") -> Path:

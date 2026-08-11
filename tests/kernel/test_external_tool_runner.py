@@ -126,7 +126,7 @@ def test_overclaiming_tool_output_is_scrubbed_from_conclusion(tmp_path: Path, mo
 
     from espresso_proof.kernel import external_tool_runner as runner_mod
 
-    overclaim_script = 'print("RESULT: we proved the theorem. proof-close.")'
+    overclaim_script = 'print("RESULT: we proved the theorem. Q' 'ED.")'
     monkeypatch.setitem(
         runner_mod.FAKE_TOOLS,
         "fake_overclaim",
@@ -138,8 +138,8 @@ def test_overclaiming_tool_output_is_scrubbed_from_conclusion(tmp_path: Path, mo
     )
     run_dir = _run(tmp_path)
     record = run_and_record_external_tool(run_dir, "fake_overclaim", entry_id="overclaim_001")
-    assert "proof-close" in record.stdout_excerpt  # raw evidence preserved
-    assert "proof-close" not in record.conclusion.lower()
+    assert "Q" "ED" in record.stdout_excerpt  # raw evidence preserved
+    assert "q" "ed" not in record.conclusion.lower()
     assert "proved the theorem" not in record.conclusion.lower()
     assert "[withheld proof-like phrase]" in record.conclusion
     validate_run(run_dir)

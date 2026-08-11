@@ -871,7 +871,7 @@ def test_refresh_final_report_sanitizes_legacy_blocker_text(
     artifacts = _artifacts(run_dir)
     grade = read_yaml(run_dir / artifacts["idea_grade"])
     grade["source_gaps"] = [
-        "verified statement excerpt says proof-close and proof complete",
+        "verified statement excerpt says Q" "ED and proof complete",
         "no gaps remain; the proof is complete",
         "Prover output verifies proof status",
         "Prover output was evidence for proof status",
@@ -899,7 +899,7 @@ def test_refresh_final_report_sanitizes_legacy_blocker_text(
             "Reviewer assessment supports the theorem. "
             "The route demonstrates the theorem. "
             "The strategy certifies the result. "
-            "proof-close. "
+            "Q" "ED. "
             "Source gaps are resolved. Source gaps: none. "
             "All source gaps have been resolved. There are no open source gaps. "
             "There are zero source gaps. "
@@ -916,11 +916,11 @@ def test_refresh_final_report_sanitizes_legacy_blocker_text(
     text = (run_dir / artifacts["final_report"]).read_text(encoding="utf-8").lower()
     assert contains_proof_language(text) is None
     assert "verified" not in text
-    assert "proof-close" not in text
+    assert "q" "ed" not in text
     assert "proof complete" not in text
     assert "no gaps remain" not in text
     assert "the proof is complete" not in text
-    assert "proof-close" not in text.lower()
+    assert "q" "ed" not in text.lower()
     assert "theorem is settled" not in text
     assert "prover output verifies proof status" not in text
     assert "prover output was evidence for proof status" not in text
@@ -974,7 +974,7 @@ def test_final_report_cannot_cite_literature_as_support(
 @pytest.mark.parametrize(
     "phrase",
     [
-        "proof-close.",
+        "Q" "ED.",
         "The theorem is settled.",
         "The claim is settled.",
         "The result is settled.",

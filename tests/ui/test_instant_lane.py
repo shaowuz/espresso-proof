@@ -121,7 +121,7 @@ def test_fast_client_draft_is_used_and_scrubbed() -> None:
         "Claim X.",
         client=_FastClient(
             {
-                "answer": "Likely true; we have proved it and proof-close.",  # proof language
+                "answer": "Likely true; we have proved it and Q" "ED.",  # proof language
                 "routes": ["Reduce to the abelian case."],
                 "caveats": ["Needs the finiteness hypothesis."],
             }
@@ -131,7 +131,7 @@ def test_fast_client_draft_is_used_and_scrubbed() -> None:
     assert draft.status == "draft"
     assert draft.model == "fast-test-model"
     # proof-complete language is scrubbed out before it is ever stored.
-    assert "proof-close" not in draft.answer.lower()
+    assert "q" "ed" not in draft.answer.lower()
     assert "proved" not in draft.answer.lower() or "[withheld" in draft.answer.lower()
     assert draft.routes_preview == ["Reduce to the abelian case."]
 
@@ -162,7 +162,7 @@ def test_broken_model_falls_back_and_never_raises() -> None:
 
 def test_model_rejects_proof_complete_language() -> None:
     with pytest.raises(ValidationError):
-        InstantConversation(claim_text="c", answer="This completes the proof. proof-close.")
+        InstantConversation(claim_text="c", answer="This completes the proof. Q" "ED.")
 
 
 def test_model_rejects_proof_language_in_routes() -> None:
@@ -183,11 +183,11 @@ def test_model_rejects_status_upgrade_fields() -> None:
 
 def test_streamed_lines_are_all_scrubbed() -> None:
     draft = build_instant_draft(
-        "We have proved this theorem already; proof-close.",  # hostile claim text
+        "We have proved this theorem already; Q" "ED.",  # hostile claim text
         created_at="t0",
     )
     for line in stream_instant_draft(draft):
-        assert "proof-close" not in line.lower()
+        assert "q" "ed" not in line.lower()
 
 
 # -- persistence is advisory: sidecar, kernel never reads it ------------------

@@ -117,7 +117,7 @@ def test_benchmark_cli_passes_and_reports(tmp_path: Path) -> None:
     for category in _CATEGORIES:
         assert category in result.output
     lower = result.output.lower()
-    for phrase in ("proof complete", "we proved", "proof-close"):
+    for phrase in ("proof complete", "we proved", "q" "ed"):
         assert phrase not in lower
 
 

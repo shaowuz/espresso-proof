@@ -535,7 +535,7 @@ def test_high_llm_score_or_proof_language_in_allocation_cannot_prove_route(
 @pytest.mark.parametrize(
     "phrase",
     [
-        "proof-close",
+        "Q" "ED",
         "complete proof",
         "this establishes the theorem",
         "source_backed",

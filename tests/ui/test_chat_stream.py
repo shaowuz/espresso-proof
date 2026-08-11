@@ -97,13 +97,13 @@ def test_stream_emits_scrubbed_preview_lines(client) -> None:
         low = m.lower()
         assert "source_backed" not in low
         assert " refuted" not in low
-        assert "is proved" not in low and "proof-close" not in low
+        assert "is proved" not in low and "q" "ed" not in low
 
 
 def test_proof_complete_phrase_is_scrubbed(tmp_path: Path) -> None:
     # inject a proof-complete phrase via the user message; it must be scrubbed
     # before it ever appears in a streamed line.
-    lines = chat_progress_lines(tmp_path, user_message="I think we proved the theorem. proof-close.")
+    lines = chat_progress_lines(tmp_path, user_message="I think we proved the theorem. Q" "ED.")
     joined = " ".join(lines)
     assert contains_proof_language(joined) is None
     # the reply no longer echoes the message back (the panel already shows it);

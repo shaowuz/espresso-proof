@@ -96,5 +96,5 @@ def test_orchestrate_one_command_loop_with_scout_and_auto_ground(tmp_path: Path)
     validate_run(run_dir)
     # No proof-complete language leaked into the memo.
     out = resumed.output.lower()
-    for phrase in ("proof-close", "proof complete", "we proved", "this establishes the theorem"):
+    for phrase in ("q" "ed", "proof complete", "we proved", "this establishes the theorem"):
         assert phrase not in out

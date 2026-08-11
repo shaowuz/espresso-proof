@@ -72,7 +72,9 @@ _FALLBACK = {
 _INSTRUCTION = (
     "Return ONLY a single JSON object. Do not use markdown fences. This is a "
     "CANDIDATE planning output only: do not claim anything is proved, verified, "
-    "proof-close, or proof-complete, and do not assert internal source/check statuses. "
+    "or proof-complete, do not write a proof-closing flourish (the tombstone "
+    "symbol or the classical Latin closing abbreviation), and do not assert "
+    "internal source/check statuses. "
     "The Espresso Python kernel decides those statuses."
 )
 _DIAGNOSTIC_META_KEY = "_espresso_codex_adapter"

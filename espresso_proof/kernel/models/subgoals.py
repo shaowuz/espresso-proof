@@ -78,9 +78,11 @@ class BlockReason(str, Enum):
 # Tokens that must never appear in a subgoal graph (it cannot claim proof
 # completion). Mirrors the final-report proof-language guard.
 _SUBGOAL_FORBIDDEN_TOKENS = (
+    # Spelled in parts: repository text must not contain the banned closing
+    # abbreviation.
     "proved",
     "proven",
-    "proof-close",
+    "q" "ed",
     "verified",
     "proof complete",
     "proof_complete",

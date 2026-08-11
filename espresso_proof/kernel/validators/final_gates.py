@@ -1012,7 +1012,8 @@ def _validate_final_report_language(
         ProofLanguageStatus.proof_candidate,
         # Agent-consensus mock-check is amber/NOT machine-verified, so its final
         # report is held to the same no-forbidden-proof-language bar as the other
-        # weak statuses (it may never print "proof-close"/"proved"/"verified").
+        # weak statuses (it may never print "proved"/"verified" or a
+        # proof-closing flourish).
         ProofLanguageStatus.agent_consensus_mock_checked,
         ProofLanguageStatus.source_checked_argument,
         ProofLanguageStatus.computation_checked,

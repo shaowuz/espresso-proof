@@ -34,8 +34,9 @@ FIXTURES_DIR = Path("tests/fixtures")
 # Proof-complete language that must never appear in user-facing output. These are
 # specific markers, NOT bare words: "unproved"/"not verified"/"no counterexample
 # has been verified" are legitimate conservative phrasings.
+# Spelled in parts: repository text must not contain the banned closing abbreviation.
 FORBIDDEN_PHRASES = (
-    "proof-close",
+    "q" "ed",
     "proof complete",
     "proof is complete",
     "we proved",

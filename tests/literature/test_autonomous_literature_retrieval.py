@@ -243,7 +243,7 @@ def test_retrieval_handed_to_grounding_earns_support_with_locator_and_attributio
     assert "Found by autonomous literature search" in memo
     assert "Reference supports this stated claim" in memo
     lower = memo.lower()
-    for phrase in ("proof-close", "proof complete", "we proved", "proved the claim"):
+    for phrase in ("q" "ed", "proof complete", "we proved", "proved the claim"):
         assert phrase not in lower
 
 

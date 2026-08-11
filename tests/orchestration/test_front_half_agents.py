@@ -624,7 +624,7 @@ def test_full_front_half_pass_with_stub_is_valid(tmp_path: Path) -> None:
 
     memo = build_concise_memo(run_dir)
     lowered = memo.lower()
-    for banned in ("proof-close", "proof complete", "we proved", "this establishes the theorem"):
+    for banned in ("q" "ed", "proof complete", "we proved", "this establishes the theorem"):
         assert banned not in lowered
 
 
@@ -896,7 +896,7 @@ def test_precise_claim_memo_has_no_stale_vague_language(tmp_path: Path) -> None:
     memo = build_concise_memo(run_dir).lower()
     assert "vague" not in memo
     assert "not precise enough to test" not in memo
-    for banned in ("proof-close", "proof complete", "we proved", "this establishes the theorem"):
+    for banned in ("q" "ed", "proof complete", "we proved", "this establishes the theorem"):
         assert banned not in memo
 
 

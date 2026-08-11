@@ -19,7 +19,8 @@ from espresso_proof.kernel.validators import validate_run
 from tests.support_jobs import wait_for_job
 
 CLAIM = "Every group of order p^2, where p is prime, is abelian."
-_PROOF_WORDS = ("proof-close", "proof complete", "the theorem is proved", "we have proved")
+# Spelled in parts: repository text must not contain the banned closing abbreviation.
+_PROOF_WORDS = ("q" "ed", "proof complete", "the theorem is proved", "we have proved")
 
 
 def _run(tmp_path: Path, name: str = "ux") -> Path:

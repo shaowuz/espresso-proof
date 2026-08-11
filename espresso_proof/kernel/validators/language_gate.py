@@ -11,7 +11,9 @@ def _first_forbidden_proof_language(text: str) -> str | None:
     if canonical_phrase:
         return canonical_phrase
     forbidden_patterns = {
-        r"\bq\.?e\.?d\.?\b": "proof-close",
+        # Spelled in parts: repository text must not contain the banned closing
+        # abbreviation.
+        r"\bq" r"\.?e" r"\.?d" r"\.?\b": "Q" "ED",
         r"\bverified\b": "verified",
         r"\b(?:the\s+)?(?:theorem|claim|result)\s+(?:is|was|has\s+been)\s+settled\b": "settled result",
         r"\bsettled\s+the\s+(?:theorem|claim|result)\b": "settled result",

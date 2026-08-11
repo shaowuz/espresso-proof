@@ -8,7 +8,9 @@ slower artifact/kernel pipeline runs in the background.
 It is bounded hard, exactly like the chat preview but stricter:
 
 - the draft is conversation, NOT proof. It earns no source-backed / checked /
-  refuted / human-confirmed status and never says proved / proof-close / proof complete;
+  refuted / human-confirmed status and never says proved / proof complete, nor
+  writes a proof-closing flourish (the tombstone ∎ or the classical Latin
+  closing abbreviation);
 - every text field is run through ``scrub_proof_language`` before it is stored
   or streamed, and the strict model REJECTS proof-complete language and any
   unknown (status-smuggling) field outright;
@@ -138,7 +140,9 @@ class InstantDraftClient(Protocol):
 INSTANT_SYSTEM = (
     "You are a fast mathematical research assistant producing a DRAFT only. "
     "You CANNOT and MUST NOT claim a proof, checked status, source-backed status, "
-    "or a refutation. Do not say proved, proof-close, or proof complete. Give a short "
+    "or a refutation. Do not say proved or proof complete, and do not write a "
+    "proof-closing flourish (the tombstone symbol or the classical Latin closing "
+    "abbreviation). Give a short "
     "honest draft: direct intuition, the likely answer direction if clear, one to "
     "three candidate proof routes, and obvious caveats or missing hypotheses. "
     'Return JSON: {"answer": str, "routes": [str], "caveats": [str]}.'

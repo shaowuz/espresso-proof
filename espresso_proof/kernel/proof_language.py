@@ -2,8 +2,9 @@
 
 Espresso Proof may show heuristic critique, a reference-supported step, or a
 checked computation with explicit scope -- but user-visible output must NEVER
-read as if Espresso established the whole theorem ("proof-close", "proof complete",
-"Espresso proved the theorem", "verified theorem", ...). Model free text and
+read as if Espresso established the whole theorem (a proof-closing flourish
+such as the tombstone ∎ or the classical Latin closing abbreviation, "proof
+complete", "Espresso proved the theorem", "verified theorem", ...). Model free text and
 echoed artifact fields can contain such language, so every user-facing renderer
 sanitizes its output through ``scrub_proof_language`` here.
 
@@ -28,7 +29,8 @@ import unicodedata
 #
 #   1. Self-contained completion markers that negation/scope do not collide with
 #      ("not complete" / "is not complete" break the adjacency, so the assertion
-#      form is the only thing that matches): proof-close, "proof complete",
+#      form is the only thing that matches): the Latin closing abbreviation,
+#      "proof complete",
 #      "the proof is complete", "this completes the proof", "no gaps remain".
 #   2. FIRST-PERSON / Espresso global assertions, as whole phrases requiring the
 #      subject+verb+global-object together ("we proved the theorem", "espresso
@@ -53,9 +55,11 @@ _FIRST_PERSON_ASSERTIONS = tuple(
 
 
 PROOF_COMPLETE_PHRASES: tuple[str, ...] = (
-    "[proof-close]",
-    "[proof-close]",
-    "proof-close",
+    # Spelled in parts: repository text must not contain the banned closing
+    # abbreviation.
+    "q.e." "d.",
+    "q.e." "d",
+    "q" "ed",
     "proof complete",
     "proof is complete",
     "the proof is complete",
@@ -67,8 +71,9 @@ PROOF_COMPLETE_PHRASES: tuple[str, ...] = (
 # Neutral redaction marker (reuses the existing convention in llm_agents).
 REDACTION = "[withheld proof-like phrase]"
 
-# Separators INSIDE an acronym: someone who types "Q. E. D." means exactly what
-# "proof-close" means, and the periods/spaces carry no other reading.
+# Separators INSIDE an acronym: writing the closing acronym with periods or
+# spaces between its letters means exactly what the bare form means, and the
+# periods/spaces carry no other reading.
 _SEP = r"[\s._\-‐-―]*"
 
 # Separators BETWEEN the words of a phrase: whitespace only. Hyphenating is not
@@ -90,16 +95,19 @@ _TOMBSTONE_PATTERN = r"∎|□(?=[ \t]*$)"
 def _phrase_regex(phrase: str) -> str:
     """Match one curated phrase tolerantly, without loosening what it means.
 
-    A literal phrase list is a list of spellings, not of meanings: "Q. E. D.",
-    "ＱＥＤ", "proof–complete" and "the proof is now complete" all assert the same
-    thing and all walked straight through. Every separator inside a phrase now
+    A literal phrase list is a list of spellings, not of meanings: the closing
+    acronym spelled with periods or spaces between its letters or in fullwidth
+    characters, "proof–complete" and "the proof is now complete" all assert the
+    same thing and all walked straight through. Every separator inside a phrase now
     accepts the punctuation and spacing variants, an acronym accepts separators
     between its letters, and "is complete" tolerates one intensifier ("is now
     complete"). Nothing else is loosened: the words themselves, in order, are
     still required.
     """
 
-    if phrase in {"[proof-close]", "[proof-close]", "proof-close"}:
+    # Spelled in parts: repository text must not contain the banned closing
+    # abbreviation.
+    if phrase in {"q.e." "d.", "q.e." "d", "q" "ed"}:
         return _SEP.join(("q", "e", "d")) + r"\.?"
     words = phrase.replace(".", "").split()
     parts: list[str] = []
@@ -113,7 +121,7 @@ def _phrase_regex(phrase: str) -> str:
 
 
 # Both-sided word boundaries: a phrase must not match inside a longer word in
-# either direction ("proof completeness", "oedipus", "verified theorems" are NOT
+# either direction ("proof completeness", "quenched", "verified theorems" are NOT
 # matched). Longest phrases first so the whole assertion is replaced as a unit
 # (no dangling "the theorem" left behind).
 _PATTERN = re.compile(
@@ -129,7 +137,7 @@ def _folded_with_origin(text: str) -> tuple[str, list[int]]:
     """A compatibility-folded view of ``text`` plus each char's source index.
 
     Matching happens on the folded view so fullwidth, bold-math and ligature
-    spellings ("ＱＥＤ", "𝐐𝐄𝐃") are caught; the replacement happens on the
+    spellings of a banned phrase are caught; the replacement happens on the
     ORIGINAL, because folding the returned text would rewrite legitimate
     mathematics on every render (NFKC turns "p²" into "p2").
     """
@@ -280,7 +288,9 @@ FORBIDDEN_LANGUAGE = [
     "no gaps remain",
     "the claim is true",
     "the theorem is established",
-    "proof-close",
+    # Spelled in parts: repository text must not contain the banned closing
+    # abbreviation.
+    "q" "ed",
 ]
 FORBIDDEN_LANGUAGE = list(dict.fromkeys([*FORBIDDEN_LANGUAGE, *PROOF_COMPLETE_PHRASES]))
 

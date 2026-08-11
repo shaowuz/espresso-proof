@@ -161,7 +161,7 @@ def test_the_report_says_what_the_run_produced_not_only_what_is_missing(tmp_path
     assert "Prover rounds run: 2 (2 route attempt(s))" in block
     assert "reviewer passes recorded: 3" in block
     # And it claims nothing: no proof/source/checked status anywhere.
-    for forbidden in ("proved", "source-backed", "source_backed", "checked", "proof-close"):
+    for forbidden in ("proved", "source-backed", "source_backed", "checked", "Q" "ED"):
         assert forbidden not in block
 
 

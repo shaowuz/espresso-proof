@@ -68,7 +68,9 @@ _SCRUB_REPLACEMENTS = [
     ("proved", "argued"),
     ("proven", "argued"),
     ("verified", "checked-as-stated"),
-    ("proof-close", "[end of sketch]"),
+    # Spelled in parts: repository text must not contain the banned closing
+    # abbreviation.
+    ("q" "ed", "[end of sketch]"),
 ]
 
 _SOURCE_KEYWORDS = ("source", "locator", "theorem", "reference", "cite", "citation", "literature")

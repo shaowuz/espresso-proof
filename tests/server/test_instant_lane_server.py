@@ -62,7 +62,7 @@ class _FakeFastClient:
 
     def complete_json(self, *, system: str, prompt: str) -> dict:
         return {
-            "answer": f"First read of {prompt.splitlines()[0]} — we have proved it, proof-close.",
+            "answer": f"First read of {prompt.splitlines()[0]} — we have proved it, Q" "ED.",
             "routes": ["Reduce to the abelian case."],
             "caveats": ["The finiteness hypothesis is needed."],
         }
@@ -174,12 +174,12 @@ def test_instant_draft_is_scrubbed_even_on_hostile_message(client, fast_model) -
     run_id = _create(call)
     _, _, raw = call(
         "POST", f"/api/runs/{run_id}/instant-draft",
-        {"message": "We have proved this theorem; proof-close, proof complete."},
+        {"message": "We have proved this theorem; Q" "ED, proof complete."},
     )
     drafts = [e["data"]["text"] for e in _parse_sse(raw) if e["event"] == "draft"]
     joined = " ".join(drafts)
     assert contains_proof_language(joined) is None
-    assert "proof-close" not in joined.lower()
+    assert "q" "ed" not in joined.lower()
 
 
 def test_instant_draft_persists_only_advisory_sidecar(client, fast_model) -> None:

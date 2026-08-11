@@ -344,12 +344,12 @@ def test_proof_language_note_never_reaches_dashboard(tmp_path: Path) -> None:
         StrategyFeedback(
             feedback_id="fb_x", run_id=run_dir.name, claim_id=str(claim.get("id")),
             strategy_id=selected, score=99, priority="focus",
-            note="This proves the theorem; proof-close, fully source_backed.",
+            note="This proves the theorem; Q" "ED, fully source_backed.",
             created_at="2026-06-13T00:00:00+00:00",
         ),
     )
     resume_run(run_dir=run_dir, selected_strategy=selected, effort="normal_pass", prover_provider="stub")
     html = render_run_dashboard(run_dir)
-    assert "proof-close" not in html
+    assert "Q" "ED" not in html
     assert "proves the theorem" not in html
     validate_run(run_dir)  # the note upgraded nothing

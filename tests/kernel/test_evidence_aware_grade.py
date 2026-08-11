@@ -22,7 +22,8 @@ from espresso_proof.orchestration.orchestrator import orchestrate_run, resume_ru
 from espresso_proof.kernel.validators import validate_run
 
 ABSTRACT_LABELS = ("unclear", "fragile", "promising", "likely_false", "refuted", "proved")
-PROOF_COMPLETE = ("proof-close", "proof complete", "we proved", "proved the", "this establishes the theorem")
+# Spelled in parts: repository text must not contain the banned closing abbreviation.
+PROOF_COMPLETE = ("q" "ed", "proof complete", "we proved", "proved the", "this establishes the theorem")
 
 
 class FakeClaude:

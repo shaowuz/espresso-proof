@@ -443,14 +443,14 @@ def test_status_language_in_objection_is_scrubbed_on_attach(tmp_path: Path) -> N
     _register_llm_agent_run(
         run_dir,
         [{"scoped_objections": [
-            _scoped(subgoal_id="subgoal_main", text="This already proved the theorem; proof-close."),
+            _scoped(subgoal_id="subgoal_main", text="This already proved the theorem; Q" "ED."),
         ]}],
     )
     graph = assemble_subgoal_graph(run_dir)
     main = next(n for n in graph["nodes"] if n["id"] == "subgoal_main")
     attached = " ".join(main["reviewer_objections"])
     assert "proved" not in attached.lower()
-    assert "proof-close" not in attached.lower()
+    assert "q" "ed" not in attached.lower()
 
 
 # -- display: the objection shows up under its subgoal (memo + dashboard) ------

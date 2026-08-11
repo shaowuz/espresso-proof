@@ -355,10 +355,11 @@ def _emit_status(*, selection) -> None:
 
 
 # Free-text fields a model may fill with prose. We scrub these with the kernel's
-# OWN detectors so a real model that writes "this step is source_backed" / "proof-close"
-# cannot trip the kernel's status-smuggle / proof-language gates and roll the run
-# back. The kernel re-validates regardless; this only keeps the candidate text
-# safe so the legitimate math survives instead of being discarded.
+# OWN detectors so a real model that writes "this step is source_backed" or a
+# proof-closing flourish cannot trip the kernel's status-smuggle /
+# proof-language gates and roll the run back. The kernel re-validates
+# regardless; this only keeps the candidate text safe so the legitimate math
+# survives instead of being discarded.
 _PROSE_FIELDS = frozenset({
     "summary", "steps", "proposed_steps", "output_summary", "source_requests",
     "missing_hypotheses", "risks", "reasons", "finding", "looked_for",

@@ -191,7 +191,7 @@ MIXED_DISCLAIMER_STATUS_ASSERTIONS = [
     "not merely source_backed, the theorem is true",
     "not just a candidate, the claim is true",
     "No source found and proof complete.",
-    "This is not source backed and proof-close.",
+    "This is not source backed and Q" "ED.",
     "not a checked proof and we proved the theorem.",
 ]
 
@@ -320,7 +320,7 @@ def test_human_memory_types_cannot_phrase_feedback_as_evidence(
 @pytest.mark.parametrize(
     "summary",
     [
-        "The prior run proved the theorem and proof-close.",
+        "The prior run proved the theorem and Q" "ED.",
         "The theorem applicability status is applicable.",
         "The current theorem status is verified.",
         "The route is refuted.",

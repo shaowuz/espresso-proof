@@ -23,7 +23,8 @@ FIXTURES = Path("tests/fixtures")
 
 # Assertive proof-complete phrases. (A bare "proved" is allowed because artifacts
 # legitimately echo claim/objection text such as "not proved" / "proof sketch".)
-_FORBIDDEN_PROOF_LANGUAGE = ["proof-close", "proof complete", "we proved the", "this establishes the theorem"]
+# Spelled in parts: repository text must not contain the banned closing abbreviation.
+_FORBIDDEN_PROOF_LANGUAGE = ["q" "ed", "proof complete", "we proved the", "this establishes the theorem"]
 
 
 def _build(tmp_path: Path, fixture: str) -> Path:

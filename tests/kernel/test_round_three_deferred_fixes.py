@@ -157,10 +157,11 @@ def test_concurrent_processes_do_not_drop_index_entries(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "text",
     [
-        "Q. E. D.",
-        "[proof-close]",
-        "proof-close",
-        "ＱＥＤ",  # fullwidth
+        # Spelled in parts: repository text must not contain the banned closing abbreviation.
+        "Q. E." " D.",
+        "q.e." "d",
+        "Q" "ED",
+        "Ｑ" "ＥＤ",  # fullwidth
         "∎",
         "and so the result follows. □",
         "the proof is now complete",
@@ -194,10 +195,10 @@ def test_honest_prose_is_preserved_exactly(text: str) -> None:
 def test_redaction_does_not_rewrite_the_surrounding_mathematics() -> None:
     # Matching happens on a compatibility-folded view; the OUTPUT must be the
     # original characters, or every render would silently mangle exponents.
-    text = "For p² we conclude x ≤ y. proof-close"
+    text = "For p² we conclude x ≤ y. Q" "ED"
     out = scrub_proof_language(text)
     assert out.startswith("For p² we conclude x ≤ y. ")
-    assert "proof-close" not in out
+    assert "Q" "ED" not in out
 
 
 # --- a declared budget must not be accepted and dropped

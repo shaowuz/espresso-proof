@@ -137,7 +137,7 @@ def test_requires_exactly_one_main_goal() -> None:
         ProofGoalGraph.model_validate(graph)
 
 
-@pytest.mark.parametrize("token", ["proved", "proof-close", "verified", "proof complete"])
+@pytest.mark.parametrize("token", ["proved", "Q" "ED", "verified", "proof complete"])
 def test_graph_cannot_contain_proof_complete_language(token: str) -> None:
     graph = _minimal_graph_dict()
     graph["nodes"][0]["remaining_risk"] = f"This subgoal is {token}."
@@ -274,7 +274,7 @@ def test_p2_demo_creates_readable_subgoals(tmp_path: Path) -> None:
     blob = " ".join(
         [n["statement"] + n["closure_contract"] + n["remaining_risk"] for n in nodes]
     ).lower()
-    for token in ("proved", "proven", "proof-close", "verified", "proof complete", "proof-complete"):
+    for token in ("proved", "proven", "q" "ed", "verified", "proof complete", "proof-complete"):
         assert token not in blob
 
 
@@ -673,7 +673,7 @@ def test_proof_state_section_has_no_proof_complete_language(tmp_path: Path) -> N
     html = render_run_dashboard(run_dir)
     start = html.index("<h2>Proof State</h2>")
     section = html[start : html.index("</section>", start)].lower()
-    for token in ("proof complete", "proof-complete", "proof_complete", "proof-close", "proved", "proven", "verified"):
+    for token in ("proof complete", "proof-complete", "proof_complete", "q" "ed", "proved", "proven", "verified"):
         assert token not in section
 
 
@@ -957,7 +957,7 @@ def test_render_proof_search_lines_uses_human_wording_and_disclaimer() -> None:
     for raw in ("blocked_missing_source", "main_goal", "scoped_checked", "source_supported"):
         assert raw not in text
     # never proof-complete language
-    for token in ("proof complete", "proof-close", "proved", "proven", "verified"):
+    for token in ("proof complete", "q" "ed", "proved", "proven", "verified"):
         assert token not in text.lower()
 
 
@@ -987,7 +987,7 @@ def test_memo_includes_proof_search_section_when_graph_present(tmp_path: Path) -
     assert "Proof-search state (a map of the search, not a proof):" in memo
     assert "Next subgoal to work on" in memo
     # no proof-complete language anywhere in the memo
-    for token in ("proof complete", "proof-complete", "proof-close", "proved", "proven", "verified theorem"):
+    for token in ("proof complete", "proof-complete", "q" "ed", "proved", "proven", "verified theorem"):
         assert not re.search(rf"\b{re.escape(token)}\b", memo.lower())
 
 
@@ -1067,7 +1067,7 @@ def test_memo_shows_graph_notes_when_present(tmp_path: Path) -> None:
     memo = build_concise_memo(run_dir)
     assert "About this proof-search view:" in memo
     assert notes[0] in memo
-    for token in ("proof complete", "proof-complete", "proof-close", "proved", "verified theorem"):
+    for token in ("proof complete", "proof-complete", "q" "ed", "proved", "verified theorem"):
         assert token not in memo.lower()
 
 

@@ -111,7 +111,7 @@ def test_external_tool_run_does_not_upgrade_grade_and_renders_scoped(tmp_path: P
     # and must still be sanitized in display.
     _attach_runs(
         run,
-        [_base_run(stdout_excerpt="RESULT: ok\nWe proved the theorem. proof-close.")],
+        [_base_run(stdout_excerpt="RESULT: ok\nWe proved the theorem. Q" "ED.")],
     )
     validate_run(run)
     grade_after = read_yaml(run / read_yaml(run / "run_manifest.yaml")["artifacts"]["idea_grade"])
@@ -119,7 +119,7 @@ def test_external_tool_run_does_not_upgrade_grade_and_renders_scoped(tmp_path: P
     memo = build_concise_memo(run)
     assert "External tool runs" in memo
     assert "scoped, not a proof" in memo
-    assert contains_proof_language(memo) is None  # smuggled "proof-close" is sanitized in display
+    assert contains_proof_language(memo) is None  # the smuggled closing flourish is sanitized in display
 
 
 def test_failed_or_timed_out_run_is_fail_closed_in_display(tmp_path: Path) -> None:
@@ -143,9 +143,9 @@ def test_tool_run_model_rejects_proof_complete_interpretation() -> None:
         "scope_note": "scoped check only",
     }
     for field, text in (
-        ("ai_interpretation", "This shows we proved the theorem. proof-close."),
-        ("conclusion", "proof-close — the proof is complete."),
-        ("statement_checked", "the theorem is settled: [proof-close]"),
+        ("ai_interpretation", "This shows we proved the theorem. Q" "ED."),
+        ("conclusion", "Q" "ED — the proof is complete."),
+        ("statement_checked", "the theorem is settled: q.e." "d."),
         ("scope_note", "no gaps remain"),
     ):
         payload = {**base, field: text} if field != "scope_note" else {**base, "scope_note": text}
@@ -163,9 +163,9 @@ def test_tool_run_raw_stdout_may_carry_overclaim_but_display_scrubs() -> None:
         {
             "id": "t2",
             "tool_name": "fake_deterministic_check",
-            "stdout_excerpt": "RESULT: ok\nproof-close, we proved the theorem!",
+            "stdout_excerpt": "RESULT: ok\nQ" "ED, we proved the theorem!",
             "scope_note": "scoped check only",
         }
     )
-    assert "proof-close" in run.stdout_excerpt  # raw evidence preserved
-    assert "proof-close" not in scrub_proof_language(run.stdout_excerpt)
+    assert "Q" "ED" in run.stdout_excerpt  # raw evidence preserved
+    assert "Q" "ED" not in scrub_proof_language(run.stdout_excerpt)

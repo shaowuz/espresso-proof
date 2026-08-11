@@ -71,7 +71,7 @@ def test_lint_finding_severity_and_citation() -> None:
 
 
 def test_detect_proof_complete_language() -> None:
-    assert detect_proof_complete_language("Therefore we proved the claim. proof-close.")
+    assert detect_proof_complete_language("Therefore we proved the claim. Q" "ED.")
     assert "proof complete" in detect_proof_complete_language("The proof complete; done.")
     # legitimate conservative phrasings must NOT be flagged.
     assert detect_proof_complete_language("The claim is unproved and not verified.") == []
@@ -148,7 +148,7 @@ def test_review_checklist_clean_run_allows_merge(tmp_path: Path) -> None:
 def test_review_checklist_flags_injected_proof_complete_language(tmp_path: Path) -> None:
     run_dir = _run(tmp_path)
     fr = run_dir / "final_report.md"
-    fr.write_text(read_text(fr) + "\n\nConclusion: we proved the claim. proof-close.\n", encoding="utf-8")
+    fr.write_text(read_text(fr) + "\n\nConclusion: we proved the claim. Q" "ED.\n", encoding="utf-8")
     result = review_checklist(run_dir)
     assert result["merge_allowed"] is False
     assert any(f["severity"] == "blocker" and "final_report" in f["artifact"] for f in result["findings"])

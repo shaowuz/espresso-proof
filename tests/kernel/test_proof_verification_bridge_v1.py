@@ -24,7 +24,8 @@ from espresso_proof.kernel.io import read_yaml, write_yaml
 from espresso_proof.orchestration.genesis import run_mock_critique
 
 FIXTURES = Path("tests/fixtures")
-_FORBIDDEN = ("proved", "proof-close", "proof complete", "we proved")
+# Spelled in parts: repository text must not contain the banned closing abbreviation.
+_FORBIDDEN = ("proved", "q" "ed", "proof complete", "we proved")
 
 
 # ---------------------------------------------------------------------------

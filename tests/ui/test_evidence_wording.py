@@ -455,7 +455,7 @@ def test_source_backed_step_is_step_scoped_not_global_proof() -> None:
     assert contains_proof_language(block) is None
     # the user-facing evidence phrase reads as reference SUPPORT, not "proved"
     assert "proved" not in evidence_phrase("source_backed").lower()
-    assert "proof-close" not in evidence_phrase("source_backed").lower()
+    assert "q" "ed" not in evidence_phrase("source_backed").lower()
 
 
 def test_source_backed_evidence_phrase_is_reference_support_only() -> None:
@@ -473,7 +473,7 @@ def test_source_backed_step_statement_with_proof_language_is_redacted() -> None:
 
     grounding = _source_backed_step_grounding()
     grounding["steps"][0]["needed_theorem"] = (
-        "This completes the proof. proof-close. We proved the theorem."
+        "This completes the proof. Q" "ED. We proved the theorem."
     )
     block = "\n".join(render_proof_route_steps(grounding, {"checks": []}))
     assert contains_proof_language(block) is None

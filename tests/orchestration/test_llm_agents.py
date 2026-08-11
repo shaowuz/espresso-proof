@@ -1781,11 +1781,11 @@ def test_agent_doctor_network_check_uses_openai_structured_output(monkeypatch) -
 
 
 def test_safe_language_filter_preserves_unverified() -> None:
-    text = safe_text("This remains unverified; do not say proof-close.")
+    text = safe_text("This remains unverified; do not say Q" "ED.")
 
     assert "unverified" in text
-    assert "proof-close" not in text
-    assert "proof-close" in collect_unsafe_language({"summary": "proof-close", "steps": [], "risks": []})
+    assert "Q" "ED" not in text
+    assert "q" "ed" in collect_unsafe_language({"summary": "Q" "ED", "steps": [], "risks": []})
     assert "verified" not in collect_unsafe_language(
         {"summary": "This remains unverified.", "steps": [], "risks": []}
     )
@@ -1811,7 +1811,7 @@ def test_mock_agent_adapter_contains_unsafe_prover_prose() -> None:
     # (status needs_human), proof-complete language withheld, and no structured
     # steps invented from prose.
     client = StubLLMClient(model="stub-espresso-agent")
-    raw = {"summary": "This is obviously proved and verified. proof-close. The claim is true."}
+    raw = {"summary": "This is obviously proved and verified. Q" "ED. The claim is true."}
     attempt = make_prover_attempt(raw, client=client, created_at="2026-06-03T00:00:00+00:00")
 
     assert attempt["status"] == "needs_human"  # adapter never grants a strong status

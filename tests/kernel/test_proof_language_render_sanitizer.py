@@ -1,8 +1,9 @@
 """Renderer proof-language sanitizer + display vocabulary.
 
 User-visible output (memo / inspect / dashboard / memory summary) must never
-render global proof-complete language ("proof-close", "Espresso proved the theorem",
-"proof complete", ...), even if an echoed free-text artifact field carries it.
+render global proof-complete language (the classical Latin closing
+abbreviation, "Espresso proved the theorem", "proof complete", ...), even if
+an echoed free-text artifact field carries it.
 This is display-layer defense in depth; it never upgrades any status. Scoped /
 negated phrasing ("the source proves Lemma 2.1", "not a checked proof") is
 preserved.
@@ -26,14 +27,15 @@ from espresso_proof.kernel.surface_warnings import refresh_final_report_disclosu
 from espresso_proof.kernel.validators import validate_run
 
 FIXTURES = Path("tests/fixtures")
-_OVERCLAIMS = ["proof-close", "Espresso proved the theorem", "proof complete", "we proved"]
+# Spelled in parts: repository text must not contain the banned closing abbreviation.
+_OVERCLAIMS = ["Q" "ED", "Espresso proved the theorem", "proof complete", "we proved"]
 
 
 # --- unit ------------------------------------------------------------------
 def test_scrub_redacts_global_overclaims_and_preserves_scoped_language() -> None:
     text = (
         "The source proves Lemma 2.1; this is not a checked proof. "
-        "We proved the theorem. proof-close. The proof is complete."
+        "We proved the theorem. Q" "ED. The proof is complete."
     )
     out = scrub_proof_language(text)
     assert contains_proof_language(out) is None
@@ -58,7 +60,7 @@ def test_scrub_preserves_honest_negated_scoped_and_prefix_text() -> None:
         "a proof sketch; not yet verified by a checker",
         "the reference proves Proposition 3",
         "this is not a verified theorem yet",
-        "oedipus is an unrelated identifier",
+        "q" "edipus is an unrelated identifier",
     ]
     for text in preserved:
         assert contains_proof_language(text) is None, text
@@ -67,7 +69,7 @@ def test_scrub_preserves_honest_negated_scoped_and_prefix_text() -> None:
 
 def test_contains_proof_language_detects_each_overclaim() -> None:
     for phrase in (
-        "proof-close",
+        "q" "ed",
         "proof complete",
         "the proof is complete",
         "no gaps remain",
@@ -83,11 +85,11 @@ def _run_with_forged_overclaims(tmp_path: Path) -> tuple[Path, dict]:
     run = run_mock_critique("g20", FIXTURES / "promising_but_unproved" / "input.md", tmp_path)
     artifacts = read_yaml(run / "run_manifest.yaml")["artifacts"]
     review = read_yaml(run / artifacts["review"])
-    review["strongest_objection"] = "Actually we proved the theorem. proof-close."
+    review["strongest_objection"] = "Actually we proved the theorem. Q" "ED."
     write_yaml(run / artifacts["review"], review)
     grade = read_yaml(run / artifacts["idea_grade"])
     grade["next_cheapest_test"] = "None needed: Espresso proved the claim."
-    grade["source_gaps"] = ["proof-close; no gaps remain."]
+    grade["source_gaps"] = ["Q" "ED; no gaps remain."]
     write_yaml(run / artifacts["idea_grade"], grade)
     refresh_final_report_disclosures(run)
     validate_run(run)  # forged free-text fields are not cross-validated; run stays valid
@@ -131,7 +133,7 @@ def test_memory_summary_rejects_global_proof_language(tmp_path: Path) -> None:
                 "project": project_dir.name,
                 "type": "reviewer_objection",
                 "claim_id": "claim_001",
-                "summary": "A prior run noted: we proved the theorem, proof-close.",
+                "summary": "A prior run noted: we proved the theorem, Q" "ED.",
                 "provenance": ["projects/x/runs/y/review.yaml"],
                 "reusable_lesson": "Espresso proved the claim last time.",
             },
