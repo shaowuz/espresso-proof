@@ -58,6 +58,6 @@ The server has no authentication. Keep it bound to localhost; see
 Built by [@shaowuz](https://github.com/shaowuz),
 [@yangjunjie0320](https://github.com/yangjunjie0320), and
 [@w-ruizhe](https://github.com/w-ruizhe).
-The literature subsystem was started with @w-ruizhe.
+
 
 [MIT License](LICENSE)
