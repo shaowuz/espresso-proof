@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Paper Skill"
+  short_description: "Rewrite math papers with seven checks and clear proof gaps"
+  default_prompt: "Use $ai-paper-skill to turn this draft into a readable mathematical manuscript, preserving its claims and delivering the revised text, an author review note, and a seven-metric audit."
