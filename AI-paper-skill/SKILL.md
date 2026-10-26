@@ -33,6 +33,14 @@ not a proof certificate.
 - Read [writing-examples.md](references/writing-examples.md) when rewriting
   statements, proofs, or unresolved claims. The examples distinguish a repairable
   omission, a refuted statement, and an unavailable source.
+- Read [proof-repairs.md](references/proof-repairs.md) before filling a proof gap.
+  It separates routine expansion, proposed new arguments, and evidence for closure.
+- Read [scoring-calibration.md](references/scoring-calibration.md) when reporting
+  numeric metrics. Freeze the counting units first; the optional local scoring
+  helper aggregates annotations without judging their mathematical validity.
+- Read [evaluation-protocol.md](references/evaluation-protocol.md) when evaluating
+  this skill's effectiveness. Repository tests and worked examples do not measure
+  whether it produces better papers.
 
 ## Working contract
 
@@ -81,6 +89,9 @@ issue IDs, preserving existing labels and cross-references.
 Apply the seven metrics in the review reference to the available scope.
 Record unknowns as unknown. Do not require a database of routine sentences or
 invent numeric scores when semantic counting has not actually been performed.
+Before numeric comparison, freeze the reader, source revision, unit IDs, and
+counting rules using the calibration reference. Retain unsuccessful and unresolved
+units across revisions; identify genuinely new or retired units separately.
 
 ### 3. Reconstruct the manuscript for the reader
 
@@ -132,10 +143,15 @@ the local inference it supports. A title, abstract, or search snippet is not
 sufficient evidence for an exact application. Check the actual comparison or
 gluing result instead of relying on the label GAGA or local-to-global.
 
-Give a complete, justified repair when one is within scope. Otherwise state the
-missing implication with a stable issue pointer and continue improving unaffected
-material. Mark a source as unverified when it cannot be checked. Do not silently
-repair source quotations and attribute the repaired claim to their authors.
+Expand routine deductions from stated premises when each step can be inspected.
+Treat a nontrivial new argument as a proposed repair under the proof-repair
+reference: label it, record its assumptions and affected claims, and keep it
+separate from the accepted proof until the relevant review evidence is recorded.
+The generating model's confidence or another model's agreement alone does not
+close the issue. When a repair is unavailable, state the exact missing implication
+with a stable pointer and continue improving unaffected material. Mark an
+unavailable source as unverified. Do not silently repair source quotations and
+attribute the repaired claim to their authors.
 
 Use the dependency check in metric 6. Resolve scoped assumptions and valid
 induction before diagnosing a cycle; shared lemmas do not require a tree.
@@ -169,6 +185,8 @@ appeal to obviousness with the reason, an applicable reference, or a visible gap
 Apply the deletion test from the review reference. Preserve explanations,
 orientation, and useful comparisons; do not optimize for the shortest paper.
 Remove promotional claims, empty summaries, and repetition that adds no function.
+Retain passages that are already clear. A justified decision to leave them
+unchanged is preferable to cosmetic rewriting with no reader benefit.
 
 ### 8. Check the revision and deliver it
 
@@ -201,8 +219,11 @@ In a review-only task, omit the rewritten manuscript and supply the located
 findings and audit. Preserve scope and counting rules for before/after comparison.
 Do not let a good prose score offset a serious mathematical defect.
 
-Finish when the requested text has been substantively revised, the comparison
-and affected checks are complete, and unresolved matters are visible. Stop
+For a rewrite, finish when the requested revision work is complete, including
+justified retention of clear passages, the comparison and affected checks are
+complete, and unresolved matters are visible.
+For review only, finish when the requested checks and located findings are complete.
+Numeric evaluation additionally requires the frozen units and coverage record. Stop
 repeated polishing when it produces no evidence-grounded improvement.
 Report exposition completion separately from mathematical, source, rendering,
 and venue status; repeated review convergence establishes none of these by itself.

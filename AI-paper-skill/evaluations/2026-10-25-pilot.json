@@ -1,0 +1,93 @@
+{
+  "date": "2026-10-25",
+  "kind": "small purposive condition-masked AI review pilot",
+  "comparison": "ordinary rewrite prompt versus the same prompt plus the updated skill instructions",
+  "model": "same inherited writer model; provider model ID and sampling settings not exposed",
+  "replicates_per_condition": 1,
+  "source_selection": "purposive: clear introduction control, normalization-heavy theorem, conditional proof-summary comparison",
+  "cases": [
+    {
+      "case_id": "E01",
+      "paper": "milne",
+      "pdf_page": 1,
+      "source_url": "https://raw.githubusercontent.com/openai/math/1581d4cbdd69a0faf34b2089614fe2a814316a6a/preprints/Milnes-rationality-conjecture-for-abelian-varieties-October-7-2026/paper.pdf",
+      "source_pdf_sha256": "640701a0ea8d8026d2f019e571e052f2d106cad3f5216cf6f7fca0d643873234",
+      "input_sha256": "4bcb158fb22578927eebfc5c2a862fbae1d37d005faf017871ae8612ccf116aa",
+      "masked_labels": {
+        "A": "baseline",
+        "B": "treatment"
+      },
+      "masked_preference": "tie",
+      "preferred_condition": "tie",
+      "basis": "no material difference",
+      "rationale": "Both preserve the supplied claims and offer small, offsetting referent or sentence-level improvements. A's explicit specialization and B's explicit conjecture do not establish a material overall readability difference.",
+      "detected_introduced_errors_A": 0,
+      "detected_introduced_errors_B": 0
+    },
+    {
+      "case_id": "E02",
+      "paper": "bsd",
+      "pdf_page": 3,
+      "source_url": "https://raw.githubusercontent.com/openai/math/1581d4cbdd69a0faf34b2089614fe2a814316a6a/preprints/Exact-Birch-Swinnerton-Dyer-Formula-from-Low-Selmer-Corank-October-7-2026/exact-bsd-low-selmer-corank.pdf",
+      "source_pdf_sha256": "64b46603e174462e5bb32d242852eb7f0afe6e519f26534e42fd3f178a16b885",
+      "input_sha256": "e82ab7e32aa9368248518a2465f82ece47c7042378543fe76ddd26376cbe3c85",
+      "masked_labels": {
+        "A": "baseline",
+        "B": "treatment"
+      },
+      "masked_preference": "tie",
+      "preferred_condition": "tie",
+      "basis": "no material difference",
+      "rationale": "Neither version changes the supplied theorem or its delicate normalization conventions. A makes small local syntactic improvements; B makes the attribution paragraph more direct. These editorial differences do not produce a material overall preference.",
+      "detected_introduced_errors_A": 0,
+      "detected_introduced_errors_B": 0
+    },
+    {
+      "case_id": "E03",
+      "paper": "catalan",
+      "pdf_page": 3,
+      "source_url": "https://raw.githubusercontent.com/openai/math/1581d4cbdd69a0faf34b2089614fe2a814316a6a/preprints/Catalans-constant-is-irrational-September-24-2026/paper.pdf",
+      "source_pdf_sha256": "4023d0344abceb79dc46a16380dac3a662193f9d4f23e6c340b2162068b04c0e",
+      "input_sha256": "4ce119b3456e438c2495bc9217b46396ab7a31b089d9647685b699366933990e",
+      "masked_labels": {
+        "A": "treatment",
+        "B": "baseline"
+      },
+      "masked_preference": "A",
+      "preferred_condition": "treatment",
+      "basis": "editorial difference",
+      "rationale": "Both preserve the supplied mathematics, and neither has a detected introduced error. A has a modest readability advantage because it explicitly states the unboundedness already supplied in the context and connects both estimates to that sequence. This is not a mathematical-defect judgment against B.",
+      "detected_introduced_errors_A": 0,
+      "detected_introduced_errors_B": 0
+    }
+  ],
+  "summary": {
+    "treatment_preferred": 1,
+    "baseline_preferred": 0,
+    "ties": 2,
+    "introduced_errors_detected_by_reviewer": 0
+  },
+  "review_sha256": "85135f777e3d7ebe7c5d7eea22d9bc5bcc595eb148189cf007fe6e3485cfe7b7",
+  "evaluated_instruction_files": {
+    "SKILL.md": "3599f2eb2715d2069cd72992273d4fa38690593fce7931816068e82ed26c94d2",
+    "references/evaluation-protocol.md": "7c51273600eeb4ec38a153a26a277a0824b05413b09ffa7f9973bac98fa24ec4",
+    "references/metrics-and-review.md": "8de23da7301f0878157529fc4a0cfcf55e924195536636b9374cad4460738fff",
+    "references/proof-repairs.md": "4e64b2f05c4490db3cb795bd1e548934ef6b569b2e263e7e576af3b700bab97a",
+    "references/scoring-calibration.md": "9b2400c1327f92442a43dbfdabbaf227b635bef39e0290b6d01914bb1b9a16c8",
+    "references/writing-examples.md": "19d0048fd626232745ea327696e579cd4bfa84ea0305d51a95bdc5e359d74ffb"
+  },
+  "limits": [
+    "This is independent AI review, not human review or formal verification.",
+    "Only RUBRIC.md and the nine supplied source/A/B files in this masked-review folder were inspected before writing these reports. No outside directory, writer notes, skill instructions, prompts, assignment key, or web source was inspected.",
+    "The assessments concern fidelity to supplied author assertions and research-mathematician readability. They do not certify the source manuscripts, original PDFs, theorem proofs, or references.",
+    "No introduced mathematical defect was detected in these six rewrites. This bounded finding is not a guarantee that no error exists.",
+    "Readability judgments are qualitative. No seven-metric percentages, human preferences, or empirical performance measurements are claimed.",
+    "Three selected excerpts and one run per condition; no statistical or general superiority claim.",
+    "Same inherited model configuration for writers and reviewer; correlated model-family bias is possible.",
+    "Condition labels were withheld; output style could still reveal a condition.",
+    "No human reader study, full-paper evaluation, proof certification, or inter-rater reliability study.",
+    "Source PDFs were visually checked for transcription fidelity by the primary agent; that is not independent verification.",
+    "The evaluated instruction snapshot is archived locally. After review, a pilot-report cross-link and a scoring-helper input-type validation fix were added; the manuscript-rewriting instructions were not edited."
+  ],
+  "raw_artifacts": "Preserved in the local ignored evaluation archive; source excerpts and raw rewrites are not bundled in this public summary."
+}
